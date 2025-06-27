@@ -548,11 +548,16 @@ def estimate_usd_volume(
         "mep_ccl_usd": round(mep_ccl_usd,2)
     }
 
+# =============================================================================
+# Funciones para formateo y guardado de Excel
+# =============================================================================
 
 def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
     """
     Guarda el DataFrame en un archivo Excel, concatenando con datos existentes si el archivo ya existe.
     """
+    for col in ['TIREA', 'TNA', 'TEM', 'tem_spread']:
+        df[col] = pd.to_numeric(df[col].astype(str).str.replace('%', '').str.replace(',', '.').str.strip(), errors='coerce') / 100
     try:
         if os.path.exists(file_path):
             df_existente = pd.read_excel(file_path, parse_dates=["fecha_hoy"])
@@ -560,8 +565,16 @@ def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
             df_final = pd.concat([df_existente, df], ignore_index=True)
         else:
             df_final = df
-        df_final.to_excel(file_path, index=False)
+
+        # Modificaciones finales
+        df_last = df_final.drop_duplicates(subset = ['symbol', 'Código', 'fecha_hoy'], keep='last')
+        df_last = df_last.dropna(subset=['Last Price', 'TIREA', 'TNA', 'TEM', 'Paridad', 'Duration'])
+        df_last['Proy'] = np.where(df_last['Código'].str.endswith('j'), 1, 0)
+        for col in ['TIREA', 'TNA', 'TEM']:
+            df_last[col].replace('nan%', '', inplace=True)
+        df_last.to_excel(file_path, index=False)
         print(f"DataFrame guardado con éxito en '{file_path}'.")
+
     except Exception as e:
         print(f"Error al guardar el archivo: {e}")
 
