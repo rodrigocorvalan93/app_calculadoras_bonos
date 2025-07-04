@@ -23,7 +23,7 @@ BASE_URL = "https://api.latinsecurities.matrizoms.com.ar/"
 # =============================================================================
 def login_xoms(username: str, password: str) -> requests.Session:
     """
-    Inicia sesión en la API de la alyc y retorna una sesión autenticada.
+    Inicia sesión en la API de Cocos y retorna una sesión autenticada.
     """
     session = requests.Session()
     url = BASE_URL + "j_spring_security_check"

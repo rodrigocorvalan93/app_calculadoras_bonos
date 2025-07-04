@@ -12,7 +12,8 @@ fx_mae = requests.get(
     "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/forex",
     headers={"x-api-key": "nuDX73vj2483KSUgvenkj9t50oA0vgvA4WcuRAER"}
 )
-USDTSIOPEL0MAE = next(i['precioUltimo'] for i in fx_mae.json() if i['ticker'] == 'UST$T' and i['segmento'] == 'Mayorista')
+USDTSIOPEL0MAE = next((i['precioUltimo'] for i in fx_mae.json() if i['ticker'] == 'UST$T' and i['segmento'] == 'Mayorista'), 1230)
+# USDTSIOPEL0MAE = next(i['precioUltimo'] for i in fx_mae.json() if i['ticker'] == 'UST$T' and i['segmento'] == 'Mayorista')
 fecha_especifica_override = date.today().isoformat() #'2025-06-17'  # Formato 'YYYY-MM-DD'
 a3500_override = USDTSIOPEL0MAE  # USBMEPSIOPEL0MAY O Valor que desea establecer tipo 1641.2
 rentafija.inputs['a3500'].loc[fecha_especifica_override, 'tca3500'] = a3500_override
