@@ -13,9 +13,23 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None) # Útil para ajustar al ancho de la terminal/celda
+pd.set_option('display.max_colwidth', None) # Asegura que el contenido largo no se trunque
+
 #Last version
-def tir_a_tna(tir,dias,base):
-    return ((1 + tir) ** (dias/base) - 1)*(base/dias)
+def tir_a_tna(tir, dias, base):
+    # Evitá dividir por cero cuando el bono ya está en último día
+    if dias is None:
+        return float("nan")
+    try:
+        if dias <= 0:
+            return float("nan")
+    except TypeError:
+        return float("nan")
+
+    return ((1 + tir) ** (dias/base) - 1) * (base/dias)
 
 def tna_a_tir(tna,dias,base):
     return (1 + tna/(base/dias)) ** (base / dias) - 1

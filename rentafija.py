@@ -223,6 +223,8 @@ class Bono:
                 ratio_aplicable = ajuste_actual / ajuste_base
                 ajuste_aplicable.append(ratio_aplicable)
 
+            self.fecha_ajuste_actual = fecha_ajuste_actual #aca
+            self.ajuste_actual = ajuste_actual #aca 
             self.fecha_cer_base = fecha_cer_base
             self.ajuste_aplicable = ajuste_aplicable
 
@@ -566,6 +568,42 @@ class Bono:
             show_px = self.precio
 
         return round(show_px, 8)
+    
+    def calcula_average_life(self, settlement_date=None):
+        """
+        Average Life (WAL) = sum(capital_t * t_t) / sum(capital_t),
+        donde t_t son años desde settlement a cada pago de capital.
+        Calcula la vida promedio ponderada de un bono, que es una medida del tiempo promedio,
+        es independiente de la tasa de descuento, hasta que se reciben los pagos de capital.
+        Parámetros:
+        - settlement_date (opcional): La fecha de liquidación para el cálculo de los flujos de caja.
+        Si no se proporciona, se calcula automáticamente.
+        Retorna:
+        - La vida promedio ponderada (WAL) del bono, que es una medida del tiempo promedio ponderado
+            hasta que se reciben los pagos de capital.
+        """
+        # Genera los flujos de caja
+        self.generate_cashflows(settlement_date)
+
+        # Filtrar los flujos de caja desde la fecha de liquidación
+        cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
+
+        # Si ya tenés la columna de capital (p.ej. 'Amortizacion'):
+        capital = cf['Amortización'].astype(float)
+
+        # WAL
+        al = float(
+            sum(
+                row['Amortización'] * ((row['Fechas'] - self.fecha_settlement).days / 365.0)
+                for index, row in cf.iterrows()
+            ) / capital.sum()
+        )
+
+
+        self.average_life = al
+        return al
+
+
 
     def calcula_duration(self, tasa_descuento, settlement_date=None):
         """
@@ -759,7 +797,102 @@ class Bono:
                 'Tasa Aplicable': f'{self.index} {tamar_aplicable}%',
                 'Margen TNA': self.tna - tamar_aplicable / 100
             })
+        if self.tipo_tasa_interes == "VARIABLE_CAP" and self.index == "TAMAR":
+            ticket.update({
+            'Tasa Aplicable': f'{self.index}: {tamar_aplicable}%',
+            'Margen TNA': ((1 + self.tirea )**(32/365)-1) * (365/32) - tamar_aplicable / 100
+        })
 
+
+        # Convertir a DataFrame y formatear
+        ticket_pd = pd.DataFrame([ticket]).transpose()
+        ticket_pd.columns = ['Valores']
+
+        # Función auxiliar de formateo
+        def format_value(value, is_percent=False):
+            return "{:,.2f}".format(value).replace(",", "X").replace(".", ",").replace("X", ".") if not is_percent else "{:.4%}".format(value)
+
+        # Aplicar formateo
+        for key in ['VN ticket', 'Monto Total', 'Principal', 'Interés']:
+            ticket_pd.loc[key, 'Valores'] = format_value(ticket_pd.loc[key, 'Valores'])
+
+        for key in ['TIREA', 'TNA', 'TEM']:
+            ticket_pd.loc[key, 'Valores'] = format_value(ticket_pd.loc[key, 'Valores'], is_percent=True)
+
+        if self.tipo_tasa_interes == "VARIABLE":
+            ticket_pd.loc['Margen TNA', 'Valores'] = "{:.2%}".format(ticket_pd.loc['Margen TNA', 'Valores'])
+
+        if self.tipo_tasa_interes == "VARIABLE_CAP":
+            ticket_pd.loc['Margen TNA', 'Valores'] = "{:.2%}".format(ticket_pd.loc['Margen TNA', 'Valores'])
+
+
+        # Asignar el último ticket y retornar
+        self.ultimo_ticket = ticket_pd
+        return ticket_pd
+
+# last update genera ticket tir
+    def genera_ticket_tir(self, tir_ticket, nominales_ticket=1000000, settlement_date=None, tipo_de_cambio_aplicable=None):
+        """
+        Genera un ticket en base a la Tasa Nominal Anual (TNA) según la convención del bono.
+
+        Parámetros:
+        - tna_ticket: TNA según convención.
+        - nominales_ticket: Nominales del ticket (por defecto 1,000,000).
+        - settlement_date: Fecha de liquidación (opcional).
+
+        Retorna:
+        - ticket en formato DataFrame vertical.
+        """
+        #
+        if tipo_de_cambio_aplicable is not None:
+            fecha_especifica_override = date.today().isoformat()  # Formato 'YYYY-MM-DD'
+            a3500_override = tipo_de_cambio_aplicable  # USBMEPSIOPEL0MAY Valor que desea establecer
+            inputs['a3500'].loc[fecha_especifica_override, 'tca3500'] = a3500_override
+
+        # Calcular interés corrido y precio
+        self.calcula_intereses_corridos(settlement_date)
+        badlar_aplicable = inputs['badlar'].tail(5)["BADLAR"].mean()
+        tamar_aplicable = inputs['tamar'].tail(5)["TAMAR"].mean()
+        cnv_dias_al_vto = (self.vencimiento - self.fecha_settlement).days if self.cnv_tna == 'plazo remanente' else self.cnv_tna
+
+        # Calcular TIR y precio
+        tir = tir_ticket
+        precio = self.calcula_precio(tir, settlement_date)
+
+        # Definir valores comunes del ticket
+        ticket = {
+            'Nombre': self.codigo,
+            'Vencimiento:': self.vencimiento.strftime('%d-%m-%Y'),
+            'Fecha Liquidación': self.fecha_settlement.strftime('%d-%m-%Y'),
+            'Precio': precio,
+            'VN ticket': int(nominales_ticket),
+            'Monto Total': nominales_ticket * self.precio,
+            'Principal': nominales_ticket * self.precio_clean * self.valor_residual / self.valor_nominal,
+            'Interés': nominales_ticket * self.intereses_corridos,
+            'Días Devengados': self.dias_corridos,
+            'TIREA': tir,
+            'TNA': self.tna,
+            'TEM': (1 + tir) ** (30 / 360) - 1,
+            'Convención TNA': f'{int(cnv_dias_al_vto)}/{int(self.convencion_base)}',
+            'Paridad': f'{round(self.paridad * 100, 2)}%',
+            'Duration': f'{round(self.calcula_duration(tir,settlement_date),4)}',
+            'Valor Residual': f'{round(self.valor_residual, 2)}%',
+            'Callable': f'{self.callable}',
+            'Calificación': f'{self.calificacion}'
+            }
+
+        # Añadir detalles específicos si la tasa es variable
+        if self.tipo_tasa_interes == "VARIABLE" and self.index == "BADLAR":
+            ticket.update({
+                'Tasa Aplicable': f'{self.index} {badlar_aplicable}%',
+                'Margen TNA': self.tna - badlar_aplicable / 100
+            })
+        if self.tipo_tasa_interes == "VARIABLE" and self.index == "TAMAR":
+            ticket.update({
+                'Tasa Aplicable': f'{self.index} {tamar_aplicable}%',
+                'Margen TNA': self.tna - tamar_aplicable / 100
+            })
+        
         # Convertir a DataFrame y formatear
         ticket_pd = pd.DataFrame([ticket]).transpose()
         ticket_pd.columns = ['Valores']

@@ -7,8 +7,8 @@ from utils import *
 # Obtener feriados argentinos 90-2151
 
 # Obtener feriados argentinos y estadounidenses
-ar_holidays = holidays.Argentina(years=list(range(1990, 2151)))
-us_holidays = holidays.US(years=list(range(1990, 2151)))
+ar_holidays = holidays.Argentina(years=list(range(1993, 2130)))
+us_holidays = holidays.US(years=list(range(1993, 2130)))
 
 # Agregar días festivos adicionales manualmente
 additional_holidays = {
@@ -17,7 +17,11 @@ additional_holidays = {
     "2024-04-01": "Dia Feriado Turístico",
     "2024-06-21": "Dia Feriado Turístico",
     "2024-10-11": "Dia Feriado Turístico",
-    "2024-11-06": "Día del bancario"
+    "2024-11-06": "Día del bancario",
+    "2025-11-06": "Día del bancario",
+    "2025-11-21": "Feriado Puente",
+    "2026-11-06": "Día del bancario",
+    "2026-12-31": "Día no hábil de fin de año"
 }
 ar_holidays.update(additional_holidays)
 

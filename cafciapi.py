@@ -61,5 +61,21 @@ def get_valuation_variables(cafci_token):
 
 # Ejemplo de uso
 if __name__ == "__main__":
-    cafci_token = 'Bearer eyJleHBpcmVzX2luIjozMTUzNjAwMCwiYWxnIjoiSFMyNTYifQ.eyJyZXNvdXJjZXMiOiJyZXBvcnRzIHZlY3RvcmVzIiwidXNlcl9pZCI6MjgxfQ.wpDWRapZXFfYgfTLPjCdIiK_f-61-gACawUA30QM9Cw'
-    print(get_daily_report(cafci_token))
+    cafci_token = 'Bearer eyJleHBpcmVzX2luIjozMTUzNjAwMCwiYWxnIjoiSFMyNTYifQ.eyJyZXNvdXJjZXMiOiJyZXBvcnRzIHZlY3RvcmVzIiwidXNlcl9pZCI6MjgxfQ.DGyqtFWnPXv0MDpBqntmT75XoqVwpddB7YUjRYIK6-8'
+    reportediario = get_daily_report(cafci_token)
+    print(reportediario)
+
+    fondosabuscarrodri = [
+    "Fima Renta Fija Dólares - Clase C",
+    "Fima Premium Dólares - Clase A",
+    "Delta Ahorro Plus - Clase A",
+    "Delta Acciones - Clase A",
+    "Delta Gestion VI - Clase A",
+    "Delta Retorno Real - Clase A",
+    "Delta Latinoamerica - Clase A",
+    "Delta Renta - Clase A",
+    "Delta Renta Dolares - Clase D"]
+
+    filtro = reportediario[reportediario['nombreDeLaClaseDeFondo'].isin(fondosabuscarrodri)][['nombreDeLaClaseDeFondo', 'fecha', 'vcp','moneda']]
+    filtro['vcp'] = pd.to_numeric(filtro['vcp']) / 1000
+    filtro['vcp'] = filtro['vcp'].apply(lambda x: f"{x:,.6f}".replace(",", "X").replace(".", ",").replace("X", "."))
