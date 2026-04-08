@@ -1,8 +1,11 @@
 #%% Bonos:
 import rentafija
 from utils import *
+from OMSdata import refresh_a3500_in_rentafija
+a3500_override = refresh_a3500_in_rentafija()   # MAE → BYMA → serie → default
 
 #%% Overrides
+'''
 # ------Override A3500 hoy ------:
 # Fecha específica y dato que desea modificar
 # Modificar el valor para esa fecha específica en la columna 'tca3500'
@@ -58,7 +61,7 @@ logging.info(f"[A3500 Override] {fecha_especifica_override} = {a3500_override}")
 
 # V2 Badlar aplicable rentafija.inputs['badlar'].tail(5)["BADLAR"].mean()
 # Last version
-
+'''
 #%% Bonds
 '''
 Modelo:

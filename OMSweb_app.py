@@ -63,6 +63,7 @@ import rentafija
 import plotter  # usa pct_series + NSS helpers
 from dias_habiles import siguiente_dia_habil_ar
 from utils import tna_a_tir, tir_a_tna
+from OMSdata import (get_fx_hoy, refresh_a3500_in_rentafija, fx_status_text, invalidate_fx_cache)
 
 # Universo de bonos
 from especies import *

@@ -549,13 +549,13 @@ def main():
     session = login_xoms(username, password)
 
     # --- A3500 override (por env o por variable global preexistente) ---
-    # Si ya lo seteás en tu sesión (por ejemplo desde indices), lo respeta.
-    a3500_override = globals().get("a3500_override", None)
-    if a3500_override is None:
-        a3500_env = os.getenv("A3500_OVERRIDE", "").strip()
-        a3500_override = float(a3500_env) if a3500_env else None
-    if a3500_override is None:
-        raise RuntimeError("No está definido a3500_override (definilo o seteá A3500_OVERRIDE)")
+    from OMSdata import refresh_a3500_in_rentafija, fx_status_text
+ 
+    session = login_xoms(username, password)
+    
+    # Refrescar FX con session (ahora puede usar DLR/SPOT como fallback)
+    a3500_override = refresh_a3500_in_rentafija(session=session)
+    print(f"[FX] {fx_status_text()}")
 
     # --- Básicos ---
     segments_df = get_segments(session)
