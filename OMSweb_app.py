@@ -47,7 +47,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -58,6 +58,9 @@ from pandas.tseries.offsets import MonthEnd
 import OMSapi
 import OMSmktdata
 import OMSprices
+import OMScauciones
+import OMSnews
+import OMSticker
 import OMSsettings as cfg
 import rentafija
 import plotter  # usa pct_series + NSS helpers
@@ -73,6 +76,9 @@ try:
     import plotly.graph_objects as go
 except Exception:  # pragma: no cover
     go = None
+
+if TYPE_CHECKING:
+    import plotly.graph_objects as go
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -819,7 +825,7 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
 # Estilos (pandas Styler) — unificados
 # ──────────────────────────────────────────────────────────────────────
 
-def _apply_variation_bar(sty: "pd.io.formats.style.Styler", df: pd.DataFrame, col: str) -> "pd.io.formats.style.Styler":
+def _apply_variation_bar(sty: pd.io.formats.style.Styler, df: pd.DataFrame, col: str) -> pd.io.formats.style.Styler:
     """Aplica barra divergente verde/rojo + fondo a una columna de variación."""
     if col not in df.columns:
         return sty
@@ -830,7 +836,7 @@ def _apply_variation_bar(sty: "pd.io.formats.style.Styler", df: pd.DataFrame, co
     return sty
 
 
-def _apply_color_by_variation(sty: "pd.io.formats.style.Styler", df: pd.DataFrame, var_col: str, target_col: str) -> "pd.io.formats.style.Styler":
+def _apply_color_by_variation(sty: pd.io.formats.style.Styler, df: pd.DataFrame, var_col: str, target_col: str) -> pd.io.formats.style.Styler:
     """Colorea target_col en verde/rojo según el signo de var_col."""
     if var_col not in df.columns or target_col not in df.columns:
         return sty
@@ -858,7 +864,7 @@ def _apply_color_by_variation(sty: "pd.io.formats.style.Styler", df: pd.DataFram
     return sty
 
 
-def style_curvas(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
+def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
 
@@ -889,7 +895,7 @@ def style_curvas(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
     return sty
 
 
-def style_mercado(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
+def style_mercado(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
 
@@ -935,15 +941,17 @@ def style_mercado(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
 def style_forwards(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
     if df is None or df.empty:
         return pd.DataFrame().style
-    sty = df.style.format("{:.2f}%")
+    sty = df.style.format("{:.2f}%", na_rep="")
     try:
         sty = sty.background_gradient(cmap="Blues", axis=None)
     except Exception:
         pass
+    sty = sty.map(lambda v: "background-color: transparent;" if pd.isna(v) else "")
     return sty
 
 
-def style_total_return(df: pd.DataFrame, tr_col: str = "_tr_num") -> "pd.io.formats.style.Styler":
+
+def style_total_return(df: pd.DataFrame, tr_col: str = "_tr_num") -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
 
@@ -980,7 +988,7 @@ def style_total_return(df: pd.DataFrame, tr_col: str = "_tr_num") -> "pd.io.form
     return sty
 
 
-def style_futuros(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
+def style_futuros(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     """Estilo para tabla de futuros DLR."""
     fmt = {
         "Close Price": "{:,.4f}",
@@ -1037,7 +1045,7 @@ def plot_curve_plotly(
     show_nss: bool = True,
     threshold_factor: float = 2.0,
     which: str = "TIREA",  # "TIREA" o "TEM"
-) -> Tuple[Optional["go.Figure"], Optional[np.ndarray]]:
+) -> Tuple[Optional[go.Figure], Optional[np.ndarray]]:
     """Devuelve figura Plotly y params NSS (si aplica)."""
     if go is None:
         return None, None
@@ -1464,7 +1472,7 @@ def compute_breakeven_table(
     return df
 
 
-def style_breakeven(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
+def style_breakeven(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
 
@@ -2056,12 +2064,65 @@ def main():
         st.warning("Ingresá usuario y password para conectarte a la API.")
         st.stop()
 
+    # ── MARQUESINAS (News + Ticker) ──
+    OMSnews.start_news_background(interval=120)
+
+    session = get_session(username, password)
+
+    # Curvas para selección parametrizable por duration
+    _ticker_curve_tables = {}
+    for _ck in ("cer", "lecap"):
+        try:
+            _ticker_curve_tables[_ck] = load_curve_last_table(username, password, _ck, plazo)
+        except Exception:
+            pass
+
+    # Armar lista: parametrizables primero, fijos después
+    _ticker_assets = OMSticker.build_parametric_symbols(_ticker_curve_tables, plazo) + list(OMSticker.FIXED_ASSETS)
+
+    OMSticker.start_ticker_background(session, _ticker_assets, interval=15)
+
+    _is_dark = st.session_state.get("bbg_theme", False)
+
+    @st.fragment(run_every=15)
+    def _render_bars():
+        ticker_data = OMSticker.get_ticker_data(session=session, assets=_ticker_assets)
+        
+        # ── A3500: inyectar desde indices (MAE waterfall) vs BCRA ayer ──
+        try:
+            fx_hoy = get_fx_hoy(session=session)
+            df_a3500 = rentafija.inputs.get("a3500")
+            fx_ayer = float(df_a3500.iloc[-2]["tca3500"]) if df_a3500 is not None and len(df_a3500) >= 2 else fx_hoy
+            fx_var = (fx_hoy / fx_ayer - 1.0) if fx_ayer > 0 else 0.0
+            ticker_data.append(OMSticker.TickerData(
+                label="A3500", last=fx_hoy, close=fx_ayer,
+                variation=fx_var, is_tna=False,
+            ))
+        except Exception:
+            pass
+
+        if ticker_data:
+            st.markdown(
+                OMSticker.ticker_marquee_html(ticker_data, speed=35, dark=_is_dark),
+                unsafe_allow_html=True,
+            )
+
+        news = OMSnews.get_news(max_items=20)
+        if news:
+            st.markdown(
+                OMSnews.news_marquee_html(news, speed=120, dark=_is_dark),
+                unsafe_allow_html=True,
+            )
+
+    _render_bars()
+
+
     curves = build_curve_codes()
     curve_labels = {c.key: c.label for c in CURVES}
 
     # Navegación: pestañas
-    tab_curvas, tab_mercado, tab_fwds, tab_graficos, tab_futuros, tab_tr, tab_yas, tab_comp, tab_breakeven = st.tabs(
-        ["Curvas", "Mercado", "Forwards", "Gráficos", "Futuros", "Total Return", "Análisis Yields", "Comparador Yields", "Breakeven Inflación"]
+    tab_curvas, tab_mercado, tab_cauciones, tab_fwds, tab_graficos, tab_futuros, tab_tr, tab_yas, tab_comp, tab_breakeven = st.tabs(
+        ["Curvas", "Mercado", "Cauciones", "Forwards", "Gráficos", "Futuros", "Total Return", "Análisis Yields", "Comparador Yields", "Breakeven Inflación"]
     )
 
     # ─────────────────────────
@@ -2125,6 +2186,66 @@ def main():
                 st.dataframe(style_mercado(dfm), width="stretch", height=680)
 
         _mercado_live()
+    
+    # ─────────────────────────
+    # Cauciones
+    # ─────────────────────────
+    with tab_cauciones:
+        st.subheader("Monitor de Cauciones — BYMA")
+        st.caption("Tasas TNA por plazo. Datos en tiempo real. Sin cálculo de TIR (se negocia directo por TNA).")
+
+        col_cfg1, col_cfg2 = st.columns([1, 1])
+        with col_cfg1:
+            caucion_plazos_mode = st.radio(
+                "Plazos",
+                options=["Principales (1-7, 14, 21, 28, 35, 60, 90, 120)", "Todos (1 a 30)"],
+                horizontal=True,
+                key="caucion_plazos_mode",
+            )
+        with col_cfg2:
+            caucion_mostrar_usd = st.toggle("Mostrar Dólares", value=False, key="caucion_usd")
+
+        if caucion_plazos_mode.startswith("Todos"):
+            plazos_cauc = list(range(1, 31))
+        else:
+            plazos_cauc = None  # usa default del módulo (principales)
+
+        @st.fragment(run_every=refresh_interval)
+        def _cauciones_live():
+            ts = datetime.now().strftime("%H:%M:%S")
+            st.caption(
+                f"🔴 LIVE  |  Actualizado: {ts}" if auto_refresh
+                else f"Actualizado: {ts}"
+            )
+
+            session = get_session(username, password)
+
+            # ── Pesos ──
+            st.markdown("### Cauciones en Pesos (ARS)")
+            df_pesos = OMScauciones.fetch_cauciones(session, moneda="PESOS", plazos=plazos_cauc)
+            if df_pesos is None or df_pesos.empty:
+                st.info("Sin datos de cauciones en pesos (mercado cerrado o sin respuesta).")
+            else:
+                st.dataframe(
+                    OMScauciones.style_cauciones(df_pesos),
+                    width="stretch",
+                    height=min(520, 40 + 35 * len(df_pesos)),
+                )
+
+            # ── Dólares (toggle) ──
+            if caucion_mostrar_usd:
+                st.markdown("### Cauciones en Dólares (USD)")
+                df_usd = OMScauciones.fetch_cauciones(session, moneda="DOLAR", plazos=plazos_cauc)
+                if df_usd is None or df_usd.empty:
+                    st.info("Sin datos de cauciones en dólares (poca liquidez o mercado cerrado).")
+                else:
+                    st.dataframe(
+                        OMScauciones.style_cauciones(df_usd),
+                        width="stretch",
+                        height=min(520, 40 + 35 * len(df_usd)),
+                    )
+
+        _cauciones_live()
 
     # ─────────────────────────
     # Forwards
@@ -3172,8 +3293,8 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         name="Breakeven Inflación",
                         text=be_df["Código"],
                         hovertemplate="%{text}<br>Dur=%{x:.3f}<br>BE=%{y:.2f}%<extra></extra>",
-                        marker=dict(size=10, color="#e74c3c"),
-                        line=dict(dash="dot", width=2, color="#e74c3c"),
+                        marker=dict(size=10, color="#2980b9"),
+                        line=dict(dash="dot", width=2, color="#2980b9"),
                     ))
 
                     # NSS fits as reference lines
@@ -3229,7 +3350,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         x=be_df["Código"],
                         y=be_tem_pct,
                         name="BE TEM",
-                        marker_color="#e74c3c",
+                        marker_color="#2980b9",
                         text=[f"{v:.2f}%" for v in be_tem_pct],
                         textposition="outside",
                         textfont=dict(size=11),
