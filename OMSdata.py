@@ -17,12 +17,7 @@ from datetime import date
 from functools import lru_cache
 import re
 
-import logging
-import threading
-import time as _time
-from datetime import datetime
- 
-_log = logging.getLogger("OMSdata")
+
 
 import numpy as np
 import pandas as pd
@@ -173,8 +168,8 @@ CURVAS_LABELS: dict[str, str] = {
 # -----------------------------------------------------------------------------
 
 # HTTP session (keep-alive) para MAE
-_HTTP = requests.Session()
-_HTTP.headers.update({"x-api-key": "nuDX73vj2483KSUgvenkj9t50oA0vgvA4WcuRAER"})
+#_HTTP = requests.Session()
+#_HTTP.headers.update({"x-api-key": "nuDX73vj2483KSUgvenkj9t50oA0vgvA4WcuRAER"})
 
 # Meses en castellano (3 letras)
 MESES_3L = {
@@ -196,210 +191,7 @@ MESES_3L = {
 CODIGO_REGEX = re.compile(r"[A-Z]+/([A-ZÁ]{3})(\d{2})([A-Z]*)$")
 
 
-def get_a3500_spot(default: float = 1480.0, timeout: int = 5) -> float:
-    """Spot mayorista A3500 (MAE); si falla, devuelve `default`."""
-    with suppress(Exception):
-        r = _HTTP.get(
-            "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/forex",
-            timeout=timeout,
-        )
-        for i in r.json():
-            if i.get("ticker") == "UST$T" and i.get("segmento") == "Mayorista":
-                return float(i["precioUltimo"])
-    return float(default)
 
-# -----------------------------------------------------------------------------
-# FX A3500 en tiempo real — cache + waterfall + inyección en rentafija
-# -----------------------------------------------------------------------------
- 
-_FX_CACHE_TTL = 30  # segundos
- 
-_fx_lock = threading.Lock()
-_fx_cached: float | None = None
-_fx_cached_ts: float = 0.0
-_fx_cached_source: str = "none"
- 
- 
-def _fx_cache_valid() -> bool:
-    return _fx_cached is not None and (_time.time() - _fx_cached_ts) < _FX_CACHE_TTL
- 
- 
-def _fetch_fx_mae(timeout: int = 6) -> float | None:
-    """UST$T Mayorista desde MAE API (plazo 000/001).
-    Reutiliza el _HTTP session que ya existe en OMSdata."""
-    for intento in range(2):
-        try:
-            r = _HTTP.get(
-                "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/forex",
-                timeout=timeout,
-            )
-            if not r.ok:
-                continue
-            data = r.json()
-            if not isinstance(data, list):
-                continue
-            for plazo in ("000", "001"):
-                for row in data:
-                    if (
-                        row.get("ticker") == "UST$T"
-                        and row.get("segmento") == "Mayorista"
-                        and row.get("plazo") == plazo
-                    ):
-                        precio = float(row["precioUltimo"])
-                        if precio > 0:
-                            return precio
-        except Exception:
-            pass
-    return None
- 
- 
-def _fetch_fx_byma_dlr_spot(session) -> float | None:
-    """DLR/SPOT desde BYMA — réplica del FX MAE en ROFX.
-    Requiere una session autenticada de BYMA/XOMS."""
-    if session is None:
-        return None
-    try:
-        # Usar OMSapi.fetch_json si está disponible
-        from OMSapi import fetch_json
-        data = fetch_json(
-            session, "rest/marketdata/get",
-            marketId="ROFX", symbol="DLR/SPOT",
-            entries="LA,CL,SE", depth=1,
-        )
-    except ImportError:
-        # Fallback: llamada directa
-        try:
-            resp = session.get(
-                "https://api.latinsecurities.matrizoms.com.ar/rest/marketdata/get",
-                params={"marketId": "ROFX", "symbol": "DLR/SPOT",
-                        "entries": "LA,CL,SE", "depth": 1},
-                timeout=8,
-            )
-            if not resp.ok:
-                return None
-            data = resp.json()
-        except Exception:
-            return None
-    except Exception:
-        return None
- 
-    if not isinstance(data, dict):
-        return None
- 
-    # Extraer precio: intentar LA, luego SE, luego CL
-    for key in ("LA", "SE", "CL"):
-        val = data.get(key)
-        if val is None:
-            continue
-        if isinstance(val, dict):
-            p = val.get("price")
-        elif isinstance(val, list) and val:
-            p = val[0].get("price") if isinstance(val[0], dict) else val[0]
-        else:
-            continue
-        if p is not None:
-            try:
-                pf = float(p)
-                if pf > 0:
-                    return pf
-            except (ValueError, TypeError):
-                pass
-    return None
- 
- 
-def _get_a3500_from_rentafija() -> float | None:
-    """Último A3500 oficial en rentafija.inputs['a3500']."""
-    try:
-        df = rentafija.inputs.get("a3500")
-        if df is not None and not df.empty:
-            val = float(df.iloc[-1]["tca3500"])
-            if val > 0:
-                return val
-    except Exception:
-        pass
-    return None
- 
- 
-def get_fx_hoy(session=None, force_refresh: bool = False,
-               default: float = 1200.0) -> float:
-    """
-    Tipo de cambio A3500 aplicable HOY con waterfall y cache.
- 
-    Orden de fuentes:
-      1. MAE API (UST$T Mayorista)
-      2. BYMA DLR/SPOT (requiere session)
-      3. Último valor en rentafija.inputs['a3500'] (A3500 del día anterior)
-      4. default hardcodeado
- 
-    El resultado se cachea por _FX_CACHE_TTL segundos (default 30).
-    """
-    global _fx_cached, _fx_cached_ts, _fx_cached_source
- 
-    with _fx_lock:
-        if not force_refresh and _fx_cache_valid():
-            return _fx_cached
- 
-    # Waterfall
-    fx = _fetch_fx_mae()
-    if fx is not None:
-        source = "MAE"
-    else:
-        fx = _fetch_fx_byma_dlr_spot(session)
-        if fx is not None:
-            source = "BYMA_DLR/SPOT"
-        else:
-            fx = _get_a3500_from_rentafija()
-            if fx is not None:
-                source = "A3500_serie"
-            else:
-                fx = default
-                source = "default"
- 
-    with _fx_lock:
-        _fx_cached = fx
-        _fx_cached_ts = _time.time()
-        _fx_cached_source = source
- 
-    _log.info(f"[FX] {fx:.4f} ({source})")
-    return fx
- 
- 
-def get_fx_source() -> str:
-    """Fuente del último FX obtenido."""
-    return _fx_cached_source
- 
- 
-def refresh_a3500_in_rentafija(session=None, force: bool = False) -> float:
-    """
-    Obtiene el FX actual y lo inyecta en rentafija.inputs['a3500']
-    para la fecha de hoy.
- 
-    Así todos los bonos con Ajuste sobre Capital = "A3500" (ONs DLK,
-    soberanos dollar-linked) calculan automáticamente con el FX correcto.
-    """
-    fx = get_fx_hoy(session=session, force_refresh=force)
-    fecha_hoy = date.today().isoformat()
-    try:
-        rentafija.inputs['a3500'].loc[fecha_hoy, 'tca3500'] = fx
-    except Exception as e:
-        _log.error(f"[FX] Error inyectando en rentafija: {e}")
-    return fx
- 
- 
-def fx_status_text() -> str:
-    """Texto para mostrar en la UI: 'FX A3500: 1,234.50 (MAE @ 14:32:15)'."""
-    if _fx_cached is None:
-        return "FX: sin datos"
-    ts = datetime.fromtimestamp(_fx_cached_ts).strftime("%H:%M:%S") if _fx_cached_ts > 0 else "N/A"
-    return f"FX A3500: {_fx_cached:,.4f} ({_fx_cached_source} @ {ts})"
- 
- 
-def invalidate_fx_cache():
-    """Fuerza invalidación del cache para el próximo llamado."""
-    global _fx_cached, _fx_cached_ts
-    with _fx_lock:
-        _fx_cached = None
-        _fx_cached_ts = 0.0
 
 def _parsear_vencimiento_unit(code: str) -> pd.Timestamp:
     """Parsea un solo código (DLR/AGO25, DLR/AGO25A, etc.) → primer hábil AR tras fin de mes."""

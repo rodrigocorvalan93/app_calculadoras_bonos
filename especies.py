@@ -1,7 +1,7 @@
 #%% Bonos:
 import rentafija
 from utils import *
-from OMSdata import refresh_a3500_in_rentafija
+from indices import refresh_a3500_in_rentafija
 a3500_override = refresh_a3500_in_rentafija()   # MAE → BYMA → serie → default
 
 #%% Overrides

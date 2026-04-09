@@ -549,7 +549,7 @@ def main():
     session = login_xoms(username, password)
 
     # --- A3500 override (por env o por variable global preexistente) ---
-    from OMSdata import refresh_a3500_in_rentafija, fx_status_text
+    from indices import refresh_a3500_in_rentafija, fx_status_text
  
     session = login_xoms(username, password)
     

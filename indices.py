@@ -436,6 +436,160 @@ proyeccion_devaoficial_escenariobase = {
     "2026-11-30": 1270.00,
 }
 
+# -----------------------------------------------------------------------------
+# FX A3500 en tiempo real — waterfall: MAE → BYMA DLR/SPOT → serie → default
+# Cache thread-safe 30s para no bombardear APIs en cada cálculo de bono.
+# -----------------------------------------------------------------------------
+import threading
+import time as _time
+import logging
+
+_log_fx = logging.getLogger("indices_fx")
+
+_FX_CACHE_TTL = 30
+_fx_lock = threading.Lock()
+_fx_cached = None
+_fx_cached_ts = 0.0
+_fx_cached_source = "none"
+
+
+def _fx_cache_valid():
+    return _fx_cached is not None and (_time.time() - _fx_cached_ts) < _FX_CACHE_TTL
+
+
+def _fetch_fx_mae(timeout=6):
+    for intento in range(2):
+        try:
+            r = requests.get(
+                "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/forex",
+                headers={"x-api-key": "nuDX73vj2483KSUgvenkj9t50oA0vgvA4WcuRAER"},
+                timeout=timeout,
+            )
+            if not r.ok:
+                continue
+            data = r.json()
+            if not isinstance(data, list):
+                continue
+            for plazo in ("000", "001"):
+                for row in data:
+                    if (row.get("ticker") == "UST$T"
+                        and row.get("segmento") == "Mayorista"
+                        and row.get("plazo") == plazo):
+                        precio = float(row["precioUltimo"])
+                        if precio > 0:
+                            return precio
+        except Exception:
+            pass
+    return None
+
+
+def _fetch_fx_byma_dlr_spot(session):
+    """DLR/SPOT desde BYMA — requiere session autenticada."""
+    if session is None:
+        return None
+    try:
+        resp = session.get(
+            "https://api.latinsecurities.matrizoms.com.ar/rest/marketdata/get",
+            params={"marketId": "ROFX", "symbol": "DLR/SPOT",
+                    "entries": "LA,CL,SE", "depth": 1},
+            timeout=8,
+        )
+        if not resp.ok:
+            return None
+        data = resp.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in ("LA", "SE", "CL"):
+        val = data.get(key)
+        if val is None:
+            continue
+        if isinstance(val, dict):
+            p = val.get("price")
+        elif isinstance(val, list) and val:
+            p = val[0].get("price") if isinstance(val[0], dict) else val[0]
+        else:
+            continue
+        if p is not None:
+            try:
+                pf = float(p)
+                if pf > 0:
+                    return pf
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
+def _get_a3500_from_inputs(inputs_dict=None):
+    """Último A3500 de la serie (el del día anterior)."""
+    try:
+        if inputs_dict is not None:
+            df = inputs_dict.get("a3500")
+        else:
+            import rentafija
+            df = rentafija.inputs.get("a3500")
+        if df is not None and not df.empty:
+            val = float(df.iloc[-1]["tca3500"])
+            if val > 0:
+                return val
+    except Exception:
+        pass
+    return None
+
+
+def get_fx_hoy(session=None, force_refresh=False, default=1200.0):
+    """Waterfall: MAE → BYMA DLR/SPOT → serie rentafija → default. Cache 30s."""
+    global _fx_cached, _fx_cached_ts, _fx_cached_source
+    with _fx_lock:
+        if not force_refresh and _fx_cache_valid():
+            return _fx_cached
+    fx = _fetch_fx_mae()
+    if fx is not None:
+        source = "MAE"
+    else:
+        fx = _fetch_fx_byma_dlr_spot(session)
+        if fx is not None:
+            source = "BYMA_DLR/SPOT"
+        else:
+            fx = _get_a3500_from_inputs()
+            if fx is not None:
+                source = "A3500_serie"
+            else:
+                fx = default
+                source = "default"
+    with _fx_lock:
+        _fx_cached = fx
+        _fx_cached_ts = _time.time()
+        _fx_cached_source = source
+    _log_fx.info(f"[FX] {fx:.4f} ({source})")
+    return fx
+
+
+def refresh_a3500_in_rentafija(session=None, force=False):
+    """Obtiene FX actual y lo inyecta en rentafija.inputs['a3500'] para hoy."""
+    import rentafija
+    fx = get_fx_hoy(session=session, force_refresh=force)
+    fecha_hoy = datetime.now().date().isoformat()
+    try:
+        rentafija.inputs['a3500'].loc[fecha_hoy, 'tca3500'] = fx
+    except Exception as e:
+        _log_fx.error(f"[FX] Error inyectando en rentafija: {e}")
+    return fx
+
+
+def fx_status_text():
+    if _fx_cached is None:
+        return "FX: sin datos"
+    ts = datetime.fromtimestamp(_fx_cached_ts).strftime("%H:%M:%S") if _fx_cached_ts > 0 else "N/A"
+    return f"FX A3500: {_fx_cached:,.4f} ({_fx_cached_source} @ {ts})"
+
+
+def invalidate_fx_cache():
+    global _fx_cached, _fx_cached_ts
+    with _fx_lock:
+        _fx_cached = None
+        _fx_cached_ts = 0.0
 
 # =============================================================================
 # MAIN
