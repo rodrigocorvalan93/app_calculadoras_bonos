@@ -22800,6 +22800,7 @@ corridos de anticipación a dicho rescate.""",
     "Aviso Resultados": "https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_TP/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FTP%2FEmisionesTP%2F9586%2FMPA3%2DRES%2DTITULOS%20DE%20DEUDA%20PROV%2E%20MENDOZA%20CLASE%201%20Y%202%2DAviso%20de%20Resultados%2018%2D03%2D25%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FTP%2FEmisionesTP%2F9586&p=true&ga=1",
     "Suplemento Prospecto": "https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_TP/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FTP%2FEmisionesTP%2F9586%2FMPA3%2DANU%2DTITULOS%20DE%20DEUDA%20PROV%2E%20MENDOZA%20CLASE%201%20Y%202%2DProspecto%2014%2D03%2D25%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FTP%2FEmisionesTP%2F9586&p=true&ga=1"
 }
+
 PBM27 = {
     "Nombre Security": "Título de Deuda de la Provincia de Buenos Aires TAMAR Vto 18 03 2027",
     "Código": "PBM27",
@@ -23198,6 +23199,7 @@ ERE27 = {
 }
 
 # SUBSOB UVA/CER
+
 PMM27 = {
     "Nombre Security": "Título de Deuda de la Provincia de Mendoza 2027 Vto 14 12 2027",
     "Código": "PMM27",
@@ -23286,6 +23288,136 @@ PBJ27 = {
     "Aviso Resultados": "",
     "Suplemento Prospecto": ""
 }
+
+# ─────────────────────────────────────────────────────────────────
+# PMA28 — Título de Deuda CER Clase 1 - Provincia de Mendoza
+# Emisión: 10/04/2026 — Vto: 10/04/2028 — Bullet — CER + 7.99%
+# Aviso de Resultados: 07/04/2026
+# ─────────────────────────────────────────────────────────────────
+ 
+PMA28 = {
+    "Nombre Security": "Título de Deuda CER de la Provincia de Mendoza Clase 1 Vto 10 04 2028",
+    "Código": "PMA28",
+    "ISIN": "PMA28",
+    "Calificación": "A-(arg)",
+    "País": "Argentina",
+    "Clasificación": "Sub-soberano",
+    "Industria": "Soberano ARS",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "10/04/2026",
+    "Vencimiento": "10/04/2028",
+    "Fecha Primer Cupón": "10/07/2026",
+    "Cupón / Spread": 7.99,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "CER",
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": -10,
+    "Días lag Ajuste": -10,
+    "Fechas de cupón": [
+        "10/07/2026",
+        "10/10/2026",
+        "10/01/2027",
+        "10/04/2027",
+        "10/07/2027",
+        "10/10/2027",
+        "10/01/2028",
+        "10/04/2028",
+    ],
+    "Amortización": None,
+    "Callable": True,
+    "Tipo de Call": "Rescate total o parcial a partir del m12 desde la emisión",
+    "Fecha Call": "10/04/2027",
+    "Precio Call": "m12 en adelante: 1.00",
+    "Comentarios": """Títulos de Deuda CER Clase 1. Emisión a par (100%).
+VN emitido: $296.967.482.314. Órdenes recibidas: 158 por $312.958.272.314.
+Cupón trimestral sobre capital ajustado CER. Garantizado con coparticipación federal.
+Duration al corte: 1.87 años.
+La Provincia podrá rescatar a su sola opción, en forma total o parcial, los Títulos de Deuda,
+en cualquier momento previo a la fecha de vencimiento pero siempre luego de transcurridos
+doce (12) meses desde la Fecha de Emisión y Liquidación.""",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": ""
+}
+ 
+ 
+# ─────────────────────────────────────────────────────────────────
+# PMA29 — Título de Deuda CER Clase 2 - Provincia de Mendoza
+# Emisión: 10/04/2026 — Vto: 10/04/2029 — Amortizable — CER + 8.50%
+# Aviso de Resultados: 07/04/2026
+# ─────────────────────────────────────────────────────────────────
+ 
+PMA29 = {
+    "Nombre Security": "Título de Deuda CER de la Provincia de Mendoza Clase 2 Vto 10 04 2029",
+    "Código": "PMA29",
+    "ISIN": "PMA29",
+    "Calificación": "A-(arg)",
+    "País": "Argentina",
+    "Clasificación": "Sub-soberano",
+    "Industria": "Soberano ARS",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "10/04/2026",
+    "Vencimiento": "10/04/2029",
+    "Fecha Primer Cupón": "10/07/2026",
+    "Cupón / Spread": 8.50,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "CER",
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": -10,
+    "Días lag Ajuste": -10,
+    "Fechas de cupón": [
+        "10/07/2026",
+        "10/10/2026",
+        "10/01/2027",
+        "10/04/2027",
+        "10/07/2027",
+        "10/10/2027",
+        "10/01/2028",
+        "10/04/2028",
+        "10/07/2028",
+        "10/10/2028",
+        "10/01/2029",
+        "10/04/2029",
+    ],
+    "Amortización": [0, 0, 0, 0, 0, 0, 0, 0, 0, 33.33, 33.33, 33.34],
+    "Callable": True,
+    "Tipo de Call": "Rescate total o parcial a partir del m12 desde la emisión",
+    "Fecha Call": "10/04/2027",
+    "Precio Call": "m12 en adelante: 1.00",
+    "Comentarios": """Títulos de Deuda CER Clase 2. Emisión a par (100%).
+VN emitido: $149.246.148.601. Órdenes recibidas: 31 por $149.246.148.601 (sin prorrateo).
+Amortización en 3 cuotas: 33.33% el 10/10/2028, 33.33% el 10/01/2029, 33.34% el 10/04/2029.
+Cupón trimestral sobre capital ajustado CER. Garantizado con coparticipación federal.
+Duration al corte: 2.48 años.
+La Provincia podrá rescatar a su sola opción, en forma total o parcial, los Títulos de Deuda,
+en cualquier momento previo a la fecha de vencimiento pero siempre luego de transcurridos
+doce (12) meses desde la Fecha de Emisión y Liquidación.""",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": ""
+}
+
+
 CO3D7 = {
     "Nombre Security": "Titulo de Deuda de la Provincia de Cordoba Clase 6 Vto 05 12 2027",
     "Código": "CO3D7",
@@ -23976,6 +24108,9 @@ BU4J6 = rentafija.Bono(BU4J6)
 
 # SUBSOB CER/UVA
 PMM27 = rentafija.Bono(PMM27)
+PMA28 = rentafija.Bono(PMA28)
+PMA29 = rentafija.Bono(PMA29)
+
 PBJ27 = rentafija.Bono(PBJ27)
 CO3D7 = rentafija.Bono(CO3D7)
 COY27 = rentafija.Bono(COY27)
@@ -24037,7 +24172,7 @@ todos_los_bonos = [
 
     # SUBSOB CER/UVA
 
-    PMM27, COY27, COD7P, PBJ27, CO3D7,
+    PMM27, PMA28, PMA29, COY27, COD7P, PBJ27, CO3D7,
 
     # SUBSOB TASA FIJA
 
