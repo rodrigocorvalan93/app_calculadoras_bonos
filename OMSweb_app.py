@@ -39,9 +39,9 @@ REFACTOR (02/2026):
 
 from __future__ import annotations
 
+import copy
 import os
 import re
-import copy
 import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -56,21 +56,26 @@ from dateutil.relativedelta import relativedelta
 from pandas.tseries.offsets import MonthEnd
 
 import OMSapi
-import OMSmktdata
-import OMSprices
 import OMScauciones
+import OMSmktdata
 import OMSnews
-import OMSticker
+import OMSprices
 import OMSsettings as cfg
-import rentafija
+import OMSticker
 import plotter  # usa pct_series + NSS helpers
+import rentafija
 from dias_habiles import siguiente_dia_habil_ar
-from utils import tna_a_tir, tir_a_tna
-from indices import (get_fx_hoy, refresh_a3500_in_rentafija, fx_status_text, invalidate_fx_cache)
 
 # Universo de bonos
 from especies import *
 from especies import todos_los_bonos
+from indices import (
+    fx_status_text,
+    get_fx_hoy,
+    invalidate_fx_cache,
+    refresh_a3500_in_rentafija,
+)
+from utils import tir_a_tna, tna_a_tir
 
 try:
     import plotly.graph_objects as go
@@ -195,11 +200,28 @@ CURVE_EVAL_SUFFIX: Dict[str, str] = {
     "dualtamar": "v",   # dual tamar siempre con v
 }
 
+# ── NUEVO: Curvas donde ticker BYMA ≠ código Python del objeto bono ──
+# Para corp_hdmep: PECIO (objeto Python) → PECIOD (ticker BYMA para marketdata)
+# Para corp_hdcable: los códigos ya son los tickers C (BYCHC etc.) que existen en BONDS
+CURVE_BYMA_REMAP: Dict[str, str] = {
+    "corp_hdmep": "mep",    # PECIO -> PECIOD (O->D)
+    "corp_hdcable": "cable", # BYCHO -> BYCHC (ya son los tickers C en la lista)
+}
+
 
 def _apply_curve_suffix(curve_key: str, base_code: str) -> str:
     suf = CURVE_EVAL_SUFFIX.get(str(curve_key), "")
     return f"{base_code}{suf}" if suf else base_code
 
+def _byma_ticker_from_code(code: str, curve_key: str) -> str:
+    """Convierte código Python -> ticker BYMA según curva."""
+    remap = CURVE_BYMA_REMAP.get(curve_key)
+    if remap == "mep":
+        # ON MEP: xxxO -> xxxD (reemplazar última O por D)
+        c = str(code)
+        return c[:-1] + "D" if c.endswith("O") else c
+    # Para cable: los códigos ya son los tickers C (BYCHC, etc.)
+    return str(code)
 
 def _md_code_from_calc_code(calc_code: str) -> str:
     c = str(calc_code).strip()
@@ -261,6 +283,9 @@ def _tna_from_tirea(bond_obj, tirea: float, bond_type: str) -> Optional[float]:
 
         if bt == "dual":
             return rentafija.tir_a_tna(tirea, 30, 365)
+        
+        if bt in ("hdmep", "hdcable"):
+            return rentafija.tir_a_tna(tirea, 180, 365)
 
         return getattr(bond_obj, "tna", None)
     except Exception:
@@ -464,6 +489,15 @@ CURVES: List[CurveDef] = [
     # Dual separadas:
     CurveDef("dualfija", "Dual Fija (base)", "dual"),
     CurveDef("dualtamar", "Dual Tamar (v)", "dual"),
+
+
+    # --- Corporativos ---
+    CurveDef("corp_tamar", "Corp. TAMAR", "tamar"),
+    CurveDef("corp_badlar", "Corp. BADLAR", "tamar"),
+    CurveDef("corp_tasafija", "Corp. Tasa Fija", "lecap"),
+    CurveDef("corp_uva", "Corp. UVA/CER", "cer"),
+    CurveDef("corp_hdmep", "Corp. USD MEP", "hdmep"),
+    CurveDef("corp_hdcable", "Corp. USD Cable", "hdcable"),
 ]
 
 
@@ -551,6 +585,41 @@ def build_curve_codes() -> Dict[str, List[str]]:
         if has(c)
     })
 
+    # ── Corporativos ──────────────────────────────────────────────
+    corp_tamar_set = set()
+    corp_badlar_set = set()
+    corp_tasafija_set = set()
+    corp_uva_set = set()
+    corp_hdmep_set = set()
+    corp_hdcable_set = set()
+
+    for b in bonos:
+        code = _codigo_obj(b)
+        clas = (getattr(b, "clasificacion", None) or "").strip()
+        qpc = (getattr(b, "quote_price_cnv", None) or "").strip().upper()
+        if not code or not has(code):
+            continue
+
+        if clas == "Corporativo TAMAR":
+            corp_tamar_set.add(code)
+        elif clas == "Corporativo BADLAR":
+            corp_badlar_set.add(code)
+        elif clas == "Corporativo Tasa Fija":
+            corp_tasafija_set.add(code)
+        elif clas == "Corporativo UVA":
+            corp_uva_set.add(code)
+        elif clas == "Corporativo Hard Dolar MEP":
+            corp_hdmep_set.add(code)
+        elif clas == "Corporativo Hard Dolar":
+            # Solo los que tienen versión DIRTY (ticker con C) disponible
+            # O sea: los que están cargados CLEAN y tienen análogo C en BONDS
+            byma_c = code[:-1] + "C" if code.endswith("O") else code
+            if has(byma_c) and qpc == "CLEAN":
+                corp_hdcable_set.add(byma_c)  # usamos el ticker DIRTY
+            elif qpc == "DIRTY":
+                corp_hdcable_set.add(code)  # ya está como dirty
+
+
     return {
         "cer": cer,
         "lecap": lecap,
@@ -562,6 +631,12 @@ def build_curve_codes() -> Dict[str, List[str]]:
         "bopreales": bopreales,
         "dualfija": dualfija,
         "dualtamar": dualtamar,
+        "corp_tamar": sorted(corp_tamar_set),
+        "corp_badlar": sorted(corp_badlar_set),
+        "corp_tasafija": sorted(corp_tasafija_set),
+        "corp_uva": sorted(corp_uva_set),
+        "corp_hdmep": sorted(corp_hdmep_set),
+        "corp_hdcable": sorted(corp_hdcable_set)
     }
 
 
@@ -582,7 +657,9 @@ def _all_curve_symbols(plazo: str) -> List[str]:
     all_md_codes: set = set()
     for curve_key, codes in curves.items():
         for c in codes:
-            all_md_codes.add(_md_code_from_calc_code(str(c)))
+            base = _md_code_from_calc_code(str(c))
+            md = _byma_ticker_from_code(base, curve_key)
+            all_md_codes.add(md)
     return _build_symbols(sorted(all_md_codes), plazo)
 
 
@@ -692,7 +769,8 @@ def _load_curve_base(username: str, password: str, curve_key: str, plazo: str) -
         return None
 
     calc_codes = [str(x) for x in codes]
-    md_codes = [_md_code_from_calc_code(c) for c in calc_codes]
+    md_codes = [_byma_ticker_from_code(_md_code_from_calc_code(c), curve_key)
+            for c in calc_codes]
 
     # mapping md -> calc (si hay colisión, mantiene el primero)
     md_to_calc: Dict[str, str] = {}
@@ -710,7 +788,7 @@ def _load_curve_base(username: str, password: str, curve_key: str, plazo: str) -
         return None
 
     # Re-etiquetar a calc_code SOLO para curvas con sufijo
-    if curve_key in CURVE_EVAL_SUFFIX:
+    if curve_key in CURVE_EVAL_SUFFIX or curve_key in CURVE_BYMA_REMAP:
         snap["Código"] = snap["Código"].map(lambda x: md_to_calc.get(str(x), str(x)))
 
     return snap
@@ -737,6 +815,32 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
 
     out["tem_spread"] = pd.to_numeric(out.get("TEM"), errors="coerce").diff().fillna(0.0)
 
+    # Margen TNA para curvas con tasa variable (TAMAR/BADLAR)
+    if bond_type in ("tamar",):
+        inp = rentafija.inputs
+        # Determinar benchmark según el index de cada bono
+        margen_col = []
+        for code in out["Código"].astype(str).tolist():
+            obj = _bond_obj(code)
+            idx = getattr(obj, "index", None) if obj else None
+            tipo = getattr(obj, "tipo_tasa_interes", None) if obj else None
+            if tipo in ("VARIABLE", "VARIABLE_CAP") and idx:
+                if idx == "TAMAR":
+                    bench = inp.get("tamar", pd.DataFrame()).tail(5).get("TAMAR", pd.Series()).mean() / 100.0
+                elif idx == "BADLAR":
+                    bench = inp.get("badlar", pd.DataFrame()).tail(5).get("BADLAR", pd.Series()).mean() / 100.0
+                else:
+                    bench = 0.0
+                tna_val = out.loc[out["Código"] == code, "TNA"]
+                if not tna_val.empty:
+                    tna_f = pd.to_numeric(tna_val.iloc[0], errors="coerce")
+                    margen_col.append(tna_f - bench if np.isfinite(tna_f) else np.nan)
+                else:
+                    margen_col.append(np.nan)
+            else:
+                margen_col.append(np.nan)
+        out["Margen TNA"] = margen_col
+
     cols = [
         "Código",
         "Close",
@@ -748,6 +852,7 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
         "Paridad",
         "Duration",
         "tem_spread",
+        "Margen TNA",
         "Volumen",
     ]
     cols = [c for c in cols if c in out.columns]
@@ -878,6 +983,7 @@ def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "Paridad": "{:.2%}",
         "Duration": "{:.4f}",
         "tem_spread": "{:+.2%}",
+        "Margen TNA": "{:+.2%}",
         "Volumen": "{:,.0f}",
     }
 
