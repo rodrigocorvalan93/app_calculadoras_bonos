@@ -178,12 +178,22 @@ def fetch_principales_variables():
         return None
 
 
-# Cargamos catálogo solo a título informativo (sin lógica booleana rara)
-_tmp_catalogo = fetch_principales_variables()
-if _tmp_catalogo is None:
-    principales_variables_df = pd.DataFrame()
-else:
-    principales_variables_df = _tmp_catalogo
+# Catálogo de variables: lazy (evita HTTP en import, solo se carga si se accede)
+_principales_variables_df = None
+
+def get_principales_variables_df():
+    global _principales_variables_df
+    if _principales_variables_df is None:
+        tmp = fetch_principales_variables()
+        _principales_variables_df = tmp if tmp is not None else pd.DataFrame()
+    return _principales_variables_df
+
+
+def __getattr__(name):
+    """Backward compat: indices.principales_variables_df."""
+    if name == "principales_variables_df":
+        return get_principales_variables_df()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # =============================================================================

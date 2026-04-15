@@ -6,12 +6,12 @@ from utils import *
 #Last version
 # Obtener feriados argentinos 90-2151
 
-# Obtener feriados argentinos y estadounidenses
-ar_holidays = holidays.Argentina(years=list(range(1993, 2130)))
-us_holidays = holidays.US(years=list(range(1993, 2130)))
+# Lazy initialization: se generan los feriados en el primer uso, no al importar
+_ar_holidays = None
+_us_holidays = None
 
-# Agregar días festivos adicionales manualmente
-additional_holidays = {
+# Días festivos adicionales (se agregan al inicializar)
+_additional_holidays = {
     "2023-11-06": "Día del bancario 2023",
     "2024-03-28": "Jueves Santo",
     "2024-04-01": "Dia Feriado Turístico",
@@ -23,7 +23,25 @@ additional_holidays = {
     "2026-11-06": "Día del bancario",
     "2026-12-31": "Día no hábil de fin de año"
 }
-ar_holidays.update(additional_holidays)
+
+
+def _ensure_holidays():
+    global _ar_holidays, _us_holidays
+    if _ar_holidays is None:
+        _ar_holidays = holidays.Argentina(years=list(range(1993, 2130)))
+        _us_holidays = holidays.US(years=list(range(1993, 2130)))
+        _ar_holidays.update(_additional_holidays)
+
+
+def __getattr__(name):
+    """Backward compat: permite acceder a dias_habiles.ar_holidays / us_holidays."""
+    if name == "ar_holidays":
+        _ensure_holidays()
+        return _ar_holidays
+    if name == "us_holidays":
+        _ensure_holidays()
+        return _us_holidays
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Función auxiliar para convertir a datetime.date
 def convertir_a_date(fecha):
@@ -40,32 +58,35 @@ def convertir_a_date(fecha):
 
 # Función para encontrar el siguiente día hábil en Argentina
 def siguiente_dia_habil_ar(fecha):
+    _ensure_holidays()
     fecha = convertir_a_date(fecha)
-    while fecha.weekday() >= 5 or fecha in ar_holidays:  # 5 y 6 son sábado y domingo
+    while fecha.weekday() >= 5 or fecha in _ar_holidays:  # 5 y 6 son sábado y domingo
         fecha = (pd.Timestamp(fecha) + BDay(1)).date()
     return fecha
 
 # Función para encontrar el siguiente día hábil en EE.UU.
 def siguiente_dia_habil_us(fecha):
+    _ensure_holidays()
     fecha = convertir_a_date(fecha)
-    while fecha.weekday() >= 5 or fecha in us_holidays:  # 5 y 6 son sábado y domingo
+    while fecha.weekday() >= 5 or fecha in _us_holidays:  # 5 y 6 son sábado y domingo
         fecha = (pd.Timestamp(fecha) + BDay(1)).date()
     return fecha
 
 # Función para encontrar n días hábiles
 
 def n_dias_laborales(fecha, n):
+    _ensure_holidays()
     fecha = convertir_a_date(fecha)
     if n > 0:
         while n > 0:
             fecha = (pd.Timestamp(fecha) + BDay(1)).date()  # Añade un día hábil
-            while fecha.weekday() >= 5 or fecha in ar_holidays:
+            while fecha.weekday() >= 5 or fecha in _ar_holidays:
                 fecha = (pd.Timestamp(fecha) + BDay(1)).date()  # Añade días hasta que sea un día hábil
             n -= 1
     elif n < 0:
         while n < 0:
             fecha = (pd.Timestamp(fecha) - BDay(1)).date()  # Resta un día hábil
-            while fecha.weekday() >= 5 or fecha in ar_holidays:
+            while fecha.weekday() >= 5 or fecha in _ar_holidays:
                 fecha = (pd.Timestamp(fecha) - BDay(1)).date()  # Resta días hasta que sea un día hábil
             n += 1
 

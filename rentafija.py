@@ -3,7 +3,74 @@ from utils import *
 import indices
 from dias_habiles import (convertir_a_date, siguiente_dia_habil_ar, siguiente_dia_habil_us,
                           n_dias_laborales, days360)
-inputs = indices.main()
+
+
+# Lazy inputs: evita llamar indices.main() (6+ HTTP requests) al importar el módulo.
+# Se inicializa en el primer acceso a inputs[key].
+class _LazyInputs(dict):
+    """Dict que carga indices.main() en el primer acceso, no en import time."""
+    _loaded = False
+
+    def _ensure_loaded(self):
+        if not self._loaded:
+            self._loaded = True  # antes del call para evitar recursión
+            data = indices.main()
+            if isinstance(data, dict):
+                self.update(data)
+
+    def __getitem__(self, key):
+        self._ensure_loaded()
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        self._ensure_loaded()
+        return super().get(key, default)
+
+    def __contains__(self, key):
+        self._ensure_loaded()
+        return super().__contains__(key)
+
+    def __iter__(self):
+        self._ensure_loaded()
+        return super().__iter__()
+
+    def keys(self):
+        self._ensure_loaded()
+        return super().keys()
+
+    def values(self):
+        self._ensure_loaded()
+        return super().values()
+
+    def items(self):
+        self._ensure_loaded()
+        return super().items()
+
+    def __len__(self):
+        self._ensure_loaded()
+        return super().__len__()
+
+    def __repr__(self):
+        if not self._loaded:
+            return "<LazyInputs: not loaded yet>"
+        return super().__repr__()
+
+
+inputs = _LazyInputs()
+
+
+# ── Helpers vectorizados para cálculos de precio/tir/duration ──
+
+def _cf_yearfracs(cf_fechas, settlement_date):
+    """Calcula fracciones de año desde settlement a cada fecha de cashflow (vectorizado)."""
+    return np.array([(f - settlement_date).days / 365.0 for f in cf_fechas], dtype=np.float64)
+
+
+def _pv_vec(totals, t_years, tasa):
+    """Valor presente vectorizado: sum(cf_i / (1+r)^t_i)."""
+    return float(np.sum(totals * np.power(1.0 + tasa, -t_years)))
+
+
 #Last version 12.17 16/5
 #%%
 class Bono:
@@ -319,8 +386,8 @@ class Bono:
 
         self.cashflow_cpn_full = pd.DataFrame(cf_cpn)
         self.cashflow_pmt_full = pd.DataFrame(cf_pmt)
-        self.cashflow_cpn = pd.DataFrame(cf_cpn)[pd.DataFrame(cf_cpn)['Fechas'] > self.fecha_settlement]
-        self.cashflow_pmt = pd.DataFrame(cf_pmt)[pd.DataFrame(cf_pmt)['Fechas'] > self.fecha_settlement]
+        self.cashflow_cpn = self.cashflow_cpn_full[self.cashflow_cpn_full['Fechas'] > self.fecha_settlement].copy()
+        self.cashflow_pmt = self.cashflow_pmt_full[self.cashflow_pmt_full['Fechas'] > self.fecha_settlement].copy()
 
         self.valor_residual = self.valor_nominal - sum(self.cashflow_cpn_full['Amortización'][self.cashflow_cpn_full['Fechas'] <= self.fecha_settlement]) # cada 100 o %
 
@@ -443,16 +510,19 @@ class Bono:
                     }
         cf = pd.concat([pd.DataFrame([nueva_fila]), cf], ignore_index=True)
 
-        # Función del valor presente neto
-        def valor_presente(tasa):
-            return sum(row['Total'] / (1 + tasa) ** ((row['Fechas'] - self.fecha_settlement).days / 365) for index, row in cf.iterrows())
+        # Pre-extraer arrays para Newton-Raphson vectorizado (evita iterrows en el loop)
+        _totals = cf['Total'].to_numpy(dtype=np.float64)
+        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
 
-        # Derivada del valor presente neto
+        # Función del valor presente neto (vectorizado)
+        def valor_presente(tasa):
+            return float(np.sum(_totals * np.power(1.0 + tasa, -_t_years)))
+
+        # Derivada del valor presente neto (vectorizado)
         def derivada_vp(tasa):
-            return sum(-row['Total'] * ((row['Fechas'] - self.fecha_settlement).days / 365) / (1 + tasa) ** ((row['Fechas'] - self.fecha_settlement).days / 365 + 1) for index, row in cf.iterrows())
+            return float(np.sum(-_totals * _t_years * np.power(1.0 + tasa, -_t_years - 1.0)))
 
         # Método de Newton-Raphson https://es.wikipedia.org/wiki/M%C3%A9todo_de_Newton (me aproximo usando la pendiente derivada)
-        #tasa_actual = 0.5 if self.paridad < 0.5 else (0.01 if self.paridad < 1.20 else (-0.2 if self.paridad < 1.30 else (-0.5 if self.paridad < 1.40 else (-0.6 if self.paridad < 1.70 else (-0.8 if self.paridad < 2 else -0.94)))))
         tasa_actual = (
             0.3755 if 0.2 <= self.paridad < 0.3 else
             0.3255 if 0.3 <= self.paridad < 0.4 else
@@ -474,7 +544,6 @@ class Bono:
             -0.9999 if 1.9 <= self.paridad < 2.0 else
             -0.99999 if self.paridad >= 2 else 0.01
             )
-        tasa_actual = tasa_actual
         precision = 0.0001
         iteraciones = 0
         max_iteraciones = 10000  # Para evitar bucles infinitos
@@ -489,21 +558,6 @@ class Bono:
                 break
 
             tasa_actual = tasa_nueva
-
-        '''
-        # Búsqueda binaria para encontrar la tasa de descuento (esto era re bruto pero efectivo)
-        bajo, alto = -20, 20  # Asumiendo que la tasa está entre 0% y 100%
-        precision = 0.00001  # Precisión deseada
-        tasa_actual = (alto + bajo) / 2
-
-        while alto - bajo > precision:
-            vp = vp(tasa_actual)
-            if vp > precio_objetivo:
-                alto = tasa_actual
-            else:
-                bajo = tasa_actual
-            tasa_actual = (alto + bajo) / 2
-        '''
 
         self.tirea = tasa_actual.real
 
@@ -554,8 +608,10 @@ class Bono:
         # Filtrar los flujos de caja desde la fecha de liquidación
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
 
-        # Calcular el valor presente de los flujos de caja
-        precio = sum(row['Total'] / (1 + tasa_descuento.real) ** ((row['Fechas'] - self.fecha_settlement).days / 365) for index, row in cf.iterrows())
+        # Calcular el valor presente de los flujos de caja (vectorizado)
+        _totals = cf['Total'].to_numpy(dtype=np.float64)
+        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        precio = _pv_vec(_totals, _t_years, tasa_descuento.real)
 
         self.precio = precio
         self.precio_clean = (precio - self.intereses_corridos) / (self.valor_residual / self.valor_nominal)
@@ -588,16 +644,10 @@ class Bono:
         # Filtrar los flujos de caja desde la fecha de liquidación
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
 
-        # Si ya tenés la columna de capital (p.ej. 'Amortizacion'):
-        capital = cf['Amortización'].astype(float)
-
-        # WAL
-        al = float(
-            sum(
-                row['Amortización'] * ((row['Fechas'] - self.fecha_settlement).days / 365.0)
-                for index, row in cf.iterrows()
-            ) / capital.sum()
-        )
+        # WAL (vectorizado)
+        capital = cf['Amortización'].to_numpy(dtype=np.float64)
+        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        al = float(np.sum(capital * _t_years) / np.sum(capital))
 
 
         self.average_life = al
@@ -626,11 +676,14 @@ class Bono:
         # Filtrar los flujos de caja desde la fecha de liquidación
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
 
-        # Calcular el precio del bono
-        precio = sum(row['Total'] / (1 + tasa_descuento.real) ** ((row['Fechas'] - self.fecha_settlement).days / 365) for index, row in cf.iterrows())
+        # Calcular precio y duración (vectorizado)
+        _totals = cf['Total'].to_numpy(dtype=np.float64)
+        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        _df = np.power(1.0 + tasa_descuento.real, -_t_years)
+        _pv = _totals * _df
 
-        # Calcular la duración
-        duration = sum((row['Total'] / (1 + tasa_descuento.real) ** ((row['Fechas'] - self.fecha_settlement).days / 365)) * ((row['Fechas'] - self.fecha_settlement).days / 365) for index, row in cf.iterrows()) / precio
+        precio = float(np.sum(_pv))
+        duration = float(np.sum(_pv * _t_years)) / precio
 
         self.duration = duration
         return duration
@@ -678,11 +731,14 @@ class Bono:
         # Filtrar los flujos de caja desde la fecha de liquidación
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
 
-        # Calcular el precio del bono
-        precio = sum(row['Total'] / (1 + tasa_descuento) ** ((row['Fechas'] - self.fecha_settlement).days / 365) for index, row in cf.iterrows())
+        # Calcular precio y convexidad (vectorizado)
+        _totals = cf['Total'].to_numpy(dtype=np.float64)
+        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        _df = np.power(1.0 + tasa_descuento, -_t_years)
 
-        # Calcular la convexidad
-        convexidad = sum(row['Total'] * ((row['Fechas'] - self.fecha_settlement).days / 365) ** 2 / ((1 + tasa_descuento) ** ((row['Fechas'] - self.fecha_settlement).days / 365 + 2)) for index, row in cf.iterrows()) / (precio * (1 + tasa_descuento) ** 2)
+        precio = float(np.sum(_totals * _df))
+        # Convexidad: sum(cf_i * t_i^2 / (1+r)^(t_i+2)) / (P * (1+r)^2)
+        convexidad = float(np.sum(_totals * _t_years ** 2 * np.power(1.0 + tasa_descuento, -(_t_years + 2.0)))) / (precio * (1 + tasa_descuento) ** 2)
 
         self.convexity = convexidad
         return convexidad
@@ -690,17 +746,21 @@ class Bono:
     def calcula_total_return(self, tirea_inicial, tirea_final, terminal_date,settlement_date=None):
         # Identificar y sumar los cupones cobrados
         self.generate_cashflows(settlement_date)
-        fechas_cpn_cobrados = (self.cashflow_cpn_full['Fechas'] > self.fecha_settlement) & (self.cashflow_cpn_full['Fechas'] <= datetime.strptime(terminal_date, '%d/%m/%Y').date())
+        terminal_dt = datetime.strptime(terminal_date, '%d/%m/%Y').date()
+        fechas_cpn_cobrados = (self.cashflow_cpn_full['Fechas'] > self.fecha_settlement) & (self.cashflow_cpn_full['Fechas'] <= terminal_dt)
         cupones_cobrados = self.cashflow_cpn_full.loc[fechas_cpn_cobrados, 'Total'].sum()
 
-        # Calcula el precio final del bono usando la tirea_final
-        cf_final = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > datetime.strptime(terminal_date, '%d/%m/%Y').date()]
-        precio_final = sum(row['Total'] / (1 + tirea_final) ** ((row['Fechas'] - datetime.strptime(terminal_date, '%d/%m/%Y').date()).days / 365) for index, row in cf_final.iterrows())
+        # Calcula el precio final del bono usando la tirea_final (vectorizado)
+        cf_final = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > terminal_dt]
+        _totals_f = cf_final['Total'].to_numpy(dtype=np.float64)
+        _t_years_f = _cf_yearfracs(cf_final['Fechas'], terminal_dt)
+        precio_final = _pv_vec(_totals_f, _t_years_f, tirea_final)
 
-
-        # Calcula el precio inicial del bono usando la tirea_inicial
+        # Calcula el precio inicial del bono usando la tirea_inicial (vectorizado)
         cf_inicial = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
-        precio_inicial = sum(row['Total'] / (1 + tirea_inicial) ** ((row['Fechas'] - self.fecha_settlement).days / 365) for index, row in cf_inicial.iterrows())
+        _totals_i = cf_inicial['Total'].to_numpy(dtype=np.float64)
+        _t_years_i = _cf_yearfracs(cf_inicial['Fechas'], self.fecha_settlement)
+        precio_inicial = _pv_vec(_totals_i, _t_years_i, tirea_inicial)
 
         # precio_inicial = self.calcula_precio(tasa_descuento=tirea_inicial, settlement_date=settlement_date)
 
