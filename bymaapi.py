@@ -5,16 +5,17 @@
 
 # %% Imports
 import os
-from datetime import date, datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
 import requests
-from utils import *
-from plotter import *
+
 import rentafija
 from especies import *  # asume que define objetos bono y/o colecciones (todos_los_bonos, etc.)
+from plotter import *
+from utils import *
 
 # =============================================================================
 # Config performance
@@ -549,7 +550,7 @@ def main():
     session = login_xoms(username, password)
 
     # --- A3500 override (por env o por variable global preexistente) ---
-    from indices import refresh_a3500_in_rentafija, fx_status_text
+    from indices import fx_status_text, refresh_a3500_in_rentafija
  
     session = login_xoms(username, password)
     
@@ -802,4 +803,8 @@ if __name__ == '__main__':
 # maturity_map = {b.codigo: b.duration for b in todos_los_bonos}
 # fw_lecap = matriz_forwards_tir(lecap_24hs_prices_df, maturity_map=maturity_map)
 # fw_cer   = matriz_forwards_tir(cer_24hs_prices_df, maturity_map=maturity_map)
+# Export formato excel:
+# df.style.format(decimal=',', thousands='.')
+# df.to_csv('curva_tasas.csv', sep=';', decimal=',', index=False)
+# %%
 # %%
