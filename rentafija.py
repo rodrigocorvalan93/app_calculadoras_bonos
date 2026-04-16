@@ -1,9 +1,17 @@
 #%%
-from utils import *
-import indices
-from dias_habiles import (convertir_a_date, siguiente_dia_habil_ar, siguiente_dia_habil_us,
-                          n_dias_laborales, days360)
+import warnings
 
+import indices
+from dias_habiles import (
+    convertir_a_date,
+    days360,
+    n_dias_laborales,
+    siguiente_dia_habil_ar,
+    siguiente_dia_habil_us,
+)
+from utils import *
+
+warnings.filterwarnings("error", category=RuntimeWarning)
 
 # Lazy inputs: evita llamar indices.main() (6+ HTTP requests) al importar el módulo.
 # Se inicializa en el primer acceso a inputs[key].
@@ -474,8 +482,10 @@ class Bono:
         3. Preparación de Datos para el Cálculo:
         - Filtra los flujos de caja desde la fecha de liquidación y ajusta con el precio.
         4. Cálculo de la TIREA:
-        - Utiliza el método de Newton-Raphson para encontrar la tasa de descuento.
-            Incluye el cálculo del valor presente neto y su derivada.
+        - Utiliza el método de Newton-Raphson (damped) para encontrar la tasa de descuento.
+          Incluye el cálculo del valor presente neto y su derivada fusionados en una sola
+          llamada a np.power por iteración. El damping protege contra pasos que caerían
+          en zona inválida (1+r <= 0), típico en bonos con paridad extrema.
         - Realiza iteraciones hasta alcanzar la precisión deseada o el máximo de iteraciones.
         5. Calcula TNA según convención
 
@@ -491,7 +501,7 @@ class Bono:
         if precio <= 0:
             raise ValueError("No se ingresó un precio válido")
         if self.quote_price_cnv == 'CLEAN':
-            self.precio = precio * (self.valor_residual / self.valor_nominal)  + self.intereses_corridos
+            self.precio = precio * (self.valor_residual / self.valor_nominal) + self.intereses_corridos
             self.precio_clean = precio
         else:
             self.precio = precio
@@ -499,30 +509,36 @@ class Bono:
         # adjunto calculo de paridad
         self.paridad = self.precio / self.valor_tecnico
 
-
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
         nueva_fila = {
-                        'Fechas': self.fecha_settlement,
-                        'Intereses': 0,
-                        'Amortización': 0,
-                        'Ajuste': 0,
-                        'Total': - self.precio
-                    }
+            'Fechas': self.fecha_settlement,
+            'Intereses': 0,
+            'Amortización': 0,
+            'Ajuste': 0,
+            'Total': - self.precio
+        }
         cf = pd.concat([pd.DataFrame([nueva_fila]), cf], ignore_index=True)
 
         # Pre-extraer arrays para Newton-Raphson vectorizado (evita iterrows en el loop)
         _totals = cf['Total'].to_numpy(dtype=np.float64)
         _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
 
-        # Función del valor presente neto (vectorizado)
-        def valor_presente(tasa):
-            return float(np.sum(_totals * np.power(1.0 + tasa, -_t_years)))
-
-        # Derivada del valor presente neto (vectorizado)
-        def derivada_vp(tasa):
-            return float(np.sum(-_totals * _t_years * np.power(1.0 + tasa, -_t_years - 1.0)))
+        # VP y derivada fusionados: una sola llamada a np.power por iteración.
+        # VP(r)   = Σ cf · (1+r)^(-t)
+        # VP'(r)  = -Σ cf · t · (1+r)^(-t-1) = -(1/(1+r)) · Σ cf · t · (1+r)^(-t)
+        def vp_y_derivada(tasa):
+            base = 1.0 + tasa
+            if not np.isfinite(tasa) or base <= 0.0:
+                return np.nan, np.nan
+            with np.errstate(invalid="ignore", divide="ignore"):
+                df = np.power(base, -_t_years)      # (1+r)^(-t) — UNA sola potencia
+                cf_df = _totals * df
+                vp = float(np.sum(cf_df))
+                dvp = -float(np.sum(cf_df * _t_years)) / base
+            return vp, dvp
 
         # Método de Newton-Raphson https://es.wikipedia.org/wiki/M%C3%A9todo_de_Newton (me aproximo usando la pendiente derivada)
+        # Semilla por paridad: TIR típica según zona de precio del bono en Argentina.
         tasa_actual = (
             0.3755 if 0.2 <= self.paridad < 0.3 else
             0.3255 if 0.3 <= self.paridad < 0.4 else
@@ -543,32 +559,50 @@ class Bono:
             -0.999 if 1.8 <= self.paridad < 1.9 else
             -0.9999 if 1.9 <= self.paridad < 2.0 else
             -0.99999 if self.paridad >= 2 else 0.01
-            )
-        precision = 0.0001
-        iteraciones = 0
-        max_iteraciones = 10000  # Para evitar bucles infinitos
+        )
 
-        while True:
-            iteraciones += 1
-            vp_actual = valor_presente(tasa_actual)
-            derivada_actual = derivada_vp(tasa_actual)
-            tasa_nueva = tasa_actual - vp_actual / derivada_actual
+        precision = 1e-4
+        max_iteraciones = 100  # Newton cuadrático con damping no necesita más
 
-            if abs(tasa_nueva - tasa_actual) < precision or iteraciones > max_iteraciones:
+        for _ in range(max_iteraciones):
+            vp_actual, derivada_actual = vp_y_derivada(tasa_actual)
+
+            # Guard: si VP o derivada son inválidos o la derivada es cero, cortamos
+            if not np.isfinite(vp_actual) or not np.isfinite(derivada_actual) or derivada_actual == 0.0:
+                break
+
+            paso = vp_actual / derivada_actual
+            tasa_nueva = tasa_actual - paso
+
+            # Damped Newton: si el paso cae en zona inválida (1+r <= 0), halving hasta zona válida.
+            # En el caso normal este loop no se ejecuta (overhead cero).
+            damping = 0
+            while (not np.isfinite(tasa_nueva) or tasa_nueva <= -1.0) and damping < 30:
+                paso *= 0.5
+                tasa_nueva = tasa_actual - paso
+                damping += 1
+
+            # Si ni siquiera con damping se recuperó, cortamos
+            if not np.isfinite(tasa_nueva) or tasa_nueva <= -1.0:
+                break
+
+            if abs(tasa_nueva - tasa_actual) < precision:
+                tasa_actual = tasa_nueva
                 break
 
             tasa_actual = tasa_nueva
 
-        self.tirea = tasa_actual.real
+        # Defensivo: si por cualquier razón tasa_actual fuese complejo, quedarse con la parte real.
+        self.tirea = float(np.real(tasa_actual))
 
         # Cálculo TNA según cnv
         if self.cnv_tna == 'plazo remanente':
             dias_al_vto = (self.vencimiento - self.fecha_settlement).days
-            self.tna = tir_a_tna(self.tirea,dias_al_vto,self.convencion_base)
+            self.tna = tir_a_tna(self.tirea, dias_al_vto, self.convencion_base)
         else:
-            self.tna = tir_a_tna(self.tirea,self.cnv_tna,self.convencion_base)
-        return tasa_actual.real
+            self.tna = tir_a_tna(self.tirea, self.cnv_tna, self.convencion_base)
 
+        return self.tirea
 
     def calcula_precio(self, tasa_descuento, settlement_date=None):
         '''
@@ -1278,6 +1312,13 @@ class Bono:
 
         bono2.calcula_precio(tna_a_tir(tna_ticket_2, int(cnv_dias_al_vto_2), int(bono2.convencion_base)))
         px_dirty2 = bono2.precio # para calcular los VN de la otra pata
+        ticket2 = bono2.genera_ticket_tna(tna_ticket_2, nominales_ticket*self.precio/px_dirty2, settlement_date)
+
+        return pd.concat((ticket1, ticket2),axis=1)
+
+
+
+
         ticket2 = bono2.genera_ticket_tna(tna_ticket_2, nominales_ticket*self.precio/px_dirty2, settlement_date)
 
         return pd.concat((ticket1, ticket2),axis=1)
