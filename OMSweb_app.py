@@ -413,8 +413,10 @@ def _sort_duration_nan_last(df: pd.DataFrame, col: str = "Duration") -> pd.DataF
 
 
 def _bar_limits(s: pd.Series) -> Tuple[float, float]:
-    ser = pd.to_numeric(s, errors="coerce")
-    lim = float(np.nanmax(np.abs(ser.to_numpy(dtype="float64")))) if len(ser) else 1.0
+    arr = pd.to_numeric(s, errors="coerce").to_numpy(dtype="float64")
+    if arr.size == 0 or np.all(np.isnan(arr)):
+        return -1.0, 1.0
+    lim = float(np.nanmax(np.abs(arr)))
     if not np.isfinite(lim) or lim <= 0:
         lim = 1.0
     return -lim, lim
