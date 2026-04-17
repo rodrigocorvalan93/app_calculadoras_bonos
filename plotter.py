@@ -17,11 +17,16 @@
 from __future__ import annotations
 
 from datetime import date as _date
-from typing import Callable, Optional, Dict, Any  # <- Dict/Any para el helper de estimación
+from typing import (  # <- Dict/Any para el helper de estimación
+    Any,
+    Callable,
+    Dict,
+    Optional,
+)
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
 
@@ -246,8 +251,16 @@ def _fit_nss_with_outliers(
 
     # ---------- Caso NSS full ----------
     if n >= 6:
-        p0 = np.array([float(np.mean(y)), 0.0, 0.0, 0.0, 1.0, 1.0], dtype=np.float64)
-        popt, _ = curve_fit(nss_model, X, y, p0=p0, maxfev=maxfev)
+        # Filtrar NaN antes de calcular mean y pasar a curve_fit:
+        # np.mean sobre array con NaN devuelve NaN silenciosamente y
+        # contamina p0, haciendo que curve_fit falle o converja mal.
+        finite_mask = np.isfinite(X) & np.isfinite(y)
+        X_fit = X[finite_mask]
+        y_fit = y[finite_mask]
+
+        y_mean = float(np.nanmean(y_fit)) if y_fit.size > 0 and np.isfinite(y_fit).any() else 0.0
+        p0 = np.array([y_mean, 0.0, 0.0, 0.0, 1.0, 1.0], dtype=np.float64)
+        popt, _ = curve_fit(nss_model, X_fit, y_fit, p0=p0, maxfev=maxfev)
 
         yhat = nss_model(X, *popt)
         resid = y - yhat
@@ -322,10 +335,14 @@ def _plot_nss(
         if np.isfinite(x0) and np.isfinite(x1) and (x1 > x0):
             xx = np.linspace(x0, x1, 140, dtype=np.float64)
         else:
-            xx = np.linspace(float(np.min(X)), float(np.max(X)), 140, dtype=np.float64)
+            x_lo = float(np.nanmin(X)) if np.isfinite(X).any() else 0.0
+            x_hi = float(np.nanmax(X)) if np.isfinite(X).any() else 1.0
+            xx = np.linspace(x_lo, x_hi, 140, dtype=np.float64)
             xlim = None
     else:
-        xx = np.linspace(float(np.min(X)), float(np.max(X)), 140, dtype=np.float64)
+        x_lo = float(np.nanmin(X)) if np.isfinite(X).any() else 0.0
+        x_hi = float(np.nanmax(X)) if np.isfinite(X).any() else 1.0
+        xx = np.linspace(x_lo, x_hi, 140, dtype=np.float64)
 
     yy = nss_model(xx, *popt)
 
@@ -611,8 +628,10 @@ def _fit_nss_cached(
 
     # rango observado (post outliers) para poder clippear
     X_used = X[mask] if mask is not None and np.any(mask) else X
-    x_min = float(np.min(X_used))
-    x_max = float(np.max(X_used))
+    if X_used.size == 0 or not np.isfinite(X_used).any():
+        raise ValueError("No hay valores finitos de Duration tras filtrar outliers.")
+    x_min = float(np.nanmin(X_used))
+    x_max = float(np.nanmax(X_used))
 
     out = (popt, x_min, x_max)
     if use_cache:

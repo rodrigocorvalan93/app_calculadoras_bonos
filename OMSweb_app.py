@@ -65,7 +65,7 @@ import OMSsettings as cfg
 import OMSticker
 import plotter  # usa pct_series + NSS helpers
 import rentafija
-from dias_habiles import siguiente_dia_habil_ar
+from dias_habiles import ar_holidays, siguiente_dia_habil_ar
 
 # Universo de bonos
 from especies import *
@@ -448,6 +448,22 @@ def _diverging_bg(val: Any, lim: float, bold: bool = True) -> str:
     fw = "700" if bold else "400"
     return f"background-color: rgba({r},{g},{b},{alpha:.3f}); font-weight:{fw};"
 
+def _safe_median_pct(series, default: float = 40.0) -> float:
+    """Mediana segura de una serie de yields (decimales) → porcentaje.
+
+    Devuelve `default` si la serie es None, está vacía, o no tiene valores
+    finitos. Evita el RuntimeWarning 'All-NaN slice encountered' de
+    np.nanmedian cuando la columna viene toda en NaN (carga inicial del
+    panel antes del primer tick de WS, mercado cerrado, etc.).
+    """
+    if series is None:
+        return float(default)
+    vals = pd.to_numeric(series, errors="coerce")
+    if not vals.notna().any():
+        return float(default)
+    med = float(np.nanmedian(vals))
+    return float(med * 100.0) if np.isfinite(med) else float(default)
+
 
 def _yield_pct_points(series_or_scalar: Any) -> Any:
     """Convierte yields a 'puntos porcentuales' (ej 42.35 => 42.35%).
@@ -468,6 +484,83 @@ def _warn_once(key: str, msg: str) -> None:
     if not st.session_state.get(k, False):
         st.warning(msg)
         st.session_state[k] = True
+
+# ──────────────────────────────────────────────────────────────────────
+# Market hours (BYMA: 10:30 a 17:00 hora Argentina, lun-vie)
+# ──────────────────────────────────────────────────────────────────────
+
+# Horario BYMA (hora local Argentina)
+_BYMA_OPEN = (10, 30)   # 10:30
+_BYMA_CLOSE = (17, 0)   # 17:00
+
+
+def is_market_open(now: Optional[datetime] = None) -> bool:
+    """True si el mercado BYMA está operativo (lun-vie, 10:30-17:00 AR,
+    excluyendo feriados del calendario argentino de dias_habiles.ar_holidays).
+    """
+    if now is None:
+        now = datetime.now()
+
+    # Fin de semana
+    if now.weekday() >= 5:
+        return False
+
+    # Feriado argentino
+    if now.date() in ar_holidays:
+        return False
+
+    # Ventana horaria
+    t_open = now.replace(hour=_BYMA_OPEN[0], minute=_BYMA_OPEN[1], second=0, microsecond=0)
+    t_close = now.replace(hour=_BYMA_CLOSE[0], minute=_BYMA_CLOSE[1], second=0, microsecond=0)
+    return t_open <= now <= t_close
+
+
+def _effective_price_series(df: pd.DataFrame, last_col: str = "Last",
+                            close_col: str = "Close") -> pd.Series:
+    """Devuelve la serie de 'precio efectivo' para cálculos.
+
+    Regla: si hay `Last` válido se usa; si no, se cae a `Close`.
+    Esto permite que con mercado cerrado (o primeros minutos sin ticks)
+    la app calcule TIREA/TNA/Duration sobre el último cierre conocido.
+    """
+    if df is None or df.empty:
+        return pd.Series(dtype="float64")
+
+    if last_col in df.columns:
+        last = pd.to_numeric(df[last_col], errors="coerce")
+    else:
+        last = pd.Series(np.nan, index=df.index, dtype="float64")
+
+    if close_col in df.columns:
+        close = pd.to_numeric(df[close_col], errors="coerce")
+    else:
+        close = pd.Series(np.nan, index=df.index, dtype="float64")
+
+    # Prioridad: Last -> Close
+    return last.where(last.notna() & np.isfinite(last), close)
+
+
+def market_status_caption(plazo: str, auto_refresh: bool = False) -> str:
+    """Construye el caption de estado de mercado (LIVE / CERRADO + timestamp + FX)."""
+    now = datetime.now()
+    ts = now.strftime("%H:%M:%S")
+    is_open = is_market_open(now)
+
+    try:
+        fx_txt = fx_status_text()
+    except Exception:
+        fx_txt = ""
+
+    if is_open:
+        dot = "🔴 LIVE"
+        estado = ""
+    else:
+        dot = "⚪ CERRADO"
+        estado = " · calculando con Close del último cierre"
+
+    prefix = f"{dot}  |  " if (auto_refresh or not is_open) else ""
+    fx_part = f"  |  {fx_txt}" if fx_txt else ""
+    return f"{prefix}Actualizado: {ts}  |  Plazo: {plazo}{estado}{fx_part}"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -811,9 +904,11 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
     settle = _settlement_date_str(plazo)
 
     codes_arr = snap["Código"].astype(str).to_numpy()
-    last_arr = pd.to_numeric(snap["Last"], errors="coerce").to_numpy(dtype="float64")
+    # Precio efectivo para cálculos: Last si hay; si no, Close (mercado cerrado / feriado).
+    price_eff = _effective_price_series(snap, last_col="Last", close_col="Close")
+    price_arr = price_eff.to_numpy(dtype="float64")
 
-    mdf = _parallel_metrics(codes_arr, last_arr, bond_type, settle)
+    mdf = _parallel_metrics(codes_arr, price_arr, bond_type, settle)
 
     out = pd.concat([snap.reset_index(drop=True), mdf], axis=1)
     out = _sort_duration_nan_last(out, "Duration")
@@ -892,8 +987,10 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
     settle = _settlement_date_str(plazo)
 
     codes_arr = snap["Código"].astype(str).to_numpy()
-    last_arr = pd.to_numeric(snap["Last Price"], errors="coerce").to_numpy(dtype="float64")
-    m_last_df = _parallel_metrics(codes_arr, last_arr, bond_type, settle)
+    # Precio efectivo: Last Price si hay; si no, Close (mercado cerrado / feriado).
+    price_eff = _effective_price_series(snap, last_col="Last Price", close_col="Close")
+    price_arr = price_eff.to_numpy(dtype="float64")
+    m_last_df = _parallel_metrics(codes_arr, price_arr, bond_type, settle)
 
     bid_arr = pd.to_numeric(snap.get("Bid Price"), errors="coerce").to_numpy(dtype="float64") if "Bid Price" in snap.columns else np.full(len(snap), np.nan)
     off_arr = pd.to_numeric(snap.get("Offer Price"), errors="coerce").to_numpy(dtype="float64") if "Offer Price" in snap.columns else np.full(len(snap), np.nan)
@@ -2248,7 +2345,9 @@ def main():
             invalidate_fx_cache()
             refresh_a3500_in_rentafija(session=get_session(username, password))
 
-            st.caption(f"🔴 LIVE  |  Actualizado: {datetime.now().strftime('%H:%M:%S')}  |  Plazo: {plazo}  |  {fx_status_text()}" if auto_refresh else f"Actualizado: {datetime.now().strftime('%H:%M:%S')}  |  Plazo: {plazo}  |  {fx_status_text()}")
+            st.caption(market_status_caption(plazo, auto_refresh=auto_refresh))
+            if not is_market_open():
+                st.info("⚪ Mercado cerrado — TIREA / TNA / Duration se calculan sobre el **Close** del último cierre. Bid/Offer TIREA usan sus precios si existen.")
 
             for c in CURVES:
                 if c.key not in curves:
@@ -2289,7 +2388,9 @@ def main():
             invalidate_fx_cache()
             refresh_a3500_in_rentafija(session=get_session(username, password))
 
-            st.caption(f"🔴 LIVE  |  Actualizado: {datetime.now().strftime('%H:%M:%S')}  |  Plazo: {plazo}  |  {fx_status_text()}" if auto_refresh else f"Actualizado: {datetime.now().strftime('%H:%M:%S')}  |  Plazo: {plazo}  |  {fx_status_text()}")
+            st.caption(market_status_caption(plazo, auto_refresh=auto_refresh))
+            if not is_market_open():
+                st.info("⚪ Mercado cerrado — métricas calculadas sobre **Close** del último cierre. Bid/Offer TIREA usan sus precios si hay book.")
             dfm = load_curve_market_table(username, password, curve_key_mkt, plazo)
             if dfm is None or dfm.empty:
                 st.info("Sin datos (mercado cerrado o sin respuesta de marketdata).")
@@ -2324,10 +2425,10 @@ def main():
         @st.fragment(run_every=refresh_interval)
         def _cauciones_live():
             ts = datetime.now().strftime("%H:%M:%S")
-            st.caption(
-                f"🔴 LIVE  |  Actualizado: {ts}" if auto_refresh
-                else f"Actualizado: {ts}"
-            )
+            is_open = is_market_open()
+            dot = "🔴 LIVE" if is_open else "⚪ CERRADO"
+            prefix = f"{dot}  |  " if (auto_refresh or not is_open) else ""
+            st.caption(f"{prefix}Actualizado: {ts}")
 
             session = get_session(username, password)
 
@@ -2364,7 +2465,8 @@ def main():
     with tab_fwds:
         st.subheader("Forwards implícitos (TIR) — tiempo real")
         st.caption("Matriz aproximada: usa TIR como spot (no bootstrap de curva de descuento).")
-
+        if not is_market_open():
+            st.info("⚪ Mercado cerrado — forwards calculados sobre TIREA derivado del Close.")
         col1, col2 = st.columns(2)
 
         with col1:
@@ -2390,6 +2492,8 @@ def main():
     # ─────────────────────────
     with tab_graficos:
         st.subheader("Curva — Duration vs Yield (bid / last / offer) + NSS")
+        if not is_market_open():
+            st.info("⚪ Mercado cerrado — los puntos **LAST** del gráfico reflejan TIREA calculado sobre Close del último cierre.")
 
         curve_key = st.selectbox(
             "Curva",
@@ -2575,6 +2679,8 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
     # ─────────────────────────
     with tab_tr:
         st.subheader("Total Return real (calcula_total_return)")
+        if not is_market_open():
+            st.info("⚪ Mercado cerrado — la curva **Actual** se arma con TIREA calculada sobre el Close del último cierre.")
 
         curve_key = st.selectbox(
             "Curva",
@@ -2619,7 +2725,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         anchor0 = d_med
                         dflt = _nss_defaults_level_slope_convex(df_last, threshold_factor=2.0, anchor=anchor0, which="TIREA")
                         if dflt is None:
-                            level0 = float(np.nanmedian(df_last["TIREA"]) * 100.0) if "TIREA" in df_last.columns else 40.0
+                            level0 = _safe_median_pct(df_last.get("TIREA"), default=40.0)
                             slope0 = 0.0
                             convex0 = 0.0
                         else:
@@ -2691,7 +2797,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     dmin = float(np.nanmin(durations)) if np.isfinite(durations).any() else 0.5
                     dmax = float(np.nanmax(durations)) if np.isfinite(durations).any() else 2.0
                     dmid = float((dmin + dmax) / 2)
-                    y0 = float(np.nanmedian(df_last["TIREA"]) * 100.0) if "TIREA" in df_last.columns else 40.0
+                    y0 = _safe_median_pct(df_last.get("TIREA"), default=40.0)
 
                     pts_default = pd.DataFrame({"Duration": [dmin, dmid, dmax], "TIREA %": [y0, y0, y0]})
                     pts_editor = st.data_editor(pts_default, num_rows="dynamic", width="stretch")
@@ -3398,8 +3504,10 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             "Ese CER refleja la inflación MOM del mes *anterior* al de la fijación "
             "(ej: TZXO6 vence 30/10/26, CER fix ~mediados Sep, refleja inflación de Ago)."
         )
-
+        if not is_market_open():
+            st.info("⚪ Mercado cerrado — el breakeven se calcula con TIREA de CER y LECAP sobre Close del último cierre.")
         col_be1, col_be2 = st.columns([1, 1])
+
         with col_be1:
             be_cer_key = st.selectbox(
                 "Curva CER",
