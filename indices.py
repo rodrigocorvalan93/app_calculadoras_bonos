@@ -7,9 +7,10 @@
 # Imports
 # =============================================================================
 
-from utils import *  # trae: datetime, timedelta, pd, np, MonthEnd, requests, json, os, io, URLError, etc.
-import dias_habiles
 import urllib3
+
+import dias_habiles
+from utils import *  # trae: datetime, timedelta, pd, np, MonthEnd, requests, json, os, io, URLError, etc.
 
 # Desactiva la advertencia al usar verify=False en requests.get
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -365,17 +366,16 @@ def _calcular_start_date_por_backup(backup: dict, default_days_back: int = 365):
 # =============================================================================
 
 proyeccion_inflacion_mensual = {
-    "Mar-26": 3.1,
-    "Apr-26": 2.6,
-    "May-26": 2,
-    "Jun-26": 1.8,
-    "Jul-26": 1.5,
-    "Aug-26": 1.3,
-    "Sep-26": 1.3,
-    "Oct-26": 1.3,
-    "Nov-26": 1.3,
-    "Dec-26": 1.3,
-    "Jan-27": 1.2,
+    "Apr-26": 2.6+0.1,
+    "May-26": 1.8+0.1,
+    "Jun-26": 1.6+0.1,
+    "Jul-26": 1.2+0.1,
+    "Aug-26": 1.1+0.1,
+    "Sep-26": 1.3+0.1,
+    "Oct-26": 1.3+0.1,
+    "Nov-26": 1.2+0.1,
+    "Dec-26": 1.3+0.1,
+    "Jan-27": 1.2+0.1,
     "Feb-27": 1.3,
     "Mar-27": 1.3,
     "Apr-27": 1.0,
@@ -446,13 +446,14 @@ proyeccion_devaoficial_escenariobase = {
     "2026-11-30": 1270.00,
 }
 
+import logging
+
 # -----------------------------------------------------------------------------
 # FX A3500 en tiempo real — waterfall: MAE → BYMA DLR/SPOT → serie → default
 # Cache thread-safe 30s para no bombardear APIs en cada cálculo de bono.
 # -----------------------------------------------------------------------------
 import threading
 import time as _time
-import logging
 
 _log_fx = logging.getLogger("indices_fx")
 
@@ -955,5 +956,7 @@ def main():
 
 if __name__ == "__main__":
     inputs = main()
+    if isinstance(inputs, dict):
+        print("Series disponibles:", list(inputs.keys()))
     if isinstance(inputs, dict):
         print("Series disponibles:", list(inputs.keys()))
