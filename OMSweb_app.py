@@ -1643,21 +1643,8 @@ def _breakeven_iter_tem(
         return None
 
     # Resolver el bono `j` correspondiente.
-    # Si el caller nos pasó el base (TZX26), buscamos TZX26j.
-    # Si nos pasó el `j` directamente (TZX26j), lo usamos tal cual.
-    base_code = (
-        getattr(bond_obj_cer_base, "ticker", None)
-        or getattr(bond_obj_cer_base, "codigo", None)
-        or bond_obj_cer_base.__class__.__name__
-    )
-    base_code = str(base_code)
-    if base_code.lower().endswith("j"):
-        bond_j = bond_obj_cer_base
-    else:
-        j_code = f"{base_code}j"
-        bond_j = globals().get(j_code)
+    bond_j, _ = _resolve_bond_j(bond_obj_cer_base)
     if bond_j is None:
-        # No hay versión proyectada — no podemos usar este método
         return None
 
     target_tir_nom = float(tir_nominal_anual)
@@ -1675,26 +1662,35 @@ def _breakeven_iter_tem(
     if combined_df_cer is None or combined_df_cer.empty:
         return None
 
+    # Truncar proyección al vencimiento del bono + buffer (acelera ~10x)
+    venc = getattr(bond_j, "vencimiento", None) or getattr(bond_obj_cer_base, "vencimiento", None)
+    max_proj_date = (venc + relativedelta(months=2)) if venc else None
+
     try:
         def _tir_bono_j(i_mensual: float) -> float:
             """Inyecta inflación constante y devuelve TIREA del bono `j`."""
-            horizon_months = 36
             today = date.today()
+            # Horizonte limitado al vencimiento del bono (en vez de 36 meses fijos)
+            if venc is not None:
+                horizon_months = max(2, (venc.year - today.year) * 12 + (venc.month - today.month) + 2)
+            else:
+                horizon_months = 36
             proy = {}
             d = today.replace(day=1) + relativedelta(months=1)
             for _ in range(horizon_months):
                 proy[d.strftime("%b-%y")] = float(i_mensual * 100.0)
                 d = d + relativedelta(months=1)
 
-            _recalculate_cer_proyectado(proy, idx_module)
+            _recalculate_cer_proyectado(proy, idx_module, max_proj_date=max_proj_date)
 
             try:
                 return float(bond_j.calcula_tirea(float(price_cer_pct) / 100.0, settle_str))
             except Exception:
                 return float("nan")
 
-        # Bisección sobre i_mensual (TEM)
-        lo, hi = -0.02, 0.15
+        # Bracket amplio: Argentina tiene escenarios extremos y bonos muy cortos
+        # pueden requerir i_mensual > 20% para alcanzar target.
+        lo, hi = -0.05, 0.50
         f_lo = _tir_bono_j(lo) - target_tir_nom
         f_hi = _tir_bono_j(hi) - target_tir_nom
 
@@ -1776,6 +1772,19 @@ def _bdays_to_cer_fix(bond_obj) -> Optional[int]:
         return int((cer_fix - date.today()).days / 1.4)
 
 
+def _resolve_bond_j(bond_obj_cer_base):
+    """Devuelve (bond_j, base_code_str). bond_j es None si no existe la variante `j`."""
+    base_code = (
+        getattr(bond_obj_cer_base, "ticker", None)
+        or getattr(bond_obj_cer_base, "codigo", None)
+        or bond_obj_cer_base.__class__.__name__
+    )
+    base_code = str(base_code)
+    if base_code.lower().endswith("j"):
+        return bond_obj_cer_base, base_code
+    return globals().get(f"{base_code}j"), base_code
+
+
 def _solve_month_inflation(
     bond_obj_cer_base,
     price_cer_pct: float,
@@ -1786,49 +1795,51 @@ def _solve_month_inflation(
     idx_module,
     tol: float = 5e-5,
     max_iter: int = 40,
-) -> Optional[float]:
+) -> Tuple[Optional[float], str]:
     """Resuelve la inflación del mes `mes_key` que hace que TIREA(bono_j, px) == tir_target.
 
     Se mueve SOLO `current_proy[mes_key]`, los demás meses quedan fijos.
-    Retorna el valor resuelto en DECIMAL (ej: 0.023), o None si no converge.
+    Retorna (valor_resuelto_decimal_o_None, motivo_diagnostico_str).
     """
-    base_code = (
-        getattr(bond_obj_cer_base, "ticker", None)
-        or getattr(bond_obj_cer_base, "codigo", None)
-        or bond_obj_cer_base.__class__.__name__
-    )
-    base_code = str(base_code)
-    bond_j = bond_obj_cer_base if base_code.lower().endswith("j") else globals().get(f"{base_code}j")
+    bond_j, base_code = _resolve_bond_j(bond_obj_cer_base)
     if bond_j is None:
-        return None
+        return None, f"sin variante `{base_code}j`"
+
+    # Truncar el horizonte de CER proyectado al vencimiento del bono + buffer
+    # (evita recalcular ~5 años de CER diario cuando sólo necesitamos hasta el fix)
+    venc = getattr(bond_j, "vencimiento", None) or getattr(bond_obj_cer_base, "vencimiento", None)
+    max_proj_date = (venc + relativedelta(months=2)) if venc else None
 
     def _tir_j_at(i_decimal: float) -> float:
         proy_try = dict(current_proy)
         proy_try[mes_key] = float(i_decimal * 100.0)  # dict lleva porcentaje
-        _recalculate_cer_proyectado(proy_try, idx_module)
+        _recalculate_cer_proyectado(proy_try, idx_module, max_proj_date=max_proj_date)
         try:
             return float(bond_j.calcula_tirea(float(price_cer_pct) / 100.0, settle_str))
         except Exception:
             return float("nan")
 
-    # Rango razonable: inflación mensual entre -2% y 20%
-    lo, hi = -0.02, 0.20
+    # Bracket amplio para contemplar curvas de crédito y escenarios extremos
+    lo, hi = -0.05, 0.50
     f_lo = _tir_j_at(lo) - tir_target
     f_hi = _tir_j_at(hi) - tir_target
 
     if not (np.isfinite(f_lo) and np.isfinite(f_hi)):
-        return None
+        return None, f"TIREA_j NaN (f_lo={f_lo}, f_hi={f_hi})"
     if f_lo * f_hi > 0:
-        # target fuera del bracket
-        return None
+        return None, (
+            f"target {tir_target:.2%} fuera del bracket "
+            f"[TIREA_j({lo:.0%})={f_lo + tir_target:.2%}, "
+            f"TIREA_j({hi:.0%})={f_hi + tir_target:.2%}]"
+        )
 
     for _ in range(max_iter):
         mid = 0.5 * (lo + hi)
         f_mid = _tir_j_at(mid) - tir_target
         if not np.isfinite(f_mid):
-            return None
+            return None, "NaN en la bisección"
         if abs(f_mid) < tol:
-            return mid
+            return mid, "OK"
         if f_lo * f_mid < 0:
             hi = mid
             f_hi = f_mid
@@ -1836,7 +1847,7 @@ def _solve_month_inflation(
             lo = mid
             f_lo = f_mid
 
-    return 0.5 * (lo + hi)
+    return 0.5 * (lo + hi), "OK (max_iter)"
 
 
 def compute_inflation_bootstrap(
@@ -1942,6 +1953,27 @@ def compute_inflation_bootstrap(
                 })
                 continue
 
+            # Pre-filtro: si el bono no tiene variante `j` no sirve iterar.
+            # Va directo a Fisher (corto) para no malgastar 2 rebuilds de CER.
+            bond_j_obj, _ = _resolve_bond_j(obj_base)
+            if bond_j_obj is None:
+                be_tirea = (1.0 + tir_target) / (1.0 + float(tirea_real)) - 1.0
+                be_tem_fisher = (1.0 + be_tirea) ** (30.0 / 360.0) - 1.0
+                short_bonds.append({
+                    "Código": code,
+                    "Duration": float(dur),
+                    "Volumen": volumen,
+                    "Mes ref": _mes_ref_key(obj_base),
+                    "Método": "Fisher (sin `j`)",
+                    "LECAP ref": cod_target,
+                    "TIR target": tir_target,
+                    "TIREA real": float(tirea_real),
+                    "BE TEM": be_tem_fisher,
+                    "bdays_to_fix": bdays,
+                })
+                warnings_.append(f"{code}: sin variante `{code}j`, resuelto por Fisher")
+                continue
+
             # Bono para bootstrap: identificar mes de referencia
             mes_key = _mes_ref_key(obj_base)
             if mes_key is None:
@@ -1986,7 +2018,7 @@ def compute_inflation_bootstrap(
 
             resultados_mes: List[Dict[str, Any]] = []
             for b in bonos_mes:
-                i_sol = _solve_month_inflation(
+                i_sol, motivo = _solve_month_inflation(
                     bond_obj_cer_base=b["obj_base"],
                     price_cer_pct=b["px"],
                     tir_target=b["tir_target"],
@@ -1997,12 +2029,12 @@ def compute_inflation_bootstrap(
                 )
                 metodo = "Iter bootstrap"
                 if i_sol is None:
-                    # Fallback a Fisher si no bracketea
+                    # Fallback a Fisher si no bracketea, pero con mensaje específico
                     be_tirea = (1.0 + b["tir_target"]) / (1.0 + b["tirea_real"]) - 1.0
                     i_sol_tem = (1.0 + be_tirea) ** (30.0 / 360.0) - 1.0
                     i_sol = i_sol_tem
                     metodo = "Fisher (fallback)"
-                    warnings_.append(f"{b['code']}: bootstrap no bracketeó, fallback Fisher")
+                    warnings_.append(f"{b['code']}: {motivo} — fallback Fisher")
 
                 resultados_mes.append({
                     "code": b["code"],
@@ -2778,7 +2810,7 @@ def _find_curve_for_bond(code: str) -> Optional[str]:
 # Inflation projection → CER recalculation helpers
 # ──────────────────────────────────────────────────────────────────────
 
-def _recalculate_cer_proyectado(new_proy: dict, idx_module=None):
+def _recalculate_cer_proyectado(new_proy: dict, idx_module=None, max_proj_date=None):
     """Recalculate CER proyectado from scratch using a custom inflation vector
     and inject it into rentafija.inputs so ALL tabs use the new CER.
 
@@ -2787,6 +2819,12 @@ def _recalculate_cer_proyectado(new_proy: dict, idx_module=None):
     'cer_proyectado', 'inflamom', and 'uva_proyectado' entries in
     rentafija.inputs — which is the global dict that every bond object
     reads when it calls generate_cashflows() with ajuste='CER PROYECTADO'.
+
+    Parámetros:
+      max_proj_date: si se provee (date), trunca la proyección a esa fecha
+        + 1 mes (suficiente para bonos con fix antes de esa fecha).
+        Acelera significativamente el bootstrap porque calcular_CER_diario_proyectado
+        es un loop Python sobre días y proyectar 5 años vs 6 meses es ~10x más lento.
     """
     if idx_module is None:
         import indices as idx_module
@@ -2821,6 +2859,11 @@ def _recalculate_cer_proyectado(new_proy: dict, idx_module=None):
         df_inflamom_new = proy_inf_df.copy()
     df_inflamom_new.sort_index(inplace=True)
 
+    # Truncar el horizonte si nos pidieron acelerar (bootstrap por bono)
+    if max_proj_date is not None:
+        cutoff = max_proj_date + relativedelta(months=1)
+        df_inflamom_new = df_inflamom_new[df_inflamom_new.index <= cutoff]
+
     # Recalculate daily CER
     cer_inicial = combined_df_cer["CER"].iloc[-1]
     fecha_inicial_cer = combined_df_cer.index[-1]
@@ -2840,8 +2883,10 @@ def _recalculate_cer_proyectado(new_proy: dict, idx_module=None):
     uva_completo_new.columns = ["UVA"]
     rentafija.inputs["uva_proyectado"] = uva_completo_new
 
-    # Also update the module-level dict so future calls to indices.main()
-    # would use the new projection (though we bypass main() here)
+    # Mutación controlada del dict del módulo. compute_inflation_bootstrap
+    # y _breakeven_iter_tem hacen backup/restore en finally, pero si algún caller
+    # sólo quiere aplicar una proyección definitiva (ej: Aplicar curva implícita),
+    # este write queda como el nuevo default.
     idx_module.proyeccion_inflacion_mensual = new_proy
 
     return True
