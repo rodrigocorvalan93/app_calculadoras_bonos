@@ -1662,11 +1662,14 @@ def _breakeven_iter_tem(
 
     target_tir_nom = float(tir_nominal_anual)
 
-    # Backup del estado original de rentafija.inputs
+    # Backup del estado original de rentafija.inputs y de la proyección del módulo.
+    # Sin este backup, _recalculate_cer_proyectado muta idx_module.proyeccion_inflacion_mensual
+    # y la proyección "default" del usuario queda pisada al terminar el bootstrap.
     inp = rentafija.inputs
     original_cer = inp.get("cer_proyectado")
     original_uva = inp.get("uva_proyectado")
     original_inflamom = inp.get("inflamom")
+    original_module_proy = dict(getattr(idx_module, "proyeccion_inflacion_mensual", {}))
 
     combined_df_cer = inp.get("CER")
     if combined_df_cer is None or combined_df_cer.empty:
@@ -1720,13 +1723,15 @@ def _breakeven_iter_tem(
         return 0.5 * (lo + hi)
 
     finally:
-        # Restaurar estado original
+        # Restaurar estado original (rentafija.inputs + idx_module.proyeccion_inflacion_mensual)
         if original_cer is not None:
             rentafija.inputs["cer_proyectado"] = original_cer
         if original_uva is not None:
             rentafija.inputs["uva_proyectado"] = original_uva
         if original_inflamom is not None:
             rentafija.inputs["inflamom"] = original_inflamom
+        if original_module_proy:
+            idx_module.proyeccion_inflacion_mensual = original_module_proy
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1871,13 +1876,16 @@ def compute_inflation_bootstrap(
     lecap_codes = df_lecap_last["Código"].astype(str)
     ok_lecap = np.isfinite(lecap_durs) & np.isfinite(lecap_tirs)
 
-    # Backup de estado (vamos a mutar rentafija.inputs repetidamente)
+    # Backup de estado (vamos a mutar rentafija.inputs y la proyección del módulo).
+    # _recalculate_cer_proyectado también reasigna idx_module.proyeccion_inflacion_mensual,
+    # así que hay que preservarla para volver al default del usuario al terminar.
     inp = rentafija.inputs
     backup = {
         "cer_proyectado": inp.get("cer_proyectado"),
         "uva_proyectado": inp.get("uva_proyectado"),
         "inflamom": inp.get("inflamom"),
     }
+    backup_module_proy = dict(getattr(idx_module, "proyeccion_inflacion_mensual", {}))
 
     warnings_: List[str] = []
     per_bond_info: List[Dict[str, Any]] = []
@@ -2089,10 +2097,12 @@ def compute_inflation_bootstrap(
         }
 
     finally:
-        # Restaurar estado original
+        # Restaurar estado original (rentafija.inputs + proyección del módulo)
         for k, v in backup.items():
             if v is not None:
                 rentafija.inputs[k] = v
+        if backup_module_proy:
+            idx_module.proyeccion_inflacion_mensual = backup_module_proy
 
 
 def _cer_effective_maturity_date(bond_obj) -> Optional[date]:
@@ -2259,7 +2269,7 @@ def compute_breakeven_table(
             if np.isfinite(price_cer_pct):
                 try:
                     _iter_result = _breakeven_iter_tem(
-                        bond_obj=bond_obj,
+                        bond_obj_cer_base=bond_obj,
                         price_cer_pct=price_cer_pct * 100.0 if price_cer_pct < 10 else price_cer_pct,
                         tir_nominal_anual=float(nominal_nearest),
                         settle_str=settle,
@@ -4830,6 +4840,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         bkp_cer = inp_b.get("cer_proyectado")
                         bkp_uva = inp_b.get("uva_proyectado")
                         bkp_inf = inp_b.get("inflamom")
+                        bkp_mod_proy = dict(getattr(_idx_dbg, "proyeccion_inflacion_mensual", {}))
 
                         rows_dbg = []
                         # Calcular mes de referencia del bono (lo que intentamos resolver)
@@ -4887,6 +4898,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                             if bkp_cer is not None: rentafija.inputs["cer_proyectado"] = bkp_cer
                             if bkp_uva is not None: rentafija.inputs["uva_proyectado"] = bkp_uva
                             if bkp_inf is not None: rentafija.inputs["inflamom"] = bkp_inf
+                            if bkp_mod_proy: _idx_dbg.proyeccion_inflacion_mensual = bkp_mod_proy
 
                         st.dataframe(pd.DataFrame(rows_dbg), width="stretch")
                         st.caption(
