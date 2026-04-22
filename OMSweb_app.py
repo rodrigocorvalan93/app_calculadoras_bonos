@@ -614,18 +614,19 @@ def _codigo_obj(b) -> str:
 # Histórico BYMA (archivo local OneDrive)
 # ──────────────────────────────────────────────────────────────────────
 
-# Resolver ruta del histórico: primero env var, luego default OneDrive
+# Resolver ruta del histórico: se configura vía secrets.txt (env vars).
+# No hay fallback hardcodeado para evitar exponer info interna en el repo.
 _HISTORICO_FILENAME = "Delta - historico_byma_px_tasas.xlsx"
-_HISTORICO_BASES_DIR_FALLBACK = r"DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Delta Bases"
 
 
 def _resolve_historico_path() -> Optional[str]:
     """Resuelve la ruta al Excel histórico.
 
-    Prioridad:
-    1. Env var DELTA_HISTORICO_PATH (ruta completa al archivo).
-    2. Env var DELTA_HISTORICO_DIR (carpeta) + filename.
-    3. ~/<fallback OneDrive>/<filename>.
+    Config vía secrets.txt — prioridad:
+    1. DELTA_HISTORICO_PATH (ruta completa al archivo).
+    2. DELTA_HISTORICO_DIR  (carpeta) + filename default.
+    3. DELTA_BASES_DIR      (carpeta común Carteras) + '..' + filename
+                            (por si el histórico vive un nivel arriba de Carteras).
     """
     # 1) Ruta completa al archivo
     env = os.getenv("DELTA_HISTORICO_PATH")
@@ -642,12 +643,13 @@ def _resolve_historico_path() -> Optional[str]:
         if os.path.isfile(candidate):
             return candidate
 
-    # 3) Fallback default OneDrive
-    candidate = os.path.join(
-        os.path.expanduser("~"), _HISTORICO_BASES_DIR_FALLBACK, _HISTORICO_FILENAME
-    )
-    if os.path.isfile(candidate):
-        return candidate
+    # 3) Derivar desde DELTA_BASES_DIR (Carteras → parent)
+    env_bases = os.getenv("DELTA_BASES_DIR")
+    if env_bases:
+        env_bases = os.path.expandvars(os.path.expanduser(env_bases))
+        candidate = os.path.join(os.path.dirname(env_bases), _HISTORICO_FILENAME)
+        if os.path.isfile(candidate):
+            return candidate
 
     return None
 
@@ -5102,10 +5104,12 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
             if df_hist.empty:
                 st.warning(
-                    "No se pudo cargar el Excel histórico. Verificá que esté accesible en:\n\n"
-                    f"`{os.path.join(os.path.expanduser('~'), _HISTORICO_BASES_DIR_FALLBACK, _HISTORICO_FILENAME)}`\n\n"
-                    "Podés definir `DELTA_HISTORICO_PATH` (archivo completo) o "
-                    "`DELTA_HISTORICO_DIR` (carpeta) en `secrets.txt`."
+                    f"No se pudo cargar `{_HISTORICO_FILENAME}`.\n\n"
+                    "Configurá en `secrets.txt`:\n"
+                    "- `DELTA_HISTORICO_PATH` (ruta completa al archivo), o\n"
+                    "- `DELTA_HISTORICO_DIR` (carpeta), o\n"
+                    "- `DELTA_BASES_DIR` (si el histórico está junto a las carteras).\n\n"
+                    "Podés usar `~` o `%USERPROFILE%` en las rutas — son independientes del usuario."
                 )
             else:
                 last_upd = _hist_last_update(df_hist)

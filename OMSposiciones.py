@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """OMSposiciones.py — Carteras / Tenencias / Matriz de Posiciones
 
-Carga los Excel internos de Delta:
-    ~/DELTA ASSET MANAGEMENT S.A/Inversiones - Documentos/Delta Bases/
+Carga los 3 Excel de carteras desde la carpeta configurada en secrets.txt
+vía la variable DELTA_BASES_DIR:
+
+    $DELTA_BASES_DIR/
         Delta_Composicion.xlsx  (tenencias por fondo)
         Delta_PN.xlsx           (patrimonio neto por fondo)
         Delta_Futuros.xlsx      (futuros ROFEX por fondo)
@@ -39,7 +41,6 @@ import streamlit as st
 # ──────────────────────────────────────────────────────────────────────
 
 _BASES_DIR_ENV = "DELTA_BASES_DIR"
-_BASES_DIR_FALLBACK = r"DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Delta Bases\Carteras"
 
 _COMPOSICION_FILE = "Delta_Composicion.xlsx"
 _PN_FILE = "Delta_PN.xlsx"
@@ -94,17 +95,19 @@ FONDO_NOMBRES: Dict[int, str] = {
 # Resolución de paths
 # ──────────────────────────────────────────────────────────────────────
 
-def _bases_dir() -> str:
+def _bases_dir() -> Optional[str]:
     """Carpeta raíz donde viven los Excel internos de Delta.
 
-    Prioridad:
-    1. Env var DELTA_BASES_DIR (cargada desde secrets.txt en deploy normal).
-    2. Path relativo al home del usuario, con fallback genérico.
+    Se configura exclusivamente vía secrets.txt:
+        DELTA_BASES_DIR=~\\...\\Delta Bases\\Carteras
+
+    Retorna None si no está configurada — en ese caso los loaders muestran
+    un warning pidiendo configurar secrets.txt.
     """
     env = os.getenv(_BASES_DIR_ENV)
     if env:
         return os.path.expandvars(os.path.expanduser(env))
-    return os.path.join(os.path.expanduser("~"), _BASES_DIR_FALLBACK)
+    return None
 
 
 def _resolve_base_path(filename: str, env_override: Optional[str] = None) -> Optional[str]:
@@ -113,7 +116,8 @@ def _resolve_base_path(filename: str, env_override: Optional[str] = None) -> Opt
     Prioridad:
     1. Env var específica del archivo (ej. DELTA_COMPOSICION_PATH) → ruta completa.
     2. Env var DELTA_BASES_DIR + filename.
-    3. Fallback ~/.../<filename>.
+
+    Retorna None si no hay ninguna configurada o el archivo no existe.
     """
     # 1) Override específico (path completo al archivo)
     if env_override:
@@ -124,9 +128,11 @@ def _resolve_base_path(filename: str, env_override: Optional[str] = None) -> Opt
                 return env
 
     # 2) Carpeta base + filename
-    candidate = os.path.join(_bases_dir(), filename)
-    if os.path.isfile(candidate):
-        return candidate
+    base = _bases_dir()
+    if base:
+        candidate = os.path.join(base, filename)
+        if os.path.isfile(candidate):
+            return candidate
 
     return None
 
@@ -450,12 +456,23 @@ def render_tab_posiciones(
     df_fut = load_delta_futuros()
 
     if df_comp.empty:
-        st.warning(
-            "No se pudo cargar `Delta_Composicion.xlsx`. Verificá que esté en:\n\n"
-            f"`{_bases_dir()}`\n\n"
-            "Podés setear la env var `DELTA_BASES_DIR` (carpeta) o "
-            "`DELTA_COMPOSICION_PATH` (archivo completo) en `secrets.txt`."
-        )
+        base = _bases_dir()
+        if base:
+            # Config OK, pero archivo no encontrado en esa carpeta
+            st.warning(
+                f"No se pudo cargar `Delta_Composicion.xlsx`.\n\n"
+                f"Carpeta buscada: `{base}`\n\n"
+                "Verificá que el archivo exista ahí, o definí "
+                "`DELTA_COMPOSICION_PATH` en `secrets.txt` con la ruta completa."
+            )
+        else:
+            # No hay nada configurado
+            st.warning(
+                "⚠️ Paths no configurados.\n\n"
+                "Agregá a `secrets.txt`:\n\n"
+                "```\nDELTA_BASES_DIR=<ruta-a-carpeta-Carteras>\n```\n\n"
+                "Podés usar `~` o `%USERPROFILE%` para independencia de usuario."
+            )
         return
 
     fecha_comp = df_comp["Fecha"].max() if "Fecha" in df_comp.columns else None
