@@ -132,8 +132,22 @@ AJUSTE_ORDER = ["Tasa Fija", "CER/UVA", "TAMAR", "Duales",
 # =============================================================================
 
 def _read_sheet(path: str, sheet: str) -> pd.DataFrame:
-    return pd.read_excel(path, sheet_name=sheet, header=None,
-                         engine="openpyxl")
+    """Lee un sheet de Excel. Si el archivo está bloqueado (abierto en Excel),
+    hace una copia temporal antes de leer."""
+    import tempfile, shutil, os
+    try:
+        return pd.read_excel(path, sheet_name=sheet, header=None, engine="openpyxl")
+    except PermissionError:
+        # Archivo bloqueado por Excel — copiar a temp y leer desde ahí
+        ext = os.path.splitext(path)[1]
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            shutil.copy2(path, tmp_path)
+            return pd.read_excel(tmp_path, sheet_name=sheet, header=None, engine="openpyxl")
+        finally:
+            try: os.unlink(tmp_path)
+            except: pass
 
 
 def _get_metrics(df: pd.DataFrame, col_metr: int) -> dict:
@@ -943,39 +957,40 @@ def generar_fondos_html(
         try:
             fd = _load_fondo(rf_detalle_path, fondo_cfg)
             slides_html += _build_fondo_slide(fd, i, n)
+            print(f"[generar_fondos] ✓ {fondo_cfg['nombre']}: "
+                  f"PN={fd['metrics'].get('patrimonio','?'):.2e} "
+                  f"comp={list(fd['composition'].keys())[:3]} "
+                  f"top5={[t['ticker'] for t in fd['top5']]}")
         except Exception as e:
-            print(f"[generar_fondos] Error en {fondo_cfg['nombre']}: {e}")
+            import traceback
+            print(f"[generar_fondos] ✗ Error en {fondo_cfg['nombre']}: {e}")
+            traceback.print_exc()
             continue
 
     # Script de navegación goToId() — compatibiliza con goTo() del reporte
     goto_js = """
 <script>
-function goToId(targetId) {
-  var allSlides = document.querySelectorAll('.slide-chapter');
-  allSlides.forEach(function(s) { s.classList.remove('active'); });
-  var target = document.getElementById(targetId);
-  if (target) {
-    target.classList.add('active');
+// goToId — wrapper de la navegación unificada
+// La función goToId real está definida en el HTML por _unify_navigation()
+// Este script solo se incluye como fallback por si acaso
+if (typeof goToId === 'undefined') {
+  function goToId(targetId) {
     var m = targetId.match(/^slide-([0-9]+)$/);
-    if (m && typeof goTo === 'function') { goTo(parseInt(m[1])); }
-    // Forzar resize para que los canvas nativos se redimensionen
-    setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 60);
-  }
-  document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
-  var navId = targetId.replace('fd-slide-', 'fd-nav-').replace(/^slide-/, 'nav-');
-  var navEl = document.getElementById(navId);
-  if (navEl) navEl.classList.add('active');
-}
-(function() {
-  var _origGoTo = window.goTo;
-  if (typeof _origGoTo === 'function') {
-    window.goTo = function(idx) {
-      document.querySelectorAll('.fd-slide').forEach(function(s) { s.classList.remove('active'); });
-      _origGoTo(idx);
+    if (m && typeof goTo === 'function') { goTo(parseInt(m[1])); return; }
+    document.querySelectorAll('.slide-chapter, .slide-cover').forEach(function(s) {
+      s.classList.remove('active');
+    });
+    var target = document.getElementById(targetId);
+    if (target) {
+      target.classList.add('active');
       setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 60);
-    };
+    }
+    document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+    var navId = targetId.replace('fd-slide-', 'fd-nav-').replace(/^slide-/, 'nav-');
+    var navEl = document.getElementById(navId);
+    if (navEl) navEl.classList.add('active');
   }
-})();
+}
 </script>
 """
     return f"<style>{_FONDO_CSS}</style>\n{slides_html}\n{goto_js}"

@@ -1463,7 +1463,7 @@ X30S6 = {
 }
 X30S6j = {
     "Nombre Security": "Letra del Tesoro Nacional en Pesos Ajustada por CER a dto Vto 30 09 2026",
-    "Código": "X30S6j",
+    "Código": "X30S6",
     "ISIN": "AR0362438175",
     "Calificación": "CCC-",
     "País": "Argentina",

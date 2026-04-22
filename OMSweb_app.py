@@ -615,24 +615,37 @@ def _codigo_obj(b) -> str:
 # ──────────────────────────────────────────────────────────────────────
 
 # Resolver ruta del histórico: primero env var, luego default OneDrive
-_HISTORICO_DEFAULT = (
-    r"DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Delta Bases"
-    r"\Delta - historico_byma_px_tasas.xlsx"
-)
+_HISTORICO_FILENAME = "Delta - historico_byma_px_tasas.xlsx"
+_HISTORICO_BASES_DIR_FALLBACK = r"DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Delta Bases"
 
 
 def _resolve_historico_path() -> Optional[str]:
     """Resuelve la ruta al Excel histórico.
 
     Prioridad:
-    1. Env var DELTA_HISTORICO_PATH (por si alguien lo tiene en otra carpeta).
-    2. %USERPROFILE%\\DELTA ASSET MANAGEMENT S.A\\... (OneDrive sincronizado).
+    1. Env var DELTA_HISTORICO_PATH (ruta completa al archivo).
+    2. Env var DELTA_HISTORICO_DIR (carpeta) + filename.
+    3. ~/<fallback OneDrive>/<filename>.
     """
+    # 1) Ruta completa al archivo
     env = os.getenv("DELTA_HISTORICO_PATH")
-    if env and os.path.isfile(env):
-        return env
+    if env:
+        env = os.path.expandvars(os.path.expanduser(env))
+        if os.path.isfile(env):
+            return env
 
-    candidate = os.path.join(os.path.expanduser("~"), _HISTORICO_DEFAULT)
+    # 2) Carpeta override + filename
+    env_dir = os.getenv("DELTA_HISTORICO_DIR")
+    if env_dir:
+        env_dir = os.path.expandvars(os.path.expanduser(env_dir))
+        candidate = os.path.join(env_dir, _HISTORICO_FILENAME)
+        if os.path.isfile(candidate):
+            return candidate
+
+    # 3) Fallback default OneDrive
+    candidate = os.path.join(
+        os.path.expanduser("~"), _HISTORICO_BASES_DIR_FALLBACK, _HISTORICO_FILENAME
+    )
     if os.path.isfile(candidate):
         return candidate
 
@@ -5090,8 +5103,9 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             if df_hist.empty:
                 st.warning(
                     "No se pudo cargar el Excel histórico. Verificá que esté accesible en:\n\n"
-                    f"`{os.path.join(os.path.expanduser('~'), _HISTORICO_DEFAULT)}`\n\n"
-                    "Podés definir la variable de entorno `DELTA_HISTORICO_PATH` para apuntar a otra ubicación."
+                    f"`{os.path.join(os.path.expanduser('~'), _HISTORICO_BASES_DIR_FALLBACK, _HISTORICO_FILENAME)}`\n\n"
+                    "Podés definir `DELTA_HISTORICO_PATH` (archivo completo) o "
+                    "`DELTA_HISTORICO_DIR` (carpeta) en `secrets.txt`."
                 )
             else:
                 last_upd = _hist_last_update(df_hist)

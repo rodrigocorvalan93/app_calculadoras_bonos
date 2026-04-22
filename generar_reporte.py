@@ -24,8 +24,9 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
-import OMSweb_app_OLDWORKING220426 as _app
 import pandas as pd
+
+import OMSweb_app as _app
 
 # =============================================================================
 # CONFIG
@@ -1266,18 +1267,60 @@ function render(){{
   }}
 }}
 
+// Adjuntar listeners a los sliders
 document.addEventListener('DOMContentLoaded',function(){{
   ['c4-hab','c4-fondeo','c4-piso-tf','c4-techo-tf','c4-piso-cer','c4-techo-cer'].forEach(id=>{{
     const el=document.getElementById(id);
     if(el) el.addEventListener('input',render);
   }});
-  render();
+  // No renderizar en DOMContentLoaded — el slide está oculto
+  // Renderizar cuando el slide se vuelve visible
 }});
-// Re-render cuando se navega al slide 4
-var _origGoTo4 = window.goTo;
-if(typeof _origGoTo4==='function'){{
-  window.goTo=function(idx){{ _origGoTo4(idx); if(idx===4) setTimeout(render,80); }};
-}}
+
+// Lazy render del cap4: renderiza cuando el slide-4 se vuelve visible
+(function(){{
+  var _c4done = false;
+
+  function _renderC4(){{
+    if (_c4done) return;
+    var cv1 = document.getElementById('c4-chart-tf');
+    if (!cv1) return;
+    // Verificar que el canvas tiene dimensiones (slide visible)
+    var rect = cv1.getBoundingClientRect();
+    if (rect.width < 10) {{
+      setTimeout(_renderC4, 100);
+      return;
+    }}
+    render();
+    _c4done = true;
+  }}
+
+  // MutationObserver: detectar cuando slide-4 recibe clase 'active'
+  function _setupC4Observer(){{
+    var slide4 = document.getElementById('slide-4');
+    if (!slide4) {{ setTimeout(_setupC4Observer, 100); return; }}
+    var obs = new MutationObserver(function(){{
+      if (slide4.classList.contains('active')) {{
+        _c4done = false;  // permitir re-render si se navega varias veces
+        setTimeout(_renderC4, 80);
+      }}
+    }});
+    obs.observe(slide4, {{attributes: true, attributeFilter: ['class']}});
+  }}
+
+  // Engancharse al sistema de navegación unificado
+  document.addEventListener('DOMContentLoaded', function(){{
+    _setupC4Observer();
+    // Parchear goToId para renderizar al navegar al slide-4
+    var _origGoToId = window.goToId;
+    if (typeof _origGoToId === 'function') {{
+      window.goToId = function(id) {{
+        _origGoToId(id);
+        if (id === 'slide-4') {{ _c4done = false; setTimeout(_renderC4, 80); }}
+      }};
+    }}
+  }});
+}})();
 }})();
 </script>
 
@@ -1389,8 +1432,8 @@ def _fetch_fx_data() -> dict:
     - Bandas BCRA: descarga el XLSX oficial
     Devuelve dict con spot, mep, ccl, techo_hoy, piso_hoy, banda_serie
     """
-    import json as _json
     import urllib.request
+    import json as _json
 
     result = {
         "spot": None, "mep": None, "ccl": None,
@@ -1420,8 +1463,7 @@ def _fetch_fx_data() -> dict:
 
     # ── Bandas BCRA — XLSX ────────────────────────────────────────────
     try:
-        import io
-        import urllib.request
+        import io, urllib.request
         xlsx_url = "https://www.bcra.gob.ar/archivos/Pdfs/PublicacionesEstadisticas/serie-completa-bandas-cambiarias.xlsx"
         req = urllib.request.Request(xlsx_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=15) as r:
@@ -1481,73 +1523,136 @@ def _get_banda_for_date(banda_serie: list, target_date: date):
     return round(techo_ext, 2), round(piso_ext, 2)
 
 
+
 def _assign_bond_to_dus(dus_date: date, df_lecap: pd.DataFrame,
-                        df_cer: pd.DataFrame, tamar_tea: float) -> dict:
+                        df_cer: pd.DataFrame, tamar_tea: float,
+                        used_tickers: set = None) -> dict:
     """
-    Para un contrato DUS con vencimiento en dus_date, asigna el mejor bono ARS:
-    1. BONCAP/LECAP más cercano (dentro de ±20 días del mes)
-    2. Si no hay, BONCER proyectado (versión j) más cercano
-    Devuelve dict con ticker, tipo, tir_nominal, dias_cal
+    Para cada DUS asigna el mejor bono ARS:
+    1. BONCAP/LECAP que vence lo más cerca DESPUES del DUS (no antes si hay alternativa)
+    2. Si no hay BONCAP a <=45 dias, BONCER proyectado (j) mas cercano
     """
     from datetime import timedelta
 
-    def _get_maturity_approx(ticker: str, dur: float) -> date:
-        """Estima la fecha de vencimiento como hoy + duration × 365."""
-        return date.today() + timedelta(days=round(dur * 365))
+    def _vto(dur: float) -> date:
+        return date.today() + timedelta(days=round(float(dur) * 365))
+
+    if used_tickers is None:
+        used_tickers = set()
+    candidates_cap = []
+    for _, r in _clean_df(df_lecap).iterrows():
+        dur = r.get("Duration"); tir = _pct_float(r.get("TIREA"))
+        if dur is None or tir is None: continue
+        ticker = str(r["Código"])
+        if ticker in used_tickers: continue  # ya asignado a otro DUS
+        try: dur_f = float(dur); vto = _vto(dur_f)
+        except: continue
+        candidates_cap.append({
+            "ticker": ticker, "tipo": "BONCAP",
+            "tir_nom": round(tir * 100, 4), "dur": round(dur_f, 4),
+            "vto": vto, "delta": (vto - dus_date).days,
+        })
 
     best = None
-    best_delta = 9999
+    best_delta_abs = 9999
+    if candidates_cap:
+        after  = [c for c in candidates_cap if c["delta"] >= 0]
+        before = [c for c in candidates_cap if c["delta"] <  0]
+        if after:
+            best = min(after, key=lambda c: c["delta"])
+        elif before:
+            best = max(before, key=lambda c: c["delta"])
+        if best:
+            best_delta_abs = abs(best["delta"])
 
-    # ── Buscar en LECAP/BONCAP ─────────────────────────────────────────
-    for _, r in _clean_df(df_lecap).iterrows():
-        dur = r.get("Duration")
-        tir = _pct_float(r.get("TIREA"))
-        if dur is None or tir is None:
-            continue
-        try:
-            vto = _get_maturity_approx(str(r["Código"]), float(dur))
-        except Exception:
-            continue
-        delta = abs((vto - dus_date).days)
-        if delta < best_delta:
-            best_delta = delta
-            best = {
-                "ticker": str(r["Código"]),
-                "tipo":   "BONCAP",
-                "tir_nom": round(tir * 100, 4),
-                "dur":    round(float(dur), 4),
-                "vto":    vto,
-            }
-
-    # ── Si no hay BONCAP cercano (>45 días), buscar en BONCER proyectado ──
-    if best_delta > 45:
+    if best_delta_abs > 45:
+        candidates_cer = []
         for _, r in _clean_df(df_cer).iterrows():
-            ticker = str(r.get("Código", ""))
-            dur    = r.get("Duration")
-            tir    = _pct_float(r.get("TIREA"))
-            if dur is None or tir is None:
-                continue
-            try:
-                vto = _get_maturity_approx(ticker, float(dur))
-            except Exception:
-                continue
-            delta = abs((vto - dus_date).days)
-            # Para CER, aceptamos cualquiera que sea más cercano que el BONCAP
-            if delta < best_delta:
-                best_delta = delta
-                # TIR nominal CER = usamos versión j si existe en el DF
-                # como proxy: TIR real + inflación proyectada (3.5% mensual → 51% anual)
-                infl_anual = 0.42   # aprox proyección inflación
-                tir_nom = (1 + tir) * (1 + infl_anual) - 1
-                best = {
-                    "ticker": ticker + "j",   # versión proyectada
-                    "tipo":   "BONCER",
-                    "tir_nom": round(tir_nom * 100, 4),
-                    "dur":    round(float(dur), 4),
-                    "vto":    vto,
-                }
+            ticker = str(r.get("Código", "")); dur = r.get("Duration")
+            tir = _pct_float(r.get("TIREA"))
+            if dur is None or tir is None: continue
+            try: dur_f = float(dur); vto = _vto(dur_f)
+            except: continue
+            infl_anual = 0.42
+            tir_nom = (1 + tir) * (1 + infl_anual) - 1
+            candidates_cer.append({
+                "ticker": ticker + "j", "tipo": "BONCER",
+                "tir_nom": round(tir_nom * 100, 4), "dur": round(dur_f, 4),
+                "vto": vto, "delta": abs((vto - dus_date).days),
+            })
+        # Filtrar CER ya usados
+        candidates_cer = [c for c in candidates_cer if c["ticker"] not in used_tickers]
+        if candidates_cer:
+            best_cer = min(candidates_cer, key=lambda c: c["delta"])
+            if best is None or best_cer["delta"] < best_delta_abs:
+                best = best_cer
 
     return best
+
+
+
+def _get_futuros_auto(df_futuros_param, prev_snap: dict, hoy: date) -> "pd.DataFrame | None":
+    """
+    Obtiene el DataFrame de futuros DUS en este orden de prioridad:
+    1. df_futuros pasado como parámetro (ya procesado)
+    2. futuros_minorista del módulo bymaapi (si está disponible en el entorno)
+    3. Datos del snapshot del HTML anterior (JSON embebido)
+    Retorna None si no hay ninguna fuente disponible.
+    """
+    from datetime import timedelta
+
+    # 1. Parámetro explícito
+    if df_futuros_param is not None and not df_futuros_param.empty:
+        return df_futuros_param
+
+    # 2. futuros_minorista de bymaapi (global del módulo)
+    try:
+        import bymaapi
+        fm = getattr(bymaapi, "futuros_minorista", None)
+        if fm is not None and not fm.empty:
+            print("[cap5] Usando futuros_minorista de bymaapi")
+            # Normalizar columnas: symbol/Código, price/Last Price, days_to_maturity/Dias Vto
+            df = fm.copy()
+            rename = {}
+            if "symbol" in df.columns and "Código" not in df.columns:
+                rename["symbol"] = "Código"
+            if "price" in df.columns and "Last Price" not in df.columns:
+                rename["price"] = "Last Price"
+            if "days_to_maturity" in df.columns and "Dias Vto" not in df.columns:
+                rename["days_to_maturity"] = "Dias Vto"
+            if "maturityDate" in df.columns and "Fecha Vto" not in df.columns:
+                rename["maturityDate"] = "Fecha Vto"
+            if rename:
+                df = df.rename(columns=rename)
+            # Filtrar solo minorista (sin sufijo A)
+            if "Código" in df.columns:
+                df = df[~df["Código"].astype(str).str.endswith("A")].copy()
+            return df.reset_index(drop=True)
+    except Exception as e:
+        pass
+
+    # 3. Snapshot del HTML anterior
+    if prev_snap and prev_snap.get("rofex"):
+        print("[cap5] Usando precios ROFEX del comité anterior (sin datos frescos)")
+        rofex = prev_snap["rofex"]
+        rows = []
+        for r in rofex:
+            precio = r.get("precio")
+            dias   = r.get("dias")
+            fecha  = r.get("fecha_vto")
+            ticker = r.get("ticker", "")
+            if precio and dias:
+                rows.append({
+                    "Código":     ticker,
+                    "Last Price": precio,
+                    "Dias Vto":   dias,
+                    "Fecha Vto":  fecha,
+                })
+        if rows:
+            return pd.DataFrame(rows)
+
+    return None
+
 
 
 def _build_cap5_html(
@@ -1589,29 +1694,49 @@ def _build_cap5_html(
     dus_contracts = []
     if df_futuros is not None and not df_futuros.empty:
         for _, r in df_futuros.iterrows():
-            precio = r.get("Last Price") or r.get("price") or r.get("Close")
-            dias   = r.get("Dias Vto") or r.get("days_to_maturity") or r.get("dias_cal")
-            mat    = r.get("maturityDate") or r.get("Fecha Vto")
-            sym    = str(r.get("symbol") or r.get("Código") or "")
-            if precio is None or dias is None:
+            # Soportar columnas de bymaapi (price, symbol, maturityDate, days_to_maturity)
+            # y columnas normalizadas (Last Price, Código, Fecha Vto, Dias Vto)
+            precio = None
+            for col in ["price", "Last Price", "Close"]:
+                v = r.get(col)
+                if v is not None and not (isinstance(v, float) and np.isnan(v)) and float(v) > 0:
+                    precio = float(v); break
+
+            dias_raw = r.get("days_to_maturity") or r.get("Dias Vto") or r.get("dias_cal")
+            mat_raw  = r.get("maturityDate")     or r.get("Fecha Vto")
+            sym      = str(r.get("symbol") or r.get("Código") or "")
+
+            if precio is None:
+                continue
+            # Filtrar solo minorista DLR (sin sufijo A) o DUS
+            sym_upper = sym.upper()
+            if not (sym_upper.startswith("DLR") or sym_upper.startswith("DUS")):
+                continue
+            if sym_upper.endswith("A"):  # mayorista — omitir
                 continue
             try:
-                precio_f = float(precio)
-                dias_f   = int(float(dias))
-                if not sym.startswith("DLR") and not sym.startswith("DUS"):
+                # Fecha de vencimiento real
+                if mat_raw is not None:
+                    mat_date = pd.to_datetime(mat_raw).date()
+                    dias_f   = (mat_date - hoy).days
+                elif dias_raw is not None:
+                    dias_f   = int(float(dias_raw))
+                    mat_date = hoy + timedelta(days=dias_f)
+                else:
                     continue
-                mat_date = pd.to_datetime(mat).date() if mat is not None else hoy + timedelta(days=dias_f)
-                label = mat_date.strftime("%b-%y").capitalize()
-                tea   = (precio_f / spot) ** (365 / dias_f) - 1 if dias_f > 0 else 0
-                tna   = (precio_f / spot - 1) * 365 / dias_f if dias_f > 0 else 0
-                deva_m = (precio_f / spot) ** (30 / dias_f) - 1 if dias_f > 0 else 0
+                if dias_f <= 0:
+                    continue
+                label  = mat_date.strftime("%b-%y").capitalize()
+                tea    = (precio / spot) ** (365 / dias_f) - 1
+                tna    = (precio / spot - 1) * 365 / dias_f
+                deva_m = (precio / spot) ** (30  / dias_f) - 1
                 dus_contracts.append({
                     "label":   label,
-                    "precio":  round(precio_f, 1),
+                    "precio":  round(precio, 1),
                     "dias":    dias_f,
                     "mat":     mat_date,
-                    "tea":     round(tea * 100, 4),
-                    "tna":     round(tna * 100, 4),
+                    "tea":     round(tea   * 100, 4),
+                    "tna":     round(tna   * 100, 4),
                     "deva_m":  round(deva_m * 100, 4),
                 })
             except Exception:
@@ -1655,14 +1780,16 @@ def _build_cap5_html(
 
     # ── Sintético por DUS ────────────────────────────────────────────
     sinteticos = []
+    _used_tickers = set()
     for c in dus_contracts:
-        bond = _assign_bond_to_dus(c["mat"], df_lecap, df_cer, tamar_tea)
+        bond = _assign_bond_to_dus(c["mat"], df_lecap, df_cer, tamar_tea, _used_tickers)
         if bond is None or c["dias"] == 0:
             sinteticos.append({
                 "ticker": "—", "tipo": "", "tir_nom": None,
                 "tcn_finish": None, "dif_ars": None, "sint_tea": None
             })
             continue
+        _used_tickers.add(bond["ticker"])  # marcar como usado
         tir_nom = bond["tir_nom"] / 100.0
         tcn_finish = spot * (1 + tir_nom) ** (c["dias"] / 365)
         dif_ars = tcn_finish - c["precio"]
@@ -2037,8 +2164,9 @@ def _build_cap5_html(
 # =============================================================================
 
 import json as _json
-import re as _re
+import re  as _re
 from pathlib import Path as _Path
+
 
 # ── Helpers de parseo ────────────────────────────────────────────────────────
 
@@ -2119,6 +2247,9 @@ def _build_snapshot_json(
     hoy: date,
 ) -> dict:
     """Construye el dict completo del snapshot para embeber en el cap 7."""
+    # Guards de seguridad
+    tamar_tea = tamar_tea if tamar_tea is not None else 0.2973
+    tamar_tna = tamar_tna if tamar_tna is not None else tamar_tea * 0.885
     def _rows_boncap(df):
         out = []
         for _, r in _clean_df(df).iterrows():
@@ -2799,10 +2930,68 @@ def _replace_cap1_OLD(html, cap1_inner):
     return before + "\n\n" + cap1_inner + "\n\n    " + after
 
 
+
+def _unify_navigation(html: str) -> str:
+    """
+    Reemplaza el goTo() original del template con una versión unificada
+    que maneja tanto slides numerados (slide-N) como fd-slides (fd-slide-X).
+    Elimina la necesidad de parchar goTo en cadena desde múltiples módulos.
+    """
+    old_goto = """function goTo(idx) {
+    if (idx < 0 || idx >= total) return;
+    document.getElementById('slide-' + current).classList.remove('active');
+    document.getElementById('nav-'   + current).classList.remove('active');
+    current = idx;
+    document.getElementById('slide-' + current).classList.add('active');
+    document.getElementById('nav-'   + current).classList.add('active');"""
+
+    new_goto = """// ── Navegación unificada (slides numerados + fd-slides) ──
+  var _currentFdId = null;   // id del fd-slide activo, o null
+  function _hideAll() {
+    document.querySelectorAll('.slide-chapter, .slide-cover').forEach(function(s) {
+      s.classList.remove('active');
+    });
+    document.querySelectorAll('.nav-item').forEach(function(n) {
+      n.classList.remove('active');
+    });
+  }
+  function goToId(targetId) {
+    _hideAll();
+    var target = document.getElementById(targetId);
+    if (!target) return;
+    target.classList.add('active');
+    _currentFdId = targetId.startsWith('fd-slide-') ? targetId : null;
+    // Nav item
+    var navId = targetId.replace('fd-slide-', 'fd-nav-').replace(/^slide-/, 'nav-');
+    var navEl = document.getElementById(navId);
+    if (navEl) navEl.classList.add('active');
+    // Topbar mobile
+    var tEl = document.getElementById('mobile-title');
+    var sEl = document.getElementById('mobile-slide');
+    if (tEl && slideTitles) tEl.textContent = slideTitles[parseInt(targetId.replace(/[^0-9]/g,''))] || 'Fondos';
+    if (sEl) sEl.textContent = targetId;
+    setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 60);
+    setTimeout(closeSidebar, 80);
+  }
+  function goTo(idx) {
+    if (idx < 0 || idx >= total) return;
+    _hideAll();
+    _currentFdId = null;
+    current = idx;
+    var slideEl = document.getElementById('slide-' + current);
+    var navEl   = document.getElementById('nav-'   + current);
+    if (slideEl) slideEl.classList.add('active');
+    if (navEl)   navEl.classList.add('active');"""
+
+    if old_goto in html:
+        html = html.replace(old_goto, new_goto, 1)
+    return html
+
+
+
 def _apply_delta_theme_to_root(html: str) -> str:
     """Reemplaza el :root y @import del template con los valores Delta."""
     import re
-
     # Reemplazar @import de Google Fonts original
     html = html.replace(
         "@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;500;600&display=swap');",
@@ -2909,7 +3098,8 @@ def generar_reporte(
     fecha_reporte: date  = None,
     tamar_tna:     float = None,
     tamar_tea:     float = None,
-    rf_detalle_path: str   = None,
+    rf_detalle_path: str        = None,
+    df_futuros:      "pd.DataFrame" = None,
 ) -> str:
     """
     Genera el reporte HTML del comité de inversiones.
@@ -2990,6 +3180,7 @@ def generar_reporte(
     print(f"  TAMAR: TNA={tamar_tna*100:.3f}%  TEA={tamar_tea*100:.3f}%")
 
     html = _apply_delta_theme_to_root(html)
+    html = _unify_navigation(html)
     html = _inject_css(html, _CAP1_CSS)
     html = _replace_cap1(html, _build_cap1_html(
         df_lecap, df_cer, df_tamar, df_dual, tamar_tea, tamar_tna))
@@ -2997,8 +3188,10 @@ def generar_reporte(
         df_lecap, df_cer, df_tamar, df_dual, tamar_tea, tamar_tna))
     html = _replace_capN(html, "slide-4", _build_cap4_html(
         df_lecap, df_cer, hoy))
+    # Futuros: bymaapi global → parámetro → fallback snapshot (snapshot aún no cargado aquí)
+    _df_futuros = _get_futuros_auto(df_futuros, None, hoy)
     html = _replace_capN(html, "slide-5", _build_cap5_html(
-        df_lecap, df_cer, df_tamar, df_dual, None, tamar_tea, hoy))
+        df_lecap, df_cer, df_tamar, df_dual, _df_futuros, tamar_tea, hoy))
 
     # ── Caps 6 y 7: snapshot + movimientos ───────────────────────────
     _fx_data  = _fetch_fx_data()

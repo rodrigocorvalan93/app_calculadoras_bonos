@@ -38,9 +38,8 @@ import streamlit as st
 # Constantes
 # ──────────────────────────────────────────────────────────────────────
 
-_BASES_DIR_DEFAULT = (
-    r"DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Delta Bases"
-)
+_BASES_DIR_ENV = "DELTA_BASES_DIR"
+_BASES_DIR_FALLBACK = r"DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Delta Bases\Carteras"
 
 _COMPOSICION_FILE = "Delta_Composicion.xlsx"
 _PN_FILE = "Delta_PN.xlsx"
@@ -95,18 +94,40 @@ FONDO_NOMBRES: Dict[int, str] = {
 # Resolución de paths
 # ──────────────────────────────────────────────────────────────────────
 
+def _bases_dir() -> str:
+    """Carpeta raíz donde viven los Excel internos de Delta.
+
+    Prioridad:
+    1. Env var DELTA_BASES_DIR (cargada desde secrets.txt en deploy normal).
+    2. Path relativo al home del usuario, con fallback genérico.
+    """
+    env = os.getenv(_BASES_DIR_ENV)
+    if env:
+        return os.path.expandvars(os.path.expanduser(env))
+    return os.path.join(os.path.expanduser("~"), _BASES_DIR_FALLBACK)
+
+
 def _resolve_base_path(filename: str, env_override: Optional[str] = None) -> Optional[str]:
-    """Resuelve ruta al Excel interno. Env var > path default OneDrive."""
+    """Resuelve ruta al Excel interno.
+
+    Prioridad:
+    1. Env var específica del archivo (ej. DELTA_COMPOSICION_PATH) → ruta completa.
+    2. Env var DELTA_BASES_DIR + filename.
+    3. Fallback ~/.../<filename>.
+    """
+    # 1) Override específico (path completo al archivo)
     if env_override:
         env = os.getenv(env_override)
-        if env and os.path.isfile(env):
-            return env
+        if env:
+            env = os.path.expandvars(os.path.expanduser(env))
+            if os.path.isfile(env):
+                return env
 
-    candidate = os.path.join(
-        os.path.expanduser("~"), _BASES_DIR_DEFAULT, filename
-    )
+    # 2) Carpeta base + filename
+    candidate = os.path.join(_bases_dir(), filename)
     if os.path.isfile(candidate):
         return candidate
+
     return None
 
 
@@ -431,8 +452,9 @@ def render_tab_posiciones(
     if df_comp.empty:
         st.warning(
             "No se pudo cargar `Delta_Composicion.xlsx`. Verificá que esté en:\n\n"
-            f"`{os.path.join(os.path.expanduser('~'), _BASES_DIR_DEFAULT)}`\n\n"
-            "Podés setear la env var `DELTA_COMPOSICION_PATH` para apuntar a otra ruta."
+            f"`{_bases_dir()}`\n\n"
+            "Podés setear la env var `DELTA_BASES_DIR` (carpeta) o "
+            "`DELTA_COMPOSICION_PATH` (archivo completo) en `secrets.txt`."
         )
         return
 
