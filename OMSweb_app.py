@@ -62,6 +62,7 @@ import OMSmktdata
 import OMSnews
 import OMSposiciones
 import OMSprices
+import OMSsecrets  # noqa: F401  — auto-carga secrets.txt a os.environ
 import OMSsettings as cfg
 import OMSticker
 import plotter  # usa pct_series + NSS helpers
@@ -2933,6 +2934,15 @@ def main():
 
         username = st.text_input("Usuario", value=default_user)
         password = st.text_input("Password", value=default_pass, type="password")
+
+        # Diagnóstico de secrets.txt (no expone valores, sólo estado)
+        _sec_status = OMSsecrets.status()
+        if _sec_status["found"]:
+            st.caption(
+                f"🔐 secrets.txt: {_sec_status['n_loaded']} vars cargadas"
+            )
+        else:
+            st.caption("🔐 secrets.txt: no encontrado (usando env vars del sistema)")
 
         st.divider()
         st.header("Parámetros globales")
