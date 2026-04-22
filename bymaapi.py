@@ -807,4 +807,4 @@ if __name__ == '__main__':
 # df.style.format(decimal=',', thousands='.')
 # df.to_csv('curva_tasas.csv', sep=';', decimal=',', index=False)
 # %%
-# %%
+

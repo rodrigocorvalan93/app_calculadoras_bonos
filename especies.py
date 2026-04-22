@@ -15666,6 +15666,49 @@ BF38O = {
     "Aviso Resultados": """https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/EbyB612ESYZHtHJIeFxOj4MBmeRXxZ4_VcNoTCF1dMtz7A""",
     "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/EUGIjm3H_mVEi0Z9YPuKATABgMx_h0xqPyvmYICHc3ZUVg""",
 }
+ICC4O = {
+    "Nombre Security": "ON ICBC (Argentina) S.A.U Clase IV Vto 27 11 2026",
+    "Código": "ICC4O",
+    "ISIN": "AR0245082422",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "28/11/2025",
+    "Vencimiento": "27/11/2026",
+    "Fecha Primer Cupón": "28/02/2026",
+    "Cupón / Spread": 3.50, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE", # FIJA o VARIABLE
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+    "28/02/2026",
+    "28/05/2026",
+    "28/08/2026",
+    "27/11/2026"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQAWfVpzS2v0S6740TSa5c_nAdLrr5M5C7bWSm9Y78tpxuo""",
+    "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQBHuqzMQar1RK9OZICKD6ugAV5YRR99m8P7OrSKSYCMw5E""",
+}
 SXC1O = {
     "Nombre Security": "ON Mercado Pago SP S.R.L. Clase 1 Vto. 18 07 2026",
     "Código": "SXC1O",
@@ -23728,6 +23771,7 @@ BSCRO = rentafija.Bono(BSCRO)
 BYCQO = rentafija.Bono(BYCQO)
 FTM3O = rentafija.Bono(FTM3O)
 FTN3O = rentafija.Bono(FTN3O)
+ICC4O = rentafija.Bono(ICC4O)
 RB59O = rentafija.Bono(RB59O)
 RB61O = rentafija.Bono(RB61O)
 RB64O = rentafija.Bono(RB64O)
@@ -24288,7 +24332,7 @@ todos_los_bonos = [
     BPCRO, PVC4O, BYCMO, TLCRO, ZPC1O, PS37O,
     RCCTO, RC3CO, RVS1O, MR42O, PSSYO, PS35O,  
     LNS3P, VWCDO, RB64O, TY37O, SXC3O, FTN3O, 
-    RC4CO, HBCEO, AFCGO, BF38O,
+    RC4CO, HBCEO, AFCGO, BF38O, ICC4O,
 
     # CORPORATIVOS UVA
 
