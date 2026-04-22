@@ -39,15 +39,15 @@ REFACTOR (02/2026):
 
 from __future__ import annotations
 
+import copy
 import os
 import re
-import copy
 import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -56,23 +56,37 @@ from dateutil.relativedelta import relativedelta
 from pandas.tseries.offsets import MonthEnd
 
 import OMSapi
+import OMScauciones
+import OMScredit
 import OMSmktdata
+import OMSnews
 import OMSprices
 import OMSsettings as cfg
-import rentafija
+import OMSticker
 import plotter  # usa pct_series + NSS helpers
-from dias_habiles import siguiente_dia_habil_ar
-from utils import tna_a_tir, tir_a_tna
-from OMSdata import (get_fx_hoy, refresh_a3500_in_rentafija, fx_status_text, invalidate_fx_cache)
+import rentafija
+from dias_habiles import ar_holidays, siguiente_dia_habil_ar
 
 # Universo de bonos
 from especies import *
 from especies import todos_los_bonos
 
+OMScredit.init(todos_los_bonos)
+from indices import (
+    fx_status_text,
+    get_fx_hoy,
+    invalidate_fx_cache,
+    refresh_a3500_in_rentafija,
+)
+from utils import tir_a_tna, tna_a_tir
+
 try:
     import plotly.graph_objects as go
 except Exception:  # pragma: no cover
     go = None
+
+if TYPE_CHECKING:
+    import plotly.graph_objects as go
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -189,11 +203,28 @@ CURVE_EVAL_SUFFIX: Dict[str, str] = {
     "dualtamar": "v",   # dual tamar siempre con v
 }
 
+# ── NUEVO: Curvas donde ticker BYMA ≠ código Python del objeto bono ──
+# Para corp_hdmep: PECIO (objeto Python) → PECIOD (ticker BYMA para marketdata)
+# Para corp_hdcable: los códigos ya son los tickers C (BYCHC etc.) que existen en BONDS
+CURVE_BYMA_REMAP: Dict[str, str] = {
+    "corp_hdmep": "mep",    # PECIO -> PECIOD (O->D)
+    "corp_hdcable": "cable", # BYCHO -> BYCHC (ya son los tickers C en la lista)
+}
+
 
 def _apply_curve_suffix(curve_key: str, base_code: str) -> str:
     suf = CURVE_EVAL_SUFFIX.get(str(curve_key), "")
     return f"{base_code}{suf}" if suf else base_code
 
+def _byma_ticker_from_code(code: str, curve_key: str) -> str:
+    """Convierte código Python -> ticker BYMA según curva."""
+    remap = CURVE_BYMA_REMAP.get(curve_key)
+    if remap == "mep":
+        # ON MEP: xxxO -> xxxD (reemplazar última O por D)
+        c = str(code)
+        return c[:-1] + "D" if c.endswith("O") else c
+    # Para cable: los códigos ya son los tickers C (BYCHC, etc.)
+    return str(code)
 
 def _md_code_from_calc_code(calc_code: str) -> str:
     c = str(calc_code).strip()
@@ -255,6 +286,9 @@ def _tna_from_tirea(bond_obj, tirea: float, bond_type: str) -> Optional[float]:
 
         if bt == "dual":
             return rentafija.tir_a_tna(tirea, 30, 365)
+        
+        if bt in ("hdmep", "hdcable"):
+            return rentafija.tir_a_tna(tirea, 180, 365)
 
         return getattr(bond_obj, "tna", None)
     except Exception:
@@ -379,8 +413,10 @@ def _sort_duration_nan_last(df: pd.DataFrame, col: str = "Duration") -> pd.DataF
 
 
 def _bar_limits(s: pd.Series) -> Tuple[float, float]:
-    ser = pd.to_numeric(s, errors="coerce")
-    lim = float(np.nanmax(np.abs(ser.to_numpy(dtype="float64")))) if len(ser) else 1.0
+    arr = pd.to_numeric(s, errors="coerce").to_numpy(dtype="float64")
+    if arr.size == 0 or np.all(np.isnan(arr)):
+        return -1.0, 1.0
+    lim = float(np.nanmax(np.abs(arr)))
     if not np.isfinite(lim) or lim <= 0:
         lim = 1.0
     return -lim, lim
@@ -412,6 +448,22 @@ def _diverging_bg(val: Any, lim: float, bold: bool = True) -> str:
     fw = "700" if bold else "400"
     return f"background-color: rgba({r},{g},{b},{alpha:.3f}); font-weight:{fw};"
 
+def _safe_median_pct(series, default: float = 40.0) -> float:
+    """Mediana segura de una serie de yields (decimales) → porcentaje.
+
+    Devuelve `default` si la serie es None, está vacía, o no tiene valores
+    finitos. Evita el RuntimeWarning 'All-NaN slice encountered' de
+    np.nanmedian cuando la columna viene toda en NaN (carga inicial del
+    panel antes del primer tick de WS, mercado cerrado, etc.).
+    """
+    if series is None:
+        return float(default)
+    vals = pd.to_numeric(series, errors="coerce")
+    if not vals.notna().any():
+        return float(default)
+    med = float(np.nanmedian(vals))
+    return float(med * 100.0) if np.isfinite(med) else float(default)
+
 
 def _yield_pct_points(series_or_scalar: Any) -> Any:
     """Convierte yields a 'puntos porcentuales' (ej 42.35 => 42.35%).
@@ -432,6 +484,83 @@ def _warn_once(key: str, msg: str) -> None:
     if not st.session_state.get(k, False):
         st.warning(msg)
         st.session_state[k] = True
+
+# ──────────────────────────────────────────────────────────────────────
+# Market hours (BYMA: 10:30 a 17:00 hora Argentina, lun-vie)
+# ──────────────────────────────────────────────────────────────────────
+
+# Horario BYMA (hora local Argentina)
+_BYMA_OPEN = (10, 30)   # 10:30
+_BYMA_CLOSE = (17, 0)   # 17:00
+
+
+def is_market_open(now: Optional[datetime] = None) -> bool:
+    """True si el mercado BYMA está operativo (lun-vie, 10:30-17:00 AR,
+    excluyendo feriados del calendario argentino de dias_habiles.ar_holidays).
+    """
+    if now is None:
+        now = datetime.now()
+
+    # Fin de semana
+    if now.weekday() >= 5:
+        return False
+
+    # Feriado argentino
+    if now.date() in ar_holidays:
+        return False
+
+    # Ventana horaria
+    t_open = now.replace(hour=_BYMA_OPEN[0], minute=_BYMA_OPEN[1], second=0, microsecond=0)
+    t_close = now.replace(hour=_BYMA_CLOSE[0], minute=_BYMA_CLOSE[1], second=0, microsecond=0)
+    return t_open <= now <= t_close
+
+
+def _effective_price_series(df: pd.DataFrame, last_col: str = "Last",
+                            close_col: str = "Close") -> pd.Series:
+    """Devuelve la serie de 'precio efectivo' para cálculos.
+
+    Regla: si hay `Last` válido se usa; si no, se cae a `Close`.
+    Esto permite que con mercado cerrado (o primeros minutos sin ticks)
+    la app calcule TIREA/TNA/Duration sobre el último cierre conocido.
+    """
+    if df is None or df.empty:
+        return pd.Series(dtype="float64")
+
+    if last_col in df.columns:
+        last = pd.to_numeric(df[last_col], errors="coerce")
+    else:
+        last = pd.Series(np.nan, index=df.index, dtype="float64")
+
+    if close_col in df.columns:
+        close = pd.to_numeric(df[close_col], errors="coerce")
+    else:
+        close = pd.Series(np.nan, index=df.index, dtype="float64")
+
+    # Prioridad: Last -> Close
+    return last.where(last.notna() & np.isfinite(last), close)
+
+
+def market_status_caption(plazo: str, auto_refresh: bool = False) -> str:
+    """Construye el caption de estado de mercado (LIVE / CERRADO + timestamp + FX)."""
+    now = datetime.now()
+    ts = now.strftime("%H:%M:%S")
+    is_open = is_market_open(now)
+
+    try:
+        fx_txt = fx_status_text()
+    except Exception:
+        fx_txt = ""
+
+    if is_open:
+        dot = "🔴 LIVE"
+        estado = ""
+    else:
+        dot = "⚪ CERRADO"
+        estado = " · calculando con Close del último cierre"
+
+    prefix = f"{dot}  |  " if (auto_refresh or not is_open) else ""
+    fx_part = f"  |  {fx_txt}" if fx_txt else ""
+    return f"{prefix}Actualizado: {ts}  |  Plazo: {plazo}{estado}{fx_part}"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -458,6 +587,15 @@ CURVES: List[CurveDef] = [
     # Dual separadas:
     CurveDef("dualfija", "Dual Fija (base)", "dual"),
     CurveDef("dualtamar", "Dual Tamar (v)", "dual"),
+
+
+    # --- Corporativos ---
+    CurveDef("corp_tamar", "Corp. TAMAR", "tamar"),
+    CurveDef("corp_badlar", "Corp. BADLAR", "tamar"),
+    CurveDef("corp_tasafija", "Corp. Tasa Fija", "lecap"),
+    CurveDef("corp_uva", "Corp. UVA/CER", "cer"),
+    CurveDef("corp_hdmep", "Corp. USD MEP", "hdmep"),
+    CurveDef("corp_hdcable", "Corp. USD Cable", "hdcable"),
 ]
 
 
@@ -468,6 +606,97 @@ def _codigo_obj(b) -> str:
         or getattr(b, "symbol", None)
         or b.__class__.__name__
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Histórico BYMA (archivo local OneDrive)
+# ──────────────────────────────────────────────────────────────────────
+
+# Resolver ruta del histórico: primero env var, luego default OneDrive
+_HISTORICO_DEFAULT = (
+    r"DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Delta Bases"
+    r"\Delta - historico_byma_px_tasas.xlsx"
+)
+
+
+def _resolve_historico_path() -> Optional[str]:
+    """Resuelve la ruta al Excel histórico.
+
+    Prioridad:
+    1. Env var DELTA_HISTORICO_PATH (por si alguien lo tiene en otra carpeta).
+    2. %USERPROFILE%\\DELTA ASSET MANAGEMENT S.A\\... (OneDrive sincronizado).
+    """
+    env = os.getenv("DELTA_HISTORICO_PATH")
+    if env and os.path.isfile(env):
+        return env
+
+    candidate = os.path.join(os.path.expanduser("~"), _HISTORICO_DEFAULT)
+    if os.path.isfile(candidate):
+        return candidate
+
+    return None
+
+
+@st.cache_data(ttl=3600, show_spinner="Cargando histórico BYMA…")
+def load_historico_byma() -> pd.DataFrame:
+    """Carga el Excel histórico con TIREA/Precio/Duration por bono y fecha.
+
+    Incluye limpieza de:
+    - Duplicados exactos (Código, fecha) → conserva el último.
+    - Filas muertas (TIREA/Duration/Paridad todas en 0) — capturas fallidas.
+    - TIREA absurdas (>200% ó <-90%) — errores de escala de precio.
+    """
+    path = _resolve_historico_path()
+    if path is None:
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_excel(path, sheet_name="Sheet1")
+    except Exception as e:
+        st.error(f"Error leyendo histórico: {e}")
+        return pd.DataFrame()
+
+    df["fecha_hoy"] = pd.to_datetime(df["fecha_hoy"], errors="coerce")
+    df = df.dropna(subset=["fecha_hoy", "Código"]).copy()
+    df["Código"] = df["Código"].astype(str)
+
+    for col in ("Last Price", "TIREA", "TNA", "TEM", "Paridad", "Duration", "tem_spread"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # 1) Deduplicar por (Código, fecha) → quedarnos con el último registro del día
+    df = df.sort_values(["Código", "fecha_hoy"]).drop_duplicates(
+        subset=["Código", "fecha_hoy"], keep="last"
+    )
+
+    # 2) Filas muertas (todo 0 en las métricas clave)
+    dead_mask = (
+        (df["TIREA"].fillna(0) == 0) &
+        (df["Duration"].fillna(0) == 0) &
+        (df["Paridad"].fillna(0) == 0)
+    )
+
+    # 3) TIREAs absurdas (errores de captura: -100% floor del solver o escalas raras)
+    extreme_mask = (df["TIREA"] > 2.0) | (df["TIREA"] <= -0.99)
+
+    bad_mask = dead_mask | extreme_mask
+    if bad_mask.any():
+        df = df[~bad_mask].copy()
+
+    df = df.sort_values(["Código", "fecha_hoy"]).reset_index(drop=True)
+    return df
+
+
+def _hist_codigos_disponibles(df_hist: pd.DataFrame) -> List[str]:
+    if df_hist is None or df_hist.empty:
+        return []
+    return sorted(df_hist["Código"].unique().tolist())
+
+
+def _hist_last_update(df_hist: pd.DataFrame) -> Optional[pd.Timestamp]:
+    if df_hist is None or df_hist.empty:
+        return None
+    return df_hist["fecha_hoy"].max()
 
 
 @st.cache_data(show_spinner=False)
@@ -545,6 +774,41 @@ def build_curve_codes() -> Dict[str, List[str]]:
         if has(c)
     })
 
+    # ── Corporativos ──────────────────────────────────────────────
+    corp_tamar_set = set()
+    corp_badlar_set = set()
+    corp_tasafija_set = set()
+    corp_uva_set = set()
+    corp_hdmep_set = set()
+    corp_hdcable_set = set()
+
+    for b in bonos:
+        code = _codigo_obj(b)
+        clas = (getattr(b, "clasificacion", None) or "").strip()
+        qpc = (getattr(b, "quote_price_cnv", None) or "").strip().upper()
+        if not code or not has(code):
+            continue
+
+        if clas == "Corporativo TAMAR":
+            corp_tamar_set.add(code)
+        elif clas == "Corporativo BADLAR":
+            corp_badlar_set.add(code)
+        elif clas == "Corporativo Tasa Fija":
+            corp_tasafija_set.add(code)
+        elif clas == "Corporativo UVA":
+            corp_uva_set.add(code)
+        elif clas == "Corporativo Hard Dolar MEP":
+            corp_hdmep_set.add(code)
+        elif clas == "Corporativo Hard Dolar":
+            # Solo los que tienen versión DIRTY (ticker con C) disponible
+            # O sea: los que están cargados CLEAN y tienen análogo C en BONDS
+            byma_c = code[:-1] + "C" if code.endswith("O") else code
+            if has(byma_c) and qpc == "CLEAN":
+                corp_hdcable_set.add(byma_c)  # usamos el ticker DIRTY
+            elif qpc == "DIRTY":
+                corp_hdcable_set.add(code)  # ya está como dirty
+
+
     return {
         "cer": cer,
         "lecap": lecap,
@@ -556,6 +820,12 @@ def build_curve_codes() -> Dict[str, List[str]]:
         "bopreales": bopreales,
         "dualfija": dualfija,
         "dualtamar": dualtamar,
+        "corp_tamar": sorted(corp_tamar_set),
+        "corp_badlar": sorted(corp_badlar_set),
+        "corp_tasafija": sorted(corp_tasafija_set),
+        "corp_uva": sorted(corp_uva_set),
+        "corp_hdmep": sorted(corp_hdmep_set),
+        "corp_hdcable": sorted(corp_hdcable_set)
     }
 
 
@@ -576,7 +846,9 @@ def _all_curve_symbols(plazo: str) -> List[str]:
     all_md_codes: set = set()
     for curve_key, codes in curves.items():
         for c in codes:
-            all_md_codes.add(_md_code_from_calc_code(str(c)))
+            base = _md_code_from_calc_code(str(c))
+            md = _byma_ticker_from_code(base, curve_key)
+            all_md_codes.add(md)
     return _build_symbols(sorted(all_md_codes), plazo)
 
 
@@ -686,7 +958,8 @@ def _load_curve_base(username: str, password: str, curve_key: str, plazo: str) -
         return None
 
     calc_codes = [str(x) for x in codes]
-    md_codes = [_md_code_from_calc_code(c) for c in calc_codes]
+    md_codes = [_byma_ticker_from_code(_md_code_from_calc_code(c), curve_key)
+            for c in calc_codes]
 
     # mapping md -> calc (si hay colisión, mantiene el primero)
     md_to_calc: Dict[str, str] = {}
@@ -704,7 +977,7 @@ def _load_curve_base(username: str, password: str, curve_key: str, plazo: str) -
         return None
 
     # Re-etiquetar a calc_code SOLO para curvas con sufijo
-    if curve_key in CURVE_EVAL_SUFFIX:
+    if curve_key in CURVE_EVAL_SUFFIX or curve_key in CURVE_BYMA_REMAP:
         snap["Código"] = snap["Código"].map(lambda x: md_to_calc.get(str(x), str(x)))
 
     return snap
@@ -722,14 +995,42 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
     settle = _settlement_date_str(plazo)
 
     codes_arr = snap["Código"].astype(str).to_numpy()
-    last_arr = pd.to_numeric(snap["Last"], errors="coerce").to_numpy(dtype="float64")
+    # Precio efectivo para cálculos: Last si hay; si no, Close (mercado cerrado / feriado).
+    price_eff = _effective_price_series(snap, last_col="Last", close_col="Close")
+    price_arr = price_eff.to_numpy(dtype="float64")
 
-    mdf = _parallel_metrics(codes_arr, last_arr, bond_type, settle)
+    mdf = _parallel_metrics(codes_arr, price_arr, bond_type, settle)
 
     out = pd.concat([snap.reset_index(drop=True), mdf], axis=1)
     out = _sort_duration_nan_last(out, "Duration")
 
     out["tem_spread"] = pd.to_numeric(out.get("TEM"), errors="coerce").diff().fillna(0.0)
+
+    # Margen TNA para curvas con tasa variable (TAMAR/BADLAR)
+    if bond_type in ("tamar",):
+        inp = rentafija.inputs
+        # Determinar benchmark según el index de cada bono
+        margen_col = []
+        for code in out["Código"].astype(str).tolist():
+            obj = _bond_obj(code)
+            idx = getattr(obj, "index", None) if obj else None
+            tipo = getattr(obj, "tipo_tasa_interes", None) if obj else None
+            if tipo in ("VARIABLE", "VARIABLE_CAP") and idx:
+                if idx == "TAMAR":
+                    bench = inp.get("tamar", pd.DataFrame()).tail(5).get("TAMAR", pd.Series()).mean() / 100.0
+                elif idx == "BADLAR":
+                    bench = inp.get("badlar", pd.DataFrame()).tail(5).get("BADLAR", pd.Series()).mean() / 100.0
+                else:
+                    bench = 0.0
+                tna_val = out.loc[out["Código"] == code, "TNA"]
+                if not tna_val.empty:
+                    tna_f = pd.to_numeric(tna_val.iloc[0], errors="coerce")
+                    margen_col.append(tna_f - bench if np.isfinite(tna_f) else np.nan)
+                else:
+                    margen_col.append(np.nan)
+            else:
+                margen_col.append(np.nan)
+        out["Margen TNA"] = margen_col
 
     cols = [
         "Código",
@@ -742,6 +1043,7 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
         "Paridad",
         "Duration",
         "tem_spread",
+        "Margen TNA",
         "Volumen",
     ]
     cols = [c for c in cols if c in out.columns]
@@ -776,8 +1078,10 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
     settle = _settlement_date_str(plazo)
 
     codes_arr = snap["Código"].astype(str).to_numpy()
-    last_arr = pd.to_numeric(snap["Last Price"], errors="coerce").to_numpy(dtype="float64")
-    m_last_df = _parallel_metrics(codes_arr, last_arr, bond_type, settle)
+    # Precio efectivo: Last Price si hay; si no, Close (mercado cerrado / feriado).
+    price_eff = _effective_price_series(snap, last_col="Last Price", close_col="Close")
+    price_arr = price_eff.to_numpy(dtype="float64")
+    m_last_df = _parallel_metrics(codes_arr, price_arr, bond_type, settle)
 
     bid_arr = pd.to_numeric(snap.get("Bid Price"), errors="coerce").to_numpy(dtype="float64") if "Bid Price" in snap.columns else np.full(len(snap), np.nan)
     off_arr = pd.to_numeric(snap.get("Offer Price"), errors="coerce").to_numpy(dtype="float64") if "Offer Price" in snap.columns else np.full(len(snap), np.nan)
@@ -819,7 +1123,7 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
 # Estilos (pandas Styler) — unificados
 # ──────────────────────────────────────────────────────────────────────
 
-def _apply_variation_bar(sty: "pd.io.formats.style.Styler", df: pd.DataFrame, col: str) -> "pd.io.formats.style.Styler":
+def _apply_variation_bar(sty: pd.io.formats.style.Styler, df: pd.DataFrame, col: str) -> pd.io.formats.style.Styler:
     """Aplica barra divergente verde/rojo + fondo a una columna de variación."""
     if col not in df.columns:
         return sty
@@ -830,7 +1134,7 @@ def _apply_variation_bar(sty: "pd.io.formats.style.Styler", df: pd.DataFrame, co
     return sty
 
 
-def _apply_color_by_variation(sty: "pd.io.formats.style.Styler", df: pd.DataFrame, var_col: str, target_col: str) -> "pd.io.formats.style.Styler":
+def _apply_color_by_variation(sty: pd.io.formats.style.Styler, df: pd.DataFrame, var_col: str, target_col: str) -> pd.io.formats.style.Styler:
     """Colorea target_col en verde/rojo según el signo de var_col."""
     if var_col not in df.columns or target_col not in df.columns:
         return sty
@@ -858,7 +1162,7 @@ def _apply_color_by_variation(sty: "pd.io.formats.style.Styler", df: pd.DataFram
     return sty
 
 
-def style_curvas(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
+def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
 
@@ -872,6 +1176,7 @@ def style_curvas(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
         "Paridad": "{:.2%}",
         "Duration": "{:.4f}",
         "tem_spread": "{:+.2%}",
+        "Margen TNA": "{:+.2%}",
         "Volumen": "{:,.0f}",
     }
 
@@ -889,7 +1194,7 @@ def style_curvas(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
     return sty
 
 
-def style_mercado(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
+def style_mercado(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
 
@@ -935,15 +1240,17 @@ def style_mercado(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
 def style_forwards(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
     if df is None or df.empty:
         return pd.DataFrame().style
-    sty = df.style.format("{:.2f}%")
+    sty = df.style.format("{:.2f}%", na_rep="")
     try:
         sty = sty.background_gradient(cmap="Blues", axis=None)
     except Exception:
         pass
+    sty = sty.map(lambda v: "background-color: transparent;" if pd.isna(v) else "")
     return sty
 
 
-def style_total_return(df: pd.DataFrame, tr_col: str = "_tr_num") -> "pd.io.formats.style.Styler":
+
+def style_total_return(df: pd.DataFrame, tr_col: str = "_tr_num") -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
 
@@ -980,7 +1287,7 @@ def style_total_return(df: pd.DataFrame, tr_col: str = "_tr_num") -> "pd.io.form
     return sty
 
 
-def style_futuros(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
+def style_futuros(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     """Estilo para tabla de futuros DLR."""
     fmt = {
         "Close Price": "{:,.4f}",
@@ -1037,7 +1344,7 @@ def plot_curve_plotly(
     show_nss: bool = True,
     threshold_factor: float = 2.0,
     which: str = "TIREA",  # "TIREA" o "TEM"
-) -> Tuple[Optional["go.Figure"], Optional[np.ndarray]]:
+) -> Tuple[Optional[go.Figure], Optional[np.ndarray]]:
     """Devuelve figura Plotly y params NSS (si aplica)."""
     if go is None:
         return None, None
@@ -1295,6 +1602,540 @@ def compute_total_return_table(
 # ──────────────────────────────────────────────────────────────────────
 # Breakeven Inflación: CER vs Tasa Fija
 # ──────────────────────────────────────────────────────────────────────
+def _breakeven_iter_tem(
+    bond_obj_cer_base,
+    price_cer_pct: float,
+    tir_nominal_anual: float,
+    settle_str: Optional[str],
+    idx_module=None,
+    tol: float = 1e-5,
+    max_iter: int = 40,
+) -> Optional[float]:
+    """Breakeven de inflación por iteración (método correcto con sufijo `j`).
+
+    Los bonos con sufijo `j` (TZX26j, TX28j, etc.) son la variante evaluada
+    sobre CER PROYECTADO. Cuando cambiamos la proyección de inflación y
+    pedimos `bond_j.calcula_tirea(precio_mkt)`, lo que devuelve es
+    efectivamente la TIR nominal implícita (porque el CER proyectado
+    expresa los flujos en pesos a fecha futura).
+
+    Algoritmo:
+      1. Buscamos el bono `j` correspondiente al bono CER base.
+      2. Bisección sobre `i_mensual` (inflación constante futura):
+         a) Inyectamos CER proyectado con esa inflación.
+         b) Calculamos la TIREA del bono `j` al precio de mercado.
+         c) Comparamos con `tir_nominal_anual` (TIR del LECAP vecino).
+      3. `i*` donde TIREA(bono_j, px) == TIR_LECAP es el breakeven.
+
+    Parámetros:
+      bond_obj_cer_base: el objeto bono CER base (ej TZX26, no TZX26j).
+      price_cer_pct: precio de mercado en % del nominal (ej 378.65).
+      tir_nominal_anual: TIR objetivo (la del LECAP vecino, decimal).
+
+    Retorna: i_mensual decimal (ej 0.023 = 2.3% TEM), o None si falla.
+    """
+    if idx_module is None:
+        import indices as idx_module
+
+    if (bond_obj_cer_base is None
+        or not np.isfinite(price_cer_pct)
+        or not np.isfinite(tir_nominal_anual)):
+        return None
+
+    # Resolver el bono `j` correspondiente.
+    bond_j, _ = _resolve_bond_j(bond_obj_cer_base)
+    if bond_j is None:
+        return None
+
+    target_tir_nom = float(tir_nominal_anual)
+
+    # Backup del estado original de rentafija.inputs y de la proyección del módulo.
+    # Sin este backup, _recalculate_cer_proyectado muta idx_module.proyeccion_inflacion_mensual
+    # y la proyección "default" del usuario queda pisada al terminar el bootstrap.
+    inp = rentafija.inputs
+    original_cer = inp.get("cer_proyectado")
+    original_uva = inp.get("uva_proyectado")
+    original_inflamom = inp.get("inflamom")
+    original_module_proy = dict(getattr(idx_module, "proyeccion_inflacion_mensual", {}))
+
+    combined_df_cer = inp.get("CER")
+    if combined_df_cer is None or combined_df_cer.empty:
+        return None
+
+    # Truncar proyección al vencimiento del bono + buffer (acelera ~10x)
+    venc = getattr(bond_j, "vencimiento", None) or getattr(bond_obj_cer_base, "vencimiento", None)
+    max_proj_date = (venc + relativedelta(months=2)) if venc else None
+
+    try:
+        def _tir_bono_j(i_mensual: float) -> float:
+            """Inyecta inflación constante y devuelve TIREA del bono `j`."""
+            today = date.today()
+            # Horizonte limitado al vencimiento del bono (en vez de 36 meses fijos)
+            if venc is not None:
+                horizon_months = max(2, (venc.year - today.year) * 12 + (venc.month - today.month) + 2)
+            else:
+                horizon_months = 36
+            proy = {}
+            d = today.replace(day=1) + relativedelta(months=1)
+            for _ in range(horizon_months):
+                proy[d.strftime("%b-%y")] = float(i_mensual * 100.0)
+                d = d + relativedelta(months=1)
+
+            _recalculate_cer_proyectado(proy, idx_module, max_proj_date=max_proj_date)
+
+            try:
+                return float(bond_j.calcula_tirea(float(price_cer_pct) / 100.0, settle_str))
+            except Exception:
+                return float("nan")
+
+        # Bracket amplio: Argentina tiene escenarios extremos y bonos muy cortos
+        # pueden requerir i_mensual > 20% para alcanzar target.
+        lo, hi = -0.05, 0.50
+        f_lo = _tir_bono_j(lo) - target_tir_nom
+        f_hi = _tir_bono_j(hi) - target_tir_nom
+
+        if not (np.isfinite(f_lo) and np.isfinite(f_hi)):
+            return None
+
+        # Mayor inflación → mayor VR → mayor TIR nominal del bono j.
+        # Así que f(i) = TIREA_j(i) − target debería ir de negativo a positivo.
+        if f_lo * f_hi > 0:
+            return None
+
+        for _ in range(max_iter):
+            mid = 0.5 * (lo + hi)
+            f_mid = _tir_bono_j(mid) - target_tir_nom
+            if not np.isfinite(f_mid):
+                return None
+            if abs(f_mid) < tol:
+                return mid
+            if f_lo * f_mid < 0:
+                hi = mid
+                f_hi = f_mid
+            else:
+                lo = mid
+                f_lo = f_mid
+
+        return 0.5 * (lo + hi)
+
+    finally:
+        # Restaurar estado original (rentafija.inputs + idx_module.proyeccion_inflacion_mensual)
+        if original_cer is not None:
+            rentafija.inputs["cer_proyectado"] = original_cer
+        if original_uva is not None:
+            rentafija.inputs["uva_proyectado"] = original_uva
+        if original_inflamom is not None:
+            rentafija.inputs["inflamom"] = original_inflamom
+        if original_module_proy:
+            idx_module.proyeccion_inflacion_mensual = original_module_proy
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Bootstrap de inflación implícita desde la curva CER vs LECAP
+# ──────────────────────────────────────────────────────────────────────
+
+# Umbral: si el CER fix está a menos de este número de días hábiles, el bono
+# es demasiado corto para hacer bootstrap (su inflación de referencia ya está
+# prácticamente fija o publicada). Para esos usamos Fisher directo.
+BOOTSTRAP_MIN_BDAYS_TO_CER_FIX = 15
+
+
+def _mes_ref_key(bond_obj) -> Optional[str]:
+    """Devuelve la key mes-año en formato '%b-%y' que el bono espera inyectar
+    como inflación de referencia. Ej: 'Abr-26'. None si no se puede resolver."""
+    cer_fix = _cer_effective_maturity_date(bond_obj)
+    if cer_fix is None:
+        return None
+    try:
+        label_full = _inflation_month_for_cer_date(cer_fix)  # 'Abr-2026'
+        return pd.to_datetime(label_full, format="%b-%Y").strftime("%b-%y")
+    except Exception:
+        return None
+
+
+def _bdays_to_cer_fix(bond_obj) -> Optional[int]:
+    """Días hábiles hasta el CER fix. None si no se puede calcular."""
+    cer_fix = _cer_effective_maturity_date(bond_obj)
+    if cer_fix is None:
+        return None
+    try:
+        from dias_habiles import ar_holidays as _hol
+        d = date.today()
+        n = 0
+        while d < cer_fix:
+            d = d + relativedelta(days=1)
+            if d.weekday() < 5 and d not in _hol:
+                n += 1
+        return n
+    except Exception:
+        # fallback: días calendario / 1.4 (aprox días hábiles)
+        return int((cer_fix - date.today()).days / 1.4)
+
+
+def _resolve_bond_j(bond_obj_cer_base):
+    """Devuelve (bond_j, base_code_str). bond_j es None si no existe la variante `j`."""
+    base_code = (
+        getattr(bond_obj_cer_base, "ticker", None)
+        or getattr(bond_obj_cer_base, "codigo", None)
+        or bond_obj_cer_base.__class__.__name__
+    )
+    base_code = str(base_code)
+    if base_code.lower().endswith("j"):
+        return bond_obj_cer_base, base_code
+    return globals().get(f"{base_code}j"), base_code
+
+
+def _solve_month_inflation(
+    bond_obj_cer_base,
+    price_cer_pct: float,
+    tir_target: float,
+    mes_key: str,
+    current_proy: dict,
+    settle_str: Optional[str],
+    idx_module,
+    tol: float = 5e-5,
+    max_iter: int = 40,
+) -> Tuple[Optional[float], str]:
+    """Resuelve la inflación del mes `mes_key` que hace que TIREA(bono_j, px) == tir_target.
+
+    Se mueve SOLO `current_proy[mes_key]`, los demás meses quedan fijos.
+    Retorna (valor_resuelto_decimal_o_None, motivo_diagnostico_str).
+    """
+    bond_j, base_code = _resolve_bond_j(bond_obj_cer_base)
+    if bond_j is None:
+        return None, f"sin variante `{base_code}j`"
+
+    # Truncar el horizonte de CER proyectado al vencimiento del bono + buffer
+    # (evita recalcular ~5 años de CER diario cuando sólo necesitamos hasta el fix)
+    venc = getattr(bond_j, "vencimiento", None) or getattr(bond_obj_cer_base, "vencimiento", None)
+    max_proj_date = (venc + relativedelta(months=2)) if venc else None
+
+    def _tir_j_at(i_decimal: float) -> float:
+        proy_try = dict(current_proy)
+        proy_try[mes_key] = float(i_decimal * 100.0)  # dict lleva porcentaje
+        _recalculate_cer_proyectado(proy_try, idx_module, max_proj_date=max_proj_date)
+        try:
+            return float(bond_j.calcula_tirea(float(price_cer_pct) / 100.0, settle_str))
+        except Exception:
+            return float("nan")
+
+    # Bracket amplio para contemplar curvas de crédito y escenarios extremos
+    lo, hi = -0.05, 0.50
+    f_lo = _tir_j_at(lo) - tir_target
+    f_hi = _tir_j_at(hi) - tir_target
+
+    if not (np.isfinite(f_lo) and np.isfinite(f_hi)):
+        return None, f"TIREA_j NaN (f_lo={f_lo}, f_hi={f_hi})"
+    if f_lo * f_hi > 0:
+        return None, (
+            f"target {tir_target:.2%} fuera del bracket "
+            f"[TIREA_j({lo:.0%})={f_lo + tir_target:.2%}, "
+            f"TIREA_j({hi:.0%})={f_hi + tir_target:.2%}]"
+        )
+
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        f_mid = _tir_j_at(mid) - tir_target
+        if not np.isfinite(f_mid):
+            return None, "NaN en la bisección"
+        if abs(f_mid) < tol:
+            return mid, "OK"
+        if f_lo * f_mid < 0:
+            hi = mid
+            f_hi = f_mid
+        else:
+            lo = mid
+            f_lo = f_mid
+
+    return 0.5 * (lo + hi), "OK (max_iter)"
+
+
+def compute_inflation_bootstrap(
+    df_cer_last: pd.DataFrame,
+    df_lecap_last: pd.DataFrame,
+    plazo: str,
+    idx_module=None,
+) -> Dict[str, Any]:
+    """Bootstrap de inflación implícita.
+
+    Para cada bono CER con CER fix > BOOTSTRAP_MIN_BDAYS_TO_CER_FIX días hábiles:
+      1. Identificar su mes de referencia.
+      2. Encontrar el LECAP vecino por duration → TIR target.
+      3. Resolver i* en ese mes que iguala TIREA(bono_j, px) con el target.
+
+    Si varios bonos comparten mes → promedio ponderado por Volumen.
+    Meses sin bono ancla → interpolación lineal con sus vecinos.
+
+    Bonos demasiado cortos → Fisher directo (BE = (1+tir_nom)/(1+tir_real) - 1).
+
+    Retorna dict con:
+      - 'inflacion_implicita': dict {mes_key: i_decimal}
+      - 'per_bond': lista con detalle por bono (código, mes ref, método, BE)
+      - 'warnings': lista de avisos
+    """
+    if idx_module is None:
+        import indices as idx_module
+
+    if df_cer_last is None or df_cer_last.empty or df_lecap_last is None or df_lecap_last.empty:
+        return {"inflacion_implicita": {}, "per_bond": [], "warnings": ["Curvas vacías"]}
+
+    settle = _settlement_date_str(plazo)
+
+    # Precomputar LECAP arrays para nearest-neighbor por duration
+    lecap_durs = pd.to_numeric(df_lecap_last["Duration"], errors="coerce")
+    lecap_tirs = pd.to_numeric(df_lecap_last["TIREA"], errors="coerce")
+    lecap_codes = df_lecap_last["Código"].astype(str)
+    ok_lecap = np.isfinite(lecap_durs) & np.isfinite(lecap_tirs)
+
+    # Backup de estado (vamos a mutar rentafija.inputs y la proyección del módulo).
+    # _recalculate_cer_proyectado también reasigna idx_module.proyeccion_inflacion_mensual,
+    # así que hay que preservarla para volver al default del usuario al terminar.
+    inp = rentafija.inputs
+    backup = {
+        "cer_proyectado": inp.get("cer_proyectado"),
+        "uva_proyectado": inp.get("uva_proyectado"),
+        "inflamom": inp.get("inflamom"),
+    }
+    backup_module_proy = dict(getattr(idx_module, "proyeccion_inflacion_mensual", {}))
+
+    warnings_: List[str] = []
+    per_bond_info: List[Dict[str, Any]] = []
+    # Agrupamos los bonos por mes de referencia
+    by_month: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    short_bonds: List[Dict[str, Any]] = []  # se resuelven por Fisher
+
+    try:
+        for _, row in df_cer_last.iterrows():
+            code = str(row.get("Código", "")).strip()
+            dur = pd.to_numeric(row.get("Duration"), errors="coerce")
+            tirea_real = pd.to_numeric(row.get("TIREA"), errors="coerce")
+            if not code or not np.isfinite(dur) or not np.isfinite(tirea_real):
+                continue
+
+            obj_base = _bond_obj(code)
+            if obj_base is None:
+                continue
+
+            # Precio de mercado
+            px_last = pd.to_numeric(row.get("Last"), errors="coerce")
+            px_close = pd.to_numeric(row.get("Close"), errors="coerce")
+            px = float(px_last if np.isfinite(px_last) else px_close)
+            if not np.isfinite(px):
+                continue
+
+            volumen = float(pd.to_numeric(row.get("Volumen"), errors="coerce") or 0.0)
+
+            # Target LECAP (nearest por duration)
+            if not ok_lecap.any():
+                continue
+            sub_d = lecap_durs[ok_lecap]
+            nidx = (sub_d - float(dur)).abs().idxmin()
+            tir_target = float(lecap_tirs.loc[nidx])
+            cod_target = str(lecap_codes.loc[nidx])
+
+            # ¿Es corto? → Fisher directo, sin bootstrap
+            bdays = _bdays_to_cer_fix(obj_base)
+            if bdays is not None and bdays < BOOTSTRAP_MIN_BDAYS_TO_CER_FIX:
+                # Fisher directo sobre TIREA anualizada
+                be_tirea = (1.0 + tir_target) / (1.0 + float(tirea_real)) - 1.0
+                be_tem_fisher = (1.0 + be_tirea) ** (30.0 / 360.0) - 1.0
+                short_bonds.append({
+                    "Código": code,
+                    "Duration": float(dur),
+                    "Volumen": volumen,
+                    "Mes ref": _mes_ref_key(obj_base),
+                    "Método": "Fisher (corto)",
+                    "LECAP ref": cod_target,
+                    "TIR target": tir_target,
+                    "TIREA real": float(tirea_real),
+                    "BE TEM": be_tem_fisher,
+                    "bdays_to_fix": bdays,
+                })
+                continue
+
+            # Pre-filtro: si el bono no tiene variante `j` no sirve iterar.
+            # Va directo a Fisher (corto) para no malgastar 2 rebuilds de CER.
+            bond_j_obj, _ = _resolve_bond_j(obj_base)
+            if bond_j_obj is None:
+                be_tirea = (1.0 + tir_target) / (1.0 + float(tirea_real)) - 1.0
+                be_tem_fisher = (1.0 + be_tirea) ** (30.0 / 360.0) - 1.0
+                short_bonds.append({
+                    "Código": code,
+                    "Duration": float(dur),
+                    "Volumen": volumen,
+                    "Mes ref": _mes_ref_key(obj_base),
+                    "Método": "Fisher (sin `j`)",
+                    "LECAP ref": cod_target,
+                    "TIR target": tir_target,
+                    "TIREA real": float(tirea_real),
+                    "BE TEM": be_tem_fisher,
+                    "bdays_to_fix": bdays,
+                })
+                warnings_.append(f"{code}: sin variante `{code}j`, resuelto por Fisher")
+                continue
+
+            # Bono para bootstrap: identificar mes de referencia
+            mes_key = _mes_ref_key(obj_base)
+            if mes_key is None:
+                warnings_.append(f"{code}: no se pudo determinar el mes de referencia")
+                continue
+
+            by_month[mes_key].append({
+                "code": code,
+                "obj_base": obj_base,
+                "px": px,
+                "dur": float(dur),
+                "volumen": volumen,
+                "tir_target": tir_target,
+                "cod_target": cod_target,
+                "tirea_real": float(tirea_real),
+                "bdays": bdays,
+            })
+
+        # Proyección base de arranque (combina observados de BCRA + la proy que esté cargada)
+        base_proy = dict(getattr(idx_module, "proyeccion_inflacion_mensual", {}))
+
+        # Ordenar meses temporalmente
+        def _month_sort_key(k: str) -> date:
+            try:
+                return pd.to_datetime(k, format="%b-%y").date()
+            except Exception:
+                return date(2099, 1, 1)
+
+        meses_ordenados = sorted(by_month.keys(), key=_month_sort_key)
+
+        # Acá iremos fijando las inflaciones resueltas
+        inflacion_resuelta: Dict[str, float] = {}  # {mes_key: i_decimal}
+
+        for mes_key in meses_ordenados:
+            bonos_mes = by_month[mes_key]
+
+            # Estado de la proyección al momento de resolver este mes:
+            #   - base_proy + meses ya resueltos (en porcentaje como espera _recalculate...)
+            current_proy = dict(base_proy)
+            for k, v in inflacion_resuelta.items():
+                current_proy[k] = float(v * 100.0)
+
+            resultados_mes: List[Dict[str, Any]] = []
+            for b in bonos_mes:
+                i_sol, motivo = _solve_month_inflation(
+                    bond_obj_cer_base=b["obj_base"],
+                    price_cer_pct=b["px"],
+                    tir_target=b["tir_target"],
+                    mes_key=mes_key,
+                    current_proy=current_proy,
+                    settle_str=settle,
+                    idx_module=idx_module,
+                )
+                metodo = "Iter bootstrap"
+                if i_sol is None:
+                    # Fallback a Fisher si no bracketea, pero con mensaje específico
+                    be_tirea = (1.0 + b["tir_target"]) / (1.0 + b["tirea_real"]) - 1.0
+                    i_sol_tem = (1.0 + be_tirea) ** (30.0 / 360.0) - 1.0
+                    i_sol = i_sol_tem
+                    metodo = "Fisher (fallback)"
+                    warnings_.append(f"{b['code']}: {motivo} — fallback Fisher")
+
+                resultados_mes.append({
+                    "code": b["code"],
+                    "i_sol": i_sol,
+                    "volumen": b["volumen"],
+                    "metodo": metodo,
+                    "cod_target": b["cod_target"],
+                    "tir_target": b["tir_target"],
+                    "tirea_real": b["tirea_real"],
+                    "dur": b["dur"],
+                    "bdays": b["bdays"],
+                })
+
+            # Promedio ponderado por volumen (opción 3 que elegiste)
+            vols = np.array([r["volumen"] for r in resultados_mes], dtype="float64")
+            i_vals = np.array([r["i_sol"] for r in resultados_mes], dtype="float64")
+            vmask = np.isfinite(i_vals) & (vols > 0)
+            if vmask.any():
+                i_mes = float(np.average(i_vals[vmask], weights=vols[vmask]))
+            elif np.isfinite(i_vals).any():
+                i_mes = float(np.nanmean(i_vals))
+            else:
+                i_mes = float("nan")
+                warnings_.append(f"{mes_key}: ningún bono convergió")
+
+            inflacion_resuelta[mes_key] = i_mes
+
+            for r in resultados_mes:
+                per_bond_info.append({
+                    "Código": r["code"],
+                    "Duration": r["dur"],
+                    "Mes ref": mes_key,
+                    "Método": r["metodo"],
+                    "LECAP ref": r["cod_target"],
+                    "TIR target": r["tir_target"],
+                    "TIREA real": r["tirea_real"],
+                    "BE TEM": r["i_sol"],
+                    "bdays_to_fix": r["bdays"],
+                })
+
+        # Agregar los bonos cortos al per_bond_info (sin modificar inflacion_resuelta)
+        for sb in short_bonds:
+            per_bond_info.append({
+                "Código": sb["Código"],
+                "Duration": sb["Duration"],
+                "Mes ref": sb["Mes ref"],
+                "Método": sb["Método"],
+                "LECAP ref": sb["LECAP ref"],
+                "TIR target": sb["TIR target"],
+                "TIREA real": sb["TIREA real"],
+                "BE TEM": sb["BE TEM"],
+                "bdays_to_fix": sb["bdays_to_fix"],
+            })
+
+        # Interpolación lineal sobre meses sin ancla dentro del rango cubierto
+        if inflacion_resuelta:
+            meses_con_dato = sorted(
+                [(pd.to_datetime(k, format="%b-%y").date(), k, v)
+                 for k, v in inflacion_resuelta.items() if np.isfinite(v)],
+                key=lambda x: x[0],
+            )
+            if len(meses_con_dato) >= 2:
+                full_range = []
+                cur = meses_con_dato[0][0]
+                last = meses_con_dato[-1][0]
+                while cur <= last:
+                    full_range.append(cur)
+                    cur = (cur.replace(day=1) + relativedelta(months=1)) - relativedelta(days=1)
+                    cur = cur.replace(day=28) + relativedelta(days=4)
+                    cur = cur.replace(day=1)
+                # Simplificamos: generamos mes a mes
+                full_range = []
+                d0 = meses_con_dato[0][0].replace(day=1)
+                d1 = meses_con_dato[-1][0].replace(day=1)
+                while d0 <= d1:
+                    full_range.append(d0)
+                    d0 = d0 + relativedelta(months=1)
+
+                xs = np.array([d.toordinal() for d, _, _ in meses_con_dato], dtype="float64")
+                ys = np.array([v for _, _, v in meses_con_dato], dtype="float64")
+
+                for d in full_range:
+                    k = d.strftime("%b-%y")
+                    if k not in inflacion_resuelta or not np.isfinite(inflacion_resuelta.get(k, np.nan)):
+                        # interpolar
+                        inflacion_resuelta[k] = float(np.interp(d.toordinal(), xs, ys))
+
+        return {
+            "inflacion_implicita": inflacion_resuelta,
+            "per_bond": per_bond_info,
+            "warnings": warnings_,
+        }
+
+    finally:
+        # Restaurar estado original (rentafija.inputs + proyección del módulo)
+        for k, v in backup.items():
+            if v is not None:
+                rentafija.inputs[k] = v
+        if backup_module_proy:
+            idx_module.proyeccion_inflacion_mensual = backup_module_proy
+
 
 def _cer_effective_maturity_date(bond_obj) -> Optional[date]:
     """Fecha en la que el bono CER toma su último índice CER.
@@ -1364,24 +2205,23 @@ def compute_breakeven_table(
     df_cer_last: pd.DataFrame,
     df_lecap_last: pd.DataFrame,
     plazo: str,
+    method: str = "fisher",  # "fisher" | "iter" | "both"
 ) -> pd.DataFrame:
     """Computes inflation breakeven for each CER bond by matching
     duration against the LECAP/tasa fija curve (NSS interpolated).
 
-    For each CER bond:
-    1. Get its TIREA (real yield over CER)
-    2. Find the equivalent nominal yield from the LECAP curve at the same duration
-    3. breakeven = (1 + nominal) / (1 + real) - 1  (Fisher equation)
-    4. Express as TEM and TIREA
-
-    Also accounts for the fact that CER bonds become fixed-rate
-    ~10 bdays before maturity (using the CER index from that date).
+    method:
+      - "fisher": BE_TEM = (1 + TIR_nom) / (1 + TIR_real) − 1 — anualizado y mensualizado.
+      - "iter":   Iteración de inflación mensual constante hasta que la TIR nominal
+                  implícita del CER coincida con la TIR del LECAP de misma duration.
+                  Más preciso para bonos cortos donde Fisher distorsiona.
+      - "both":   Calcula los dos métodos y devuelve ambas columnas.
     """
     if (df_cer_last is None or df_cer_last.empty or
         df_lecap_last is None or df_lecap_last.empty):
         return pd.DataFrame()
 
-    # Need NSS fit on LECAP curve for interpolation
+    # NSS sobre LECAP para interpolación
     try:
         tmp_lecap = df_lecap_last[["Código", "Duration", "TIREA", "TEM"]].copy()
         popt_lecap, xmin_l, xmax_l = plotter._fit_nss_cached(
@@ -1392,7 +2232,7 @@ def compute_breakeven_table(
     if popt_lecap is None:
         return pd.DataFrame()
 
-    # Also fit CER curve NSS for interpolation reference
+    # NSS CER (referencia, opcional)
     try:
         tmp_cer = df_cer_last[["Código", "Duration", "TIREA", "TEM"]].copy()
         popt_cer, xmin_c, xmax_c = plotter._fit_nss_cached(
@@ -1402,6 +2242,15 @@ def compute_breakeven_table(
 
     settle = _settlement_date_str(plazo)
     rows = []
+
+    # Pre-armar índices para nearest neighbor sobre LECAP
+    lecap_durs = pd.to_numeric(df_lecap_last["Duration"], errors="coerce")
+    lecap_tirs = pd.to_numeric(df_lecap_last["TIREA"], errors="coerce")
+    lecap_codes = df_lecap_last["Código"].astype(str)
+    ok_lecap = np.isfinite(lecap_durs) & np.isfinite(lecap_tirs)
+
+    do_iter = method in ("iter", "both")
+    do_fisher = method in ("fisher", "both")
 
     for _, row in df_cer_last.iterrows():
         code = str(row.get("Código", "")).strip()
@@ -1414,31 +2263,60 @@ def compute_breakeven_table(
 
         bond_obj = _bond_obj(code)
         vencimiento = getattr(bond_obj, "vencimiento", None) if bond_obj else None
-
-        # CER effective maturity: when the CER index is fixed
         cer_eff_date = _cer_effective_maturity_date(bond_obj)
         infla_month = _inflation_month_for_cer_date(cer_eff_date) if cer_eff_date else "—"
 
-        # Interpolate nominal yield from LECAP NSS at this duration
+        # (1) TIR nominal por NSS
         dur_clipped = np.clip(float(dur), float(xmin_l), float(xmax_l))
         nominal_yield_pct = float(plotter.nss_model(np.array([dur_clipped]), *popt_lecap)[0])
-        nominal_yield = nominal_yield_pct / 100.0  # decimal
+        nominal_yield = nominal_yield_pct / 100.0
 
-        # Fisher equation: (1 + nominal) = (1 + real) * (1 + breakeven)
-        # => breakeven = (1 + nominal) / (1 + real) - 1
-        if np.isfinite(nominal_yield) and np.isfinite(tirea_real):
-            be_tirea = (1.0 + nominal_yield) / (1.0 + tirea_real) - 1.0
-            be_tem = (1.0 + be_tirea) ** (30.0 / 360.0) - 1.0
-        else:
-            be_tirea = np.nan
-            be_tem = np.nan
+        # (2) TIR nominal por vecino más cercano (sin NSS)
+        nominal_nearest = np.nan
+        nominal_nearest_code = ""
+        if ok_lecap.any():
+            sub_durs = lecap_durs[ok_lecap]
+            nearest_idx = (sub_durs - float(dur)).abs().idxmin()
+            nominal_nearest = float(lecap_tirs.loc[nearest_idx])
+            nominal_nearest_code = str(lecap_codes.loc[nearest_idx])
 
-        # Days to CER fixing vs maturity
+        # (3) Breakeven Fisher (dos versiones: NSS y nearest)
+        be_tirea_nss = be_tem_nss = np.nan
+        be_tirea_near = be_tem_near = np.nan
+
+        if do_fisher:
+            if np.isfinite(nominal_yield) and np.isfinite(tirea_real):
+                be_tirea_nss = (1.0 + nominal_yield) / (1.0 + tirea_real) - 1.0
+                be_tem_nss = (1.0 + be_tirea_nss) ** (30.0 / 360.0) - 1.0
+            if np.isfinite(nominal_nearest) and np.isfinite(tirea_real):
+                be_tirea_near = (1.0 + nominal_nearest) / (1.0 + tirea_real) - 1.0
+                be_tem_near = (1.0 + be_tirea_near) ** (30.0 / 360.0) - 1.0
+
+        # (4) Breakeven por iteración — sobre bono nominal MÁS CERCANO
+        be_tem_iter = np.nan
+        if do_iter and bond_obj is not None and np.isfinite(nominal_nearest):
+            price_cer_pct = getattr(bond_obj, "precio", np.nan)
+            if not np.isfinite(price_cer_pct):
+                price_cer_pct = float(pd.to_numeric(row.get("Last") or row.get("Close"), errors="coerce"))
+            if np.isfinite(price_cer_pct):
+                try:
+                    _iter_result = _breakeven_iter_tem(
+                        bond_obj_cer_base=bond_obj,
+                        price_cer_pct=price_cer_pct * 100.0 if price_cer_pct < 10 else price_cer_pct,
+                        tir_nominal_anual=float(nominal_nearest),
+                        settle_str=settle,
+                    )
+                    be_tem_iter = float(_iter_result) if _iter_result is not None else np.nan
+                except Exception:
+                    be_tem_iter = np.nan
+
+        # Días a fixing
         today = date.today()
         days_to_mat = (vencimiento - today).days if vencimiento else np.nan
         days_to_cer_fix = (cer_eff_date - today).days if cer_eff_date else np.nan
-        # "Fija desde" = period from CER fixing to maturity where the bond is effectively fixed rate
-        days_fixed = (days_to_mat - days_to_cer_fix) if (np.isfinite(days_to_mat or np.nan) and np.isfinite(days_to_cer_fix or np.nan)) else np.nan
+        days_fixed = (days_to_mat - days_to_cer_fix) if (
+            np.isfinite(days_to_mat) and np.isfinite(days_to_cer_fix)
+        ) else np.nan
 
         rows.append({
             "Código": code,
@@ -1447,9 +2325,12 @@ def compute_breakeven_table(
             "TIREA CER (real)": tirea_real,
             "TEM CER (real)": tem_real if np.isfinite(tem_real) else np.nan,
             "TIREA Nominal (NSS)": nominal_yield,
-            "TEM Nominal (NSS)": (1.0 + nominal_yield) ** (30.0 / 360.0) - 1.0 if np.isfinite(nominal_yield) else np.nan,
-            "BE TIREA": be_tirea,
-            "BE TEM": be_tem,
+            "TIR Nom. (vecino)": nominal_nearest,
+            "Bono ref.": nominal_nearest_code,
+            "BE TIREA (Fisher NSS)": be_tirea_nss,
+            "BE TEM (Fisher NSS)": be_tem_nss,
+            "BE TEM (Fisher vecino)": be_tem_near,
+            "BE TEM (Iter)": be_tem_iter,
             "Fecha CER Fix": cer_eff_date,
             "Días a CER Fix": days_to_cer_fix,
             "Inflación ref.": infla_month,
@@ -1464,7 +2345,7 @@ def compute_breakeven_table(
     return df
 
 
-def style_breakeven(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
+def style_breakeven(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
 
@@ -1478,9 +2359,13 @@ def style_breakeven(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
         "BE TEM": "{:.2%}",
         "Días a CER Fix": "{:.0f}",
         "Días fija": "{:.0f}",
+        "TIR Nom. (vecino)": "{:.2%}",
+        "BE TEM (Fisher NSS)": "{:.2%}",
+        "BE TEM (Fisher vecino)": "{:.2%}",
+        "BE TEM (Iter)": "{:.2%}"
     }
 
-    sty = df.style.format(fmt)
+    sty = df.style.format(fmt, na_rep="—")
 
     # Highlight breakeven columns
     if "BE TEM" in df.columns:
@@ -1723,22 +2608,30 @@ def _render_sidebar_macro():
         fecha = df.index[-1]
         val = row[col] if col in row.index else row.iloc[0]
         return fecha, val
+    
+    def _fecha_str(f) -> str:
+        if f is None:
+            return ""
+        try:
+            return f.strftime("%d/%m/%Y")
+        except Exception:
+            return str(f)
 
     # A3500
     f, v = _last_val("a3500", "tca3500")
     if v is not None:
-        st.sidebar.metric("A3500 (mayorista)", f"{v:,.2f}", delta=f"al {f}")
+        st.sidebar.metric("A3500 (mayorista)", f"{v:,.2f}", delta=f"al {_fecha_str(f)}")
 
     # Badlar
     f, v = _last_val("badlar", "BADLAR")
     if v is not None:
-        st.sidebar.metric("Badlar", f"{v:.4f}%", delta=f"al {f}")
+        st.sidebar.metric("Badlar", f"{v:.4f}%", delta=f"al {_fecha_str(f)}")
 
     # Tamar
     f, v = _last_val("tamar", "TAMAR")
     tamar_5d = tamar_10d = tamar_tem = None
     if v is not None:
-        st.sidebar.metric("Tamar", f"{v:.4f}%", delta=f"al {f}")
+        st.sidebar.metric("Tamar", f"{v:.4f}%", delta=f"al {_fecha_str(f)}")
         df_t = inp.get("tamar")
         if df_t is not None and len(df_t) >= 5:
             tamar_5d = df_t.tail(5)["TAMAR"].mean()
@@ -1753,7 +2646,7 @@ def _render_sidebar_macro():
     # CER
     f, v = _last_val("CER", "CER")
     if v is not None:
-        st.sidebar.metric("CER", f"{v:,.5f}", delta=f"al {f}")
+        st.sidebar.metric("CER", f"{v:,.5f}", delta=f"al {_fecha_str(f)}")
 
     # Inflación MOM — último dato observado (no proyectado)
     df_inflam = inp.get("inflamom")
@@ -1772,7 +2665,7 @@ def _render_sidebar_macro():
     # UVA
     f, v = _last_val("UVA", "UVA")
     if v is not None:
-        st.sidebar.metric("UVA", f"{v:,.2f}", delta=f"al {f}")
+        st.sidebar.metric("UVA", f"{v:,.2f}", delta=f"al {_fecha_str(f)}")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1917,7 +2810,7 @@ def _find_curve_for_bond(code: str) -> Optional[str]:
 # Inflation projection → CER recalculation helpers
 # ──────────────────────────────────────────────────────────────────────
 
-def _recalculate_cer_proyectado(new_proy: dict, idx_module=None):
+def _recalculate_cer_proyectado(new_proy: dict, idx_module=None, max_proj_date=None):
     """Recalculate CER proyectado from scratch using a custom inflation vector
     and inject it into rentafija.inputs so ALL tabs use the new CER.
 
@@ -1926,6 +2819,12 @@ def _recalculate_cer_proyectado(new_proy: dict, idx_module=None):
     'cer_proyectado', 'inflamom', and 'uva_proyectado' entries in
     rentafija.inputs — which is the global dict that every bond object
     reads when it calls generate_cashflows() with ajuste='CER PROYECTADO'.
+
+    Parámetros:
+      max_proj_date: si se provee (date), trunca la proyección a esa fecha
+        + 1 mes (suficiente para bonos con fix antes de esa fecha).
+        Acelera significativamente el bootstrap porque calcular_CER_diario_proyectado
+        es un loop Python sobre días y proyectar 5 años vs 6 meses es ~10x más lento.
     """
     if idx_module is None:
         import indices as idx_module
@@ -1960,6 +2859,11 @@ def _recalculate_cer_proyectado(new_proy: dict, idx_module=None):
         df_inflamom_new = proy_inf_df.copy()
     df_inflamom_new.sort_index(inplace=True)
 
+    # Truncar el horizonte si nos pidieron acelerar (bootstrap por bono)
+    if max_proj_date is not None:
+        cutoff = max_proj_date + relativedelta(months=1)
+        df_inflamom_new = df_inflamom_new[df_inflamom_new.index <= cutoff]
+
     # Recalculate daily CER
     cer_inicial = combined_df_cer["CER"].iloc[-1]
     fecha_inicial_cer = combined_df_cer.index[-1]
@@ -1979,8 +2883,10 @@ def _recalculate_cer_proyectado(new_proy: dict, idx_module=None):
     uva_completo_new.columns = ["UVA"]
     rentafija.inputs["uva_proyectado"] = uva_completo_new
 
-    # Also update the module-level dict so future calls to indices.main()
-    # would use the new projection (though we bypass main() here)
+    # Mutación controlada del dict del módulo. compute_inflation_bootstrap
+    # y _breakeven_iter_tem hacen backup/restore en finally, pero si algún caller
+    # sólo quiere aplicar una proyección definitiva (ej: Aplicar curva implícita),
+    # este write queda como el nuevo default.
     idx_module.proyeccion_inflacion_mensual = new_proy
 
     return True
@@ -2056,12 +2962,65 @@ def main():
         st.warning("Ingresá usuario y password para conectarte a la API.")
         st.stop()
 
+    # ── MARQUESINAS (News + Ticker) ──
+    OMSnews.start_news_background(interval=120)
+
+    session = get_session(username, password)
+
+    # Curvas para selección parametrizable por duration
+    _ticker_curve_tables = {}
+    for _ck in ("cer", "lecap"):
+        try:
+            _ticker_curve_tables[_ck] = load_curve_last_table(username, password, _ck, plazo)
+        except Exception:
+            pass
+
+    # Armar lista: parametrizables primero, fijos después
+    _ticker_assets = OMSticker.build_parametric_symbols(_ticker_curve_tables, plazo) + list(OMSticker.FIXED_ASSETS)
+
+    OMSticker.start_ticker_background(session, _ticker_assets, interval=15)
+
+    _is_dark = st.session_state.get("bbg_theme", False)
+
+    @st.fragment(run_every=15)
+    def _render_bars():
+        ticker_data = OMSticker.get_ticker_data(session=session, assets=_ticker_assets)
+        
+        # ── A3500: inyectar desde indices (MAE waterfall) vs BCRA ayer ──
+        try:
+            fx_hoy = get_fx_hoy(session=session)
+            df_a3500 = rentafija.inputs.get("a3500")
+            fx_ayer = float(df_a3500.iloc[-2]["tca3500"]) if df_a3500 is not None and len(df_a3500) >= 2 else fx_hoy
+            fx_var = (fx_hoy / fx_ayer - 1.0) if fx_ayer > 0 else 0.0
+            ticker_data.append(OMSticker.TickerData(
+                label="A3500", last=fx_hoy, close=fx_ayer,
+                variation=fx_var, is_tna=False,
+            ))
+        except Exception:
+            pass
+
+        if ticker_data:
+            st.markdown(
+                OMSticker.ticker_marquee_html(ticker_data, speed=35, dark=_is_dark),
+                unsafe_allow_html=True,
+            )
+
+        news = OMSnews.get_news(max_items=20)
+        if news:
+            st.markdown(
+                OMSnews.news_marquee_html(news, speed=120, dark=_is_dark),
+                unsafe_allow_html=True,
+            )
+
+    _render_bars()
+
+
     curves = build_curve_codes()
     curve_labels = {c.key: c.label for c in CURVES}
 
     # Navegación: pestañas
-    tab_curvas, tab_mercado, tab_fwds, tab_graficos, tab_futuros, tab_tr, tab_yas, tab_comp, tab_breakeven = st.tabs(
-        ["Curvas", "Mercado", "Forwards", "Gráficos", "Futuros", "Total Return", "Análisis Yields", "Comparador Yields", "Breakeven Inflación"]
+    tab_curvas, tab_mercado, tab_cauciones, tab_fwds, tab_graficos, tab_futuros, tab_tr, tab_yas, tab_comp, tab_breakeven, tab_credito, tab_historico = st.tabs(
+        ["Curvas", "Mercado", "Cauciones", "Forwards", "Gráficos", "Futuros", "Total Return", "Análisis Yields", "Comparador Yields", "Breakeven Inflación", "Crédito Corp.", "Histórico"]
     )
 
     # ─────────────────────────
@@ -2072,8 +3031,13 @@ def main():
 
         @st.fragment(run_every=refresh_interval)
         def _curvas_live():
-            # Invalidar cache para forzar re-fetch
-            st.caption(f"🔴 LIVE  |  Actualizado: {datetime.now().strftime('%H:%M:%S')}  |  Plazo: {plazo}" if auto_refresh else f"Actualizado: {datetime.now().strftime('%H:%M:%S')}  |  Plazo: {plazo}")
+            # Refrescar FX A3500 en cada ciclo live (>>> PATCH FX 04/2026)
+            invalidate_fx_cache()
+            refresh_a3500_in_rentafija(session=get_session(username, password))
+
+            st.caption(market_status_caption(plazo, auto_refresh=auto_refresh))
+            if not is_market_open():
+                st.info("⚪ Mercado cerrado — TIREA / TNA / Duration se calculan sobre el **Close** del último cierre. Bid/Offer TIREA usan sus precios si existen.")
 
             for c in CURVES:
                 if c.key not in curves:
@@ -2110,7 +3074,13 @@ def main():
 
         @st.fragment(run_every=refresh_interval)
         def _mercado_live():
-            st.caption(f"🔴 LIVE  |  Actualizado: {datetime.now().strftime('%H:%M:%S')}  |  Plazo: {plazo}" if auto_refresh else f"Actualizado: {datetime.now().strftime('%H:%M:%S')}  |  Plazo: {plazo}")
+            # Refrescar FX A3500 en cada ciclo live (>>> PATCH FX 04/2026)
+            invalidate_fx_cache()
+            refresh_a3500_in_rentafija(session=get_session(username, password))
+
+            st.caption(market_status_caption(plazo, auto_refresh=auto_refresh))
+            if not is_market_open():
+                st.info("⚪ Mercado cerrado — métricas calculadas sobre **Close** del último cierre. Bid/Offer TIREA usan sus precios si hay book.")
             dfm = load_curve_market_table(username, password, curve_key_mkt, plazo)
             if dfm is None or dfm.empty:
                 st.info("Sin datos (mercado cerrado o sin respuesta de marketdata).")
@@ -2118,6 +3088,66 @@ def main():
                 st.dataframe(style_mercado(dfm), width="stretch", height=680)
 
         _mercado_live()
+    
+    # ─────────────────────────
+    # Cauciones
+    # ─────────────────────────
+    with tab_cauciones:
+        st.subheader("Monitor de Cauciones — BYMA")
+        st.caption("Tasas TNA por plazo. Datos en tiempo real. Sin cálculo de TIR (se negocia directo por TNA).")
+
+        col_cfg1, col_cfg2 = st.columns([1, 1])
+        with col_cfg1:
+            caucion_plazos_mode = st.radio(
+                "Plazos",
+                options=["Principales (1-7, 14, 21, 28, 35, 60, 90, 120)", "Todos (1 a 30)"],
+                horizontal=True,
+                key="caucion_plazos_mode",
+            )
+        with col_cfg2:
+            caucion_mostrar_usd = st.toggle("Mostrar Dólares", value=False, key="caucion_usd")
+
+        if caucion_plazos_mode.startswith("Todos"):
+            plazos_cauc = list(range(1, 31))
+        else:
+            plazos_cauc = None  # usa default del módulo (principales)
+
+        @st.fragment(run_every=refresh_interval)
+        def _cauciones_live():
+            ts = datetime.now().strftime("%H:%M:%S")
+            is_open = is_market_open()
+            dot = "🔴 LIVE" if is_open else "⚪ CERRADO"
+            prefix = f"{dot}  |  " if (auto_refresh or not is_open) else ""
+            st.caption(f"{prefix}Actualizado: {ts}")
+
+            session = get_session(username, password)
+
+            # ── Pesos ──
+            st.markdown("### Cauciones en Pesos (ARS)")
+            df_pesos = OMScauciones.fetch_cauciones(session, moneda="PESOS", plazos=plazos_cauc)
+            if df_pesos is None or df_pesos.empty:
+                st.info("Sin datos de cauciones en pesos (mercado cerrado o sin respuesta).")
+            else:
+                st.dataframe(
+                    OMScauciones.style_cauciones(df_pesos),
+                    width="stretch",
+                    height=min(520, 40 + 35 * len(df_pesos)),
+                )
+
+            # ── Dólares (toggle) ──
+            if caucion_mostrar_usd:
+                st.markdown("### Cauciones en Dólares (USD)")
+                df_usd = OMScauciones.fetch_cauciones(session, moneda="DOLAR", plazos=plazos_cauc)
+                if df_usd is None or df_usd.empty:
+                    st.info("Sin datos de cauciones en dólares (poca liquidez o mercado cerrado).")
+                else:
+                    st.dataframe(
+                        OMScauciones.style_cauciones(df_usd),
+                        width="stretch",
+                        height=min(520, 40 + 35 * len(df_usd)),
+                    )
+
+        _cauciones_live()
 
     # ─────────────────────────
     # Forwards
@@ -2125,7 +3155,8 @@ def main():
     with tab_fwds:
         st.subheader("Forwards implícitos (TIR) — tiempo real")
         st.caption("Matriz aproximada: usa TIR como spot (no bootstrap de curva de descuento).")
-
+        if not is_market_open():
+            st.info("⚪ Mercado cerrado — forwards calculados sobre TIREA derivado del Close.")
         col1, col2 = st.columns(2)
 
         with col1:
@@ -2146,11 +3177,160 @@ def main():
             else:
                 st.dataframe(style_forwards(fwd_lec), width="stretch", height=520)
 
+        # ── Forwards interactivos (what-if por precio editable) ──
+        st.markdown("---")
+        st.markdown("### Forwards interactivos — editá precios y recalculá")
+        st.caption(
+            "Modificá el **Precio** de cualquier instrumento en la tabla izquierda. "
+            "Se recalculan **TIR** y **Duration** automáticamente, y la matriz de forwards "
+            "de la derecha se actualiza con los nuevos valores."
+        )
+
+        wi_curve_key = st.radio(
+            "Curva para what-if",
+            options=["cer", "lecap"],
+            format_func=lambda k: {"cer": "CER", "lecap": "LECAP / Tasa fija"}.get(k, k),
+            horizontal=True,
+            key="wi_fwd_curve",
+        )
+
+        df_wi_base = load_curve_last_table(username, password, wi_curve_key, plazo)
+
+        if df_wi_base is None or df_wi_base.empty:
+            st.info(f"Sin datos para la curva {wi_curve_key}.")
+        else:
+            # Precio base: Last si hay, si no Close
+            px_base = _effective_price_series(df_wi_base, last_col="Last", close_col="Close")
+
+            # Construir tabla editable
+            wi_editor_df = pd.DataFrame({
+                "Código": df_wi_base["Código"].astype(str).values,
+                "Precio": pd.to_numeric(px_base, errors="coerce").astype("float64").values,
+            })
+
+            # Session state: persistir ediciones por curva
+            wi_state_key = f"wi_fwd_prices::{wi_curve_key}::{plazo}"
+
+            # Si el usuario ya editó, usamos esos valores como base; si no, los del mercado
+            if wi_state_key in st.session_state:
+                prev = st.session_state[wi_state_key]
+                # Merge: tomar precios custom donde el código matchea
+                wi_editor_df["Precio"] = wi_editor_df["Código"].map(
+                    lambda c: prev.get(c, np.nan)
+                ).fillna(wi_editor_df["Precio"])
+
+            col_edit, col_mat = st.columns([1, 2])
+
+            with col_edit:
+                st.markdown("#### Precios (editables)")
+                wi_edited = st.data_editor(
+                    wi_editor_df,
+                    width="stretch",
+                    height=520,
+                    num_rows="fixed",
+                    column_config={
+                        "Código": st.column_config.TextColumn("Código", disabled=True),
+                        "Precio": st.column_config.NumberColumn(
+                            "Precio",
+                            format="%.4f",
+                            step=0.01,
+                            min_value=0.0,
+                        ),
+                    },
+                    key=f"wi_fwd_editor::{wi_curve_key}::{plazo}",
+                )
+
+                # Persist user edits for this curve/plazo combo
+                st.session_state[wi_state_key] = dict(
+                    zip(wi_edited["Código"].astype(str), wi_edited["Precio"].astype(float))
+                )
+
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("↩️ Restaurar precios de mercado", key=f"wi_reset::{wi_curve_key}"):
+                        if wi_state_key in st.session_state:
+                            del st.session_state[wi_state_key]
+                        st.rerun()
+
+            # Recalcular TIR y Duration con los precios editados
+            bond_type_wi = next((c.bond_type for c in CURVES if c.key == wi_curve_key), "lecap")
+            settle_wi = _settlement_date_str(plazo)
+
+            codes_wi = wi_edited["Código"].astype(str).to_numpy()
+            prices_wi = pd.to_numeric(wi_edited["Precio"], errors="coerce").to_numpy(dtype="float64")
+
+            # Usa el pipeline paralelo existente → TIREA, TNA, TEM, Paridad, Duration
+            mdf_wi = _parallel_metrics(codes_wi, prices_wi, bond_type_wi, settle_wi)
+
+            # Armar DataFrame con Código + Precio + TIREA + Duration (para display + forwards)
+            wi_full = pd.DataFrame({
+                "Código": codes_wi,
+                "Precio": prices_wi,
+                "TIREA": mdf_wi["TIREA"].values,
+                "Duration": mdf_wi["Duration"].values,
+            })
+
+            with col_edit:
+                # Display: agregar columnas calculadas al editor como preview read-only
+                st.markdown("#### TIR y Duration recalculadas")
+                display_df = wi_full.copy()
+                display_df = _sort_duration_nan_last(display_df, "Duration")
+                st.dataframe(
+                    display_df.style.format({
+                        "Precio": "{:,.4f}",
+                        "TIREA": "{:.2%}",
+                        "Duration": "{:.4f}",
+                    }, na_rep="—"),
+                    width="stretch",
+                    height=360,
+                )
+
+            with col_mat:
+                st.markdown("#### Matriz de Forwards recalculada")
+                # Usar el DataFrame recalculado para generar la matriz
+                wi_full_for_fwd = wi_full.dropna(subset=["TIREA", "Duration"]).copy()
+
+                if len(wi_full_for_fwd) < 2:
+                    st.info("Necesitás al menos 2 instrumentos con TIR/Duration válidos para calcular forwards.")
+                else:
+                    fwd_wi = plotter.matriz_forwards_tir(
+                        wi_full_for_fwd[["Código", "TIREA", "Duration"]].copy(),
+                        y_col="TIREA",
+                        code_col="Código",
+                        comp="ea",
+                        t_col="Duration",
+                    )
+                    if fwd_wi.empty:
+                        st.info("No se pudo calcular la matriz.")
+                    else:
+                        st.dataframe(style_forwards(fwd_wi), width="stretch", height=620)
+
+                        # Comparativa rápida: diff vs matriz original
+                        with st.expander("Δ vs forwards con precios de mercado", expanded=False):
+                            fwd_orig = forwards_matrix(df_wi_base)
+                            if not fwd_orig.empty:
+                                # Alinear índices/columnas
+                                common_idx = fwd_orig.index.intersection(fwd_wi.index)
+                                common_cols = fwd_orig.columns.intersection(fwd_wi.columns)
+                                if len(common_idx) >= 2 and len(common_cols) >= 2:
+                                    diff_df = (fwd_wi.loc[common_idx, common_cols]
+                                               - fwd_orig.loc[common_idx, common_cols])
+                                    st.caption("Diferencia en puntos porcentuales (what-if − mercado).")
+                                    st.dataframe(
+                                        diff_df.style.format("{:+.2f}", na_rep="").background_gradient(
+                                            cmap="RdBu_r", axis=None, vmin=-5, vmax=5,
+                                        ),
+                                        width="stretch",
+                                        height=520,
+                                    )
+
     # ─────────────────────────
     # Gráficos
     # ─────────────────────────
     with tab_graficos:
         st.subheader("Curva — Duration vs Yield (bid / last / offer) + NSS")
+        if not is_market_open():
+            st.info("⚪ Mercado cerrado — los puntos **LAST** del gráfico reflejan TIREA calculado sobre Close del último cierre.")
 
         curve_key = st.selectbox(
             "Curva",
@@ -2258,27 +3438,13 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         FUTUROS_BASE = _generate_futures_symbols(n_months=18)
         FUTUROS_MAY = [f"{s}A" for s in FUTUROS_BASE]
 
-        def get_a3500_spot_fallback(default: float = 1300.0) -> float:
-            import requests
-            api_key = os.environ.get("MAE_API_KEY")
-            if not api_key:
-                return float(default)
-            try:
-                url = "https://openapi.mae.com.ar/openapi/v1/marketdata/" + "dolar"
-                headers = {"X-API-Key": api_key}
-                res = requests.get(url, headers=headers, timeout=10)
-                res.raise_for_status()
-                data = res.json()
-                return float(data.get("precio") or data.get("price") or default)
-            except Exception:
-                return float(default)
-
         colS1, colS2 = st.columns([1, 1])
         with colS1:
-            a3500_auto = get_a3500_spot_fallback()
+            # >>> PATCH FX 04/2026: usa get_fx_hoy() con waterfall MAE → BYMA DLR/SPOT → serie
+            a3500_auto = get_fx_hoy(session=get_session(username, password))
             a3500 = st.number_input("A3500 spot (mayorista)", value=float(a3500_auto), step=0.5)
         with colS2:
-            st.caption("Si no hay MAE_API_KEY, usá input manual.")
+            st.caption(fx_status_text())
 
         entries_fut = "LA,CL,SE"
         symbols_all = FUTUROS_BASE + FUTUROS_MAY
@@ -2350,6 +3516,8 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
     # ─────────────────────────
     with tab_tr:
         st.subheader("Total Return real (calcula_total_return)")
+        if not is_market_open():
+            st.info("⚪ Mercado cerrado — la curva **Actual** se arma con TIREA calculada sobre el Close del último cierre.")
 
         curve_key = st.selectbox(
             "Curva",
@@ -2394,7 +3562,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         anchor0 = d_med
                         dflt = _nss_defaults_level_slope_convex(df_last, threshold_factor=2.0, anchor=anchor0, which="TIREA")
                         if dflt is None:
-                            level0 = float(np.nanmedian(df_last["TIREA"]) * 100.0) if "TIREA" in df_last.columns else 40.0
+                            level0 = _safe_median_pct(df_last.get("TIREA"), default=40.0)
                             slope0 = 0.0
                             convex0 = 0.0
                         else:
@@ -2466,7 +3634,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     dmin = float(np.nanmin(durations)) if np.isfinite(durations).any() else 0.5
                     dmax = float(np.nanmax(durations)) if np.isfinite(durations).any() else 2.0
                     dmid = float((dmin + dmax) / 2)
-                    y0 = float(np.nanmedian(df_last["TIREA"]) * 100.0) if "TIREA" in df_last.columns else 40.0
+                    y0 = _safe_median_pct(df_last.get("TIREA"), default=40.0)
 
                     pts_default = pd.DataFrame({"Duration": [dmin, dmid, dmax], "TIREA %": [y0, y0, y0]})
                     pts_editor = st.data_editor(pts_default, num_rows="dynamic", width="stretch")
@@ -2732,14 +3900,54 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         else:
                             st.metric("Val. Residual", f"{vr:.2f}%" if np.isfinite(vr) else "—")
 
+                    # ── Crédito del emisor ──
+                    credit = OMScredit.get_credit_for_bond(yas_code)
+                    if credit:
+                        with st.expander(
+                            f"📊 Crédito emisor: {credit.get('compania', '')} — Score {credit.get('score', '?')}/5",
+                            expanded=False,
+                        ):
+                            cr1, cr2, cr3, cr4, cr5 = st.columns(5)
+                            with cr1:
+                                _sc = credit.get("score")
+                                st.metric("Score", f"{_sc:.1f}" if _sc else "—")
+                            with cr2:
+                                _sv = credit.get("score_solvencia")
+                                st.metric("Solvencia", f"{_sv:.1f}" if _sv else "—")
+                            with cr3:
+                                _sl = credit.get("score_liquidez")
+                                st.metric("Liquidez", f"{_sl:.1f}" if _sl else "—")
+                            with cr4:
+                                st.metric("Sector", credit.get("sector", "—"))
+                            with cr5:
+                                st.metric("Last Q", credit.get("last_q", "—"))
+ 
+                            cr6, cr7, cr8, cr9 = st.columns(4)
+                            with cr6:
+                                _nd = credit.get("net_debt_ebitda")
+                                st.metric("Net Debt/EBITDA", f"{_nd:.2f}x" if _nd is not None else "—")
+                            with cr7:
+                                _ei = credit.get("ebitda_net_interest")
+                                st.metric("EBITDA/Interest", f"{_ei:.1f}x" if _ei is not None else "—")
+                            with cr8:
+                                _cr = credit.get("current_ratio")
+                                st.metric("Current Ratio", f"{_cr:.2f}x" if _cr is not None else "—")
+                            with cr9:
+                                _pp = credit.get("pasivo_pn")
+                                st.metric("Pasivo/PN", f"{_pp:.2f}x" if _pp is not None else "—")
+ 
+                            _com = credit.get("comentario")
+                            if _com:
+                                st.caption(f"💬 {_com}")
+
                     # Ticket completo (DataFrame) — ya calculado arriba
                     with st.expander("Ver ticket completo (DataFrame)", expanded=False):
                         if ticket_df is not None:
                             st.dataframe(ticket_df, width="stretch")
                         else:
                             st.info("No se pudo generar el ticket.")
-
                     # ── Gráfico: punto en la curva ──
+
                     if go is not None and np.isfinite(dur_v) and np.isfinite(tirea):
                         curve_key_yas = _find_curve_for_bond(yas_code)
                         if curve_key_yas:
@@ -2999,6 +4207,126 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     except Exception as e:
                         st.error(f"Error al comparar: {e}")
 
+
+    # ─────────────────────────
+    # Crédito Corporativo
+    # ─────────────────────────
+    with tab_credito:
+        st.subheader("Scoring Crediticio — Corporativos Argentina USD")
+        st.caption(
+            "Score interno (1-5) basado en ratios de solvencia y liquidez. "
+            "Datos del último balance disponible. "
+            "Fuente: equipo de Research RV — Delta Asset Management."
+        )
+ 
+        df_credit = OMScredit.get_all_issuers_df()
+ 
+        if df_credit.empty:
+            st.warning("No se encontró credit_scores.json. Corré export_credit_scores.py.")
+        else:
+            col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
+            with col_f1:
+                sectors = sorted(df_credit["Sector"].dropna().unique())
+                sel_sector = st.multiselect("Sector", options=sectors, default=[], key="cred_sector")
+            with col_f2:
+                score_min = st.slider("Score mínimo", 1.0, 5.0, 1.0, 0.5, key="cred_score_min")
+            with col_f3:
+                solo_con_ons = st.toggle("Solo con ONs cargadas", value=False, key="cred_solo_ons")
+ 
+            df_show = df_credit.copy()
+            if sel_sector:
+                df_show = df_show[df_show["Sector"].isin(sel_sector)]
+            df_show = df_show[pd.to_numeric(df_show["Score"], errors="coerce") >= score_min]
+            if solo_con_ons:
+                df_show = df_show[df_show["ONs cargadas"] > 0]
+ 
+            cols_main = [
+                "Emisor", "Ticker", "Sector", "Score",
+                # Solvencia (sub-scores)
+                "Net Debt/EBITDA", "EBITDA/Interest", "(EBITDA-CAPEX)/Int",
+                "Pasivo/PN", "Solvencia",
+                # Liquidez (sub-scores)
+                "Current Ratio", "Liq. Ratio", "% ST Debt", "Liquidez",
+                # Balance
+                "DFN (USD M)", "EBITDA (USD M)",
+                # Meta
+                "ONs cargadas", "Last Q", "Comentario",
+            ]
+            
+            cols_main = [c for c in cols_main if c in df_show.columns]
+ 
+            st.dataframe(
+                OMScredit.style_credit_table(df_show[cols_main]),
+                width="stretch",
+                height=min(680, 40 + 35 * len(df_show)),
+            )
+ 
+            # Detalle emisor
+            st.markdown("### Detalle emisor")
+            emisor_opts = df_show["Ticker"].tolist()
+            if emisor_opts:
+                sel_emisor = st.selectbox("Emisor", options=emisor_opts, key="cred_emisor_detail")
+                credit_data = OMScredit.get_credit(sel_emisor)
+                if credit_data:
+                    st.markdown(f"**{credit_data.get('compania', '')}** — {credit_data.get('sector', '')}")
+ 
+                    _com = credit_data.get("comentario")
+                    if _com:
+                        st.info(f"💬 {_com}")
+ 
+                    bonds = OMScredit.get_bonds_for_issuer(sel_emisor)
+                    if bonds:
+                        st.markdown(f"**ONs cargadas ({len(bonds)}):** {', '.join(bonds)}")
+ 
+                        # Métricas live de cada ON
+                        bond_rows = []
+                        settle = _settlement_date_str(plazo)
+                        snap = _global_snapshot(username, password, plazo)
+                        if snap is not None and not snap.empty:
+                            for bc in bonds:
+                                # Buscar en snapshot directo o con D (MEP)
+                                bs = snap[snap["Código"] == bc]
+                                if bs.empty:
+                                    bs = snap[snap["Código"] == bc[:-1] + "D"]
+                                if not bs.empty:
+                                    lp = pd.to_numeric(bs.iloc[0].get("last"), errors="coerce")
+                                    if np.isfinite(lp):
+                                        obj = _bond_obj(bc)
+                                        bt = "hdmep"  # default para corp USD
+                                        if obj:
+                                            clas = getattr(obj, "clasificacion", "") or ""
+                                            if "TAMAR" in clas:
+                                                bt = "tamar"
+                                            elif "Tasa Fija" in clas:
+                                                bt = "lecap"
+                                            elif "UVA" in clas:
+                                                bt = "cer"
+                                        m = metrics_for_price(bc, lp, bt, settle)
+                                        bond_rows.append({
+                                            "Código": bc,
+                                            "Last": lp,
+                                            "TIREA": m.get("TIREA", np.nan),
+                                            "TNA": m.get("TNA", np.nan),
+                                            "Duration": m.get("Duration", np.nan),
+                                            "Paridad": m.get("Paridad", np.nan),
+                                        })
+ 
+                        if bond_rows:
+                            df_bonds = pd.DataFrame(bond_rows)
+                            st.dataframe(
+                                df_bonds.style.format({
+                                    "Last": "{:,.4f}", "TIREA": "{:.2%}",
+                                    "TNA": "{:.2%}", "Duration": "{:.4f}",
+                                    "Paridad": "{:.2%}",
+                                }, na_rep="—"),
+                                width="stretch",
+                                height=min(400, 40 + 35 * len(df_bonds)),
+                            )
+                        elif bonds:
+                            st.caption("Sin datos de mercado para estas ONs.")
+                    else:
+                        st.caption("Sin ONs cargadas en especies.py para este emisor.")
+
     # ─────────────────────────
     # Breakeven Inflación
     # ─────────────────────────
@@ -3013,8 +4341,10 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             "Ese CER refleja la inflación MOM del mes *anterior* al de la fijación "
             "(ej: TZXO6 vence 30/10/26, CER fix ~mediados Sep, refleja inflación de Ago)."
         )
-
+        if not is_market_open():
+            st.info("⚪ Mercado cerrado — el breakeven se calcula con TIREA de CER y LECAP sobre Close del último cierre.")
         col_be1, col_be2 = st.columns([1, 1])
+
         with col_be1:
             be_cer_key = st.selectbox(
                 "Curva CER",
@@ -3031,8 +4361,169 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             )
 
         df_cer_be = load_curve_last_table(username, password, be_cer_key, plazo)
+        col_m1, col_m2 = st.columns([1, 2])
+        with col_m1:
+            be_method = st.radio(
+                "Método de cálculo",
+                options=["both", "fisher", "iter"],
+                format_func=lambda k: {
+                    "both": "Ambos (Fisher + Iteración)",
+                    "fisher": "Fisher (rápido)",
+                    "iter": "Iteración (preciso para cortas)",
+                }.get(k, k),
+                horizontal=True,
+                key="be_method",
+            )
+        with col_m2:
+            st.caption(
+                "**Fisher** usa `(1+i_nom)/(1+i_real)−1` — rápido pero "
+                "distorsiona en bonos CER cortos (duration < 0.5). "
+                "**Iteración** resuelve la inflación mensual constante que iguala los flujos "
+                "nominales del bono CER con los del LECAP de misma duration — es el método "
+                "que coincide con PPI/Allaria/Invecq."
+            )
         df_lecap_be = load_curve_last_table(username, password, be_nom_key, plazo)
 
+        # ═══════════════════════════════════════════════════════════
+        # 🔁 Bootstrap de curva de inflación implícita
+        # ═══════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.markdown("### 🔁 Bootstrap de curva de inflación implícita")
+        st.caption(
+            "Bootstrap secuencial: resuelve mes a mes la inflación MOM que iguala TIREA(CER proyectado) "
+            "con la TIR del LECAP vecino. Si varios bonos comparten mes → **promedio ponderado por volumen**. "
+            "Meses sin ancla → **interpolación lineal**. Bonos con CER fix a menos de "
+            f"**{BOOTSTRAP_MIN_BDAYS_TO_CER_FIX} días hábiles** → Fisher directo (el mes ya está prácticamente fijado)."
+        )
+
+        col_bs1, col_bs2, col_bs3 = st.columns([1, 1, 2])
+        with col_bs1:
+            run_bootstrap = st.button(
+                "🔁 Ejecutar bootstrap",
+                type="primary",
+                key="be_run_bootstrap",
+            )
+        with col_bs2:
+            if "_bootstrap_result" in st.session_state:
+                if st.button("🧹 Limpiar resultado", key="be_clear_bootstrap"):
+                    del st.session_state["_bootstrap_result"]
+                    st.rerun()
+
+        if run_bootstrap:
+            if df_cer_be is None or df_cer_be.empty or df_lecap_be is None or df_lecap_be.empty:
+                st.error("Curvas CER o LECAP vacías — no se puede ejecutar.")
+            else:
+                with st.spinner("Ejecutando bootstrap (puede tardar 10-20 segundos)…"):
+                    import indices as _idx_bs
+                    result = compute_inflation_bootstrap(df_cer_be, df_lecap_be, plazo, _idx_bs)
+                    st.session_state["_bootstrap_result"] = result
+
+        bs_result = st.session_state.get("_bootstrap_result")
+        if bs_result:
+            infla_impl = bs_result.get("inflacion_implicita", {})
+            per_bond = bs_result.get("per_bond", [])
+            warns = bs_result.get("warnings", [])
+
+            if warns:
+                with st.expander(f"⚠️ {len(warns)} avisos del bootstrap", expanded=False):
+                    for w in warns:
+                        st.caption(f"• {w}")
+
+            # Tabla de detalle por bono
+            if per_bond:
+                df_pb = pd.DataFrame(per_bond)
+                df_pb = df_pb.sort_values("Duration", ascending=True, na_position="last").reset_index(drop=True)
+                st.markdown("#### Resolución por bono")
+                st.dataframe(
+                    df_pb.style.format({
+                        "Duration": "{:.4f}",
+                        "TIR target": "{:.2%}",
+                        "TIREA real": "{:.2%}",
+                        "BE TEM": "{:.2%}",
+                        "bdays_to_fix": "{:.0f}",
+                    }, na_rep="—"),
+                    width="stretch",
+                    height=min(480, 40 + 35 * len(df_pb)),
+                )
+
+            # Curva de inflación implícita
+            if infla_impl:
+                # Ordenar por fecha
+                rows_ci = []
+                for k, v in infla_impl.items():
+                    try:
+                        d = pd.to_datetime(k, format="%b-%y")
+                        rows_ci.append({"Mes": k, "_orden": d, "Inflación MOM (%)": v * 100.0})
+                    except Exception:
+                        pass
+                df_ci = pd.DataFrame(rows_ci).sort_values("_orden").drop(columns=["_orden"]).reset_index(drop=True)
+
+                st.markdown("#### Curva de inflación implícita (MOM)")
+                col_ci_t, col_ci_g = st.columns([1, 2])
+                with col_ci_t:
+                    st.dataframe(
+                        df_ci.style.format({"Inflación MOM (%)": "{:.2f}%"}),
+                        width="stretch",
+                        height=min(480, 40 + 35 * len(df_ci)),
+                    )
+                with col_ci_g:
+                    if go is not None and not df_ci.empty:
+                        fig_ci = go.Figure()
+                        fig_ci.add_trace(go.Scatter(
+                            x=df_ci["Mes"],
+                            y=df_ci["Inflación MOM (%)"],
+                            mode="lines+markers+text",
+                            name="Inflación implícita",
+                            text=[f"{v:.1f}%" for v in df_ci["Inflación MOM (%)"]],
+                            textposition="top center",
+                            textfont=dict(size=9),
+                            line=dict(color="#2980b9", width=2),
+                            marker=dict(size=8, color="#2980b9"),
+                            hovertemplate="%{x}<br>%{y:.2f}%<extra></extra>",
+                        ))
+
+                        # Línea de inflación observada (último dato BCRA) como referencia
+                        inp_b = rentafija.inputs
+                        df_infl_obs = inp_b.get("inflamom")
+                        if df_infl_obs is not None and not df_infl_obs.empty and "inflacionmom" in df_infl_obs.columns:
+                            hoy = date.today()
+                            primer_dia_mes = hoy.replace(day=1)
+                            obs_df = df_infl_obs[df_infl_obs.index < primer_dia_mes]
+                            if not obs_df.empty:
+                                v_obs = float(obs_df.iloc[-1]["inflacionmom"])
+                                fig_ci.add_hline(
+                                    y=v_obs, line_dash="dash", line_color="#ff9800",
+                                    annotation_text=f"Última MOM observada: {v_obs:.1f}%",
+                                    annotation_position="top left",
+                                )
+
+                        fig_ci.update_layout(
+                            title="Inflación MOM implícita por mes",
+                            xaxis_title="Mes",
+                            yaxis_title="Inflación MOM (%)",
+                            height=420,
+                            hovermode="x unified",
+                            margin=dict(l=10, r=10, t=50, b=10),
+                        )
+                        _st_plotly(fig_ci)
+
+                # Botón para aplicar el bootstrap como proyección de CER
+                st.markdown("---")
+                if st.button(
+                    "📥 Aplicar curva implícita como proyección de CER",
+                    key="be_apply_bootstrap",
+                    help="Actualiza rentafija.inputs['cer_proyectado'] con esta curva. "
+                         "Afecta a TODAS las tabs (Curvas CER Proy, TR, etc.).",
+                ):
+                    new_proy = {k: float(v * 100.0) for k, v in infla_impl.items() if np.isfinite(v)}
+                    st.session_state["_custom_inflation_proy"] = new_proy
+                    import indices as _idx_apply
+                    _recalculate_cer_proyectado(new_proy, _idx_apply)
+                    st.cache_data.clear()
+                    st.success(f"Aplicada proyección de {len(new_proy)} meses. Refrescando…")
+                    st.rerun()
+
+        st.markdown("---")
         # ── Proyección de inflación editable ──
         with st.expander("📊 Editar proyección de inflación MOM (%)", expanded=False):
             st.caption(
@@ -3123,7 +4614,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         elif df_lecap_be is None or df_lecap_be.empty:
             st.info("Sin datos de curva LECAP/Tasa Fija (mercado cerrado o sin marketdata).")
         else:
-            be_df = compute_breakeven_table(df_cer_be, df_lecap_be, plazo)
+            be_df = compute_breakeven_table(df_cer_be, df_lecap_be, plazo, method=be_method)
             if be_df.empty:
                 st.warning("No se pudo calcular breakeven (pocos datos o NSS no ajustó).")
             else:
@@ -3131,10 +4622,13 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 cols_show_be = [
                     "Código", "Vencimiento", "Duration",
                     "TIREA CER (real)", "TEM CER (real)",
-                    "TIREA Nominal (NSS)", "TEM Nominal (NSS)",
-                    "BE TIREA", "BE TEM",
+                    "TIR Nom. (vecino)", "Bono ref.",
+                    "TIREA Nominal (NSS)",
+                    "BE TEM (Fisher NSS)",
+                    "BE TEM (Fisher vecino)",
+                    "BE TEM (Iter)",
                     "Fecha CER Fix", "Días a CER Fix", "Inflación ref.", "Días fija",
-                ]
+                    ]
                 cols_show_be = [c for c in cols_show_be if c in be_df.columns]
                 be_show = be_df[cols_show_be].copy()
 
@@ -3171,17 +4665,34 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         marker=dict(size=7, color="#3498db", symbol="diamond"),
                     ))
 
-                    # Breakeven
-                    fig_be.add_trace(go.Scatter(
-                        x=be_df["Duration"],
-                        y=_yield_pct_points(be_df["BE TIREA"]),
-                        mode="markers+lines",
-                        name="Breakeven Inflación",
-                        text=be_df["Código"],
-                        hovertemplate="%{text}<br>Dur=%{x:.3f}<br>BE=%{y:.2f}%<extra></extra>",
-                        marker=dict(size=10, color="#e74c3c"),
-                        line=dict(dash="dot", width=2, color="#e74c3c"),
-                    ))
+                    # Breakeven — elegir columna según método seleccionado.
+                    # En "both" priorizamos Iter (más preciso), sino Fisher NSS.
+                    be_tirea_col_candidates = []
+                    if be_method in ("iter", "both"):
+                        if "BE TEM (Iter)" in be_df.columns:
+                            _iter_tem = pd.to_numeric(be_df["BE TEM (Iter)"], errors="coerce")
+                            _iter_tirea = (1.0 + _iter_tem) ** 12.0 - 1.0
+                            be_df = be_df.assign(**{"BE TIREA (Iter)": _iter_tirea})
+                            be_tirea_col_candidates.append(
+                                ("BE TIREA (Iter)", "BE Inflación (Iter)", "#8e44ad")
+                            )
+                    if be_method in ("fisher", "both"):
+                        if "BE TIREA (Fisher NSS)" in be_df.columns:
+                            be_tirea_col_candidates.append(
+                                ("BE TIREA (Fisher NSS)", "BE Inflación (Fisher NSS)", "#2980b9")
+                            )
+
+                    for col_name, trace_name, color in be_tirea_col_candidates:
+                        fig_be.add_trace(go.Scatter(
+                            x=be_df["Duration"],
+                            y=_yield_pct_points(be_df[col_name]),
+                            mode="markers+lines",
+                            name=trace_name,
+                            text=be_df["Código"],
+                            hovertemplate="%{text}<br>Dur=%{x:.3f}<br>BE=%{y:.2f}%<extra></extra>",
+                            marker=dict(size=10, color=color),
+                            line=dict(dash="dot", width=2, color=color),
+                        ))
 
                     # NSS fits as reference lines
                     try:
@@ -3227,21 +4738,36 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     )
                     _st_plotly(fig_be)
 
-                # Breakeven TEM chart (more intuitive for local market)
+                # Breakeven TEM chart (más intuitivo para el mercado local)
                 if go is not None:
                     fig_be_tem = go.Figure()
 
-                    be_tem_pct = _yield_pct_points(be_df["BE TEM"])
-                    fig_be_tem.add_trace(go.Bar(
-                        x=be_df["Código"],
-                        y=be_tem_pct,
-                        name="BE TEM",
-                        marker_color="#e74c3c",
-                        text=[f"{v:.2f}%" for v in be_tem_pct],
-                        textposition="outside",
-                        textfont=dict(size=11),
-                        hovertemplate="%{x}<br>BE TEM=%{y:.2f}%<extra></extra>",
-                    ))
+                    # Columnas a graficar según método
+                    be_tem_traces = []
+                    if be_method in ("iter", "both") and "BE TEM (Iter)" in be_df.columns:
+                        be_tem_traces.append(("BE TEM (Iter)", "BE TEM (Iter)", "#8e44ad"))
+                    if be_method in ("fisher", "both"):
+                        if "BE TEM (Fisher vecino)" in be_df.columns:
+                            be_tem_traces.append(
+                                ("BE TEM (Fisher vecino)", "BE TEM (Fisher vecino)", "#2980b9")
+                            )
+                        if "BE TEM (Fisher NSS)" in be_df.columns and be_method == "fisher":
+                            be_tem_traces.append(
+                                ("BE TEM (Fisher NSS)", "BE TEM (Fisher NSS)", "#3498db")
+                            )
+
+                    for col_name, trace_name, color in be_tem_traces:
+                        _pct = _yield_pct_points(be_df[col_name])
+                        fig_be_tem.add_trace(go.Bar(
+                            x=be_df["Código"],
+                            y=_pct,
+                            name=trace_name,
+                            marker_color=color,
+                            text=[(f"{v:.2f}%" if pd.notna(v) else "") for v in _pct],
+                            textposition="outside",
+                            textfont=dict(size=11),
+                            hovertemplate=f"%{{x}}<br>{trace_name}=%{{y:.2f}}%<extra></extra>",
+                        ))
 
                     # Add inflación observada reference line
                     inp = rentafija.inputs
@@ -3296,6 +4822,617 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 - **Días fija**: Cantidad de días en los que el bono CER es "tasa fija" (post CER fix)
 """)
 
+        # ═══════════════════════════════════════════════════════════
+        # 🔍 DEBUG: inspección paso a paso del método Iter
+        # ═══════════════════════════════════════════════════════════
+        with st.expander("🔍 DEBUG — inspeccionar método Iter para un bono", expanded=False):
+            st.caption(
+                "Probá distintos valores de inflación mensual y fijate qué TIREA "
+                "devuelve el bono `j` (CER proyectado) a su precio de mercado. "
+                "El breakeven es la inflación donde esa TIREA iguala la del LECAP vecino."
+            )
+
+            debug_opts = df_cer_be["Código"].tolist() if (df_cer_be is not None and not df_cer_be.empty) else []
+            if debug_opts:
+                dbg_code = st.selectbox(
+                    "Bono CER (base, sin `j`)",
+                    options=debug_opts,
+                    key="be_debug_code",
+                )
+                if st.button("Ejecutar debug", key="be_debug_run"):
+                    obj_base = _bond_obj(dbg_code)
+                    j_code = f"{dbg_code}j"
+                    obj_j = globals().get(j_code)
+
+                    st.write(f"**Código base:** `{dbg_code}` → `_bond_obj()` devolvió: `{obj_base is not None}`")
+                    st.write(f"**Buscando `{j_code}` en globals:** {'✅ ENCONTRADO' if obj_j is not None else '❌ NO ENCONTRADO'}")
+
+                    if obj_j is None:
+                        # Listar globals que terminan en 'j' para ver qué nombres hay
+                        j_candidates = [k for k in globals().keys()
+                                        if k.lower().endswith("j") and len(k) <= 10
+                                        and k[0].isupper()][:30]
+                        st.error(
+                            f"El bono `{j_code}` no existe como variable global. "
+                            f"Sin esto, el método iter no puede funcionar."
+                        )
+                        st.write(f"**Otros `*j` disponibles en globals:** {j_candidates}")
+                    else:
+                        # Precio de mercado
+                        row_cer = df_cer_be[df_cer_be["Código"] == dbg_code].iloc[0]
+                        px_last = pd.to_numeric(row_cer.get("Last"), errors="coerce")
+                        px_close = pd.to_numeric(row_cer.get("Close"), errors="coerce")
+                        px = float(px_last if np.isfinite(px_last) else px_close)
+
+                        # Target LECAP
+                        lecap_d = pd.to_numeric(df_lecap_be["Duration"], errors="coerce")
+                        lecap_t = pd.to_numeric(df_lecap_be["TIREA"], errors="coerce")
+                        ok = np.isfinite(lecap_d) & np.isfinite(lecap_t)
+                        dur_cer = float(row_cer.get("Duration"))
+                        near_idx = (lecap_d[ok] - dur_cer).abs().idxmin()
+                        tir_target = float(lecap_t.loc[near_idx])
+                        cod_target = str(df_lecap_be.loc[near_idx, "Código"])
+
+                        st.write(f"**Precio mkt CER:** {px:.4f} | Duration: {dur_cer:.4f}")
+                        st.write(f"**Target LECAP:** `{cod_target}` | TIREA: {tir_target:.4%}")
+
+                        # Probar varios niveles de inflación
+                        import indices as _idx_dbg
+                        settle_dbg = _settlement_date_str(plazo)
+
+                        # Backup
+                        inp_b = rentafija.inputs
+                        bkp_cer = inp_b.get("cer_proyectado")
+                        bkp_uva = inp_b.get("uva_proyectado")
+                        bkp_inf = inp_b.get("inflamom")
+                        bkp_mod_proy = dict(getattr(_idx_dbg, "proyeccion_inflacion_mensual", {}))
+
+                        rows_dbg = []
+                        # Calcular mes de referencia del bono (lo que intentamos resolver)
+                        cer_fix_dbg = _cer_effective_maturity_date(obj_base)
+                        mes_ref_dbg = _inflation_month_for_cer_date(cer_fix_dbg) if cer_fix_dbg else None
+                        # Formato que espera _recalculate_cer_proyectado
+                        mes_ref_key = None
+                        if mes_ref_dbg:
+                            try:
+                                mes_ref_key = pd.to_datetime(mes_ref_dbg, format="%b-%Y").strftime("%b-%y")
+                            except Exception:
+                                mes_ref_key = None
+
+                        st.write(f"**Mes de referencia del bono:** `{mes_ref_dbg}` (key: `{mes_ref_key}`)")
+
+                        # Leer proyección base (la que ya tiene indices.py)
+                        import indices as _idx_dbg2
+                        base_proy = dict(getattr(_idx_dbg2, "proyeccion_inflacion_mensual", {}))
+                        if mes_ref_key:
+                            st.write(f"**Valor actual de proyección en `{mes_ref_key}`:** {base_proy.get(mes_ref_key, 'NO PRESENTE')}%")
+
+                        try:
+                            for i_m in [0.005, 0.015, 0.023, 0.030, 0.050, 0.080, 0.120]:
+                                # Método A: inflación constante (como antes, para comparar)
+                                proy_const = {}
+                                today_d = date.today()
+                                d = today_d.replace(day=1) + relativedelta(months=1)
+                                for _ in range(36):
+                                    proy_const[d.strftime("%b-%y")] = i_m * 100.0
+                                    d = d + relativedelta(months=1)
+                                _recalculate_cer_proyectado(proy_const, _idx_dbg)
+                                try:
+                                    tir_j_const = float(obj_j.calcula_tirea(px / 100.0, settle_dbg))
+                                except Exception:
+                                    tir_j_const = float("nan")
+
+                                # Método B: cambiar SÓLO el mes de referencia del bono
+                                tir_j_ref = float("nan")
+                                if mes_ref_key:
+                                    proy_ref = dict(base_proy)  # copia de la base
+                                    proy_ref[mes_ref_key] = i_m * 100.0
+                                    _recalculate_cer_proyectado(proy_ref, _idx_dbg)
+                                    try:
+                                        tir_j_ref = float(obj_j.calcula_tirea(px / 100.0, settle_dbg))
+                                    except Exception:
+                                        tir_j_ref = float("nan")
+
+                                rows_dbg.append({
+                                    "i_TEM probada": f"{i_m:.2%}",
+                                    "TIREA j (const)": f"{tir_j_const:.4%}" if np.isfinite(tir_j_const) else "—",
+                                    "TIREA j (solo mes ref)": f"{tir_j_ref:.4%}" if np.isfinite(tir_j_ref) else "—",
+                                    "Δ mes ref vs target": f"{(tir_j_ref - tir_target):+.4%}" if np.isfinite(tir_j_ref) else "—",
+                                })
+                        finally:
+                            if bkp_cer is not None: rentafija.inputs["cer_proyectado"] = bkp_cer
+                            if bkp_uva is not None: rentafija.inputs["uva_proyectado"] = bkp_uva
+                            if bkp_inf is not None: rentafija.inputs["inflamom"] = bkp_inf
+                            if bkp_mod_proy: _idx_dbg.proyeccion_inflacion_mensual = bkp_mod_proy
+
+                        st.dataframe(pd.DataFrame(rows_dbg), width="stretch")
+                        st.caption(
+                            f"El método Iter busca la `i_TEM` donde **TIREA {j_code} = {tir_target:.4%}**. "
+                            "Si ves que todos los valores de la primera columna son similares (no cambian con i), "
+                            "es que el bono `j` no está respondiendo a la inyección de CER proyectado. "
+                            "Si f(i) nunca cambia de signo en el rango probado, el breakeven está fuera de `[-2%, 15%]`."
+                        )
+
+    # ─────────────────────────
+    # Histórico (series macro + bonos BYMA)
+    # ─────────────────────────
+    with tab_historico:
+        st.subheader("Histórico de tasas, precios y series macro")
+
+        sub_macro, sub_bonos = st.tabs(["📊 Series Macro (BCRA)", "📈 Histórico BYMA (bonos)"])
+
+        # ── Sub-tab: Series Macro ──
+        with sub_macro:
+            st.caption(
+                "Series del BCRA ya cargadas en memoria (A3500, Badlar, Tamar, CER, UVA, Inflación MOM). "
+                "Cero costo de lectura — vienen de `rentafija.inputs`."
+            )
+
+            macro_sources = {
+                "A3500 (mayorista)": ("a3500", "tca3500"),
+                "Badlar": ("badlar", "BADLAR"),
+                "Tamar": ("tamar", "TAMAR"),
+                "CER": ("CER", "CER"),
+                "UVA": ("UVA", "UVA"),
+                "Inflación MOM (%)": ("inflamom", "inflacionmom"),
+            }
+
+            inp = rentafija.inputs
+            available_macro = [k for k, (key, _) in macro_sources.items() if inp.get(key) is not None and not inp[key].empty]
+
+            if not available_macro:
+                st.info("No hay series macro cargadas en `rentafija.inputs`.")
+            else:
+                col_m1, col_m2 = st.columns([2, 1])
+                with col_m1:
+                    macro_sel = st.multiselect(
+                        "Series a visualizar",
+                        options=available_macro,
+                        default=available_macro[:2],
+                        key="macro_series_sel",
+                    )
+                with col_m2:
+                    macro_norm = st.toggle("Normalizar base 100", value=False, key="macro_norm")
+                    macro_range = st.radio(
+                        "Rango",
+                        options=["Todo", "1Y", "6M", "3M", "1M"],
+                        horizontal=True,
+                        key="macro_range",
+                    )
+
+                if macro_sel and go is not None:
+                    fig_macro = go.Figure()
+
+                    # Filtro de rango
+                    today = pd.Timestamp.today()
+                    range_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "Todo": None}
+                    days_back = range_map.get(macro_range)
+                    cutoff = today - pd.Timedelta(days=days_back) if days_back else None
+
+                    stats_rows = []
+                    for label in macro_sel:
+                        key, col = macro_sources[label]
+                        df_m = inp[key].copy()
+                        if col not in df_m.columns:
+                            continue
+                        s = pd.to_numeric(df_m[col], errors="coerce").dropna()
+                        if s.empty:
+                            continue
+                        # Convert index a datetime
+                        s.index = pd.to_datetime(s.index, errors="coerce")
+                        s = s.dropna()
+                        if cutoff is not None:
+                            s = s[s.index >= cutoff]
+                        if s.empty:
+                            continue
+
+                        y_plot = (s / s.iloc[0]) * 100.0 if macro_norm else s
+
+                        fig_macro.add_trace(go.Scatter(
+                            x=s.index, y=y_plot, mode="lines",
+                            name=label,
+                            hovertemplate=f"{label}<br>%{{x|%Y-%m-%d}}<br>%{{y:.4f}}<extra></extra>",
+                        ))
+
+                        stats_rows.append({
+                            "Serie": label,
+                            "Último": float(s.iloc[-1]),
+                            "Fecha último": s.index[-1].date(),
+                            "Mín": float(s.min()),
+                            "Máx": float(s.max()),
+                            "Promedio": float(s.mean()),
+                            "Obs.": int(len(s)),
+                        })
+
+                    y_axis_title = "Base 100" if macro_norm else "Valor"
+                    fig_macro.update_layout(
+                        title=f"Series macro — {macro_range}",
+                        xaxis_title="Fecha",
+                        yaxis_title=y_axis_title,
+                        height=500,
+                        hovermode="x unified",
+                        legend_orientation="h",
+                        legend_yanchor="bottom", legend_y=1.02,
+                        legend_xanchor="left", legend_x=0,
+                        margin=dict(l=10, r=10, t=60, b=10),
+                    )
+                    _st_plotly(fig_macro)
+
+                    if stats_rows:
+                        st.markdown("#### Estadísticas del período")
+                        st.dataframe(
+                            pd.DataFrame(stats_rows).style.format({
+                                "Último": "{:,.4f}",
+                                "Mín": "{:,.4f}",
+                                "Máx": "{:,.4f}",
+                                "Promedio": "{:,.4f}",
+                                "Obs.": "{:,.0f}",
+                            }),
+                            width="stretch",
+                            height=min(300, 40 + 35 * len(stats_rows)),
+                        )
+
+        # ── Sub-tab: Histórico BYMA ──
+        with sub_bonos:
+            df_hist = load_historico_byma()
+
+            if df_hist.empty:
+                st.warning(
+                    "No se pudo cargar el Excel histórico. Verificá que esté accesible en:\n\n"
+                    f"`{os.path.join(os.path.expanduser('~'), _HISTORICO_DEFAULT)}`\n\n"
+                    "Podés definir la variable de entorno `DELTA_HISTORICO_PATH` para apuntar a otra ubicación."
+                )
+            else:
+                last_upd = _hist_last_update(df_hist)
+                st.caption(
+                    f"Última fecha en el histórico: **{last_upd.date() if last_upd else '—'}**  |  "
+                    f"{df_hist['Código'].nunique()} códigos  |  "
+                    f"{df_hist['fecha_hoy'].nunique()} fechas  |  "
+                    f"{len(df_hist):,} observaciones"
+                )
+
+                codigos_hist = _hist_codigos_disponibles(df_hist)
+
+                view_mode = st.radio(
+                    "Vista",
+                    options=["Un bono (precio + TIR)", "Curva completa (evolución histórica)", "Comparador TIR", "Spread entre bonos", "Tabla completa"],
+                    horizontal=True,
+                    key="hist_view_mode",
+                )
+
+                # Rango de fechas común
+                min_date = df_hist["fecha_hoy"].min().date()
+                max_date = df_hist["fecha_hoy"].max().date()
+                col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+                with col_r1:
+                    date_from = st.date_input("Desde", value=max(min_date, (max_date - pd.Timedelta(days=365)).date() if hasattr(max_date - pd.Timedelta(days=365), "date") else min_date), min_value=min_date, max_value=max_date, key="hist_from")
+                with col_r2:
+                    date_to = st.date_input("Hasta", value=max_date, min_value=min_date, max_value=max_date, key="hist_to")
+                with col_r3:
+                    proy_filter = st.radio("Tipo", options=["Todos", "Base", "Proy (j)"], horizontal=True, key="hist_proy_filter")
+
+                # Aplicar filtros comunes
+                mask = (df_hist["fecha_hoy"].dt.date >= date_from) & (df_hist["fecha_hoy"].dt.date <= date_to)
+                if proy_filter == "Base":
+                    mask &= df_hist["Proy"] == 0
+                elif proy_filter == "Proy (j)":
+                    mask &= df_hist["Proy"] == 1
+                df_f = df_hist[mask].copy()
+
+                if df_f.empty:
+                    st.info("No hay datos en el rango/filtro seleccionado.")
+                else:
+                    codigos_f = sorted(df_f["Código"].unique().tolist())
+
+                    # ── Vista 1: Un bono ──
+                    if view_mode.startswith("Un bono"):
+                        code_sel = st.selectbox("Bono", options=codigos_f, key="hist_single_code")
+                        sub = df_f[df_f["Código"] == code_sel].sort_values("fecha_hoy")
+
+                        if sub.empty or go is None:
+                            st.info("Sin datos para este bono en el rango.")
+                        else:
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=sub["fecha_hoy"], y=sub["Last Price"],
+                                mode="lines", name="Precio", yaxis="y",
+                                hovertemplate="%{x|%Y-%m-%d}<br>Px=%{y:,.4f}<extra></extra>",
+                                line=dict(color="#3498db"),
+                            ))
+                            fig.add_trace(go.Scatter(
+                                x=sub["fecha_hoy"], y=pd.to_numeric(sub["TIREA"]) * 100.0,
+                                mode="lines", name="TIREA (%)", yaxis="y2",
+                                hovertemplate="%{x|%Y-%m-%d}<br>TIREA=%{y:.2f}%<extra></extra>",
+                                line=dict(color="#e74c3c"),
+                            ))
+                            fig.update_layout(
+                                title=f"{code_sel} — Precio & TIREA",
+                                xaxis=dict(title="Fecha"),
+                                yaxis=dict(title="Precio", side="left"),
+                                yaxis2=dict(title="TIREA (%)", overlaying="y", side="right"),
+                                height=520,
+                                hovermode="x unified",
+                                legend_orientation="h",
+                                legend_yanchor="bottom", legend_y=1.02,
+                            )
+                            _st_plotly(fig)
+
+                            # Stats
+                            stats = {
+                                "Último precio": f"{sub['Last Price'].iloc[-1]:,.4f}",
+                                "Última TIREA": f"{sub['TIREA'].iloc[-1]:.2%}",
+                                "Última Duration": f"{sub['Duration'].iloc[-1]:.4f}",
+                                "Fecha última obs.": sub["fecha_hoy"].iloc[-1].strftime("%Y-%m-%d"),
+                                "Δ Precio (período)": f"{(sub['Last Price'].iloc[-1] / sub['Last Price'].iloc[0] - 1):.2%}",
+                                "Δ TIREA (bps)": f"{(sub['TIREA'].iloc[-1] - sub['TIREA'].iloc[0]) * 10000:+.0f}",
+                            }
+                            cols_stat = st.columns(len(stats))
+                            for (k, v), c in zip(stats.items(), cols_stat):
+                                c.metric(k, v)
+
+                    # ── Vista 2: Comparador TIR ──
+                    # ── Vista 1b: Curva completa (evolución histórica de todas las TIR) ──
+                    elif view_mode.startswith("Curva completa"):
+                        st.caption(
+                            "Cada línea es la TIREA histórica de un bono de la curva seleccionada. "
+                            "Las líneas horizontales son el promedio y rango histórico del conjunto."
+                        )
+
+                        # Selector de "curva": usamos los mismos grupos de la app (CER/LECAP/TAMAR/etc.)
+                        # pero los resolvemos al universo de códigos del histórico.
+                        curve_groups = build_curve_codes()
+                        curve_opts_hist = []
+                        for curve_def in CURVES:
+                            codes_in_curve = set(curve_groups.get(curve_def.key, []))
+                            # Códigos del histórico que pertenecen a esa curva (sin sufijo j/v)
+                            hist_base_codes = {_md_code_from_calc_code(c) for c in codigos_f}
+                            calc_base_codes = {_md_code_from_calc_code(c) for c in codes_in_curve}
+                            overlap = hist_base_codes & calc_base_codes
+                            if overlap:
+                                curve_opts_hist.append(curve_def.key)
+
+                        if not curve_opts_hist:
+                            st.info("No hay curvas con datos históricos en este rango.")
+                        else:
+                            col_cv1, col_cv2, col_cv3 = st.columns([1, 1, 1])
+                            with col_cv1:
+                                hist_curve_sel = st.selectbox(
+                                    "Curva",
+                                    options=curve_opts_hist,
+                                    format_func=lambda k: curve_labels.get(k, k),
+                                    key="hist_curve_sel",
+                                )
+                            with col_cv2:
+                                hist_y_metric = st.selectbox(
+                                    "Métrica",
+                                    options=["TIREA", "TEM", "TNA", "Paridad"],
+                                    index=0,
+                                    key="hist_curve_metric",
+                                )
+                            with col_cv3:
+                                hist_show_bands = st.toggle(
+                                    "Mostrar promedio y rango",
+                                    value=True,
+                                    key="hist_curve_bands",
+                                )
+
+                            # Códigos del histórico que pertenecen a esta curva
+                            curve_codes_raw = curve_groups.get(hist_curve_sel, [])
+                            curve_base_codes = {_md_code_from_calc_code(c) for c in curve_codes_raw}
+
+                            # Respetar el filtro Proy del usuario:
+                            # - si eligió "Base" → solo Proy=0
+                            # - si eligió "Proy (j)" → solo Proy=1
+                            # - si "Todos" → buscamos por base_code (stripping j/v) y mostramos ambos
+                            df_curve_hist = df_f[
+                                df_f["Código"].map(_md_code_from_calc_code).isin(curve_base_codes)
+                            ].copy()
+
+                            if df_curve_hist.empty or go is None:
+                                st.info("Sin datos históricos para esta curva en el rango seleccionado.")
+                            else:
+                                fig = go.Figure()
+
+                                codes_in_hist = sorted(df_curve_hist["Código"].unique())
+                                scale = 100.0 if hist_y_metric in ("TIREA", "TEM", "TNA", "Paridad") else 1.0
+
+                                # Un trace por código
+                                for c in codes_in_hist:
+                                    sub = df_curve_hist[df_curve_hist["Código"] == c].sort_values("fecha_hoy")
+                                    if sub.empty or hist_y_metric not in sub.columns:
+                                        continue
+                                    y = pd.to_numeric(sub[hist_y_metric], errors="coerce") * scale
+                                    fig.add_trace(go.Scatter(
+                                        x=sub["fecha_hoy"], y=y,
+                                        mode="lines", name=c,
+                                        hovertemplate=f"{c}<br>%{{x|%Y-%m-%d}}<br>{hist_y_metric}=%{{y:.2f}}%<extra></extra>",
+                                    ))
+
+                                # Líneas de referencia: promedio y rango del agregado
+                                if hist_show_bands:
+                                    all_vals = pd.to_numeric(df_curve_hist[hist_y_metric], errors="coerce").dropna() * scale
+                                    if not all_vals.empty:
+                                        mean_v = float(all_vals.mean())
+                                        min_v = float(all_vals.min())
+                                        max_v = float(all_vals.max())
+                                        fig.add_hline(
+                                            y=mean_v, line_dash="solid", line_color="#7f8c8d", line_width=1.2,
+                                            annotation_text=f"Prom: {mean_v:.1f}%",
+                                            annotation_position="right",
+                                        )
+                                        fig.add_hline(
+                                            y=min_v, line_dash="dash", line_color="#95a5a6", line_width=0.8,
+                                            annotation_text=f"Mín: {min_v:.1f}%",
+                                            annotation_position="right",
+                                        )
+                                        fig.add_hline(
+                                            y=max_v, line_dash="dash", line_color="#95a5a6", line_width=0.8,
+                                            annotation_text=f"Máx: {max_v:.1f}%",
+                                            annotation_position="right",
+                                        )
+
+                                fig.update_layout(
+                                    title=f"Evolución histórica — {curve_labels.get(hist_curve_sel, hist_curve_sel)} ({hist_y_metric})",
+                                    xaxis_title="Fecha",
+                                    yaxis_title=f"{hist_y_metric} (%)",
+                                    height=560,
+                                    hovermode="x unified",
+                                    legend_orientation="h",
+                                    legend_yanchor="bottom", legend_y=-0.25,
+                                    legend_xanchor="left", legend_x=0,
+                                    margin=dict(l=10, r=80, t=60, b=80),
+                                )
+                                _st_plotly(fig)
+
+                                # Stats agregadas
+                                all_vals = pd.to_numeric(df_curve_hist[hist_y_metric], errors="coerce").dropna() * scale
+                                if not all_vals.empty:
+                                    s1, s2, s3, s4, s5 = st.columns(5)
+                                    s1.metric("Bonos", len(codes_in_hist))
+                                    s2.metric(f"Prom {hist_y_metric}", f"{all_vals.mean():.2f}%")
+                                    s3.metric("Mín", f"{all_vals.min():.2f}%")
+                                    s4.metric("Máx", f"{all_vals.max():.2f}%")
+                                    s5.metric("Desvío", f"{all_vals.std():.2f}%")
+
+                                # Snapshot de la última fecha por bono (útil para comparar con la curva actual)
+                                with st.expander("Último valor por bono (snapshot más reciente)", expanded=False):
+                                    last_by_code = (
+                                        df_curve_hist
+                                        .sort_values("fecha_hoy")
+                                        .groupby("Código")
+                                        .tail(1)
+                                        [["Código", "fecha_hoy", "Last Price", "TIREA", "TEM", "Duration", "Paridad"]]
+                                        .sort_values("Duration" if "Duration" in df_curve_hist.columns else "Código")
+                                        .reset_index(drop=True)
+                                    )
+                                    st.dataframe(
+                                        last_by_code.style.format({
+                                            "Last Price": "{:,.4f}",
+                                            "TIREA": "{:.2%}",
+                                            "TEM": "{:.2%}",
+                                            "Duration": "{:.4f}",
+                                            "Paridad": "{:.2%}",
+                                        }, na_rep="—"),
+                                        width="stretch",
+                                        height=min(400, 40 + 35 * len(last_by_code)),
+                                    )
+                    elif view_mode.startswith("Comparador"):
+                        codes_multi = st.multiselect(
+                            "Bonos a comparar",
+                            options=codigos_f,
+                            default=codigos_f[:3] if len(codigos_f) >= 3 else codigos_f,
+                            key="hist_multi_codes",
+                        )
+                        if codes_multi and go is not None:
+                            fig = go.Figure()
+                            for c in codes_multi:
+                                sub = df_f[df_f["Código"] == c].sort_values("fecha_hoy")
+                                if sub.empty:
+                                    continue
+                                fig.add_trace(go.Scatter(
+                                    x=sub["fecha_hoy"],
+                                    y=pd.to_numeric(sub["TIREA"]) * 100.0,
+                                    mode="lines", name=c,
+                                    hovertemplate=f"{c}<br>%{{x|%Y-%m-%d}}<br>TIREA=%{{y:.2f}}%<extra></extra>",
+                                ))
+                            fig.update_layout(
+                                title="Evolución histórica de TIREA",
+                                xaxis_title="Fecha",
+                                yaxis_title="TIREA (%)",
+                                height=520,
+                                hovermode="x unified",
+                                legend_orientation="h",
+                                legend_yanchor="bottom", legend_y=1.02,
+                            )
+                            _st_plotly(fig)
+
+                    # ── Vista 3: Spread entre bonos ──
+                    elif view_mode.startswith("Spread"):
+                        col_sp1, col_sp2 = st.columns(2)
+                        with col_sp1:
+                            code_a = st.selectbox("Bono A (largo)", options=codigos_f, key="hist_sp_a")
+                        with col_sp2:
+                            code_b = st.selectbox("Bono B (corto)", options=codigos_f,
+                                                  index=min(1, len(codigos_f) - 1), key="hist_sp_b")
+
+                        if code_a and code_b and go is not None:
+                            sub_a = df_f[df_f["Código"] == code_a].set_index("fecha_hoy")["TIREA"]
+                            sub_b = df_f[df_f["Código"] == code_b].set_index("fecha_hoy")["TIREA"]
+                            spread = (sub_a - sub_b).dropna() * 10000  # bps
+
+                            if spread.empty:
+                                st.info("No hay fechas en común entre los dos bonos en este rango.")
+                            else:
+                                fig = go.Figure()
+                                fig.add_trace(go.Scatter(
+                                    x=spread.index, y=spread.values,
+                                    mode="lines", name=f"{code_a} − {code_b}",
+                                    fill="tozeroy", line=dict(color="#9b59b6"),
+                                    hovertemplate="%{x|%Y-%m-%d}<br>Spread=%{y:+.0f} bps<extra></extra>",
+                                ))
+                                fig.add_hline(y=spread.mean(), line_dash="dash", line_color="#7f8c8d",
+                                              annotation_text=f"Prom: {spread.mean():+.0f} bps",
+                                              annotation_position="top right")
+                                fig.update_layout(
+                                    title=f"Spread histórico TIR: {code_a} − {code_b}",
+                                    xaxis_title="Fecha",
+                                    yaxis_title="Spread (bps)",
+                                    height=520,
+                                    hovermode="x unified",
+                                )
+                                _st_plotly(fig)
+
+                                # Stats del spread
+                                s1, s2, s3, s4, s5 = st.columns(5)
+                                s1.metric("Último", f"{spread.iloc[-1]:+.0f} bps")
+                                s2.metric("Promedio", f"{spread.mean():+.0f} bps")
+                                s3.metric("Mín", f"{spread.min():+.0f} bps")
+                                s4.metric("Máx", f"{spread.max():+.0f} bps")
+                                s5.metric("Desvío", f"{spread.std():.0f} bps")
+
+                                # Z-score del spread actual vs histórico
+                                z = (spread.iloc[-1] - spread.mean()) / spread.std() if spread.std() > 0 else 0
+                                if abs(z) >= 1.5:
+                                    emoji = "🔴" if z > 0 else "🟢"
+                                    st.caption(
+                                        f"{emoji} Spread actual está a **{z:+.2f} σ** del promedio histórico — "
+                                        f"{'wide' if z > 0 else 'tight'} vs la media."
+                                    )
+
+                    # ── Vista 4: Tabla completa ──
+                    else:
+                        code_opts = st.multiselect(
+                            "Filtrar códigos (vacío = todos)",
+                            options=codigos_f,
+                            default=[],
+                            key="hist_tbl_codes",
+                        )
+                        tbl = df_f.copy()
+                        if code_opts:
+                            tbl = tbl[tbl["Código"].isin(code_opts)]
+                        tbl = tbl.sort_values(["fecha_hoy", "Código"], ascending=[False, True])
+
+                        st.dataframe(
+                            tbl.style.format({
+                                "Last Price": "{:,.4f}",
+                                "TIREA": "{:.2%}",
+                                "TNA": "{:.2%}",
+                                "TEM": "{:.2%}",
+                                "Paridad": "{:.2%}",
+                                "Duration": "{:.4f}",
+                                "tem_spread": "{:+.2%}",
+                            }, na_rep="—"),
+                            width="stretch",
+                            height=600,
+                        )
+
+                        csv = tbl.to_csv(index=False).encode("utf-8")
+                        st.download_button(
+                            "📥 Descargar como CSV",
+                            data=csv,
+                            file_name=f"historico_{date_from}_{date_to}.csv",
+                            mime="text/csv",
+                        )
 
 if __name__ == "__main__":
     main()

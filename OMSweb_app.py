@@ -60,6 +60,7 @@ import OMScauciones
 import OMScredit
 import OMSmktdata
 import OMSnews
+import OMSposiciones
 import OMSprices
 import OMSsettings as cfg
 import OMSticker
@@ -3019,8 +3020,8 @@ def main():
     curve_labels = {c.key: c.label for c in CURVES}
 
     # Navegación: pestañas
-    tab_curvas, tab_mercado, tab_cauciones, tab_fwds, tab_graficos, tab_futuros, tab_tr, tab_yas, tab_comp, tab_breakeven, tab_credito, tab_historico = st.tabs(
-        ["Curvas", "Mercado", "Cauciones", "Forwards", "Gráficos", "Futuros", "Total Return", "Análisis Yields", "Comparador Yields", "Breakeven Inflación", "Crédito Corp.", "Histórico"]
+    tab_curvas, tab_mercado, tab_cauciones, tab_fwds, tab_graficos, tab_futuros, tab_tr, tab_yas, tab_comp, tab_breakeven, tab_credito, tab_historico, tab_posiciones, tab_matriz = st.tabs(
+        ["Curvas", "Mercado", "Cauciones", "Forwards", "Gráficos", "Futuros", "Total Return", "Análisis Yields", "Comparador Yields", "Breakeven Inflación", "Crédito Corp.", "Histórico", "Posiciones", "Matriz Tenencias"]
     )
 
     # ─────────────────────────
@@ -5433,6 +5434,35 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                             file_name=f"historico_{date_from}_{date_to}.csv",
                             mime="text/csv",
                         )
+
+    # ─────────────────────────
+    # Posiciones (un fondo: TIR/DUR/VN/%PN + futuros)
+    # ─────────────────────────
+    with tab_posiciones:
+        st.subheader("Carteras — posiciones por fondo")
+        st.caption(
+            "Fuente: `Delta_Composicion.xlsx` + `Delta_PN.xlsx`. "
+            "TIR / Duration / Precio se calculan en vivo para las especies con curva cargada "
+            "(matcheo por `Cod_Delta` ↔ Código BYMA)."
+        )
+
+        def _snapshot_fn():
+            return _global_snapshot(username, password, plazo)
+
+        OMSposiciones.render_tab_posiciones(
+            snapshot_fn=_snapshot_fn,
+            parallel_metrics_fn=_parallel_metrics,
+            effective_price_fn=_effective_price_series,
+            settle=_settlement_date_str(plazo),
+            bonds_universe=set(BONDS.keys()) if isinstance(BONDS, dict) else set(BONDS),
+        )
+
+    # ─────────────────────────
+    # Matriz de Tenencias (buscador + matriz especies × fondos)
+    # ─────────────────────────
+    with tab_matriz:
+        st.subheader("Matriz de tenencias — especies × fondos")
+        OMSposiciones.render_tab_matriz()
 
 if __name__ == "__main__":
     main()

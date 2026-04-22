@@ -7740,6 +7740,81 @@ A partir del 10/06/2028, la Sociedad podrá efectuar rescates programados anuale
     "Aviso Resultados": "https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9570%2FMPMAE%2DRES%2DON%20VISTA%20ENERGY%20CLASE%20XXXVIII%2D%20%20Aviso%20de%20Resultados%2005%2D03%2D2025%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9570&p=true&ga=1",
     "Suplemento de Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/79f3b7e6-2753-4d7a-bbff-088c1deedbe1"
 }
+VSCXO = {
+    "Nombre Security": "ON Vista Oil & Gas Argentina S.A.U. Clase XXXI Vto 08 04 2038",
+    "Código": "VISTAA 38",
+    "ISIN": "USP9659RAB44",
+    "Calificación": "BB-",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Energy",
+    "Legislación": "Nueva York",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "08/04/2026",
+    "Vencimiento": "08/04/2038",
+    "Fecha Primer Cupón": "08/10/2026",
+    "Cupón / Spread": 7.875, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "AMORTIZABLE", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": ["08/10/2026", 
+                        "08/04/2027", 
+                        "08/10/2027", 
+                        "08/04/2028",
+                        "08/10/2028", 
+                        "08/04/2029", 
+                        "08/10/2029", 
+                        "08/04/2030",
+                        "08/10/2030", 
+                        "08/04/2031", 
+                        "08/10/2031", 
+                        "08/04/2032",
+                        "08/10/2032", 
+                        "08/04/2033", 
+                        "08/10/2033",
+                        "08/04/2034", 
+                        "08/10/2034",
+                        "08/04/2035", 
+                        "08/10/2035",
+                        "08/04/2036", 
+                        "08/10/2036",
+                        "08/04/2037", 
+                        "08/10/2037",
+                        "08/04/2038"], # Lista de fechas como ejemplo
+    "Amortización": ([0] * 19 + [33] + [0]+ [33] + [0]+ [34]),
+    "Quote Price Convention": "CLEAN",
+    "Callable": True,
+    "Tipo de Call": "Call parcial o total a opción de la sociedad con prima compensatoria (Make-Whole) hasta 08/04/2031, y call fijo decreciente posterior",
+    "Fecha Call": "08/04/2031",
+    "Precio Call": {
+        "Antes de 08/04/2031": "Mayor entre (i) valor presente de flujos (asumiendo rescate el 08/04/2031 al 103,938%) descontados a UST + 50bps y (ii) 100% del capital",
+        "08/04/2031 hasta 07/04/2032": 1.03938,
+        "08/04/2032 hasta 07/04/2033": 1.01969,
+        "08/04/2033 hasta 07/04/2034": 1.00984,
+        "08/04/2034 en adelante hasta vencimiento": 1.00
+    },
+    "Comentarios": """La emisora puede rescatar las ONs bajo las siguientes condiciones:
+    - Antes del 08/04/2031 (Make-Whole): Rescate total o parcial al mayor entre (i) el valor presente de los pagos programados de interés hasta la Fecha de Primera Recompra más el precio de rescate de esa fecha (103,938%), descontados a la Tasa del Tesoro + 50bps y (ii) el 100% del capital.
+    - Entre el 08/04/2031 y el 07/04/2032: al 103,938% del capital.
+    - Entre el 08/04/2032 y el 07/04/2033: al 101,969% del capital.
+    - Entre el 08/04/2033 y el 07/04/2034: al 100,984% del capital.
+    - Desde el 08/04/2034 hasta el vencimiento: al 100,000% del capital (a la par).""",
+    "Aviso Resultados": "https://macrosecurities.cmail20.com/t/j-l-yddyxjt-ihklhrudli-r/",
+    "Suplemento de Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/f493ec8a-81ae-49ef-b295-02637bdbf00d"
+}
 VSCTO = {
     "Nombre Security": "ON Vista Oil & Gas Argentina S.A.U. Clase XXVII Vto 10 12 2035",
     "Código": "VISTAA 35",
@@ -8224,7 +8299,7 @@ CP37O = {
     "Clasificación": "Corporativo Hard Dolar MEP",
     "Industria": "Energy",
     "Legislación": "Argentina",
-    "Moneda": "USD",
+    "Moneda": "USB",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "10/03/2025",
     "Vencimiento": "10/03/2027",
@@ -8262,6 +8337,62 @@ CP37O = {
     "Comentarios": "",
     "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/39111327-d734-4ec0-b540-bad6dcdc5db4#""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/6f937fc9-26c1-488e-a2b9-0c51df1cce88#"""
+}
+CP40O = {
+    "Nombre Security": "ON Compañia General de Combustibles S.A. Clase XV Vto 09 03 2028",
+    "Código": "CP40O",
+    "ISIN": "AR0360181769",
+    "Calificación": "AA-(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Energy",
+    "Legislación": "Argentina",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "09/03/2026",
+    "Vencimiento": "09/03/2028",
+    "Fecha Primer Cupón": "09/06/2026",
+    "Cupón / Spread": 9.50, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -3, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -3,
+    "Fechas de cupón": ["09/06/2026",
+    "09/09/2026",
+    "09/12/2026",
+    "09/03/2027",
+    "09/06/2027",
+    "09/09/2027",
+    "09/12/2027",
+    "09/03/2028"
+    ], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Quote Price Convention": "DIRTY",
+    "Callable": True , # Es binario True or False
+    "Tipo de Call": "Call total a opción de la sociedad a partir del mes 21 desde la emisión",
+    "Fecha Call": "09/12/2027",
+    "Precio Call": {"m21 en adelante: 1.00"}, # Precio Call
+    "Comentarios": """La Emisora podrá rescatar a su sola opción, en su totalidad y no parcialmente
+las Obligaciones Negociables Clase 40, con una anticipación no mayor a 90
+(noventa) días de la Fecha de Vencimiento. En caso de rescate de las
+Obligaciones Negociables Clase 40, se rescatarán por un importe equivalente
+al monto de capital no amortizado de las Obligaciones Negociables Clase 40,
+más los intereses devengados e impagos sobre aquellos a la fecha de rescate
+en cuestión, más cualquier monto adeudado e impago bajo las Obligaciones
+Negociables Clase 40.""",
+    "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/1a3f238f-26b1-4f66-a368-876089a1468e#""",
+    "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/6e0ab7c6-f5da-4324-b867-ebd87f261d1b#"""
 }
 T641O = {
     "Nombre Security": "ON Tarjeta Naranja S.A.U. Clase 64 Serie I Vto. 30 04 2027",
@@ -12440,7 +12571,7 @@ TLCOO = {
     "País": "Argentina",
     "Clasificación": "Corporativo Hard Dolar",
     "Industria": "Communications",
-    "Moneda": "USD",
+    "Moneda": "USB",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "28/11/2024",
     "Vencimiento": "28/11/2028",
@@ -12483,7 +12614,7 @@ TLCQO = {
     "País": "Argentina",
     "Clasificación": "Corporativo Hard Dolar",
     "Industria": "Communications",
-    "Moneda": "USD",
+    "Moneda": "USB",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "02/07/2025",
     "Vencimiento": "02/07/2027",
@@ -12521,6 +12652,51 @@ TLCQO = {
     "Comentarios": "",
     "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/44630955-a18d-4b8f-ae46-cbe4c2dba1c1#""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/a7b24599-fc25-44cf-98e1-f7566be320ac#"""
+}
+TLCUO = {
+    "Nombre Security": "ON Telecom Argentina S.A. Clase 28 Vto 05 03 2029",
+    "Código": "TLCUO",
+    "ISIN": "AR0857544677",
+    "Calificación": "AA+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Communications",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "05/03/2026",
+    "Vencimiento": "05/03/2029",
+    "Fecha Primer Cupón": "05/09/2026",
+    "Cupón / Spread": 6.50, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -3, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -3,
+    "Fechas de cupón": ["05/09/2026",
+                        "05/03/2027",
+                        "05/09/2027",
+                        "05/03/2028",
+                        "05/09/2028",
+                        "05/03/2029"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Quote Price Convention": "DIRTY",
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/d4ee6bf7-ffd2-4899-ac59-cf9fd1804804#""",
+    "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/9ddab7a4-bf09-4d77-a5b8-4e71a8063a5c"""
 }
 CACBO = {
     "Nombre Security": "ON Capex S.A. Clase XI Vto. 17 06 2028",
@@ -15013,10 +15189,10 @@ BPCRO = {
 AFCGO = {
     "Nombre Security": "ON Banco Comafi S.A. Clase XV Vto. 23 05 2026",
     "Código": "AFCGO",
-    "ISIN": "AFCGO",
+    "ISIN": "AR0239184333",
     "Calificación": "A1+(arg)",
     "País": "Argentina",
-    "Clasificación": "Corporativo Tasa Fija",
+    "Clasificación": "Corporativo TAMAR",
     "Industria": "Financials",
     "Moneda": "ARS",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
@@ -15051,6 +15227,48 @@ AFCGO = {
     "Comentarios": "",
     "Aviso Resultados": "https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/EX9qAVtBJj1Ni-wpKBEQewIBRhA-obAuEfTCXOsUBhq0TQ",
     "Suplemento de Prospecto": "https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/EXpGFQVRVLNFhBhPH_Z7yyEBTmVWApNSRtXR-bGG41YiIg"
+}
+AFCNO = {
+    "Nombre Security": "ON Banco Comafi S.A. Clase XXII Vto. 17 04 2027",
+    "Código": "AFCNO",
+    "ISIN": "AR0996626666",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "17/04/2026",
+    "Vencimiento": "17/04/2027",
+    "Fecha Primer Cupón": "17/07/2026",
+    "Cupón / Spread": 3.75, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE", # FIJA o VARIABLE
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": ["17/07/2025",
+                        "17/10/2025",
+                        "17/02/2027",
+                        "17/04/2027"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/a9ab5dd8-799c-4722-a844-7e756ceda390",
+    "Suplemento de Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/d13de2d8-8eb1-434e-bdd2-240733a7552e"
 }
 BYCMO = {
     "Nombre Security": "ON Banco de Galicia y Buenos Aires S.A.U. Clase XXI Vto. 10 12 2026",
@@ -22024,6 +22242,58 @@ VWCFO = {
     "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/c632677e-12b7-4d19-ab56-57f8e0961462#""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/d2802789-6406-43f0-85f2-27f6c417ef45"""
 }
+ZPC4O = {
+    "Nombre Security": "ON Plaza Logistica S.R.L. Clase 4 Vto. 04 03 2029",
+    "Código": "ZPC4O",
+    "ISIN": "AR0912205223",
+    "Calificación": "AA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo UVA",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "04/03/2026",
+    "Vencimiento": "04/03/2029",
+    "Fecha Primer Cupón": "04/06/2026",
+    "Cupón / Spread": 7.9, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "UVA", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -5, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -5,
+    "Fechas de cupón": [
+    "04/06/2026",
+    "04/09/2026",
+    "04/12/2026",
+    "04/03/2027",
+    "04/06/2027",
+    "04/09/2027",
+    "04/12/2027",
+    "04/03/2028",
+    "04/06/2028",
+    "04/09/2028",
+    "04/12/2028",
+    "04/03/2029"
+    ], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/3adfc9f3-2757-4ec1-9d96-4157b8d3d835#""",
+    "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/22a1f014-ac19-4b2f-9a2d-7813a3e15ec5#"""
+}
 BCIUO = {
     "Nombre Security": "ON Banco de la Ciudad de Buenos Aires Clase 23 Vto 05 03 2028",
     "Código": "BCIUO",
@@ -22220,6 +22490,58 @@ PSSXOj = {
     "Comentarios": "",
     "Aviso Resultados": "https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9561%2FMPMAE%2DRES%2DON%20PSA%20FINANCE%20CLASES%2031%2D32%2D33%2DAviso%20de%20Resultados%2027%2D02%2D25%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9561&p=true&ga=1",
     "Suplemento Prospecto": "https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9561%2FMPMAE%2DANU%2DON%20PSA%20FINANCE%20CLASES%2031%2D32%2D33%2DSuplemento%20de%20Prospecto%2024%2D02%2D25%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9561&p=true&ga=1",
+}
+ZPC4Oj = {
+    "Nombre Security": "ON Plaza Logistica S.R.L. Clase 4 Vto. 04 03 2029",
+    "Código": "ZPC4O",
+    "ISIN": "AR0912205223",
+    "Calificación": "AA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo UVA",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "04/03/2026",
+    "Vencimiento": "04/03/2029",
+    "Fecha Primer Cupón": "04/06/2026",
+    "Cupón / Spread": 7.9, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "UVA PROYECTADO", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -5, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -5,
+    "Fechas de cupón": [
+    "04/06/2026",
+    "04/09/2026",
+    "04/12/2026",
+    "04/03/2027",
+    "04/06/2027",
+    "04/09/2027",
+    "04/12/2027",
+    "04/03/2028",
+    "04/06/2028",
+    "04/09/2028",
+    "04/12/2028",
+    "04/03/2029"
+    ], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/3adfc9f3-2757-4ec1-9d96-4157b8d3d835#""",
+    "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/22a1f014-ac19-4b2f-9a2d-7813a3e15ec5#"""
 }
 BCIUOj = {
     "Nombre Security": "ON Banco de la Ciudad de Buenos Aires Clase 23 Vto 05 03 2028",
@@ -23776,6 +24098,7 @@ RB59O = rentafija.Bono(RB59O)
 RB61O = rentafija.Bono(RB61O)
 RB64O = rentafija.Bono(RB64O)
 AFCGO = rentafija.Bono(AFCGO)
+AFCNO = rentafija.Bono(AFCNO)
 BF36O = rentafija.Bono(BF36O)
 BF38O = rentafija.Bono(BF38O)
 SXC1O = rentafija.Bono(SXC1O)
@@ -23822,6 +24145,8 @@ TY36O = rentafija.Bono(TY36O)
 TY36Oj = rentafija.Bono(TY36Oj)
 VWCFO = rentafija.Bono(VWCFO)
 VWCFOj = rentafija.Bono(VWCFOj)
+ZPC4O = rentafija.Bono(ZPC4O)
+ZPC4Oj = rentafija.Bono(ZPC4Oj)
 BCIUO = rentafija.Bono(BCIUO)
 BCIUOj = rentafija.Bono(BCIUOj)
 BCIUP = rentafija.Bono(BCIUP)
@@ -23857,7 +24182,6 @@ CAC4O = rentafija.Bono(CAC4O)
 CAC7O = rentafija.Bono(CAC7O)
 OLC2O = rentafija.Bono(OLC2O)
 AFCIO = rentafija.Bono(AFCIO)
-AFCMO = rentafija.Bono(AFCMO)
 TLCLO = rentafija.Bono(TLCLO)
 RZ7BO = rentafija.Bono(RZ7BO)
 MR36O = rentafija.Bono(MR36O)
@@ -23962,6 +24286,7 @@ IRCPO = rentafija.Bono(IRCPO)
 VSCOO = rentafija.Bono(VSCOO)
 VSCUO = rentafija.Bono(VSCUO)
 VSCVO = rentafija.Bono(VSCVO)
+VSCXO = rentafija.Bono(VSCXO)
 
 # CORPORATIVOS HARD DOLAR MEP
 DHSKO = rentafija.Bono(DHSKO)
@@ -23973,6 +24298,7 @@ PN41O = rentafija.Bono(PN41O)
 PN42O = rentafija.Bono(PN42O)
 VSCRO = rentafija.Bono(VSCRO)
 VSCWO = rentafija.Bono(VSCWO)
+AFCMO = rentafija.Bono(AFCMO)
 SBC2O = rentafija.Bono(SBC2O)
 PLC1O = rentafija.Bono(PLC1O)
 PLC2O = rentafija.Bono(PLC2O)
@@ -23998,6 +24324,7 @@ VSCPO = rentafija.Bono(VSCPO)
 GOC4O = rentafija.Bono(GOC4O)
 EAC3O = rentafija.Bono(EAC3O)
 YFCLO = rentafija.Bono(YFCLO)
+TLCUO = rentafija.Bono(TLCUO)
 YFCMO = rentafija.Bono(YFCMO)
 YFCNO = rentafija.Bono(YFCNO)
 YFCOO = rentafija.Bono(YFCOO)
@@ -24074,6 +24401,7 @@ PN34O = rentafija.Bono(PN34O)
 LDCGO = rentafija.Bono(LDCGO)
 CP36O = rentafija.Bono(CP36O)
 CP37O = rentafija.Bono(CP37O)
+CP40O = rentafija.Bono(CP40O)
 MR35O = rentafija.Bono(MR35O)
 YFCIO = rentafija.Bono(YFCIO)
 PECAO = rentafija.Bono(PECAO)
@@ -24332,7 +24660,7 @@ todos_los_bonos = [
     BPCRO, PVC4O, BYCMO, TLCRO, ZPC1O, PS37O,
     RCCTO, RC3CO, RVS1O, MR42O, PSSYO, PS35O,  
     LNS3P, VWCDO, RB64O, TY37O, SXC3O, FTN3O, 
-    RC4CO, HBCEO, AFCGO, BF38O, ICC4O,
+    RC4CO, HBCEO, AFCGO, BF38O, ICC4O, AFCNO,
 
     # CORPORATIVOS UVA
 
@@ -24341,6 +24669,7 @@ todos_los_bonos = [
     RB60O, RB60Oj, PSSXO, PSSXOj,
     PS34O, PS34Oj, RB66O, RB66Oj,
     TY36O, TY36Oj, VWCFO, VWCFOj,
+    ZPC4O, ZPC4Oj,
     FTN1O, FTN1Oj, BCIUO, BCIUOj,
     BCIUP, BCIUPj, SNSDP, SNSDPj,
 
@@ -24351,7 +24680,7 @@ todos_los_bonos = [
     CS42O, PNJCO, PNZCO, YMCWO, RMS3P, 
     RMS3Preestructurado, PECMO, PECKO, VSCKO,
     MGCEO, PNICO, CAC4O, CAC7O, OLC2O, AFCIO, TLCLO, RZ7BO,
-    MR36O, MR40O, VSCMO, AER9O, MSSBO, VSCJO, AFCMO,
+    MR36O, MR40O, VSCMO, AER9O, MSSBO, VSCJO,
     SNAAO, VSCIO, MRCBO, YFCDO, PQCKO, CP28O, TLCFO, TLCGO,
     OLC3O, RZ9AO, VSCQO, RZ8BO, LMS6O, VSCHO, YMCTO,
     PEC7O, LUC4O, PEC6O, PEC8O, PNECO, PN40O, LUC3O,
@@ -24362,12 +24691,12 @@ todos_los_bonos = [
     # CORPORATIVOS HARD DÓLAR
 
     TSC3O, TSC4O, PLC5O, MGC3O, YMCJO, YMCIO, YM34O, ARC1O,
-    MGC9O, GNCXO, GN49O, YFCJO, PNDCO, AEC2O, BYC2O, BACGO, TTCAO,
-    TTCDO, VSCTO, BYCHO, BYCUO, NPCCO, PN38O, YCAMO, CAC5O, BACHO,
+    MGC9O, GNCXO, GN49O, YFCJO, PNDCO, AEC2O, BYC2O, BACGO,
+    TTCDO, VSCTO, BYCHO, BYCUO, NPCCO, PN38O, YCAMO, CAC5O,
     BACAO, RC1CO, RCCJO, MTCGO, PNXCO, PN43O, TLCPO, PLC4O,
     YMCXO, IRCFO, YMCUO, YMC1O, YM39O, MGCOO, MGCRO, RUCDO,
     DNC7O, TLCMO, LMS8O, LMS9O, IRCPO, VSCOO, VSCUO, VSCVO,
-    CP38O, TLCTO,
+    CP38O, TLCTO, VSCXO, BACHO, TTCAO,
 
     # CORPORATIVOS HARD DÓLAR MEP
 
@@ -24376,12 +24705,12 @@ todos_los_bonos = [
     LOC5O, LOC6O, TTC9O, TTCBO, IRCOO, T652O, T662O, PN35O, EMC1O,
     VSCPO, GOC4O, EAC3O, YFCLO, YFCMO, YFCNO, YFCOO, SBC2O, RUCEO,
     PVC3O, TLCOO, TLCQO, CACBO, CACDO, YM35O, YM37O, YM38O, YM40O,
-    YM41O, YM42O, YM43O, BYCVO, BYCWO, PUC2O, T641O, BYCXO, FO4AO, LUC5O,
+    YM41O, YM42O, YM43O, BYCVO, BYCWO, PUC2O, T641O, BYCXO, FO4AO, 
     MCC1O, MCC2O, MSSGO, ZZC1O, GYC5O, YMCVO, CS47O, CS48O, CICBO,
-    CS49O, CS50O, PN37O, CIC8O, CIC9O, CICAO, HJCKO,
-    PECGO, NBS1O, PQCRO, PQCTO, HJCGO, HBCAO, HBCDO, YMCYO,
+    CS49O, CS50O, PN37O, CIC8O, CIC9O, CICAO, HJCKO, CP40O, TLCUO,
+    PECGO, NBS1O, PQCRO, PQCTO, HJCGO, HBCAO, HBCDO, YMCYO, LUC5O,
     YMCZO, MGCNO, MGCQO, OLC5O, OLC6O, DNC5O, PZCGO, HJCHO, MRCYO, 
-    MRCUO, CRCJO, RZABO, RZ9BO, LECEO, XMC1O, MSSFO, RCCRO,
+    MRCUO, CRCJO, RZABO, RZ9BO, LECEO, XMC1O, MSSFO, RCCRO, AFCMO,
     RC2CO, TTC7O, TTC8O, IRCNO, ZPC2O, PN34O, LDCGO, CP36O, MIC4O,
     CP37O, MR35O, YFCIO, PECAO, IRCJO, IRCLO, SNSDO, HJCFO, OLC7O,
     HJCIO, HJCJO, CS44O, DNC3O, CIC7O, SIC1O, SNSBO, PLC6O,
