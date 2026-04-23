@@ -816,6 +816,7 @@ if __name__ == '__main__':
 #    rf_detalle_path = r"C:\Users\juan.paolicchi\DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Equipo RF\RF_Detalle_Carteras.xlsm",
 #    tamar_tna       = 0.2275,
 #    tamar_tea       = 0.2532,
+#    df_futuros = futuros_minorista,  # ← pasar directo,
 #)
 # %%
 

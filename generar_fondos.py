@@ -320,187 +320,122 @@ def _fmt_pct(v: float) -> str:
 # =============================================================================
 
 _FONDO_CSS = """
-/* ── Slides de fondos Delta ── */
-/* fd-slide hereda display/height/overflow de .slide-chapter */
-/* Solo necesitamos el inner padding específico */
+/* ── Slides de fondos Delta — layout tipo PPTX ── */
 .fd-slide-inner {
-  flex: 1;
-  overflow-y: auto;
-  padding: 28px 40px 20px;
+  flex: 1; overflow-y: auto;
+  padding: 20px 32px 16px;
+  font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
 }
-
-/* Layout principal */
+.fd-header {
+  margin-bottom: 14px;
+}
+.fd-title {
+  font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
+  font-size: 26px; font-weight: 700; color: #0f2557; line-height: 1.1;
+}
+.fd-subtitle {
+  font-size: 13px; color: #5f7080; margin-top: 2px;
+  font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
+}
+/* Layout: fila superior (KPI | Gráficos composición | Tenencias) + VCP abajo */
 .fd-main {
   display: grid;
-  grid-template-columns: 180px 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 16px;
-  height: calc(100% - 20px);
+  grid-template-columns: 150px 1fr 220px;
+  grid-template-rows: 1fr auto;
+  gap: 10px;
+  height: calc(100% - 64px);
+  min-height: 380px;
 }
-
-/* Panel izquierdo KPIs */
+.fd-top-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 150px 1fr 220px;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+.fd-vcp-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 10px;
+  min-height: 200px;
+}
+/* Panel KPI */
 .fd-kpi {
-  grid-row: 1 / 3;
-  background: #5f7080;
+  background: #3f5060;
   border-radius: 6px;
   padding: 20px 16px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 20px;
-  color: white;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  gap: 20px; color: white; text-align: center;
 }
-.fd-kpi-item {}
 .fd-kpi-label {
-  font-family: var(--font-title,'Barlow',Arial);
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(255,255,255,0.75);
-  text-transform: uppercase;
-  letter-spacing: .6px;
-  margin-bottom: 4px;
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .8px;
+  color: rgba(255,255,255,.65); margin-bottom: 4px;
 }
 .fd-kpi-value {
-  font-family: var(--font-title,'Barlow',Arial);
-  font-size: 18px;
-  font-weight: 700;
-  color: white;
-  line-height: 1.1;
+  font-size: 22px; font-weight: 700; color: white; line-height: 1.1;
 }
-.fd-kpi-date {
-  font-family: var(--font-body,'Calibri',Arial);
-  font-size: 10px;
-  color: rgba(255,255,255,0.55);
-  margin-top: 4px;
+.fd-kpi-date { font-size: 11px; color: rgba(255,255,255,.45); margin-top: 3px; }
+/* Panel gráficos composición (apilados verticalmente) */
+.fd-charts-col {
+  display: flex; flex-direction: column; gap: 10px; min-height: 0;
 }
-
-/* Cards de gráficos */
-.fd-card {
-  background: white;
-  border: 1px solid #d8e2ed;
-  border-radius: 7px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+/* Quadrante de contenido */
+.fd-quadrant {
+  background: white; border: 1px solid #d0d9e4;
+  border-radius: 6px; overflow: hidden;
+  display: flex; flex-direction: column;
 }
-.fd-card-header {
-  background: #0f2557;
-  color: white;
-  font-family: var(--font-title,'Barlow',Arial);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .6px;
-  padding: 6px 12px;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  transform: rotate(180deg);
-  white-space: nowrap;
-  flex-shrink: 0;
-  width: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.fd-q-title {
+  background: #0f2557; color: white;
+  font-family: 'Calibri','Segoe UI',Arial,sans-serif;
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .5px;
+  padding: 5px 10px; flex-shrink: 0;
 }
-.fd-card-body {
-  flex: 1;
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+.fd-q-body {
+  flex: 1; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px;
 }
-.fd-card-inner {
-  display: flex;
-  flex-direction: row;
+/* Top 5 table */
+.fd-top5 {
+  width: 100%; border-collapse: collapse;
+  font-family: 'Calibri','Segoe UI',Arial,sans-serif;
+  font-size: 12px;
+}
+.fd-top5 tr { border-bottom: 1px solid #edf0f3; }
+.fd-top5 td { padding: 4px 6px; }
+.fd-top5 .tk { font-weight: 700; color: #0f2557; }
+.fd-top5 .pct {
+  background: #5f7080; color: white; border-radius: 3px;
+  padding: 2px 7px; font-weight: 700; font-size: 11px;
+  text-align: center; white-space: nowrap;
+}
+.fd-top5 .fecha { color: #8090a0; font-size: 11px; }
+/* VCP */
+.fd-vcp-form {
   width: 100%;
-  height: 100%;
+  font-family: 'Calibri','Segoe UI',Arial,sans-serif;
+  font-size: 11px;
 }
-
-/* Top 5 tenencias */
-.fd-top5-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: var(--font-body,'Calibri',Arial);
+.fd-vcp-note {
+  font-size: 9px; color: #8090a0; margin-bottom: 4px;
 }
-.fd-top5-table tr {
-  border-bottom: 1px solid #eaeef2;
+.fd-vcp-grid {
+  display: grid; grid-template-columns: 90px 1fr 1fr;
+  gap: 3px 6px; align-items: center;
 }
-.fd-top5-table td {
-  padding: 4px 6px;
-  font-size: 11.5px;
-}
-.fd-top5-ticker {
-  font-weight: 700;
-  color: #0f2557;
-  min-width: 70px;
-}
-.fd-top5-pct {
-  font-weight: 700;
-  background: #5f7080;
-  color: white;
-  border-radius: 3px;
-  padding: 2px 8px;
-  text-align: center;
-  min-width: 42px;
-}
-.fd-top5-fecha {
-  color: #7a90a4;
-  font-size: 10.5px;
-}
-
-/* Gráfico VCP — editable */
-.fd-vcp-wrap {
-  width: 100%;
-}
-.fd-vcp-tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid #d8e2ed;
-  padding-bottom: 6px;
-}
-.fd-vcp-tab {
-  font-size: 10px;
-  font-family: var(--font-title,'Barlow',Arial);
-  padding: 3px 10px;
-  border: 1px solid #d8e2ed;
-  border-radius: 4px;
-  cursor: pointer;
-  background: #f0f4f8;
-  color: #5f7080;
-  transition: background .15s;
-}
-.fd-vcp-tab.active {
-  background: #0f2557;
-  color: white;
-  border-color: #0f2557;
-}
-.fd-vcp-inputs {
-  display: none;
-  grid-template-columns: auto 1fr 1fr;
-  gap: 4px 8px;
-  align-items: center;
-  font-size: 10.5px;
-  font-family: var(--font-body,'Calibri',Arial);
-}
-.fd-vcp-inputs.visible { display: grid; }
-.fd-vcp-inputs label { color: #5f7080; white-space: nowrap; }
-.fd-vcp-inputs input {
-  width: 60px;
-  border: 1px solid #d8e2ed;
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 10.5px;
-  text-align: center;
-  font-family: var(--font-body,'Calibri',Arial);
-}
-.fd-vcp-hdr {
-  font-size: 9px;
-  font-weight: 700;
-  color: #7a90a4;
-  text-transform: uppercase;
-  letter-spacing: .5px;
+.fd-vcp-grid label { color: #5f7080; font-size: 10.5px; }
+.fd-vcp-grid .hdr { font-size: 9px; font-weight: 700; color: #7a90a4; text-transform: uppercase; }
+.fd-vcp-grid input {
+  width: 100%; border: 1px solid #d0d9e4; border-radius: 3px;
+  padding: 2px 5px; font-size: 11px; text-align: center;
+  font-family: 'Calibri','Segoe UI',Arial,sans-serif;
+  box-sizing: border-box;
 }
 """
 
@@ -664,7 +599,7 @@ def _vcp_chart_js(fondo_id: str) -> str:
     if (!cv) return;
     var W = cv.parentElement.clientWidth;
     if (!W || W < 10) {{ setTimeout(drawVcp_{fondo_id}, 80); return; }}
-    var H = 140;
+    var H = cv.parentElement.clientHeight > 40 ? cv.parentElement.clientHeight - 4 : 160;
     var dpr = window.devicePixelRatio || 1;
     cv.width = W * dpr; cv.height = H * dpr;
     cv.style.width = W + 'px'; cv.style.height = H + 'px';
@@ -689,7 +624,7 @@ def _vcp_chart_js(fondo_id: str) -> str:
     var ML = 8, MR = 8, MT = 18, MB = 22;
     var PW = W - ML - MR, PH = H - MT - MB;
     var grpW = PW / n;
-    var barW = grpW * 0.28;
+    var barW = grpW * 0.33;
 
     // Eje 0
     var zero = MT + PH * maxV / (2 * maxV);
@@ -715,24 +650,24 @@ def _vcp_chart_js(fondo_id: str) -> str:
       else ctx.fillRect(gx + barW + 2, zero, barW, -h30);
 
       // Label valor semana
-      ctx.font = 'bold 8.5px Barlow,Calibri,Arial';
+      ctx.font = 'bold 10px Barlow,Calibri,Arial';
       ctx.fillStyle = colors1; ctx.textAlign = 'center';
       var vsy = h1 >= 0 ? zero - h1 - 3 : zero + (-h1) + 10;
-      ctx.fillText((s1[i]*100).toFixed(1)+'%', gx + barW/2, vsy);
+      ctx.fillText(s1[i].toFixed(1)+'%', gx + barW/2, vsy);
 
       // Label valor 30d
       ctx.fillStyle = colors30;
       var v30y = h30 >= 0 ? zero - h30 - 3 : zero + (-h30) + 10;
-      ctx.fillText((s30[i]*100).toFixed(1)+'%', gx + barW + 2 + barW/2, v30y);
+      ctx.fillText(s30[i].toFixed(1)+'%', gx + barW + 2 + barW/2, v30y);
 
       // Label entidad
-      ctx.fillStyle = '#333'; ctx.font = '8.5px Barlow,Calibri,Arial';
+      ctx.fillStyle = '#333'; ctx.font = '10px Barlow,Calibri,Arial';
       ctx.fillText(labels[i], gx + barW + 2, H - 6);
     }}
 
     // Leyenda
-    ctx.fillStyle = colors1;  ctx.fillRect(ML, 5, 8, 7);
-    ctx.fillStyle = '#333'; ctx.font = '8px Barlow,Calibri,Arial'; ctx.textAlign='left';
+    ctx.fillStyle = colors1;  ctx.fillRect(ML, 5, 10, 8);
+    ctx.fillStyle = '#333'; ctx.font = '10px Barlow,Calibri,Arial'; ctx.textAlign='left';
     ctx.fillText('Últ. semana', ML+11, 12);
     ctx.fillStyle = colors30; ctx.fillRect(ML+80, 5, 8, 7);
     ctx.fillText('Últ. 30d', ML+92, 12);
@@ -751,175 +686,101 @@ def _vcp_chart_js(fondo_id: str) -> str:
 
 
 def _build_fondo_slide(fondo_data: dict, slide_num: int, total_slides: int) -> str:
-    """Genera el HTML completo de la slide de un fondo."""
     fd   = fondo_data
     metr = fd["metrics"]
     comp = fd["composition"]
     top5 = fd["top5"]
     fid  = fd["id"]
 
-    # KPIs
     pn_str  = _fmt_pn(metr.get("patrimonio"))
     dur_str = _fmt_dur(metr.get("duration"))
     is_cer  = (fd["sheet_rf"] == "CER")
-    if is_cer:
-        tir_neta = metr.get("tir_neta")
-        tir_str = f"CER+{tir_neta*100:.1f}%" if tir_neta is not None else "—"
-    else:
-        tir_neta = metr.get("tir_neta") or metr.get("tir")
-        tir_str = f"{tir_neta*100:.1f}%" if tir_neta is not None else "—"
-
+    tir_neta = metr.get("tir_neta") or metr.get("tir")
+    tir_str = (f"CER+{tir_neta*100:.1f}%" if is_cer else f"{tir_neta*100:.1f}%") if tir_neta else "—"
     fecha_str = fd.get("fecha_datos", "—")
 
-    # Datos de composición (torta)
     pie_labels = [k for k in AJUSTE_ORDER if comp.get(k, 0) > 0.001]
     pie_values = [comp.get(k, 0) for k in pie_labels]
     pie_colors = [AJUSTE_COLORS.get(k, "#888") for k in pie_labels]
+    pie_js = _pie_chart_js(f"pie-{fid}", pie_labels, pie_values, pie_colors)
+    bar_js = _bar_chart_js(f"bar-{fid}", pie_labels, pie_values, "#1e6fba")
+    vcp_js = _vcp_chart_js(fid)
 
-    pie_js  = _pie_chart_js(f"pie-{fid}", pie_labels, pie_values, pie_colors)
-    bar_js  = _bar_chart_js(f"bar-{fid}", pie_labels, pie_values, "#1e6fba")
-    vcp_js  = _vcp_chart_js(fid)
+    top5_rows = "".join(
+        f'<tr><td class="tk">{t["ticker"]}</td>'
+        f'<td><span class="pct">{round(t["pct"]*100)}%</span></td>'
+        f'<td class="fecha">{t.get("fecha_vto","")}</td></tr>'
+        for t in top5
+    )
 
-    # Top 5
-    top5_rows = ""
-    for t in top5:
-        pct_display = f"{round(t['pct'] * 100)}%"
-        fecha_display = t.get("fecha_vto", "") or ""
-        top5_rows += f"""
-<tr>
-  <td class="fd-top5-ticker">{t['ticker']}</td>
-  <td><span class="fd-top5-pct">{pct_display}</span></td>
-  <td class="fd-top5-fecha">{fecha_display}</td>
-</tr>"""
+    entities = [("fondo", fd["peers_label"]),("benchmark","Benchmark"),
+                ("peers","Peers"),("industria","Industria")]
+    vcp_rows = "\n".join(
+        f'<label>{lbl}</label>'
+        f'<input type="number" step="0.01" id="vcp-{fid}-s1-{eid}" placeholder="0.0" oninput="drawVcp_{fid}()">'
+        f'<input type="number" step="0.01" id="vcp-{fid}-s30-{eid}" placeholder="0.0" oninput="drawVcp_{fid}()">'
+        for eid, lbl in entities
+    )
 
-    # Formulario VCP
-    entities = [("fondo", fd["peers_label"]), ("benchmark", "Benchmark"),
-                ("peers", "Peers"), ("industria", "Industria")]
-    vcp_rows = f"""
-<div class="fd-vcp-inputs visible" id="vcp-form-{fid}">
-  <span class="fd-vcp-hdr"></span>
-  <span class="fd-vcp-hdr">Últ. semana</span>
-  <span class="fd-vcp-hdr">Últ. 30d</span>
-  <input type="hidden" id="vcp-lbl-{fid}" value="{fd['peers_label']}">
-"""
-    for eid, elabel in entities:
-        vcp_rows += f"""
-  <label>{elabel}</label>
-  <input type="number" step="0.01" id="vcp-{fid}-s1-{eid}"
-         placeholder="0.00" style="width:55px">
-  <input type="number" step="0.01" id="vcp-{fid}-s30-{eid}"
-         placeholder="0.00" style="width:55px">
-"""
-    vcp_rows += "</div>"
-
-    # Progreso
-    pct_prog = round((slide_num / total_slides) * 100, 1)
-
-    # Navegación — fondos van entre slide-6 y slide-7
-    # Usamos goToId() que navega por ID de div en lugar de índice numérico
     fondo_ids = [f["id"] for f in FONDOS]
-    prev_id = f"fd-slide-{fondo_ids[slide_num - 2]}" if slide_num > 1 else "slide-6"
-    next_id = f"fd-slide-{fondo_ids[slide_num]}"     if slide_num < total_slides else "slide-7"
+    prev_id = f"fd-slide-{fondo_ids[slide_num-2]}" if slide_num > 1 else "slide-6"
+    next_id = f"fd-slide-{fondo_ids[slide_num]}"   if slide_num < total_slides else "slide-7"
+    pct_prog = round(slide_num / total_slides * 100, 1)
+    kpi_tir = (f'<div class="fd-kpi-item"><div class="fd-kpi-label">TIR*</div>'
+               f'<div class="fd-kpi-value">{tir_str}</div></div>') if fd.get("tiene_tir") else ""
 
-    prev_btn = f'<button class="slide-nav-btn" onclick="goToId(\'{prev_id}\')">← Anterior</button>'
-    next_btn = f'<button class="slide-nav-btn" onclick="goToId(\'{next_id}\')">Siguiente →</button>'
-
-    return f"""
-<div class="slide-chapter fd-slide" id="fd-slide-{fid}">
-  <div class="progress-bar">
-    <div class="progress-fill" style="width:{pct_prog}%"></div>
-  </div>
-  <div class="slide-chapter-inner">
-
-    <div style="margin-bottom:12px">
-      <h2 style="font-family:var(--font-title,'Barlow',Arial);font-size:26px;font-weight:700;
-                 color:#0f2557;line-height:1">{fd['nombre']}</h2>
-      <div style="font-family:var(--font-body,'Calibri',Arial);font-size:13px;color:#5f7080;
-                  margin-top:2px">Performance y posicionamiento</div>
-    </div>
-
-    <div class="fd-main">
-
-      <!-- KPIs izquierda -->
-      <div class="fd-kpi">
-        <div class="fd-kpi-item">
-          <div class="fd-kpi-label">Patrimonio</div>
-          <div class="fd-kpi-value" style="font-size:16px">{pn_str}</div>
-        </div>
-        {f'<div class="fd-kpi-item"><div class="fd-kpi-label">TIR*</div><div class="fd-kpi-value">{tir_str}</div></div>' if fd.get("tiene_tir") else ""}
-        <div class="fd-kpi-item">
-          <div class="fd-kpi-label">Duration*</div>
-          <div class="fd-kpi-value">{dur_str}</div>
-        </div>
-        <div class="fd-kpi-item">
-          <div class="fd-kpi-label">Datos al</div>
-          <div class="fd-kpi-date">{fecha_str}</div>
-        </div>
-      </div>
-
-      <!-- Composición General (torta) -->
-      <div class="fd-card">
-        <div class="fd-card-header">Composición General</div>
-        <div class="fd-card-body">
-          <canvas id="pie-{fid}" style="width:100%;height:100%"></canvas>
-        </div>
-      </div>
-
-      <!-- Tipo de Ajuste (barras) -->
-      <div class="fd-card">
-        <div class="fd-card-header">Tipo de Ajuste</div>
-        <div class="fd-card-body">
-          <canvas id="bar-{fid}" style="width:100%;height:100%"></canvas>
-        </div>
-      </div>
-
-      <!-- Principales Tenencias (top 5) -->
-      <div class="fd-card">
-        <div class="fd-card-header">Principales Tenencias</div>
-        <div class="fd-card-body" style="padding:6px 10px;align-items:flex-start">
-          <table class="fd-top5-table">
-            <tbody>{top5_rows}</tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Variaciones VCP (editable) -->
-      <div class="fd-card">
-        <div class="fd-card-header">Variaciones VCP</div>
-        <div class="fd-card-body" style="flex-direction:column;align-items:stretch;padding:8px 10px">
-          <div style="font-family:var(--font-title,'Barlow',Arial);font-size:9.5px;font-weight:700;
-                      color:#0f2557;margin-bottom:6px">{fd['tipo_vcp']}</div>
-          <canvas id="vcp-cv-{fid}" style="width:100%;height:140px;margin-bottom:8px"></canvas>
-          <div style="border-top:1px solid #d8e2ed;padding-top:6px">
-            <div style="font-size:9px;color:#7a90a4;font-weight:600;font-family:var(--font-title,'Barlow',Arial);
-                        margin-bottom:4px">✏ Completar datos (% como decimal, ej: 0.9 = 0.9%)</div>
-            {vcp_rows}
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <div class="slide-footer">
-    <div class="slide-footer-left">Delta Asset Management &nbsp;·&nbsp; {fecha_str} &nbsp;·&nbsp; Uso interno</div>
-    <div class="slide-nav-btns">
-      {prev_btn}
-      {next_btn}
-    </div>
-    <div class="slide-footer-right">{slide_num} / {total_slides}</div>
-  </div>
-</div>
-
-{pie_js}
-{bar_js}
-{vcp_js}
-"""
+    return (
+        f'\n<div class="slide-chapter fd-slide" id="fd-slide-{fid}">\n'
+        f'  <div class="progress-bar"><div class="progress-fill" style="width:{pct_prog}%"></div></div>\n'
+        f'  <div class="slide-chapter-inner fd-slide-inner">\n'
+        f'    <div class="fd-header">\n'
+        f'      <div class="fd-title">{fd["nombre"]}</div>\n'
+        f'      <div class="fd-subtitle">Performance y posicionamiento</div>\n'
+        f'    </div>\n'
+        f'    <div style="display:flex;flex-direction:column;gap:10px;height:calc(100% - 64px)">\n'
+        f'      <div style="display:grid;grid-template-columns:150px 1fr 240px;gap:10px;flex:1;min-height:0">\n'
+        f'        <div class="fd-kpi">\n'
+        f'          <div class="fd-kpi-item"><div class="fd-kpi-label">Patrimonio</div>'
+        f'<div class="fd-kpi-value">{pn_str}</div></div>\n'
+        f'          {kpi_tir}\n'
+        f'          <div class="fd-kpi-item"><div class="fd-kpi-label">Duration*</div>'
+        f'<div class="fd-kpi-value">{dur_str}</div></div>\n'
+        f'          <div class="fd-kpi-item"><div class="fd-kpi-label">Datos al</div>'
+        f'<div class="fd-kpi-date">{fecha_str}</div></div>\n'
+        f'        </div>\n'
+        f'        <div style="display:flex;flex-direction:column;gap:10px;min-height:0">\n'
+        f'          <div class="fd-quadrant" style="flex:1"><div class="fd-q-title">Composición General</div>'
+        f'<div class="fd-q-body"><canvas id="pie-{fid}" style="width:100%;height:100%;display:block"></canvas></div></div>\n'
+        f'          <div class="fd-quadrant" style="flex:1"><div class="fd-q-title">Tipo de Ajuste</div>'
+        f'<div class="fd-q-body"><canvas id="bar-{fid}" style="width:100%;height:100%;display:block"></canvas></div></div>\n'
+        f'        </div>\n'
+        f'        <div class="fd-quadrant"><div class="fd-q-title">Principales Tenencias</div>'
+        f'<div class="fd-q-body" style="align-items:flex-start;padding:12px 14px">'
+        f'<table class="fd-top5" style="font-size:13px"><tbody>{top5_rows}</tbody></table></div></div>\n'
+        f'      </div>\n'
+        f'      <div style="display:grid;grid-template-columns:1fr 280px;gap:10px;min-height:190px">\n'
+        f'        <div class="fd-quadrant"><div class="fd-q-title">Variaciones VCP — {fd["tipo_vcp"]}</div>'
+        f'<div class="fd-q-body" style="padding:8px 12px;flex-direction:column;align-items:stretch">'
+        f'<canvas id="vcp-cv-{fid}" style="width:100%;flex:1"></canvas></div></div>\n'
+        f'        <div class="fd-quadrant"><div class="fd-q-title">Ingresá valores</div>'
+        f'<div class="fd-q-body" style="flex-direction:column;align-items:stretch;padding:8px 10px">'
+        f'<div class="fd-vcp-note" style="margin-bottom:8px">✏ Valores en % (ej: 0.9 = 0.9%)</div>'
+        f'<div class="fd-vcp-grid">'
+        f'<span class="hdr"></span><span class="hdr">Últ. semana</span><span class="hdr">Últ. 30d</span>'
+        f'<input type="hidden" id="vcp-lbl-{fid}" value="{fd["peers_label"]}">\n'
+        f'{vcp_rows}\n</div></div></div>\n'
+        f'      </div>\n'
+        f'    </div>\n  </div>\n'
+        f'  <div class="slide-footer">'
+        f'<div class="slide-footer-left">Delta Asset Management · {fecha_str} · Uso interno</div>'
+        f'<div class="slide-nav-btns">'
+        f'<button class="slide-nav-btn" onclick="goToId(\'{prev_id}\')">← Anterior</button>'
+        f'<button class="slide-nav-btn" onclick="goToId(\'{next_id}\')">Siguiente →</button>'
+        f'</div><div class="slide-footer-right">{slide_num} / {total_slides}</div></div>\n'
+        f'</div>\n{pie_js}\n{bar_js}\n{vcp_js}\n'
+    )
 
 
-# =============================================================================
-# API PÚBLICA — HTML
-# =============================================================================
 
 def generar_fondos_nav_items(fondos: list = None) -> str:
     """
@@ -983,7 +844,14 @@ if (typeof goToId === 'undefined') {
     var target = document.getElementById(targetId);
     if (target) {
       target.classList.add('active');
-      setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 60);
+      setTimeout(function() {
+        window.dispatchEvent(new Event('resize'));
+        var active = document.querySelector('.fd-slide.active');
+        if (active) {
+          var fid = active.id.replace('fd-slide-','');
+          if (typeof window['drawVcp_'+fid]==='function') window['drawVcp_'+fid]();
+        }
+      }, 100);
     }
     document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
     var navId = targetId.replace('fd-slide-', 'fd-nav-').replace(/^slide-/, 'nav-');

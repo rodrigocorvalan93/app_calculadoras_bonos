@@ -619,6 +619,110 @@ def render_tab_posiciones(
 # Render 2: Buscador + Matriz de Tenencias
 # ──────────────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _especies_disponibles(df_comp: pd.DataFrame) -> List[str]:
+    """Lista ordenada única de Cod_Delta. Cacheada: se recalcula sólo si
+    la composición cambia (el ttl matchea el de load_delta_composicion)."""
+    if df_comp is None or df_comp.empty:
+        return []
+    return sorted(
+        df_comp["Cod_Delta"].dropna().astype(str).str.strip().unique().tolist()
+    )
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _agregado_por_especie(
+    df_comp: pd.DataFrame,
+    df_pn: pd.DataFrame,
+    especie: str,
+    only_nonzero: bool,
+) -> pd.DataFrame:
+    """Agrega tenencias de una especie por fondo + % PN. Cacheada por (especie, toggle)."""
+    df_e = df_comp[df_comp["Cod_Delta"] == especie]
+    if only_nonzero:
+        df_e = df_e[df_e["Cantidad"].fillna(0) != 0]
+    if df_e.empty:
+        return pd.DataFrame()
+
+    agg = (
+        df_e.groupby("CodFondo", dropna=True)
+        .agg(VN=("Cantidad", "sum"), Valor=("Valor", "sum"))
+        .reset_index()
+    )
+    agg = agg.merge(df_pn, on="CodFondo", how="left")
+    agg["% PN"] = np.where(
+        agg["PN"].fillna(0) > 0, agg["Valor"] / agg["PN"], np.nan
+    )
+    agg["Fondo"] = agg["CodFondo"].map(_fondo_label)
+
+    # Info de vto / denom — se guardan en attrs como strings serializables
+    # (Streamlit serializa attrs a JSON y Timestamp no es JSON-nativo).
+    vto = df_e["Vencimiento"].dropna().iloc[0] if "Vencimiento" in df_e and df_e["Vencimiento"].notna().any() else None
+    denom = df_e["Inversion"].dropna().iloc[0] if "Inversion" in df_e and df_e["Inversion"].notna().any() else ""
+    agg.attrs["vto"] = vto.date().isoformat() if vto is not None and pd.notna(vto) else ""
+    agg.attrs["denom"] = str(denom) if denom else ""
+    return agg
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _matriz_especies_fondos(
+    df_comp: pd.DataFrame,
+    df_pn: pd.DataFrame,
+    clase_sel_tuple: Tuple[str, ...],
+    unidad: str,
+    top_n: int,
+) -> pd.DataFrame:
+    """Genera la matriz pivot especies × fondos cacheada.
+    clase_sel se pasa como tuple para ser hasheable."""
+    df_m = df_comp[df_comp["Cod_Delta"].notna()]
+    if clase_sel_tuple:
+        df_m = df_m[df_m["Clase de Activo"].isin(clase_sel_tuple)]
+    if df_m.empty:
+        return pd.DataFrame()
+
+    agg = (
+        df_m.groupby(["Cod_Delta", "CodFondo"], dropna=True)
+        .agg(VN=("Cantidad", "sum"), Valor=("Valor", "sum"))
+        .reset_index()
+    )
+
+    if unidad == "% sobre PN":
+        agg = agg.merge(df_pn, on="CodFondo", how="left")
+        agg["cell"] = np.where(
+            agg["PN"].fillna(0) > 0, agg["Valor"] / agg["PN"], np.nan
+        )
+    elif unidad == "VN":
+        agg["cell"] = agg["VN"]
+    else:  # "Monto Invertido"
+        agg["cell"] = agg["Valor"]
+
+    presencias = (
+        agg[agg["cell"].fillna(0) != 0]
+        .groupby("Cod_Delta")
+        .size()
+        .sort_values(ascending=False)
+    )
+    especies_top = presencias.head(top_n).index.tolist()
+    if not especies_top:
+        return pd.DataFrame()
+
+    agg_top = agg[agg["Cod_Delta"].isin(especies_top)]
+
+    matriz = agg_top.pivot_table(
+        index="Cod_Delta",
+        columns="CodFondo",
+        values="cell",
+        aggfunc="sum",
+    ).fillna(0.0)
+
+    matriz = matriz.loc[especies_top]
+    cols_ordenadas = sorted(matriz.columns.tolist())
+    matriz = matriz[cols_ordenadas]
+    matriz.columns = [_fondo_label(c) for c in matriz.columns]
+    matriz.index.name = "Especie"
+    return matriz
+
+
 def render_tab_matriz() -> None:
     """Pestaña 'Matriz Tenencias' con 2 subsecciones:
     1) Buscador: una especie → en qué fondos está.
@@ -635,9 +739,7 @@ def render_tab_matriz() -> None:
 
     # ── Sub: buscador ──
     with sub_buscador:
-        especies_disp = sorted(
-            df_comp["Cod_Delta"].dropna().astype(str).str.strip().unique().tolist()
-        )
+        especies_disp = _especies_disponibles(df_comp)
 
         col_1, col_2 = st.columns([2, 1])
         with col_1:
@@ -650,28 +752,13 @@ def render_tab_matriz() -> None:
         with col_2:
             only_nonzero = st.toggle("Sólo fondos con tenencia ≠ 0", value=True, key="busc_nonzero")
 
-        df_e = df_comp[df_comp["Cod_Delta"] == especie].copy()
-        if only_nonzero:
-            df_e = df_e[df_e["Cantidad"].fillna(0) != 0]
+        agg = _agregado_por_especie(df_comp, df_pn, especie, only_nonzero)
 
-        if df_e.empty:
+        if agg.empty:
             st.info(f"No hay tenencias de **{especie}**.")
         else:
-            # Agregado por fondo (por si un fondo la tiene en más de una fila)
-            agg = (
-                df_e.groupby("CodFondo", dropna=True)
-                .agg(VN=("Cantidad", "sum"), Valor=("Valor", "sum"))
-                .reset_index()
-            )
-            agg = agg.merge(df_pn, on="CodFondo", how="left")
-            agg["% PN"] = np.where(
-                agg["PN"].fillna(0) > 0, agg["Valor"] / agg["PN"], np.nan
-            )
-            agg["Fondo"] = agg["CodFondo"].map(_fondo_label)
-
-            # Info de vencimiento (de la primera fila)
-            vto = df_e["Vencimiento"].dropna().iloc[0] if "Vencimiento" in df_e and df_e["Vencimiento"].notna().any() else None
-            denom = df_e["Inversion"].dropna().iloc[0] if "Inversion" in df_e and df_e["Inversion"].notna().any() else ""
+            vto = agg.attrs.get("vto", "")
+            denom = agg.attrs.get("denom", "")
 
             total_vn = float(agg["VN"].sum())
             total_val = float(agg["Valor"].sum())
@@ -680,26 +767,26 @@ def render_tab_matriz() -> None:
             k1.metric(f"🔹 {especie}", "")
             k2.metric("Σ VN (todos los fondos)", _fmt_num_ar(total_vn, 0))
             k3.metric("Σ Monto Invertido", _fmt_num_ar(total_val, 0))
-            k4.metric("Vto.", vto.date().isoformat() if vto is not None and pd.notna(vto) else "—")
+            k4.metric("Vto.", vto if vto else "—")
 
             if denom:
                 st.caption(f"**{denom}**")
 
-            agg = (
+            tbl = (
                 agg.rename(columns={"Valor": "Monto Invertido", "% PN": "% sobre PN"})
                    [["Fondo", "VN", "Monto Invertido", "% sobre PN"]]
                    .sort_values("Monto Invertido", ascending=False)
             )
 
-            sty = agg.style.format({
+            sty = tbl.style.format({
                 "VN": lambda v: _fmt_num_ar(v, 0),
                 "Monto Invertido": lambda v: _fmt_num_ar(v, 0),
                 "% sobre PN": lambda v: _fmt_pct(v, 2),
             }, na_rep="—")
-            max_pn = agg["% sobre PN"].abs().max()
+            max_pn = tbl["% sobre PN"].abs().max()
             if max_pn and max_pn > 0 and np.isfinite(max_pn):
                 sty = sty.bar(subset=["% sobre PN"], color="#2962ff", vmin=0, vmax=float(max_pn))
-            st.dataframe(sty, width="stretch", height=min(550, 50 + 32 * len(agg)))
+            st.dataframe(sty, width="stretch", height=min(550, 50 + 32 * len(tbl)))
 
     # ── Sub: matriz ──
     with sub_matriz:
@@ -715,7 +802,7 @@ def render_tab_matriz() -> None:
         with col_b:
             unidad = st.radio(
                 "Unidad de celda",
-                options=["% sobre PN", "VN", "Monto Invertido"],
+                options=["VN", "% sobre PN", "Monto Invertido"],
                 horizontal=True,
                 key="mat_unidad",
             )
@@ -726,63 +813,18 @@ def render_tab_matriz() -> None:
                 key="mat_topn",
             )
 
-        df_m = df_comp[df_comp["Cod_Delta"].notna()].copy()
-        if clase_sel:
-            df_m = df_m[df_m["Clase de Activo"].isin(clase_sel)]
-
-        if df_m.empty:
-            st.info("Sin datos con los filtros actuales.")
-            return
-
-        # Agregado por (Cod_Delta, CodFondo)
-        agg = (
-            df_m.groupby(["Cod_Delta", "CodFondo"], dropna=True)
-            .agg(VN=("Cantidad", "sum"), Valor=("Valor", "sum"))
-            .reset_index()
+        # Cacheado por (clase_sel, unidad, top_n); df_comp y df_pn son inmutables
+        # dentro del TTL, entonces cualquier cambio de widget que coincida con
+        # una combinación previamente vista es instantáneo.
+        matriz = _matriz_especies_fondos(
+            df_comp, df_pn, tuple(sorted(clase_sel)), unidad, top_n
         )
 
-        # Para % sobre PN necesitamos unir PN
-        if unidad == "% sobre PN":
-            agg = agg.merge(df_pn, on="CodFondo", how="left")
-            agg["cell"] = np.where(
-                agg["PN"].fillna(0) > 0, agg["Valor"] / agg["PN"], np.nan
-            )
-        elif unidad == "VN":
-            agg["cell"] = agg["VN"]
-        else:  # Monto Invertido
-            agg["cell"] = agg["Valor"]
-
-        # Top N especies por # fondos donde aparecen con tenencia no nula
-        presencias = (
-            agg[agg["cell"].fillna(0) != 0]
-            .groupby("Cod_Delta")
-            .size()
-            .sort_values(ascending=False)
-        )
-        especies_top = presencias.head(top_n).index.tolist()
-        if not especies_top:
+        if matriz.empty:
             st.info("No hay especies con tenencia > 0 en el recorte actual.")
             return
 
-        agg_top = agg[agg["Cod_Delta"].isin(especies_top)]
-
-        matriz = agg_top.pivot_table(
-            index="Cod_Delta",
-            columns="CodFondo",
-            values="cell",
-            aggfunc="sum",
-        ).fillna(0.0)
-
-        # Orden por presencia (filas) y por PN (columnas)
-        matriz = matriz.loc[especies_top]
-        cols_ordenadas = sorted(matriz.columns.tolist())
-        matriz = matriz[cols_ordenadas]
-
-        # Renombrar columnas con etiqueta larga
-        matriz.columns = [_fondo_label(c) for c in matriz.columns]
-        matriz.index.name = "Especie"
-
-        # Styling
+        # Styling (NO cacheable — devuelve Styler que es un objeto mutable)
         if unidad == "% sobre PN":
             fmt_fn = lambda v: _fmt_pct(v, 2) if v else ""
             cmap = "Blues"

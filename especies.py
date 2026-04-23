@@ -10406,7 +10406,7 @@ MGCNO = {
     "País": "Argentina",
     "Clasificación": "Corporativo Hard Dolar",
     "Industria": "Energy",
-    "Moneda": "USD",
+    "Moneda": "USB",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "04/10/2024",
     "Vencimiento": "04/10/2028",
@@ -10457,7 +10457,7 @@ MGCQO = {
     "País": "Argentina",
     "Clasificación": "Corporativo Hard Dolar",
     "Industria": "Energy",
-    "Moneda": "USD",
+    "Moneda": "USB",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "06/08/2025",
     "Vencimiento": "06/08/2028",
@@ -10495,6 +10495,56 @@ MGCQO = {
     se rescatarán la totalidad o una parte de las Obligaciones Negociables que se encuentren en circulación al valor nominal con más los intereses devengados y cualquier monto adeudado e impago bajo las Obligaciones Negociables hasta la fecha del rescate. """,
     "Aviso Resultados": "https://lt.mydplr.com/3fd54a673d8276f545b8866b5ce02eac-fd388f880eeed95f651bb714f572f2c5",
     "Suplemento de Prospecto": "https://lt.mydplr.com/67cce0a51259a5aac462b2a92f31e033-fd388f880eeed95f651bb714f572f2c5"
+}
+MGCTO = {
+    "Nombre Security": "ON Pampa Energia S.A. Clase XXVII Vto 01 04 2029",
+    "Código": "MGCTO",
+    "ISIN": "AR0145481872",
+    "Calificación": "AAA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Energy",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "01/04/2026",
+    "Vencimiento": "01/04/2029",
+    "Fecha Primer Cupón": "01/10/2026",
+    "Cupón / Spread": 5.49, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": ["01/10/2026",
+                        "01/04/2027",
+                        "01/10/2027",
+                        "01/04/2028",
+                        "01/10/2028",
+                        "01/04/2029"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Quote Price Convention": "DIRTY",
+    "Callable": True , # Es binario True or False
+    "Tipo de Call": "Call total o parcial a opción de la sociedad a partir del m44 de la emisión",
+    "Fecha Call": "01/12/2028",
+    "Precio Call": {"m44 en adelante": 1.00},
+    "Comentarios": """En la medida que la normativa aplicable y vigente lo permita, la Emisora
+podrá rescatar a su sola opción, de forma total o parcial, las Obligaciones Negociables, en o desde la fecha en que se cumplan 4 meses previos a la
+Fecha de Vencimiento, previa notificación con al menos 10 días hábiles. En caso de rescate de las Obligaciones Negociables, se rescatarán la
+totalidad o una parte de las Obligaciones Negociables que se encuentren en circulación al valor nominal con más los intereses devengados y
+cualquier monto adeudado e impago bajo las Obligaciones Negociables hasta la fecha del rescate. En el caso de un rescate parcial, la selección
+de las Obligaciones Negociables para el rescate será realizada a prorrata entre los tenedores de las Obligaciones Negociables.""",
+    "Aviso Resultados": "",
+    "Suplemento de Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/9e56d39e-b89b-40bc-8faf-98549af17c71"
 }
 OLC5O = {
     "Nombre Security": "ON Oleoductos del Valle S.A. Clase 5 Vto 12 06 2028",
@@ -14522,7 +14572,7 @@ TMG27 = {
     "Industria": "Soberano ARS TAMAR",
     "Moneda": "ARS",
     "Plazo habitual de liquidación: t +": 1.,
-    "Emisión": "04/01/2026",  # VERIFICAR contra pliego original de TMG27
+    "Emisión": "01/04/2026",  # VERIFICAR contra pliego original de TMG27
     "Vencimiento": "31/08/2027",
     "Fecha Primer Cupón": None,
     "Cupón / Spread": 6.,  # VERIFICAR margen de corte de licitación original

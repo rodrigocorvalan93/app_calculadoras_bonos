@@ -3363,59 +3363,14 @@ def main():
     curve_labels = {c.key: c.label for c in CURVES}
 
     # Navegación: pestañas
-    # ── NAVEGACIÓN: radio en vez de st.tabs ──
-    # Rationale: st.tabs ejecuta el código de TODOS los tabs en cada rerun,
-    # aunque sólo uno sea visible. Con 14 tabs y fragments lazy que llaman
-    # al API, cada rerun consume ~45s. Usando un radio con guard por tab
-    # activo, sólo corre el tab visible → render en <1s.
-    _TAB_LABELS = [
-        "Curvas", "Mercado", "Cauciones", "Forwards", "Gráficos", "Futuros",
-        "Total Return", "Análisis Yields", "Comparador Yields",
-        "Breakeven Inflación", "Crédito Corp.", "Histórico",
-        "Posiciones", "Matriz Tenencias",
-    ]
-    _active_tab = st.radio(
-        "Sección",
-        options=_TAB_LABELS,
-        index=_TAB_LABELS.index(st.session_state.get("_active_tab", "Análisis Yields")),
-        horizontal=True,
-        key="_active_tab",
-        label_visibility="collapsed",
+    tab_curvas, tab_mercado, tab_cauciones, tab_fwds, tab_graficos, tab_futuros, tab_tr, tab_yas, tab_comp, tab_breakeven, tab_credito, tab_historico, tab_posiciones, tab_matriz = st.tabs(
+        ["Curvas", "Mercado", "Cauciones", "Forwards", "Gráficos", "Futuros", "Total Return", "Análisis Yields", "Comparador Yields", "Breakeven Inflación", "Crédito Corp.", "Histórico", "Posiciones", "Matriz Tenencias"]
     )
-    st.divider()
-
-    # Los "tabs" son ahora context managers trivales (st.container) para
-    # mantener el indent y la estructura del código. El guard real es el `if`.
-    class _TabGuard:
-        def __init__(self, name):
-            self.name = name
-            self.active = (name == _active_tab)
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def __bool__(self):
-            return self.active
-
-    tab_curvas = _TabGuard("Curvas")
-    tab_mercado = _TabGuard("Mercado")
-    tab_cauciones = _TabGuard("Cauciones")
-    tab_fwds = _TabGuard("Forwards")
-    tab_graficos = _TabGuard("Gráficos")
-    tab_futuros = _TabGuard("Futuros")
-    tab_tr = _TabGuard("Total Return")
-    tab_yas = _TabGuard("Análisis Yields")
-    tab_comp = _TabGuard("Comparador Yields")
-    tab_breakeven = _TabGuard("Breakeven Inflación")
-    tab_credito = _TabGuard("Crédito Corp.")
-    tab_historico = _TabGuard("Histórico")
-    tab_posiciones = _TabGuard("Posiciones")
-    tab_matriz = _TabGuard("Matriz Tenencias")
-    _lap("after tabs setup (radio)")
+    _lap("after st.tabs")
     # ─────────────────────────
     # Curvas (todas juntas) — auto-refresh via st.fragment
     # ─────────────────────────
-    if tab_curvas:
+    with tab_curvas:
         compact = st.toggle("Modo compacto (usar expanders)", value=True)
 
         @st.fragment(run_every=refresh_interval)
@@ -3454,7 +3409,7 @@ def main():
     # ─────────────────────────
     # Mercado — auto-refresh
     # ─────────────────────────
-    if tab_mercado:
+    with tab_mercado:
         curve_key_mkt = st.selectbox(
             "Curva",
             options=[c.key for c in CURVES if c.key in curves],
@@ -3483,7 +3438,7 @@ def main():
     # ─────────────────────────
     # Cauciones
     # ─────────────────────────
-    if tab_cauciones:
+    with tab_cauciones:
         st.subheader("Monitor de Cauciones — BYMA")
         st.caption("Tasas TNA por plazo. Datos en tiempo real. Sin cálculo de TIR (se negocia directo por TNA).")
 
@@ -3544,7 +3499,7 @@ def main():
     # ─────────────────────────
     # Forwards
     # ─────────────────────────
-    if tab_fwds:
+    with tab_fwds:
         st.subheader("Forwards implícitos (TIR) — tiempo real")
         st.caption("Matriz aproximada: usa TIR como spot (no bootstrap de curva de descuento).")
 
@@ -3756,7 +3711,7 @@ def main():
     # ─────────────────────────
     # Gráficos
     # ─────────────────────────
-    if tab_graficos:
+    with tab_graficos:
         st.subheader("Curva — Duration vs Yield (bid / last / offer) + NSS")
 
         @st.fragment(run_every=refresh_interval)
@@ -3874,7 +3829,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
     # ─────────────────────────
     # Futuros
     # ─────────────────────────
-    if tab_futuros:
+    with tab_futuros:
         @st.fragment
         def _futuros_live():
             st.subheader("Futuros DLR (ROFEX) — implícitas vs A3500")
@@ -3962,7 +3917,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         _futuros_live()
         _lap("after futuros")
 
-    if tab_tr:
+    with tab_tr:
         @st.fragment
         def _tr_live():
             st.subheader("Total Return real (calcula_total_return)")
@@ -4202,7 +4157,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         _tr_live()
         _lap("after tr")
 
-    if tab_yas:
+    with tab_yas:
         _lap("entering tab_yas")
         # _render_yas YA está decorada con @st.fragment.
         # Llamarla directamente (sin wrapper) asegura que los widgets
@@ -4210,7 +4165,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         _render_yas(username, password, plazo, curve_labels)
         _lap("after _render_yas() executed")
 
-    if tab_comp:
+    with tab_comp:
         @st.fragment
         def _comp_live():
             st.subheader("Comparador de Yields")
@@ -4429,7 +4384,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
         _comp_live()
 
-    if tab_credito:
+    with tab_credito:
         @st.fragment
         def _credito_live():
             st.subheader("Scoring Crediticio — Corporativos Argentina USD")
@@ -4552,7 +4507,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         # ─────────────────────────
         _credito_live()
 
-    if tab_breakeven:
+    with tab_breakeven:
         st.subheader("Breakeven de Inflación — CER vs Tasa Fija")
         st.caption(
             "Compara la curva CER (tasa real) contra LECAP/Tasa Fija (tasa nominal) "
@@ -4593,11 +4548,11 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             with col_m1:
                 be_method = st.radio(
                     "Método de cálculo",
-                    options=["fisher", "iter", "both"],
+                    options=["both", "fisher", "iter"],
                     format_func=lambda k: {
+                        "both": "Ambos (Fisher + Iteración)",
                         "fisher": "Fisher (rápido)",
                         "iter": "Iteración (preciso para cortas)",
-                        "both": "Ambos (Fisher + Iteración)",
                     }.get(k, k),
                     horizontal=True,
                     key="be_method",
@@ -5187,7 +5142,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
     # ─────────────────────────
     # Histórico (series macro + bonos BYMA)
     # ─────────────────────────
-    if tab_historico:
+    with tab_historico:
         @st.fragment
         def _historico_live():
             st.subheader("Histórico de tasas, precios y series macro")
@@ -5675,7 +5630,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         # ─────────────────────────
         _historico_live()
 
-    if tab_posiciones:
+    with tab_posiciones:
         st.subheader("Carteras — posiciones por fondo")
         st.caption(
             "Fuente: `Delta_Composicion.xlsx` + `Delta_PN.xlsx`. "
@@ -5707,7 +5662,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
     # ─────────────────────────
     # Matriz de Tenencias (buscador + matriz especies × fondos)
     # ─────────────────────────
-    if tab_matriz:
+    with tab_matriz:
         st.subheader("Matriz de tenencias — especies × fondos")
 
         @st.fragment

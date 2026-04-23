@@ -187,30 +187,26 @@ function niceStep(range, target) {
   return s;
 }
 
-/* ── Anti-solapamiento de labels ── */
+
+/* Posicionamiento de labels con líneas conector */
 function resolveOverlaps(labels) {
-  /* labels: [{x, y, text, align}]
-     Empuja verticalmente labels que se solapan */
-  var H_STEP = 11;   // px mínimos entre líneas de texto
-  var W_APPROX = 7;  // px por carácter (aprox)
-  var changed = true, MAX_ITER = 20, iter = 0;
+  var H = 10, W_PX = 6.5;
+  var changed = true, MAX_ITER = 30, iter = 0;
   while (changed && iter++ < MAX_ITER) {
     changed = false;
     for (var i = 0; i < labels.length; i++) {
       for (var j = i+1; j < labels.length; j++) {
         var a = labels[i], b = labels[j];
-        var aw = a.text.length * W_APPROX;
-        var bw = b.text.length * W_APPROX;
-        var ax1 = a.align==='left' ? a.x : a.x - aw;
-        var ax2 = ax1 + aw;
-        var bx1 = b.align==='left' ? b.x : b.x - bw;
-        var bx2 = bx1 + bw;
-        var overlapX = ax1 < bx2 && ax2 > bx1;
-        var overlapY = Math.abs(a.y - b.y) < H_STEP;
-        if (overlapX && overlapY) {
-          /* Empujar el de abajo hacia arriba */
-          if (a.y >= b.y) { a.y += H_STEP * 0.6; }
-          else             { b.y += H_STEP * 0.6; }
+        var aw = a.text.length * W_PX;
+        var bw = b.text.length * W_PX;
+        var ax1 = a.align==="left" ? a.x : a.x - aw;
+        var bx1 = b.align==="left" ? b.x : b.x - bw;
+        var ox = ax1 < bx1 + bw && ax1 + aw > bx1;
+        var oy = Math.abs(a.y - b.y) < H;
+        if (ox && oy) {
+          var mid = (a.y + b.y) / 2;
+          if (a.ptY <= b.ptY) { a.y = mid - H*0.55; b.y = mid + H*0.55; }
+          else                 { a.y = mid + H*0.55; b.y = mid - H*0.55; }
           changed = true;
         }
       }
@@ -322,10 +318,18 @@ function drawChart(id, data, color, yAxisLabel, zeroLine) {
   resolveOverlaps(labelObjs);
   for(var i=0;i<labelObjs.length;i++){
     var lb=labelObjs[i];
+    var dist=Math.sqrt(Math.pow(lb.x-lb.ptX,2)+Math.pow(lb.y-lb.ptY,2));
+    if(dist>18){
+      ctx.save(); ctx.strokeStyle=color; ctx.lineWidth=0.7;
+      ctx.globalAlpha=0.4; ctx.setLineDash([2,2]);
+      ctx.beginPath(); ctx.moveTo(lb.ptX,lb.ptY);
+      ctx.lineTo(lb.align==="left"?lb.x-2:lb.x+2,lb.y-1);
+      ctx.stroke(); ctx.restore();
+    }
     ctx.textAlign=lb.align;
-    ctx.strokeStyle='white'; ctx.lineWidth=2.8; ctx.lineJoin='round';
-    ctx.strokeText(lb.text, lb.x, lb.y);
-    ctx.fillStyle=color; ctx.fillText(lb.text, lb.x, lb.y);
+    ctx.strokeStyle="white"; ctx.lineWidth=2.5; ctx.lineJoin="round";
+    ctx.strokeText(lb.text,lb.x,lb.y);
+    ctx.fillStyle=color; ctx.fillText(lb.text,lb.x,lb.y);
   }
 
   /* ── Label eje Y — centrado exacto ── */
@@ -1277,46 +1281,46 @@ document.addEventListener('DOMContentLoaded',function(){{
   // Renderizar cuando el slide se vuelve visible
 }});
 
-// Lazy render del cap4: renderiza cuando el slide-4 se vuelve visible
+// Cap4 lazy render — usa goToId hook en el sistema unificado
 (function(){{
-  var _c4done = false;
+  var _c4init = false;
 
-  function _renderC4(){{
-    if (_c4done) return;
-    var cv1 = document.getElementById('c4-chart-tf');
-    if (!cv1) return;
-    // Verificar que el canvas tiene dimensiones (slide visible)
-    var rect = cv1.getBoundingClientRect();
-    if (rect.width < 10) {{
-      setTimeout(_renderC4, 100);
-      return;
+  window._c4Render = function() {{
+    if (!_c4init) {{
+      // Primera vez: renderizar ahora que el slide es visible
+      render();
+      _c4init = true;
+    }} else {{
+      // Re-navegaciones: re-renderizar para actualizar tamaño de charts
+      if (chartTF) {{ chartTF.destroy(); chartTF = null; }}
+      if (chartCER) {{ chartCER.destroy(); chartCER = null; }}
+      render();
     }}
-    render();
-    _c4done = true;
-  }}
+  }};
 
-  // MutationObserver: detectar cuando slide-4 recibe clase 'active'
-  function _setupC4Observer(){{
-    var slide4 = document.getElementById('slide-4');
-    if (!slide4) {{ setTimeout(_setupC4Observer, 100); return; }}
-    var obs = new MutationObserver(function(){{
-      if (slide4.classList.contains('active')) {{
-        _c4done = false;  // permitir re-render si se navega varias veces
-        setTimeout(_renderC4, 80);
-      }}
-    }});
-    obs.observe(slide4, {{attributes: true, attributeFilter: ['class']}});
-  }}
-
-  // Engancharse al sistema de navegación unificado
-  document.addEventListener('DOMContentLoaded', function(){{
-    _setupC4Observer();
-    // Parchear goToId para renderizar al navegar al slide-4
-    var _origGoToId = window.goToId;
-    if (typeof _origGoToId === 'function') {{
+  // Hook en DOMContentLoaded — parchear goToId
+  document.addEventListener('DOMContentLoaded', function() {{
+    var _gti = window.goToId;
+    if (typeof _gti === 'function') {{
       window.goToId = function(id) {{
-        _origGoToId(id);
-        if (id === 'slide-4') {{ _c4done = false; setTimeout(_renderC4, 80); }}
+        _gti(id);
+        if (id === 'slide-4') {{
+          requestAnimationFrame(function() {{
+            requestAnimationFrame(window._c4Render);
+          }});
+        }}
+      }};
+    }}
+    // También para goTo numérico
+    var _gt = window.goTo;
+    if (typeof _gt === 'function') {{
+      window.goTo = function(idx) {{
+        _gt(idx);
+        if (idx === 4) {{
+          requestAnimationFrame(function() {{
+            requestAnimationFrame(window._c4Render);
+          }});
+        }}
       }};
     }}
   }});
@@ -1591,69 +1595,49 @@ def _assign_bond_to_dus(dus_date: date, df_lecap: pd.DataFrame,
 
 
 
-def _get_futuros_auto(df_futuros_param, prev_snap: dict, hoy: date) -> "pd.DataFrame | None":
-    """
-    Obtiene el DataFrame de futuros DUS en este orden de prioridad:
-    1. df_futuros pasado como parámetro (ya procesado)
-    2. futuros_minorista del módulo bymaapi (si está disponible en el entorno)
-    3. Datos del snapshot del HTML anterior (JSON embebido)
-    Retorna None si no hay ninguna fuente disponible.
-    """
-    from datetime import timedelta
 
+def _get_futuros_auto(df_futuros_param, prev_snap, hoy):
+    """Futuros DUS: parámetro → bymaapi.futuros_minorista → snapshot anterior"""
     # 1. Parámetro explícito
-    if df_futuros_param is not None and not df_futuros_param.empty:
+    if df_futuros_param is not None and hasattr(df_futuros_param,"empty") and not df_futuros_param.empty:
+        print(f"[cap5] Usando df_futuros param ({len(df_futuros_param)} filas)")
         return df_futuros_param
 
-    # 2. futuros_minorista de bymaapi (global del módulo)
+    # 2. bymaapi.futuros_minorista
     try:
-        import bymaapi
-        fm = getattr(bymaapi, "futuros_minorista", None)
-        if fm is not None and not fm.empty:
-            print("[cap5] Usando futuros_minorista de bymaapi")
-            # Normalizar columnas: symbol/Código, price/Last Price, days_to_maturity/Dias Vto
+        import bymaapi as _ba
+        fm = getattr(_ba, "futuros_minorista", None)
+        if fm is not None and hasattr(fm,"empty") and not fm.empty:
             df = fm.copy()
-            rename = {}
-            if "symbol" in df.columns and "Código" not in df.columns:
-                rename["symbol"] = "Código"
-            if "price" in df.columns and "Last Price" not in df.columns:
-                rename["price"] = "Last Price"
-            if "days_to_maturity" in df.columns and "Dias Vto" not in df.columns:
-                rename["days_to_maturity"] = "Dias Vto"
-            if "maturityDate" in df.columns and "Fecha Vto" not in df.columns:
-                rename["maturityDate"] = "Fecha Vto"
-            if rename:
-                df = df.rename(columns=rename)
-            # Filtrar solo minorista (sin sufijo A)
+            col_map = {"symbol":"Código","price":"Last Price",
+                       "days_to_maturity":"Dias Vto","maturityDate":"Fecha Vto"}
+            df = df.rename(columns={k:v for k,v in col_map.items()
+                                    if k in df.columns and v not in df.columns})
+            # Filtrar mayoristas
             if "Código" in df.columns:
-                df = df[~df["Código"].astype(str).str.endswith("A")].copy()
-            return df.reset_index(drop=True)
+                df = df[~df["Código"].astype(str).str.upper().str.endswith("A")].copy()
+            df = df.reset_index(drop=True)
+            print(f"[cap5] Usando futuros_minorista de bymaapi ({len(df)} contratos)")
+            if len(df) > 0:
+                cols_info = [c for c in ["Código","Last Price","Dias Vto","Fecha Vto"] if c in df.columns]
+                print(f"[cap5]   cols={cols_info}, primero: {df[cols_info].iloc[0].to_dict()}")
+            return df
+    except ImportError:
+        print("[cap5] bymaapi no disponible")
     except Exception as e:
-        pass
+        print(f"[cap5] Error futuros_minorista: {e}")
 
-    # 3. Snapshot del HTML anterior
+    # 3. Snapshot anterior
     if prev_snap and prev_snap.get("rofex"):
-        print("[cap5] Usando precios ROFEX del comité anterior (sin datos frescos)")
-        rofex = prev_snap["rofex"]
-        rows = []
-        for r in rofex:
-            precio = r.get("precio")
-            dias   = r.get("dias")
-            fecha  = r.get("fecha_vto")
-            ticker = r.get("ticker", "")
-            if precio and dias:
-                rows.append({
-                    "Código":     ticker,
-                    "Last Price": precio,
-                    "Dias Vto":   dias,
-                    "Fecha Vto":  fecha,
-                })
+        print("[cap5] Usando ROFEX del snapshot anterior")
+        rows = [{"Código": r.get("ticker",""), "Last Price": r.get("precio"),
+                 "Dias Vto": r.get("dias"), "Fecha Vto": r.get("fecha_vto")}
+                for r in prev_snap["rofex"] if r.get("precio") and r.get("dias")]
         if rows:
             return pd.DataFrame(rows)
 
+    print("[cap5] Sin fuente de futuros — usando fallback sintético")
     return None
-
-
 
 def _build_cap5_html(
     df_lecap:  pd.DataFrame,
@@ -1682,6 +1666,11 @@ def _build_cap5_html(
     if ccl       is None: ccl       = spot * 1.06
     if techo_hoy is None: techo_hoy = spot * 1.18
     if piso_hoy  is None: piso_hoy  = spot * 0.60
+
+    # Helper: label de mes en español
+    _MES_ES = {1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
+               7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic"}
+    def _label_mes(d): return f"{_MES_ES.get(d.month, d.strftime('%b'))}-{d.strftime('%y')}"
 
     dist_techo = (techo_hoy / spot - 1) * 100
 
@@ -1726,7 +1715,7 @@ def _build_cap5_html(
                     continue
                 if dias_f <= 0:
                     continue
-                label  = mat_date.strftime("%b-%y").capitalize()
+                label  = _label_mes(mat_date)
                 tea    = (precio / spot) ** (365 / dias_f) - 1
                 tna    = (precio / spot - 1) * 365 / dias_f
                 deva_m = (precio / spot) ** (30  / dias_f) - 1
@@ -1743,40 +1732,60 @@ def _build_cap5_html(
                 continue
         dus_contracts = sorted(dus_contracts, key=lambda x: x["dias"])[:10]
 
-    # Fallback si no hay futuros
+    # Fallback si no hay futuros — usar fechas reales de fin de mes
     if not dus_contracts:
-        # Construir serie sintética con CPI T-2 proyectado (~3%)
+        print("[cap5] Sin datos de futuros — construyendo curva sintética (CPI 3%)")
         cpi_m = 0.03
-        for i in range(1, 11):
-            dias_f = i * 30
-            mat    = hoy + timedelta(days=dias_f)
-            precio = round(spot * (1 + cpi_m) ** i, 1)
-            tea    = (precio / spot) ** (365 / dias_f) - 1
-            tna    = (precio / spot - 1) * 365 / dias_f
-            deva_m = (precio / spot) ** (30 / dias_f) - 1
-            dus_contracts.append({
-                "label":  mat.strftime("%b-%y").capitalize(),
-                "precio": precio,
-                "dias":   dias_f,
-                "mat":    mat,
-                "tea":    round(tea * 100, 4),
-                "tna":    round(tna * 100, 4),
-                "deva_m": round(deva_m * 100, 4),
-            })
+        try:
+            from pandas.tseries.offsets import MonthEnd
+            for i in range(1, 11):
+                mat    = (pd.Timestamp(hoy) + MonthEnd(i)).date()
+                dias_f = (mat - hoy).days
+                if dias_f <= 0: continue
+                precio = round(spot * (1 + cpi_m) ** i, 1)
+                tea    = (precio / spot) ** (365 / dias_f) - 1
+                tna    = (precio / spot - 1) * 365 / dias_f
+                deva_m = (precio / spot) ** (30  / dias_f) - 1
+                dus_contracts.append({
+                    "label":  _label_mes(mat),
+                    "precio": precio, "dias": dias_f, "mat": mat,
+                    "tea":    round(tea * 100, 4),
+                    "tna":    round(tna * 100, 4),
+                    "deva_m": round(deva_m * 100, 4),
+                })
+        except Exception as _fe:
+            for i in range(1, 11):
+                dias_f = i * 30
+                mat = hoy + timedelta(days=dias_f)
+                precio = round(spot * (1 + cpi_m) ** i, 1)
+                tea = (precio / spot) ** (365 / dias_f) - 1
+                tna = (precio / spot - 1) * 365 / dias_f
+                deva_m = (precio / spot) ** (30 / dias_f) - 1
+                dus_contracts.append({
+                    "label":  _label_mes(mat),
+                    "precio": precio, "dias": dias_f, "mat": mat,
+                    "tea":    round(tea * 100, 4),
+                    "tna":    round(tna * 100, 4),
+                    "deva_m": round(deva_m * 100, 4),
+                })
 
     # Calcular fwd mensual entre contratos
     for i, c in enumerate(dus_contracts):
+        deva_m_raw = (c["precio"] / spot) ** (30 / max(c["dias"], 1)) - 1
+        deva_acum  = c["precio"] / spot - 1
         if i == 0:
-            c["fwd_m"] = (c["precio"] / spot - 1) * 100
-            c["tna_fwd"] = c["fwd_m"] / max(c["dias"], 1) * 30
-            c["deva_acum"] = (c["precio"] / spot - 1) * 100
+            fwd_m   = c["precio"] / spot - 1        # primer contrato vs spot
+            dt      = max(c["dias"], 1)
+            tna_fwd = fwd_m * 30 / dt
         else:
-            prev = dus_contracts[i - 1]
-            fwd = c["precio"] / prev["precio"] - 1
-            dt  = max(c["dias"] - prev["dias"], 1)
-            c["fwd_m"]    = round(fwd * 100, 4)
-            c["tna_fwd"]  = round(fwd * 30 / dt * 100, 4)
-            c["deva_acum"]= round((c["precio"] / spot - 1) * 100, 4)
+            prev    = dus_contracts[i - 1]
+            fwd_m   = c["precio"] / prev["precio"] - 1
+            dt      = max(c["dias"] - prev["dias"], 1)
+            tna_fwd = fwd_m * 30 / dt
+        c["fwd_m"]    = round(fwd_m    * 100, 4)
+        c["tna_fwd"]  = round(tna_fwd  * 100, 4)
+        c["deva_m"]   = round(deva_m_raw * 100, 4)
+        c["deva_acum"]= round(deva_acum  * 100, 4)
 
     # ── Sintético por DUS ────────────────────────────────────────────
     sinteticos = []
@@ -2390,6 +2399,19 @@ def _build_cap7_html(snap: dict, tamar_tna: float, tamar_tea: float) -> str:
     snap_json = _json.dumps(snap, ensure_ascii=False, indent=2)
 
     return f"""
+<style>
+.snap-tbl {{border-collapse:collapse;width:100%;font-family:var(--font-body,'Calibri',Arial);font-size:11.5px;}}
+.snap-tbl th {{background:#0f2557;color:white;padding:5px 10px;text-align:center;font-size:10.5px;font-weight:600;border-right:1px solid rgba(255,255,255,0.15);}}
+.snap-tbl td {{padding:4px 10px;text-align:center;border-bottom:1px solid #eaeef2;border-right:1px solid #eaeef2;}}
+.snap-tbl td:first-child,.snap-tbl th:first-child {{text-align:left;font-weight:600;color:#0f2557;min-width:80px;}}
+.snap-tbl tr:last-child td {{border-bottom:none;}}
+.snap-tbl .td-val {{text-align:right;font-variant-numeric:tabular-nums;}}
+.snap-tbl .td-pos {{color:#1a7a46;}}
+.snap-tbl .td-neg {{color:#b85a1a;}}
+.snap-tbl .td-ticker {{font-weight:700;color:#0f2557;}}
+/* Movimientos — cards alineadas */
+.c7-cards {{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;margin-top:6px}}
+</style>
 <div class="slide-section-header">
   <div class="slide-section-num">07</div>
   <div class="slide-section-stripe" style="background:#1e6fba"></div>
@@ -2407,8 +2429,8 @@ def _build_cap7_html(snap: dict, tamar_tna: float, tamar_tea: float) -> str:
 
 <div class="panel-label">Macro del día</div>
 <div class="tables-row" style="margin-bottom:18px">
-  <div class="mini-table-wrap" style="flex:0 0 auto">
-    <table class="mini-table">
+  <div class="snap-tbl-wrap" style="flex:0 0 auto">
+    <table class="snap-tbl">
       <thead><tr><th>Variable</th><th>Valor</th></tr></thead>
       <tbody>
         <tr><td>TAMAR</td><td class="td-val">{tamar_str}</td></tr>
@@ -2418,25 +2440,25 @@ def _build_cap7_html(snap: dict, tamar_tna: float, tamar_tea: float) -> str:
 </div>
 
 <div class="panel-label">BONCAP — Tasa fija</div>
-<div style="overflow-x:auto"><table class="mini-table">
+<div style="overflow-x:auto"><table class="snap-tbl">
   <thead><tr><th>Ticker</th><th>Precio</th><th>TIR TEA</th><th>Duration</th></tr></thead>
   <tbody>{_tbl_boncap(snap.get("boncap", []))}</tbody>
 </table></div>
 
 <div class="panel-label" style="margin-top:18px">BONCER — Ajuste CER</div>
-<div style="overflow-x:auto"><table class="mini-table">
+<div style="overflow-x:auto"><table class="snap-tbl">
   <thead><tr><th>Ticker</th><th>Precio</th><th>T. Real</th><th>Duration</th></tr></thead>
   <tbody>{_tbl_boncer(snap.get("boncer", []))}</tbody>
 </table></div>
 
 <div class="panel-label" style="margin-top:18px">BONTAM — Tasa variable</div>
-<div style="overflow-x:auto"><table class="mini-table">
+<div style="overflow-x:auto"><table class="snap-tbl">
   <thead><tr><th>Ticker</th><th>Precio</th><th>TIR TEA</th><th>Spread</th><th>Duration</th></tr></thead>
   <tbody>{_tbl_bontam(snap.get("bontam", []))}</tbody>
 </table></div>
 
 <div class="panel-label" style="margin-top:18px">Inflación implícita break-even</div>
-<div style="overflow-x:auto"><table class="mini-table">
+<div style="overflow-x:auto"><table class="snap-tbl">
   <thead><tr><th>BONCER</th><th>BONCAP ref.</th><th>T. Real</th><th>TIR nom.</th><th>CPI BE mens.</th></tr></thead>
   <tbody>{_tbl_bootstrap(snap.get("bootstrap_infla", []))}</tbody>
 </table></div>
@@ -2714,14 +2736,14 @@ def _build_cap6_html(snap_hoy: dict, snap_ant: dict | None, fecha_ant: date | No
 <div style="display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:start">
   <div>
     <div class="panel-label">FX y Banda Cambiaria</div>
-    <table class="mini-table">
+    <table class="snap-tbl">
       <thead><tr><th>Variable</th><th>Anterior</th><th>Actual</th><th>Δ</th></tr></thead>
       <tbody>{fx_tabla}</tbody>
     </table>
   </div>
   <div>
     <div class="panel-label">Inflación implícita break-even (CPI bootstrap)</div>
-    <table class="mini-table">
+    <table class="snap-tbl">
       <thead><tr><th>BONCER</th><th>BONCAP ref.</th><th>CPI BE act.</th><th>CPI BE ant.</th><th>Δ</th></tr></thead>
       <tbody>{boot_rows}</tbody>
     </table>
@@ -2878,7 +2900,10 @@ html, body { font-family: var(--font-body) !important; }
 .chart-sub { font-family:var(--font-body) !important; color:#7a90a4 !important; }
 
 /* ── Mini tablas ── */
-.mini-table thead th { background:#e8eef5 !important; color:#5f7080 !important; font-family:var(--font-title) !important; font-size:9.5px; }
+.mini-table thead th { background:#0f2557 !important; color:white !important; font-family:var(--font-title) !important; font-size:9.5px; text-align:center !important; padding:4px 8px !important; border-right:1px solid rgba(255,255,255,0.15) !important; }
+.mini-table tbody td { text-align:center !important; padding:3px 8px !important; border-bottom:1px solid #eaeef2 !important; border-right:1px solid #eaeef2 !important; }
+.mini-table tbody td:first-child, .mini-table thead th:first-child { text-align:left !important; }
+.mini-table tbody td.td-val { text-align:right !important; font-variant-numeric:tabular-nums; }
 .mini-table-title { font-family:var(--font-title) !important; font-size:11px !important; font-weight:700 !important; }
 
 /* ── Footer ── */
@@ -3181,6 +3206,15 @@ def generar_reporte(
 
     html = _apply_delta_theme_to_root(html)
     html = _unify_navigation(html)
+    # Override mini-table CSS del template para centrar headers
+    html = html.replace(
+        '.mini-table thead th { background: var(--light); color: var(--muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; }',
+        '.mini-table thead th { background: #0f2557; color: white; font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 4px 8px; text-align: center; border-right: 1px solid rgba(255,255,255,0.15); }'
+    )
+    html = html.replace(
+        '.mini-table tbody td { padding: 4px 8px; border-bottom: 1px solid #f0f2f5; color: var(--text); }',
+        '.mini-table tbody td { padding: 3px 8px; text-align: center; border-bottom: 1px solid #eaeef2; border-right: 1px solid #eaeef2; color: var(--text); }'
+    )
     html = _inject_css(html, _CAP1_CSS)
     html = _replace_cap1(html, _build_cap1_html(
         df_lecap, df_cer, df_tamar, df_dual, tamar_tea, tamar_tna))
