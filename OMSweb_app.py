@@ -3700,23 +3700,21 @@ def main():
             "de la derecha se actualiza con los nuevos valores."
         )
 
-        # ── Forwards interactivos (what-if por precio editable) ──
-        st.markdown("---")
-        st.markdown("### Forwards interactivos — editá precios y recalculá")
-        st.caption(
-            "Modificá el **Precio** de cualquier instrumento en la tabla izquierda. "
-            "Se recalculan **TIR** y **Duration** automáticamente, y la matriz de forwards "
-            "de la derecha se actualiza con los nuevos valores."
-        )
+        _WI_CURVE_LABELS = {
+            "cer": "CER",
+            "lecap": "LECAP / Tasa fija",
+            "globales": "Globales (Ley Extranjera)",
+            "bonares": "Bonares (Ley Argentina)",
+        }
 
         @st.fragment
         def _wi_forwards_live():
             """Aísla la edición de precios del what-if: cambios acá NO disparan
-            re-ejecución de main() ni de las 3 matrices de forwards de arriba."""
+            re-ejecución de main() ni de las matrices de forwards de arriba."""
             wi_curve_key = st.radio(
                 "Curva para what-if",
-                options=["cer", "lecap"],
-                format_func=lambda k: {"cer": "CER", "lecap": "LECAP / Tasa fija"}.get(k, k),
+                options=list(_WI_CURVE_LABELS.keys()),
+                format_func=lambda k: _WI_CURVE_LABELS.get(k, k),
                 horizontal=True,
                 key="wi_fwd_curve",
             )
@@ -3823,6 +3821,18 @@ def main():
                 if len(wi_full_for_fwd) < 2:
                     st.info("Necesitás al menos 2 instrumentos con TIR/Duration válidos para calcular forwards.")
                     return
+
+                # Filtro por bono (mismo patrón que las matrices live, namespace `wi`)
+                wi_codes_all = wi_full_for_fwd["Código"].astype(str).tolist()
+                wi_selected = _fwd_bond_filter(f"wi::{wi_curve_key}", wi_codes_all, plazo)
+
+                if len(wi_selected) < 2:
+                    st.warning("Tildá al menos 2 bonos para ver la matriz.")
+                    return
+
+                wi_full_for_fwd = wi_full_for_fwd[
+                    wi_full_for_fwd["Código"].astype(str).isin(wi_selected)
+                ]
 
                 # Matriz de forwards cacheada por (codes, TIREA, Duration)
                 fwd_wi = _wi_forwards_matrix_cached(
