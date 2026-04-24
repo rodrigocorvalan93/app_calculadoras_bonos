@@ -1383,6 +1383,44 @@ def forwards_matrix(df_curve: pd.DataFrame) -> pd.DataFrame:
     return fwd
 
 
+def _fwd_bond_filter(curve_key: str, codes: List[str], plazo: str) -> List[str]:
+    """Renderiza checkboxes para filtrar bonos de una matriz de forwards.
+
+    Devuelve la lista de códigos que el usuario dejó tildados. Por defecto
+    todos vienen tildados. El estado persiste por (curve_key, plazo) gracias
+    a las keys de los widgets.
+    """
+    if not codes:
+        return list(codes)
+
+    state_root = f"fwd_filter::{curve_key}::{plazo}"
+
+    # Botones rápidos para tildar / destildar todo
+    cbtn1, cbtn2, _spacer = st.columns([1, 1, 6])
+    with cbtn1:
+        if st.button("☑ Todos", key=f"{state_root}::all", use_container_width=True):
+            for c in codes:
+                st.session_state[f"{state_root}::{c}"] = True
+            st.rerun()
+    with cbtn2:
+        if st.button("☐ Ninguno", key=f"{state_root}::none", use_container_width=True):
+            for c in codes:
+                st.session_state[f"{state_root}::{c}"] = False
+            st.rerun()
+
+    n_per_row = 8
+    selected: List[str] = []
+    for i in range(0, len(codes), n_per_row):
+        chunk = codes[i:i + n_per_row]
+        cols = st.columns(len(chunk))
+        for j, code in enumerate(chunk):
+            with cols[j]:
+                checked = st.checkbox(code, value=True, key=f"{state_root}::{code}")
+                if checked:
+                    selected.append(code)
+    return selected
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Helpers cacheados para el what-if de forwards (performance)
 # ──────────────────────────────────────────────────────────────────────
@@ -3624,11 +3662,26 @@ def main():
                 ("cer",      "### CER",                          "No hay suficientes datos para forwards CER."),
                 ("lecap",    "### LECAP / Tasa fija",            "No hay suficientes datos para forwards LECAP."),
                 ("globales", "### Globales (Ley Extranjera)",    "No hay suficientes datos para forwards Globales."),
+                ("bonares",  "### Bonares (Ley Argentina)",      "No hay suficientes datos para forwards Bonares."),
             )
             for curve_key, title_md, empty_msg in _FWD_BLOCKS:
                 st.markdown(title_md)
                 df_c = load_curve_last_table(username, password, curve_key, plazo)
-                fwd_c = forwards_matrix(df_c)
+                if df_c is None or df_c.empty or "Código" not in df_c.columns:
+                    st.info(empty_msg)
+                    st.markdown("")
+                    continue
+
+                all_codes = df_c["Código"].astype(str).tolist()
+                selected = _fwd_bond_filter(curve_key, all_codes, plazo)
+
+                if len(selected) < 2:
+                    st.warning("Tildá al menos 2 bonos para ver la matriz.")
+                    st.markdown("")
+                    continue
+
+                df_filt = df_c[df_c["Código"].astype(str).isin(selected)]
+                fwd_c = forwards_matrix(df_filt)
                 if fwd_c.empty:
                     st.info(empty_msg)
                 else:
@@ -3647,23 +3700,21 @@ def main():
             "de la derecha se actualiza con los nuevos valores."
         )
 
-        # ── Forwards interactivos (what-if por precio editable) ──
-        st.markdown("---")
-        st.markdown("### Forwards interactivos — editá precios y recalculá")
-        st.caption(
-            "Modificá el **Precio** de cualquier instrumento en la tabla izquierda. "
-            "Se recalculan **TIR** y **Duration** automáticamente, y la matriz de forwards "
-            "de la derecha se actualiza con los nuevos valores."
-        )
+        _WI_CURVE_LABELS = {
+            "cer": "CER",
+            "lecap": "LECAP / Tasa fija",
+            "globales": "Globales (Ley Extranjera)",
+            "bonares": "Bonares (Ley Argentina)",
+        }
 
         @st.fragment
         def _wi_forwards_live():
             """Aísla la edición de precios del what-if: cambios acá NO disparan
-            re-ejecución de main() ni de las 3 matrices de forwards de arriba."""
+            re-ejecución de main() ni de las matrices de forwards de arriba."""
             wi_curve_key = st.radio(
                 "Curva para what-if",
-                options=["cer", "lecap"],
-                format_func=lambda k: {"cer": "CER", "lecap": "LECAP / Tasa fija"}.get(k, k),
+                options=list(_WI_CURVE_LABELS.keys()),
+                format_func=lambda k: _WI_CURVE_LABELS.get(k, k),
                 horizontal=True,
                 key="wi_fwd_curve",
             )
@@ -3770,6 +3821,18 @@ def main():
                 if len(wi_full_for_fwd) < 2:
                     st.info("Necesitás al menos 2 instrumentos con TIR/Duration válidos para calcular forwards.")
                     return
+
+                # Filtro por bono (mismo patrón que las matrices live, namespace `wi`)
+                wi_codes_all = wi_full_for_fwd["Código"].astype(str).tolist()
+                wi_selected = _fwd_bond_filter(f"wi::{wi_curve_key}", wi_codes_all, plazo)
+
+                if len(wi_selected) < 2:
+                    st.warning("Tildá al menos 2 bonos para ver la matriz.")
+                    return
+
+                wi_full_for_fwd = wi_full_for_fwd[
+                    wi_full_for_fwd["Código"].astype(str).isin(wi_selected)
+                ]
 
                 # Matriz de forwards cacheada por (codes, TIREA, Duration)
                 fwd_wi = _wi_forwards_matrix_cached(
