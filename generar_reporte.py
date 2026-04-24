@@ -693,6 +693,415 @@ _FWD_JS = """
 """
 
 
+def _build_cap2_html(
+    df_lecap:  pd.DataFrame,
+    df_cer:    pd.DataFrame,
+    df_tamar:  pd.DataFrame,
+    df_dual:   pd.DataFrame,
+    tamar_tea: float,
+    tamar_tna: float,
+    hoy:       date,
+) -> str:
+    """
+    Cap 2 -- Tasas Implicitas.
+    Panel A: TAMAR impl vs BONCAP (dos barras por bono: impl TNA + TIR BONCAP TNA).
+    Panel B: TAMAR impl vs BONCER (dos barras por bono: impl TNA + TIR nominal BONCER TNA).
+
+    Logica:
+      spread_tna  = TNA(tir_bontam_tea) - tamar_tna_actual
+      tamar_impl_tna_A = TNA(tir_boncap_tea) - spread_tna
+      tamar_impl_tna_B = TNA(tir_nominal_boncer) - spread_tna
+
+    TIR nominal BONCER = (1 + tir_real_tea) * cpi_acum^(1/dur) - 1  [TEA]
+    donde cpi_acum = producto de inflaciones mensuales proyectadas en el horizonte del bono.
+    """
+    def _TEA_to_TNA(tea):
+        return ((1 + tea) ** (1/365) - 1) * 365
+
+    # Obtener proyeccion de inflacion mensual desde indices.py
+    # El dict tiene formato {"Apr-26": 2.7, "May-26": 1.9, ...} (en %)
+    try:
+        import indices as _indices
+        _proy = _indices.proyeccion_inflacion_mensual   # dict {"Apr-26": float, ...}
+    except Exception:
+        _proy = {}
+
+    def _cpi_tea_para_dur(dur_years):
+        """
+        Calcula la CPI TEA equivalente para un horizonte de 'dur_years' anyos
+        usando las inflaciones mensuales proyectadas.
+        """
+        if not _proy:
+            return (1.030) ** 12 - 1  # fallback 3% mensual
+        from datetime import date as _date
+        import calendar as _cal
+        # Armar lista de (anyo, mes, inflacion) ordenada
+        month_map = {
+            "Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+            "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12
+        }
+        entries = []
+        for k, v in _proy.items():
+            parts = k.split("-")
+            if len(parts) == 2:
+                m = month_map.get(parts[0])
+                y = int("20" + parts[1]) if len(parts[1]) == 2 else int(parts[1])
+                if m:
+                    entries.append((y, m, float(v)/100.0))
+        entries.sort()
+
+        # Tomar los primeros dur_years*12 meses (redondeado)
+        n_months = max(1, round(dur_years * 12))
+        # Anadiar meses de hoy en adelante
+        result = []
+        cur_y, cur_m = hoy.year, hoy.month
+        for _ in range(n_months):
+            # Buscar en entries
+            val = next((v for (y,m,v) in entries if y==cur_y and m==cur_m), 0.015)
+            result.append(val)
+            cur_m += 1
+            if cur_m > 12:
+                cur_m = 1
+                cur_y += 1
+
+        if not result:
+            return (1.030)**12 - 1
+
+        cpi_acum = 1.0
+        for c in result:
+            cpi_acum *= (1 + c)
+        # Anualizar: cpi_acum cubre dur_years anyos -> TEA
+        cpi_tea = cpi_acum ** (1/max(dur_years, 1/12)) - 1
+        return cpi_tea
+
+    # Comparables BONCAP y BONCER
+    BONCAP_COMP = {
+        "TTJ26": ["T30J6"],
+        "M31G6": ["S31G6"],
+        "TTS26": ["S30S6"],
+        "TTD26": ["T15E7"],
+        "TMF27": ["T15E7", "T30A7"],
+    }
+    BONCER_COMP = {
+        "TTJ26": ["TZX26"],
+        "M31G6": ["X31L6", "X30S6"],
+        "TTS26": ["X30S6"],
+        "TTD26": ["TZXD6"],
+        "TMF27": ["TZXM7"],
+    }
+
+    # Dicts de TIRs TEA
+    def _tir_dict(df):
+        d = {}
+        for _, r in _clean_df(df).iterrows():
+            t = str(r.get("Codigo", r.get("Codigo", ""))).strip()
+            for col in df.columns:
+                if col.lower() in ("codigo", "c\u00f3digo"):
+                    v = r.get(col)
+                    if v:
+                        t = str(v).strip()
+                        break
+            tir = _pct_float(r.get("TIREA"))
+            if t and tir is not None:
+                d[t] = tir
+                d[t.replace(" CI", "")] = tir
+        return d
+
+    lecap_tirs = _tir_dict(df_lecap)
+    cer_tirs   = _tir_dict(df_cer)
+
+    # Duraciones de los BONCER para el calculo de CPI path
+    cer_durs = {}
+    for _, r in _clean_df(df_cer).iterrows():
+        for col in df_cer.columns:
+            if col.lower() in ("codigo", "c\u00f3digo"):
+                v = r.get(col)
+                if v:
+                    t = str(v).strip().replace(" CI", "")
+                    try:
+                        cer_durs[t] = float(r.get("Duration"))
+                    except Exception:
+                        pass
+                    break
+
+    df_all = _combine_bontam(df_tamar, df_dual)
+
+    resultados = []
+    for _, r in _clean_df(df_all).iterrows():
+        ticker_raw = ""
+        for col in df_all.columns:
+            if col.lower() in ("codigo", "c\u00f3digo"):
+                v = r.get(col)
+                if v:
+                    ticker_raw = str(v).strip()
+                    break
+        if not ticker_raw:
+            continue
+
+        ticker = ticker_raw.replace(" CI", "").strip().rstrip("v").strip()
+
+        boncap_comps = BONCAP_COMP.get(ticker)
+        if not boncap_comps:
+            continue
+
+        tir_bontam_tea = _pct_float(r.get("TIREA"))
+        if tir_bontam_tea is None:
+            continue
+        try:
+            dur_f = float(r.get("Duration", 0))
+        except Exception:
+            dur_f = 0.0
+
+        tir_bontam_tna = _TEA_to_TNA(tir_bontam_tea)
+        spread_tna = tir_bontam_tna - tamar_tna
+
+        # Panel A: vs BONCAP
+        comp_tna_a = None
+        comp_tirs_a = [lecap_tirs[c] for c in boncap_comps if c in lecap_tirs]
+        if comp_tirs_a:
+            comp_tea_a = sum(comp_tirs_a) / len(comp_tirs_a)
+            comp_tna_a = _TEA_to_TNA(comp_tea_a)
+            impl_tna_a = comp_tna_a - spread_tna
+        else:
+            impl_tna_a = None
+
+        # Panel B: vs BONCER usando CPI path de indices.py
+        impl_tna_b = None
+        comp_tna_b = None
+        boncer_comps = BONCER_COMP.get(ticker, [])
+        comp_tirs_b = [cer_tirs[c] for c in boncer_comps if c in cer_tirs]
+        if comp_tirs_b:
+            # Duracion del BONCER comparable (promedio si varios)
+            dur_cer = sum(cer_durs.get(c, dur_f) for c in boncer_comps if c in cer_durs)
+            n_cer = sum(1 for c in boncer_comps if c in cer_durs)
+            dur_cer = dur_cer / n_cer if n_cer else dur_f
+            dur_cer = max(dur_cer, 1/12)
+
+            tir_real_tea_avg = sum(comp_tirs_b) / len(comp_tirs_b)
+            cpi_tea = _cpi_tea_para_dur(dur_cer)
+            # TIR nominal TEA del BONCER = (1 + real) * (1 + cpi_anual) - 1
+            tir_nominal_tea = (1 + tir_real_tea_avg) * (1 + cpi_tea) - 1
+            comp_tna_b   = _TEA_to_TNA(tir_nominal_tea)
+            impl_tna_b   = comp_tna_b - spread_tna
+
+        resultados.append({
+            "ticker":     ticker,
+            "dur":        dur_f,
+            "spread_tna": spread_tna,
+            "comp_a":     "/".join(boncap_comps),
+            "comp_tna_a": comp_tna_a,
+            "impl_tna_a": impl_tna_a,
+            "comp_b":     "/".join(boncer_comps) if boncer_comps else "",
+            "comp_tna_b": comp_tna_b,
+            "impl_tna_b": impl_tna_b,
+        })
+
+    # Ordenar por duration y deduplicar
+    resultados.sort(key=lambda x: x["dur"])
+    seen, deduped = set(), []
+    for r in resultados:
+        if r["ticker"] not in seen:
+            seen.add(r["ticker"])
+            deduped.append(r)
+    resultados = deduped
+
+    if not resultados:
+        return """<div style="padding:40px;color:#888;text-align:center">Sin datos BONTAM.</div>"""
+
+    def _safe(v, mult=100, dec=1):
+        return round(v * mult, dec) if v is not None else 0
+
+    tickers_js  = json.dumps([r["ticker"]    for r in resultados])
+    impl_a_js   = json.dumps([_safe(r["impl_tna_a"]) for r in resultados])
+    comp_a_js   = json.dumps([_safe(r["comp_tna_a"]) for r in resultados])
+    impl_b_js   = json.dumps([_safe(r["impl_tna_b"]) for r in resultados])
+    comp_b_js   = json.dumps([_safe(r["comp_tna_b"]) for r in resultados])
+    tamar_tna_js = round(tamar_tna * 100, 2)
+
+    # Describe CPI path used
+    cpi_desc = "path CPI indices.py" if _proy else "fallback 3% mensual"
+    # Get the first few monthly values for the subtitle
+    if _proy:
+        month_map2 = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+                      "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+        near_months = []
+        cur_y, cur_m = hoy.year, hoy.month
+        for _ in range(4):
+            key_abbr = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
+                        7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}[cur_m]
+            key = f"{key_abbr}-{str(cur_y)[2:]}"
+            if key in _proy:
+                near_months.append(f"{key}: {_proy[key]:.1f}%")
+            cur_m += 1
+            if cur_m > 12:
+                cur_m = 1
+                cur_y += 1
+        cpi_desc = "CPI path: " + " | ".join(near_months) + " | ..."
+
+    hoy_str      = hoy.strftime("%d/%m/%Y")
+    tamar_tna_str = f"{tamar_tna*100:.2f}%"
+
+    return f"""
+<style>
+.c2-wrap{{display:grid;grid-template-columns:1fr 1fr;gap:14px;height:100%;padding:0}}
+.c2-panel{{background:white;border:1px solid #d0d9e4;border-radius:6px;
+           overflow:hidden;display:flex;flex-direction:column}}
+.c2-ph{{background:#0f2557;color:white;font-size:11px;font-weight:700;
+        text-transform:uppercase;letter-spacing:.5px;padding:6px 14px;flex-shrink:0}}
+.c2-pb{{flex:1;padding:8px 12px;overflow:hidden;display:flex;flex-direction:column;min-height:0}}
+.c2-sub{{font-size:10px;color:#5f7080;flex-shrink:0;margin-bottom:4px}}
+.c2-chart{{flex:1;min-height:0;position:relative}}
+.c2-chart canvas{{position:absolute;top:0;left:0;width:100%;height:100%}}
+.c2-nota{{font-size:9.5px;color:#7a90a4;flex-shrink:0;margin-top:4px;
+          border-top:1px solid #edf0f3;padding-top:4px;line-height:1.35}}
+</style>
+
+<div class="c2-wrap">
+
+  <div class="c2-panel">
+    <div class="c2-ph">A &mdash; TAMAR Implicita vs BONCAP</div>
+    <div class="c2-pb">
+      <div class="c2-sub">
+        TNA &nbsp;|&nbsp; Linea = TAMAR hoy ({tamar_tna_str}) &nbsp;|&nbsp; {hoy_str}
+      </div>
+      <div class="c2-chart"><canvas id="c2cvA"></canvas></div>
+      <div class="c2-nota">
+        <strong>Barras oscuras:</strong> TAMAR implicita TNA breakeven.
+        <strong>Barras claras:</strong> TIR TNA del BONCAP comparable.
+        Spread = TNA(BONTAM) &minus; TAMAR actual TNA. TAMAR impl = TIR BONCAP TNA &minus; Spread.
+      </div>
+    </div>
+  </div>
+
+  <div class="c2-panel">
+    <div class="c2-ph">B &mdash; TAMAR Implicita vs BONCER</div>
+    <div class="c2-pb">
+      <div class="c2-sub">
+        TNA &nbsp;|&nbsp; {cpi_desc}
+      </div>
+      <div class="c2-chart"><canvas id="c2cvB"></canvas></div>
+      <div class="c2-nota">
+        <strong>Barras oscuras:</strong> TAMAR implicita TNA.
+        <strong>Barras claras:</strong> TIR nominal TNA del BONCER bajo path CPI proyectado.
+        TIR nominal = (1 + TIR real) &times; CPI acumulado por duracion &minus; 1.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){{
+  var tickers  = {tickers_js};
+  var implA    = {impl_a_js};
+  var compA    = {comp_a_js};
+  var implB    = {impl_b_js};
+  var compB    = {comp_b_js};
+  var tamarAct = {tamar_tna_js};
+  var DARK_A   = '#0f2557';
+  var LIGHT_A  = '#6b93c4';
+  var DARK_B   = '#1a5c2e';
+  var LIGHT_B  = '#82c9a0';
+
+  function drawDouble(cid, dark, light, cd, cl) {{
+    var cv = document.getElementById(cid);
+    if (!cv) return;
+    var par = cv.parentElement;
+    var W = par.clientWidth, H = par.clientHeight;
+    if (!W||W<10||!H||H<10) {{
+      setTimeout(function(){{drawDouble(cid,dark,light,cd,cl);}},150); return;
+    }}
+    var dpr = window.devicePixelRatio||1;
+    cv.width=W*dpr; cv.height=H*dpr;
+    cv.style.width=W+'px'; cv.style.height=H+'px';
+    var ctx = cv.getContext('2d');
+    ctx.scale(dpr,dpr);
+    ctx.clearRect(0,0,W,H);
+
+    var n  = tickers.length;
+    var ML = 36, MR = 8, MT = 18, MB = 34;
+    var PW = W-ML-MR, PH = H-MT-MB;
+
+    var all = dark.concat(light).concat([tamarAct]);
+    var maxV = Math.max.apply(null,all)*1.12;
+    function sy(v){{return MT+PH-(v/maxV)*PH;}}
+
+    // Grid
+    for(var g=0;g<=5;g++){{
+      var gv=maxV*g/5, gy=sy(gv);
+      ctx.strokeStyle='#eaeef2';ctx.lineWidth=0.7;
+      ctx.beginPath();ctx.moveTo(ML,gy);ctx.lineTo(W-MR,gy);ctx.stroke();
+      ctx.font='8px Barlow,Calibri,Arial';
+      ctx.fillStyle='#8090a0';ctx.textAlign='right';ctx.textBaseline='middle';
+      ctx.fillText(gv.toFixed(0)+'%',ML-3,gy);
+    }}
+
+    // TAMAR line
+    var ty=sy(tamarAct);
+    ctx.strokeStyle='#c45000';ctx.lineWidth=1.6;ctx.setLineDash([5,3]);
+    ctx.beginPath();ctx.moveTo(ML,ty);ctx.lineTo(W-MR,ty);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font='bold 8px Barlow,Calibri,Arial';ctx.fillStyle='#c45000';
+    ctx.textAlign='left';ctx.textBaseline='bottom';
+    ctx.fillText('TAMAR '+tamarAct.toFixed(1)+'%',ML+4,ty-2);
+
+    // Bars
+    var grpW=PW/n, bw=Math.min(grpW*0.33,26), gap=Math.min(grpW*0.05,4);
+    for(var i=0;i<n;i++){{
+      var gx=ML+i*grpW+(grpW-2*bw-gap)/2;
+
+      // dark bar
+      var h1=Math.abs(sy(0)-sy(dark[i])), y1=sy(dark[i]);
+      ctx.fillStyle=cd; ctx.fillRect(gx,y1,bw,h1);
+      ctx.font='bold 8.5px Barlow,Calibri,Arial';
+      ctx.fillStyle=cd;ctx.textAlign='center';ctx.textBaseline='bottom';
+      ctx.fillText(dark[i].toFixed(1)+'%',gx+bw/2,y1-2);
+
+      // light bar
+      var h2=Math.abs(sy(0)-sy(light[i])), y2=sy(light[i]);
+      ctx.fillStyle=cl; ctx.fillRect(gx+bw+gap,y2,bw,h2);
+      ctx.font='bold 8.5px Barlow,Calibri,Arial';
+      ctx.fillStyle='#444';ctx.textAlign='center';ctx.textBaseline='bottom';
+      ctx.fillText(light[i].toFixed(1)+'%',gx+bw+gap+bw/2,y2-2);
+
+      // ticker
+      ctx.font='8.5px Barlow,Calibri,Arial';ctx.fillStyle='#333';
+      ctx.textAlign='center';ctx.textBaseline='top';
+      ctx.fillText(tickers[i],gx+bw+gap/2,MT+PH+4);
+    }}
+
+    // Legend
+    var lx=ML, ly=H-11;
+    ctx.font='8px Barlow,Calibri,Arial';ctx.textBaseline='middle';
+    ctx.fillStyle=cd;ctx.fillRect(lx,ly-3,10,7);
+    ctx.fillStyle='#333';ctx.textAlign='left';ctx.fillText('TAMAR impl TNA',lx+13,ly);
+    lx+=95;
+    ctx.fillStyle=cl;ctx.fillRect(lx,ly-3,10,7);
+    ctx.fillStyle='#333';ctx.fillText('Target TNA',lx+13,ly);
+  }}
+
+  function renderAll(){{
+    drawDouble('c2cvA',implA,compA,DARK_A,LIGHT_A);
+    drawDouble('c2cvB',implB,compB,DARK_B,LIGHT_B);
+  }}
+
+  window.addEventListener('load',renderAll);
+  window.addEventListener('resize',renderAll);
+  window['drawC2Bar']=renderAll;
+
+  (function patchGoTo(){{
+    var p=window.goTo;
+    if(typeof p!=='function'){{setTimeout(patchGoTo,100);return;}}
+    window.goTo=function(idx){{
+      p(idx);
+      if(idx===2){{setTimeout(renderAll,80);setTimeout(renderAll,300);}}
+    }};
+  }})();
+}})();
+</script>
+"""
+
+
 def _build_cap3_html(df_lecap, df_cer, df_tamar, df_dual, tamar_tea, tamar_tna) -> str:
     tamar_tea_str = f"{tamar_tea * 100:.2f}%"
     df_bontam = _combine_bontam(df_tamar, df_dual)
@@ -1097,11 +1506,11 @@ function drawCurveChart(canvasId,labels,dursAct,tirsAct,dursBE,tirsBE,colorAct,c
   return new Chart(ctx.getContext('2d'),{{
     type:'scatter',
     data:{{datasets:[
-      {{label:labelAct,data:dursAct.map(function(d,i){{return {{x:d,y:tirsAct[i]}};}})),
+      {{label:labelAct,data:dursAct.map(function(d,i){{return {{x:d,y:tirsAct[i]}};}}),
         borderColor:colorAct,backgroundColor:colorAct,
         pointRadius:5,pointHoverRadius:7,showLine:true,
         borderWidth:2.5,tension:0.3,fill:false}},
-      {{label:labelBE,data:dursBE.map(function(d,i){{return {{x:d,y:tirsBE[i]}};}})),
+      {{label:labelBE,data:dursBE.map(function(d,i){{return {{x:d,y:tirsBE[i]}};}}),
         borderColor:colorBE,backgroundColor:colorBE,
         pointRadius:5,pointHoverRadius:7,showLine:true,
         borderWidth:2,borderDash:[6,4],tension:0.3,fill:false}},
@@ -1110,14 +1519,14 @@ function drawCurveChart(canvasId,labels,dursAct,tirsAct,dursBE,tirsBE,colorAct,c
       responsive:true,maintainAspectRatio:false,
       plugins:{{
         legend:{{display:true,position:'top',labels:{{boxWidth:12,font:{{size:10}},color:'#5f7080'}}}},
-        tooltip:{{callbacks:{{label:c=>labels[c.dataIndex]+': '+fmtY(c.parsed.y)}}}}
+        tooltip:{{callbacks:{{label:function(c){{return labels[c.dataIndex]+': '+fmtY(c.parsed.y);}}}}}}
       }},
       scales:{{
         x:{{title:{{display:true,text:'Duration (años)',font:{{size:9}},color:'#7a90a4'}},
            grid:{{color:'#eaeef2'}},ticks:{{font:{{size:8}},color:'#7a90a4'}}}},
         y:{{title:{{display:true,text:'Tasa',font:{{size:9}},color:'#7a90a4'}},
            grid:{{color:'#eaeef2'}},
-           ticks:{{font:{{size:8}},color:'#7a90a4',callback:v=>fmtY(v)}}}}
+           ticks:{{font:{{size:8}},color:'#7a90a4',callback:function(v){{return fmtY(v);}}}}}}
       }}
     }}
   }});
@@ -1144,7 +1553,7 @@ function render(){{
   document.getElementById('c4-step-info').textContent='Costo fondeo: '+(cf*100).toFixed(4)+'%';
 
   // ── TASA FIJA ──
-  const bonosTF=BONCAP.filter(b=>b.dias_cal>diasCal);
+  var bonosTF=BONCAP.filter(function(b){{return b.dias_cal>diasCal;}});
   const tblTF=document.getElementById('c4-tbl-tf');
   const noTF=document.getElementById('c4-no-tf');
 
@@ -1157,8 +1566,8 @@ function render(){{
     const elStepTF=document.getElementById('c4-step-tf');
     if(elStepTF) elStepTF.textContent='Paso: '+(pasoTF*100).toFixed(2)+' pp · '+N_FILAS+' filas';
 
-    const besTF=bonosTF.map(b=>{{
-      const dR=b.dias_cal-diasCal;
+    var besTF=bonosTF.map(b=>{{
+      var dR=b.dias_cal-diasCal;
       return Math.pow(b.vn/(b.precio*(1+cf)),365/dR)-1;
     }});
 
@@ -1171,9 +1580,9 @@ function render(){{
       }}).join('')+'</tr>';
 
     document.getElementById('c4-tbody-tf').innerHTML=yTF.map(ey=>{{
-      const isCur=bonosTF.some(b=>Math.abs(b.tir-ey)<pasoTF/2+0.0001);
-      const cells=bonosTF.map(b=>{{
-        const dR=b.dias_cal-diasCal;
+      var isCur=bonosTF.some(function(b){{return Math.abs(b.tir-ey)<pasoTF/2+0.0001;}});
+      var cells=bonosTF.map(b=>{{
+        var dR=b.dias_cal-diasCal;
         const pS=b.vn/Math.pow(1+ey,dR/365);
         const tr=pS/b.precio-1-cf;
         const[bg,col]=colorTR(tr*100);
@@ -1184,11 +1593,11 @@ function render(){{
     }}).join('');
 
     chartTF=drawCurveChart('c4-chart-tf',
-      bonosTF.map(b=>b.ticker),
-      bonosTF.map(b=>b.dur), bonosTF.map(b=>b.tir),
-      bonosTF.map(b=>b.dur), besTF,
+      bonosTF.map(function(b){{return b.ticker;}}),
+      bonosTF.map(function(b){{return b.dur;}}), bonosTF.map(function(b){{return b.tir;}}),
+      bonosTF.map(function(b){{return b.dur;}}), besTF,
       '#1e6fba','#b85a1a','Curva actual','Curva break-even',
-      v=>(v*100).toFixed(1)+'%', chartTF);
+      function(v){{return (v*100).toFixed(1)+'%';}}, chartTF);
 
     document.getElementById('c4-be-tf').innerHTML=
       '<div style="font-size:9px;font-weight:700;text-transform:uppercase;color:#5f7080;margin-bottom:8px;letter-spacing:.5px;font-family:var(--font-title,Barlow,Arial)">Break-even por bono</div>'+
@@ -1206,7 +1615,7 @@ function render(){{
 
   // ── CER ──
   const cerBaseTN=CER_BASE_TN[nHab]||CER_BASE_TN[1];
-  const bonosCER=BONCER.filter(b=>b.dias_cal>diasCal+1);
+  var bonosCER=BONCER.filter(function(b){{return b.dias_cal>diasCal+1;}});
   const tblCER=document.getElementById('c4-tbl-cer');
   const noCER=document.getElementById('c4-no-cer');
 
@@ -1219,8 +1628,8 @@ function render(){{
     const elStepCER=document.getElementById('c4-step-cer');
     if(elStepCER) elStepCER.textContent='Paso: '+(pasoCER*100).toFixed(2)+' pp · '+N_FILAS+' filas';
 
-    const besCER=bonosCER.map(b=>{{
-      const dR=b.dias_cal-diasCal-1;
+    var besCER=bonosCER.map(b=>{{
+      var dR=b.dias_cal-diasCal-1;
       const flujoTN=100*cerBaseTN/b.cer_ini;
       const pBE=b.precio*(1+cf);
       return Math.pow(flujoTN/pBE,365/dR)-1;
@@ -1235,10 +1644,10 @@ function render(){{
       }}).join('')+'</tr>';
 
     document.getElementById('c4-tbody-cer').innerHTML=yCER.map(ey=>{{
-      const avgBE=besCER.reduce((s,v)=>s+v,0)/besCER.length;
-      const isCur=Math.abs(avgBE-ey)<pasoCER/2+0.0001;
-      const cells=bonosCER.map(b=>{{
-        const dR=b.dias_cal-diasCal-1;
+      var avgBE=besCER.reduce(function(s,v){{return s+v;}},0)/besCER.length;
+      var isCur=Math.abs(avgBE-ey)<pasoCER/2+0.0001;
+      var cells=bonosCER.map(b=>{{
+        var dR=b.dias_cal-diasCal-1;
         const flujoTN=100*cerBaseTN/b.cer_ini;
         const pS=flujoTN/Math.pow(1+ey,dR/365);
         const tr=pS/b.precio-1-cf;
@@ -1250,11 +1659,11 @@ function render(){{
     }}).join('');
 
     chartCER=drawCurveChart('c4-chart-cer',
-      bonosCER.map(b=>b.ticker),
-      bonosCER.map(b=>b.dur), bonosCER.map(b=>b.tir_real_hoy),
-      bonosCER.map(b=>b.dur), besCER,
+      bonosCER.map(function(b){{return b.ticker;}}),
+      bonosCER.map(function(b){{return b.dur;}}), bonosCER.map(function(b){{return b.tir_real_hoy;}}),
+      bonosCER.map(function(b){{return b.dur;}}), besCER,
       '#1a7a46','#b85a1a','Curva real actual','Curva real break-even',
-      v=>(v*100).toFixed(1)+'%', chartCER);
+      function(v){{return (v*100).toFixed(1)+'%';}}, chartCER);
 
     document.getElementById('c4-be-cer').innerHTML=
       '<div style="font-size:9px;font-weight:700;text-transform:uppercase;color:#5f7080;margin-bottom:8px;letter-spacing:.5px;font-family:var(--font-title,Barlow,Arial)">Break-even por bono</div>'+
@@ -1528,17 +1937,39 @@ def _get_banda_for_date(banda_serie: list, target_date: date):
 
 
 
+def _ticker_to_vto(ticker: str, hoy: date) -> date:
+    """Parsea fecha de vencimiento desde ticker LECAP/BONCAP (S30A6, T30J6, etc)."""
+    import re as _re2, calendar as _cal
+    _MES = {'E':1,'F':2,'M':3,'A':4,'Y':5,'J':6,'L':7,'G':8,'S':9,'O':10,'N':11,'D':12}
+    t = ticker.strip().replace(' CI','').rstrip('jv')
+    m = _re2.match(r'^[A-Za-z]+?(\d{1,2})([A-Za-z])(\d{1,2})$', t)
+    if not m:
+        return None
+    day = int(m.group(1))
+    mes = _MES.get(m.group(2).upper())
+    yr  = int(m.group(3))
+    if not mes:
+        return None
+    year = (2020 + yr) if yr < 10 else (2000 + yr)
+    ld = _cal.monthrange(year, mes)[1]
+    try:
+        return date(year, mes, min(day, ld))
+    except ValueError:
+        return None
+
+
 def _assign_bond_to_dus(dus_date: date, df_lecap: pd.DataFrame,
                         df_cer: pd.DataFrame, tamar_tea: float,
                         used_tickers: set = None) -> dict:
     """
     Para cada DUS asigna el mejor bono ARS:
-    1. BONCAP/LECAP que vence lo más cerca DESPUES del DUS (no antes si hay alternativa)
-    2. Si no hay BONCAP a <=45 dias, BONCER proyectado (j) mas cercano
+    1. BONCAP/LECAP cuya fecha de vencimiento real es la mas proxima DESPUES del DUS
+    2. Si no hay BONCAP a <=45 dias del vto, BONCER proyectado (j) mas cercano
+    Usa ticker_to_vto() para obtener la fecha exacta (no Duration).
     """
     from datetime import timedelta
 
-    def _vto(dur: float) -> date:
+    def _vto(dur: float) -> date:  # fallback si ticker no parseable
         return date.today() + timedelta(days=round(float(dur) * 365))
 
     if used_tickers is None:
@@ -1549,8 +1980,12 @@ def _assign_bond_to_dus(dus_date: date, df_lecap: pd.DataFrame,
         if dur is None or tir is None: continue
         ticker = str(r["Código"])
         if ticker in used_tickers: continue  # ya asignado a otro DUS
-        try: dur_f = float(dur); vto = _vto(dur_f)
-        except: continue
+        try:
+            dur_f = float(dur)
+            # Preferir fecha real del ticker sobre Duration
+            vto = _ticker_to_vto(ticker, hoy) or _vto(dur_f)
+        except:
+            continue
         candidates_cap.append({
             "ticker": ticker, "tipo": "BONCAP",
             "tir_nom": round(tir * 100, 4), "dur": round(dur_f, 4),
@@ -1713,7 +2148,7 @@ def _build_cap5_html(
                     mat_date = hoy + timedelta(days=dias_f)
                 else:
                     continue
-                if dias_f <= 0:
+                if dias_f <= 10:  # ignorar contratos casi vencidos (TIR distorsionada)
                     continue
                 label  = _label_mes(mat_date)
                 tea    = (precio / spot) ** (365 / dias_f) - 1
@@ -2118,12 +2553,12 @@ def _build_cap5_html(
       ]}},
       options: {{ responsive:true, maintainAspectRatio:false,
         plugins: {{ legend:{{display:false}}, tooltip:{{callbacks:{{
-          label: c => ` ${{c.dataset.label}}: ${{Math.round(c.parsed.y).toLocaleString('es-AR')}}`
+          label: function(c){{return ' ' + c.dataset.label + ': ' + Math.round(c.parsed.y).toLocaleString('es-AR');}}
         }}}} }},
         scales: {{
           x: {{ grid:{{color:grid}}, ticks:{{color:tick, font:{{size:10,family:FONT}}}} }},
           y: {{ grid:{{color:grid}}, ticks:{{color:tick, font:{{size:10,family:FONT}},
-                 callback: v => v.toLocaleString('es-AR')}}, min:{y_min_js}, max:{y_max_js} }}
+                 callback: function(v){{return v.toLocaleString('es-AR');}}}}, min:{y_min_js}, max:{y_max_js} }}
         }}
       }}
     }});
@@ -2138,14 +2573,14 @@ def _build_cap5_html(
       ]}},
       options: {{ responsive:true, maintainAspectRatio:false,
         plugins: {{ legend:{{display:false}}, tooltip:{{callbacks:{{
-          label: c => ` ${{c.dataset.label}}: ${{c.parsed.y != null ? c.parsed.y.toFixed(1) : '—'}}%`
+          label: function(c){{return ' ' + c.dataset.label + ': ' + (c.parsed.y != null ? c.parsed.y.toFixed(1) : '-') + '%';}}
         }}}} }},
         scales: {{
           x:  {{ grid:{{color:grid}}, ticks:{{color:tick, font:{{size:10,family:FONT}}, autoSkip:false}} }},
-          y:  {{ grid:{{color:grid}}, ticks:{{color:tick, font:{{size:10,family:FONT}}, callback:v=>v.toFixed(0)+'%'}},
+          y:  {{ grid:{{color:grid}}, ticks:{{color:tick, font:{{size:10,family:FONT}}, callback:function(v){{return v.toFixed(0)+'%';}}}},
                  title:{{display:true,text:'Distancia al techo (%)',color:tick,font:{{size:10,family:FONT}}}} }},
           y2: {{ position:'right', grid:{{drawOnChartArea:false}},
-                 ticks:{{color:'#1a7a46',font:{{size:10,family:FONT}},callback:v=>v.toFixed(1)+'%'}},
+                 ticks:{{color:'#1a7a46',font:{{size:10,family:FONT}},callback:function(v){{return v.toFixed(1)+'%';}}}},
                  title:{{display:true,text:'Spread (%)',color:'#1a7a46',font:{{size:10,family:FONT}}}} }}
         }}
       }}
@@ -2401,9 +2836,9 @@ def _build_cap7_html(snap: dict, tamar_tna: float, tamar_tea: float) -> str:
     return f"""
 <style>
 .snap-tbl {{border-collapse:collapse;width:100%;font-family:var(--font-body,'Calibri',Arial);font-size:11.5px;}}
-.snap-tbl th {{background:#0f2557;color:white;padding:5px 10px;text-align:center;font-size:10.5px;font-weight:600;border-right:1px solid rgba(255,255,255,0.15);}}
-.snap-tbl td {{padding:4px 10px;text-align:center;border-bottom:1px solid #eaeef2;border-right:1px solid #eaeef2;}}
-.snap-tbl td:first-child,.snap-tbl th:first-child {{text-align:left;font-weight:600;color:#0f2557;min-width:80px;}}
+.snap-tbl th {{background:#0f2557 !important;color:white !important;padding:5px 10px !important;text-align:center !important;font-size:10.5px !important;font-weight:600 !important;border-right:1px solid rgba(255,255,255,0.15) !important;}}
+.snap-tbl td {{padding:4px 10px;text-align:center !important;border-bottom:1px solid #eaeef2 !important;border-right:1px solid #eaeef2 !important;}}
+.snap-tbl td:first-child,.snap-tbl th:first-child {{text-align:left !important;font-weight:600 !important;color:#0f2557 !important;min-width:80px;}}
 .snap-tbl tr:last-child td {{border-bottom:none;}}
 .snap-tbl .td-val {{text-align:right;font-variant-numeric:tabular-nums;}}
 .snap-tbl .td-pos {{color:#1a7a46;}}
@@ -2968,10 +3403,18 @@ def _unify_navigation(html: str) -> str:
     document.getElementById('nav-'   + current).classList.remove('active');
     current = idx;
     document.getElementById('slide-' + current).classList.add('active');
-    document.getElementById('nav-'   + current).classList.add('active');"""
+    document.getElementById('nav-'   + current).classList.add('active');
+    // Actualizar topbar mobile
+    var tEl = document.getElementById('mobile-title');
+    var sEl = document.getElementById('mobile-slide');
+    if (tEl) tEl.textContent = slideTitles[idx] || 'Comité';
+    if (sEl) sEl.textContent = (idx + 1) + ' / ' + total;
+    // Cerrar sidebar al navegar en mobile (delay para que el click termine)
+    setTimeout(closeSidebar, 80);
+  }"""
 
     new_goto = """// ── Navegación unificada (slides numerados + fd-slides) ──
-  var _currentFdId = null;   // id del fd-slide activo, o null
+  var _currentFdId = null;
   function _hideAll() {
     document.querySelectorAll('.slide-chapter, .slide-cover').forEach(function(s) {
       s.classList.remove('active');
@@ -2986,17 +3429,18 @@ def _unify_navigation(html: str) -> str:
     if (!target) return;
     target.classList.add('active');
     _currentFdId = targetId.startsWith('fd-slide-') ? targetId : null;
-    // Nav item
     var navId = targetId.replace('fd-slide-', 'fd-nav-').replace(/^slide-/, 'nav-');
     var navEl = document.getElementById(navId);
     if (navEl) navEl.classList.add('active');
-    // Topbar mobile
     var tEl = document.getElementById('mobile-title');
     var sEl = document.getElementById('mobile-slide');
     if (tEl && slideTitles) tEl.textContent = slideTitles[parseInt(targetId.replace(/[^0-9]/g,''))] || 'Fondos';
     if (sEl) sEl.textContent = targetId;
     setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 60);
     setTimeout(closeSidebar, 80);
+    if (targetId === 'slide-4' && typeof window._c4Render === 'function') {
+      requestAnimationFrame(function() { requestAnimationFrame(window._c4Render); });
+    }
   }
   function goTo(idx) {
     if (idx < 0 || idx >= total) return;
@@ -3004,9 +3448,19 @@ def _unify_navigation(html: str) -> str:
     _currentFdId = null;
     current = idx;
     var slideEl = document.getElementById('slide-' + current);
-    var navEl   = document.getElementById('nav-'   + current);
+    var navEl2  = document.getElementById('nav-'   + current);
     if (slideEl) slideEl.classList.add('active');
-    if (navEl)   navEl.classList.add('active');"""
+    if (navEl2)  navEl2.classList.add('active');
+    var tEl = document.getElementById('mobile-title');
+    var sEl = document.getElementById('mobile-slide');
+    if (tEl && slideTitles) tEl.textContent = slideTitles[idx] || 'Comité';
+    if (sEl) sEl.textContent = (idx + 1) + ' / ' + total;
+    setTimeout(closeSidebar, 80);
+    setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 60);
+    if (idx === 4 && typeof window._c4Render === 'function') {
+      requestAnimationFrame(function() { requestAnimationFrame(window._c4Render); });
+    }
+  }"""
 
     if old_goto in html:
         html = html.replace(old_goto, new_goto, 1)
@@ -3124,6 +3578,7 @@ def generar_reporte(
     tamar_tna:     float = None,
     tamar_tea:     float = None,
     rf_detalle_path: str        = None,
+    vcp_data_path:   str        = None,   # CSV con variaciones VCP (opcional)
     df_futuros:      "pd.DataFrame" = None,
 ) -> str:
     """
@@ -3206,6 +3661,10 @@ def generar_reporte(
 
     html = _apply_delta_theme_to_root(html)
     html = _unify_navigation(html)
+    # Patch nav onclicks para que usen window.goTo (con todos los patches de caps)
+    import re as _re3
+    html = _re3.sub(r'onclick="goTo\((\d+)\)"',
+                    lambda m: f'onclick="(window.goTo||goTo)({m.group(1)})"', html)
     # Override mini-table CSS del template para centrar headers
     html = html.replace(
         '.mini-table thead th { background: var(--light); color: var(--muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; }',
@@ -3218,6 +3677,8 @@ def generar_reporte(
     html = _inject_css(html, _CAP1_CSS)
     html = _replace_cap1(html, _build_cap1_html(
         df_lecap, df_cer, df_tamar, df_dual, tamar_tea, tamar_tna))
+    html = _replace_capN(html, "slide-2", _build_cap2_html(
+        df_lecap, df_cer, df_tamar, df_dual, tamar_tea, tamar_tna, hoy))
     html = _replace_capN(html, "slide-3", _build_cap3_html(
         df_lecap, df_cer, df_tamar, df_dual, tamar_tea, tamar_tna))
     html = _replace_capN(html, "slide-4", _build_cap4_html(
@@ -3265,6 +3726,37 @@ def generar_reporte(
                 # Fallback: antes del cierre del body
                 html = html.replace('</body>', fondos_html + '\n</body>', 1)
             print(f"[generar_reporte] ✓ Slides de fondos embebidas (entre cap 6 y cap 7)")
+            # Inyectar slide 12 (inputs VCP) antes de </body>
+            from generar_fondos import generar_inputs_slide
+            html = html.replace('</body>', generar_inputs_slide() + '\n</body>', 1)
+            # Leer CSV de variaciones VCP si se provee, e inyectar valores pre-cargados
+            if vcp_data_path:
+                try:
+                    import csv as _csv
+                    import re as _re_vcp
+                    _vcp_vals = {}
+                    with open(vcp_data_path, 'r', encoding='utf-8-sig') as _f:
+                        for row in _csv.reader(_f):
+                            if not row or row[0].strip().startswith('#'): continue
+                            if row[0].strip().lower() == 'fondo': continue  # header
+                            try:
+                                fondo, entidad, s1, s30 = [x.strip() for x in row[:4]]
+                                _vcp_vals[(fondo, entidad)] = (float(s1), float(s30))
+                            except (ValueError, IndexError):
+                                continue
+                    # Inyectar valores en los inputs HTML
+                    def _set_vcp_val(ht, inp_id, val):
+                        return _re_vcp.sub(
+                            r'(id="' + _re_vcp.escape(inp_id) + r'"[^>]*)placeholder="0\.0"',
+                            lambda m: m.group(1) + f'value="{val}" placeholder="0.0"',
+                            ht
+                        )
+                    for (fondo, entidad), (s1, s30) in _vcp_vals.items():
+                        html = _set_vcp_val(html, f'vcp-{fondo}-s1-{entidad}', s1)
+                        html = _set_vcp_val(html, f'vcp-{fondo}-s30-{entidad}', s30)
+                    print(f"[generar_reporte] VCP CSV: {len(_vcp_vals)} valores cargados")
+                except Exception as _e:
+                    print(f"[generar_reporte] Warning VCP CSV: {_e}")
             # Inyectar nav-items en el sidebar (después del nav-7)
             from generar_fondos import generar_fondos_nav_items
             nav_items = generar_fondos_nav_items()
@@ -3292,6 +3784,28 @@ def generar_reporte(
             import traceback
             print(f"[generar_reporte] ⚠ Fondos (omitido): {e}")
             traceback.print_exc()
+
+    # Sanitizar scripts para compatibilidad con Claude iframe
+    import re as _re2
+    _CHAR_MAP = {
+        'á':'a','é':'e','í':'i','ó':'o','ú':'u',
+        'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U',
+        'ñ':'n','Ñ':'N','ü':'u','Ü':'U',
+        '—':'-','–':'-','→':'->','─':'-','·':'.',
+        '•':'*','✕':'x','…':'...',
+    }
+    def _clean_scripts(m):
+        body = m.group(2)
+        for ch, rep in _CHAR_MAP.items():
+            body = body.replace(ch, rep)
+        body = _re2.sub(r'\bconst\b', 'var', body)
+        body = _re2.sub(r'\blet\b', 'var', body)
+        body = _re2.sub(r'\$\{([^}]+)\}', lambda x: "' + " + x.group(1) + " + '", body)
+        body = body.replace('`', "'")
+        body = _re2.sub(r'(\w+)\s*=>\s*\{', r'function(\1){', body)
+        body = _re2.sub(r'\((\w[^)]*?)\)\s*=>\s*\{', r'function(\1){', body)
+        return m.group(1) + body + m.group(3)
+    html = _re2.sub(r'(<script[^>]*>)(.*?)(</script>)', _clean_scripts, html, flags=_re2.DOTALL)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)

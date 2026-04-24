@@ -808,15 +808,16 @@ if __name__ == '__main__':
 # df.to_csv('curva_tasas.csv', sep=';', decimal=',', index=False)
 
 #from generar_reporte import generar_reporte
-
+#
 #generar_reporte(
 #    username        = "delta_api",
 #    password        = "D3lt41210*-*",
 #    template_path   = r"C:\Users\juan.paolicchi\DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Equipo RF\Comité\reporte_comite_base.html",
-#    rf_detalle_path = r"C:\Users\juan.paolicchi\DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Equipo RF\RF_Detalle_Carteras.xlsm",
-#    tamar_tna       = 0.2275,
-#    tamar_tea       = 0.2532,
-#    df_futuros = futuros_minorista,  # ← pasar directo,
+#    rf_detalle_path = r"C:\Users\juan.paolicchi\DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Codes\app_calculadoras_bonos\RF_Detalle_Carteras.xlsm",
+#    tamar_tna       = 0.2275,   # TNA actual de TAMAR
+#    tamar_tea       = 0.2532,   # TEA actual de TAMAR
+#    df_futuros = futuros_minorista,  # ← pasar directo,    
 #)
+
 # %%
 

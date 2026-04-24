@@ -109,6 +109,71 @@ AJUSTE_MAP = {
     "Money Market":           "Caja",
 }
 
+# Mapeo (L1, L2) -> etiqueta en torta de Composición General
+COMP_PIE_MAP = {
+    # Soberanos
+    ("Bonos Soberano",    "CER Fija"):               "Soberanos CER",
+    ("Bonos Soberano",    "ARS Fija"):               "Soberanos Tasa Fija",
+    ("Bonos Soberano",    "ARS TAMAR"):              "Soberanos TAMAR",
+    ("Bonos Soberano",    "ARS BADLAR"):             "Soberanos Tasa Fija",
+    ("Bonos Soberano",    "USD en Dolares"):         "Soberanos USD",
+    ("Bonos Soberano",    "USD Fija"):               "Soberanos USD",
+    ("Bonos Soberano",    "USB en Dolares"):         "Soberanos USD",
+    ("Bonos Soberano",    "USD-Linked Fija"):        "Soberanos USD",
+    ("Bonos Soberano",    "Dual (Fija/TAMAR) Fija"): "Soberanos Duales",
+    ("Letras Soberano",   "CER Fija"):               "Soberanos CER",
+    ("Letras Soberano",   "ARS Fija"):               "Soberanos Tasa Fija",
+    ("Letras Soberano",   "ARS TAMAR"):              "Soberanos TAMAR",
+    ("Letras Soberano",   "USD Fija"):               "Soberanos USD",
+    ("Letras Soberano",   "UVA Fija"):               "Soberanos CER",
+    # Subsoberanos
+    ("Bonos Subsoberano", "CER Fija"):               "Subsoberanos CER",
+    ("Bonos Subsoberano", "ARS Fija"):               "Subsoberanos Tasa Fija",
+    ("Bonos Subsoberano", "ARS TAMAR"):              "Subsoberanos TAMAR",
+    ("Bonos Subsoberano", "USD Fija"):               "Subsoberanos USD",
+    ("Letras Subsoberano","ARS TAMAR"):              "Subsoberanos TAMAR",
+    ("Letras Subsoberano","UVA Fija"):               "Subsoberanos CER",
+    ("Letras Subsoberano","CER Fija"):               "Subsoberanos CER",
+    # Corporativos
+    ("Bonos Corporativo", "ARS Fija"):               "Plazos Fijos/Pagare",
+    ("Bonos Corporativo", "ARS BADLAR"):             "Plazos Fijos/Pagare",
+    ("Bonos Corporativo", "ARS CAUCION"):            "Plazos Fijos/Pagare",
+    ("Bonos Corporativo", "ARS TAMAR"):              "FF TAMAR",
+    ("Bonos Corporativo", "UVA Fija"):               "ON CER/UVA",
+    ("Bonos Corporativo", "USD Fija"):               "ON USD",
+    ("Bonos Corporativo", "USD-Linked Fija"):        "ON USD",
+    ("Bonos Corporativo", "USB Fija"):               "ON USD",
+    # Fideicomisos Financieros
+    ("Fideicomisos Financieros", "en Pesos ARS TAMAR"):  "FF TAMAR",
+    ("Fideicomisos Financieros", "en Pesos ARS BADLAR"): "FF TAMAR",
+    ("Fideicomisos Financieros", "USD USD Fija"):         "ON USD",
+    ("Fideicomisos Financieros", "USB NC"):               "ON USD",
+    # FCI Money Markets -> Caja
+    ("FCI Money Markets", "en Pesos"):               "Caja",
+    # Acciones
+    ("Local",             "Acciones"):               "Acciones",
+}
+
+
+# Colores para la torta de composicion general (paleta de la imagen de referencia)
+COMP_PIE_COLORS = {
+    "Soberanos CER":          "#4472C4",   # azul medio
+    "Soberanos Tasa Fija":    "#1F3864",   # azul oscuro navy
+    "Soberanos TAMAR":        "#70AD47",   # verde medio
+    "Soberanos USD":          "#C55A11",   # naranja oscuro
+    "Soberanos Duales":       "#7030A0",   # violeta
+    "Subsoberanos CER":       "#5B9BD5",   # azul claro
+    "Subsoberanos Tasa Fija": "#2E75B6",   # azul medio-oscuro
+    "Subsoberanos TAMAR":     "#A9D18E",   # verde claro
+    "Subsoberanos USD":       "#ED7D31",   # naranja
+    "Plazos Fijos/Pagare":    "#7B5EA7",   # violeta/uva
+    "FF TAMAR":               "#375623",   # verde oscuro
+    "ON CER/UVA":             "#264478",   # azul profundo
+    "ON USD":                 "#843C0C",   # marron
+    "Acciones":               "#5A9E6F",   # verde esmeralda
+    "Caja":                   "#203864",   # azul muy oscuro (casi negro)
+}
+
 # Categorías nivel 1 que van directo a Caja
 CAJA_L1 = {"Caja y Equivalentes", "Caja", "Money Market", "Cuenta Corriente"}
 
@@ -201,6 +266,48 @@ def _get_composition(df: pd.DataFrame, col_pct: int) -> dict:
     return result
 
 
+def _get_composition_pie(df: pd.DataFrame, col_pct: int, col_monto: int,
+                         patrimonio: float, liquidez: float) -> dict:
+    """
+    Recorre el arbol (L1, L2) y asigna cada combinacion a una etiqueta de torta
+    usando COMP_PIE_MAP. Devuelve dict {etiqueta: pct} normalizado.
+    Incluye Caja = liquidez / patrimonio.
+    """
+    result = {}
+
+    # Caja desde liquidez
+    if patrimonio and patrimonio > 0 and liquidez and liquidez > 0:
+        result["Caja"] = liquidez / patrimonio
+
+    cat1 = None
+    for i in range(27, min(len(df), 300)):
+        level = df.iloc[i, 0]
+        if pd.isna(level):
+            continue
+        level = float(level)
+        desc = str(df.iloc[i, 2]) if not pd.isna(df.iloc[i, 2]) else ""
+
+        if level == 1.0:
+            cat1 = desc
+        elif level == 2.0 and cat1:
+            pct = df.iloc[i, col_pct]
+            if not pd.isna(pct) and isinstance(pct, (int, float)) and float(pct) > 0.001:
+                # Normalize cat2 label (strip accents for map lookup)
+                desc_norm = desc.replace("\u00f3", "o").replace("\u00e9", "e")
+                label = COMP_PIE_MAP.get((cat1, desc)) or COMP_PIE_MAP.get((cat1, desc_norm))
+                if label and label != "Caja":  # Caja ya agregada desde liquidez
+                    result[label] = result.get(label, 0) + float(pct)
+
+    # Normalizar para que sume 1
+    total = sum(result.values())
+    if total > 0.05:
+        result = {k: v / total for k, v in result.items()}
+
+    # Filtrar < 0.5% y ordenar por valor desc
+    result = {k: v for k, v in result.items() if v >= 0.005}
+    return dict(sorted(result.items(), key=lambda x: -x[1]))
+
+
 def _get_top5(df: pd.DataFrame, col_pct: int) -> list:
     """
     Extrae los top 5 instrumentos por % de participación.
@@ -268,18 +375,32 @@ def _get_fecha_datos(df: pd.DataFrame) -> str:
         return date.today().strftime("%d-%b-%Y")
 
 
+def _get_liquidez(df: pd.DataFrame, col_metr: int) -> float:
+    """Extrae el valor de Liquidez (row 11) del sheet."""
+    try:
+        val = df.iloc[10, col_metr]  # row 11 (0-indexed=10)
+        return float(val) if not pd.isna(val) else 0.0
+    except Exception:
+        return 0.0
+
+
 def _load_fondo(path: str, fondo: dict) -> dict:
     """Carga todos los datos de un fondo desde RF_Detalle."""
     df = _read_sheet(path, fondo["sheet_rf"])
     metr = _get_metrics(df, fondo["col_metr"])
-    comp = _get_composition(df, fondo["col_pct"])
+    comp = _get_composition(df, fondo["col_pct"])   # para Tipo de Ajuste
     top5 = _get_top5(df, fondo["col_pct"])
     fecha = _get_fecha_datos(df)
-
+    # Composicion general con detalle L1+L2
+    patrimonio = metr.get("patrimonio") or 0
+    liquidez   = _get_liquidez(df, fondo["col_metr"])
+    comp_pie   = _get_composition_pie(df, fondo["col_pct"], fondo.get("col_monto"),
+                                      patrimonio, liquidez)
     return {
         **fondo,
         "metrics": metr,
         "composition": comp,
+        "comp_pie": comp_pie,
         "top5": top5,
         "fecha_datos": fecha,
     }
@@ -337,49 +458,38 @@ _FONDO_CSS = """
   font-size: 13px; color: #5f7080; margin-top: 2px;
   font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
 }
-/* Layout: fila superior (KPI | Gráficos composición | Tenencias) + VCP abajo */
+/* Layout: 3 cols (KPI | composición+tipo | tenencias) + VCP abajo */
 .fd-main {
-  display: grid;
-  grid-template-columns: 150px 1fr 220px;
-  grid-template-rows: 1fr auto;
-  gap: 10px;
-  height: calc(100% - 64px);
-  min-height: 380px;
+  display: flex; flex-direction: column; gap: 10px;
+  height: calc(100% - 64px); min-height: 380px;
 }
 .fd-top-row {
-  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 150px 1fr 220px;
-  gap: 10px;
-  flex: 1;
-  min-height: 0;
+  grid-template-columns: 140px 1fr 210px;
+  gap: 10px; flex: 1; min-height: 0;
 }
 .fd-vcp-row {
-  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr 260px;
-  gap: 10px;
-  min-height: 200px;
+  grid-template-columns: 1fr 240px;
+  gap: 10px; min-height: 185px; flex-shrink: 0;
 }
 /* Panel KPI */
 .fd-kpi {
-  background: #3f5060;
-  border-radius: 6px;
-  padding: 20px 16px;
+  background: #3f5060; border-radius: 6px;
+  padding: 18px 14px;
   display: flex; flex-direction: column;
   justify-content: center; align-items: center;
-  gap: 20px; color: white; text-align: center;
+  gap: 16px; color: white; text-align: center;
 }
 .fd-kpi-label {
   font-size: 10px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .8px;
-  color: rgba(255,255,255,.65); margin-bottom: 4px;
+  color: rgba(255,255,255,.65); margin-bottom: 3px;
 }
 .fd-kpi-value {
-  font-size: 22px; font-weight: 700; color: white; line-height: 1.1;
+  font-size: 21px; font-weight: 700; color: white; line-height: 1.1;
 }
-.fd-kpi-date { font-size: 11px; color: rgba(255,255,255,.45); margin-top: 3px; }
-/* Panel gráficos composición (apilados verticalmente) */
+.fd-kpi-date { font-size: 11px; color: rgba(255,255,255,.45); margin-top: 2px; }
 .fd-charts-col {
   display: flex; flex-direction: column; gap: 10px; min-height: 0;
 }
@@ -441,8 +551,8 @@ _FONDO_CSS = """
 
 
 def _pie_chart_js(canvas_id: str, labels: list, values: list, colors: list) -> str:
-    """Genera JS para un donut chart con canvas 2D nativo."""
-    data_js = json.dumps([round(v * 100, 2) for v in values])
+    """Pie chart con etiquetas externas y lineas conectoras, estilo PPTX."""
+    data_js   = json.dumps([round(v * 100, 2) for v in values])
     labels_js = json.dumps(labels)
     colors_js = json.dumps(colors)
 
@@ -454,73 +564,155 @@ def _pie_chart_js(canvas_id: str, labels: list, values: list, colors: list) -> s
     if (!cv) return;
     var W = cv.parentElement.clientWidth;
     var H = cv.parentElement.clientHeight;
-    if (!W || W < 10) {{ setTimeout(drawPie_{canvas_id}, 80); return; }}
-    H = H || 180;
+    if (!W || W < 10 || !H || H < 10) {{ setTimeout(drawPie_{canvas_id}, 200); return; }}
     var dpr = window.devicePixelRatio || 1;
     cv.width = W * dpr; cv.height = H * dpr;
     cv.style.width = W + 'px'; cv.style.height = H + 'px';
     var ctx = cv.getContext('2d');
     ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
 
-    var data   = {data_js};
-    var labels = {labels_js};
-    var colors = {colors_js};
-    var total  = data.reduce(function(a,b){{return a+b;}}, 0);
+    var allData   = {data_js};
+    var allLabels = {labels_js};
+    var allColors = {colors_js};
+
+    // Filtrar slices < 1%
+    var data = [], labels = [], colors = [];
+    var tot0 = allData.reduce(function(a,b){{return a+b;}},0);
+    for (var k=0;k<allData.length;k++) {{
+      if (allData[k]/tot0 >= 0.01) {{
+        data.push(allData[k]);
+        labels.push(allLabels[k]);
+        colors.push(allColors[k]);
+      }}
+    }}
+    var total = data.reduce(function(a,b){{return a+b;}},0);
     if (total <= 0) return;
 
-    var cx = W * 0.42, cy = H / 2;
-    var R  = Math.min(cx, cy) * 0.82;
-    var ri = R * 0.52;  // donut hole
+    // Margen para etiquetas: izquierda y derecha
+    var margin = Math.min(W * 0.32, 90);
+    var cx = W / 2;
+    var cy = H / 2;
+    var R  = Math.min((W - margin*2) / 2, H / 2) * 0.82;
+    R = Math.max(R, 30);
 
+    // Calcular angulos
+    var slices = [];
     var angle = -Math.PI / 2;
-    for (var i = 0; i < data.length; i++) {{
-      var slice = (data[i] / total) * 2 * Math.PI;
+    for (var i=0;i<data.length;i++) {{
+      var s = (data[i]/total) * 2 * Math.PI;
+      slices.push({{ start:angle, end:angle+s, pct:data[i]/total, mid:angle+s/2 }});
+      angle += s;
+    }}
+
+    // Dibujar slices
+    for (var i=0;i<slices.length;i++) {{
+      var sl = slices[i];
       ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, R, angle, angle + slice);
+      ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,R,sl.start,sl.end);
       ctx.closePath();
       ctx.fillStyle = colors[i];
       ctx.fill();
-      ctx.strokeStyle = 'white';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle='white';
+      ctx.lineWidth=1.5;
       ctx.stroke();
+    }}
 
-      // Label si slice > 4%
-      if (data[i] / total > 0.04) {{
-        var mid = angle + slice / 2;
-        var lr = R * 0.73;
-        var tx = cx + Math.cos(mid) * lr;
-        var ty = cy + Math.sin(mid) * lr;
-        ctx.font = 'bold 9px Barlow,Calibri,Arial';
-        ctx.fillStyle = data[i]/total > 0.15 ? 'white' : '#333';
-        ctx.textAlign = 'center';
+    // Etiquetas externas con lineas conectoras
+    // Separar left/right por lado del canvas
+    var leftItems  = [];
+    var rightItems = [];
+    for (var i=0;i<slices.length;i++) {{
+      var mid = slices[i].mid;
+      var onRight = (Math.cos(mid) >= 0);
+      (onRight ? rightItems : leftItems).push(i);
+    }}
+
+    // Funcion para dibujar un lado
+    function drawSide(indices, isRight) {{
+      if (indices.length === 0) return;
+      var side = isRight ? 1 : -1;
+
+      // Anchor points en el borde del pie
+      var anchors = indices.map(function(i) {{
+        var mid = slices[i].mid;
+        return {{
+          idx: i,
+          ax: cx + Math.cos(mid) * R,
+          ay: cy + Math.sin(mid) * R,
+          mid: mid,
+          pct: slices[i].pct
+        }};
+      }});
+
+      // Punto de elbow: un paso afuera del pie
+      anchors.forEach(function(a) {{
+        a.ex = cx + Math.cos(a.mid) * (R + 10);
+        a.ey = cy + Math.sin(a.mid) * (R + 10);
+      }});
+
+      // Y final de la etiqueta: distribuido verticalmente sin solapamiento
+      var lx = isRight ? cx + R + 22 : cx - R - 22;
+      var lineH = 13;
+      var totalH = (anchors.length - 1) * lineH;
+      var startY = cy - totalH / 2;
+
+      // Ordenar por angulo (arriba a abajo por y)
+      anchors.sort(function(a,b){{ return a.ey - b.ey; }});
+      anchors.forEach(function(a, j) {{
+        a.ly = startY + j * lineH;
+      }});
+
+      // Dibujar cada etiqueta
+      anchors.forEach(function(a) {{
+        var i = a.idx;
+        ctx.strokeStyle = colors[i];
+        ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(a.ax, a.ay);
+        ctx.lineTo(a.ex, a.ey);
+        ctx.lineTo(lx + (isRight ? -4 : 4), a.ly);
+        ctx.stroke();
+
+        // Punto en el quiebre
+        ctx.beginPath();
+        ctx.arc(a.ax, a.ay, 1.5, 0, 2*Math.PI);
+        ctx.fillStyle = colors[i];
+        ctx.fill();
+
+        // Texto: "Categoria; X%"
+        var pctStr = (a.pct * 100).toFixed(a.pct < 0.05 ? 1 : 0) + '%';
+        var txt = labels[i] + '; ' + pctStr;
+        ctx.font = '9px Barlow,Calibri,Arial';
+        ctx.fillStyle = '#1a1a2e';
+        ctx.textAlign = isRight ? 'left' : 'right';
         ctx.textBaseline = 'middle';
-        ctx.fillText(data[i].toFixed(1) + '%', tx, ty);
-      }}
-      angle += slice;
+        ctx.fillText(txt, lx, a.ly);
+      }});
     }}
 
-    // Hoyo del donut
-    ctx.beginPath();
-    ctx.arc(cx, cy, ri, 0, 2 * Math.PI);
-    ctx.fillStyle = 'white';
-    ctx.fill();
-
-    // Leyenda
-    var lx = cx + R + 10, ly = H / 2 - (labels.length * 13) / 2;
-    ctx.font = '9px Barlow,Calibri,Arial';
-    for (var j = 0; j < labels.length; j++) {{
-      if (data[j] < 0.1) continue;
-      ctx.fillStyle = colors[j];
-      ctx.fillRect(lx, ly + j * 13, 8, 8);
-      ctx.fillStyle = '#333';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(labels[j] + ': ' + data[j].toFixed(1) + '%', lx + 11, ly + j * 13);
-    }}
+    drawSide(rightItems, true);
+    drawSide(leftItems, false);
   }}
   window.addEventListener('load', drawPie_{canvas_id});
   window.addEventListener('resize', drawPie_{canvas_id});
+  window['drawPie_{canvas_id}'] = drawPie_{canvas_id};
+  // Disparar al navegar al slide
+  (function patchNav_{canvas_id}() {{
+    var _p = window.goToId;
+    if (typeof _p !== 'function') {{ setTimeout(patchNav_{canvas_id}, 100); return; }}
+    var _cid = '{canvas_id}';
+    window.goToId = function(id) {{
+      _p(id);
+      // Re-draw cuando se activa este fd-slide
+      if (id && _cid && id.indexOf(_cid.replace('pie_','')) !== -1) {{
+        setTimeout(drawPie_{canvas_id}, 100);
+        var bf = window['drawBar_bar_' + _cid.replace('pie_','')];
+        if (typeof bf === 'function') setTimeout(bf, 100);
+      }}
+    }};
+  }})();
 }})();
 </script>
 """
@@ -539,8 +731,7 @@ def _bar_chart_js(canvas_id: str, labels: list, values: list, color: str) -> str
     if (!cv) return;
     var W = cv.parentElement.clientWidth;
     var H = cv.parentElement.clientHeight;
-    if (!W || W < 10) {{ setTimeout(drawBar_{canvas_id}, 80); return; }}
-    H = H || 160;
+    if (!W || W < 10) {{ setTimeout(drawBar_{canvas_id}, 200); return; }}
     var dpr = window.devicePixelRatio || 1;
     cv.width = W * dpr; cv.height = H * dpr;
     cv.style.width = W + 'px'; cv.style.height = H + 'px';
@@ -699,11 +890,16 @@ def _build_fondo_slide(fondo_data: dict, slide_num: int, total_slides: int) -> s
     tir_str = (f"CER+{tir_neta*100:.1f}%" if is_cer else f"{tir_neta*100:.1f}%") if tir_neta else "—"
     fecha_str = fd.get("fecha_datos", "—")
 
-    pie_labels = [k for k in AJUSTE_ORDER if comp.get(k, 0) > 0.001]
-    pie_values = [comp.get(k, 0) for k in pie_labels]
-    pie_colors = [AJUSTE_COLORS.get(k, "#888") for k in pie_labels]
-    pie_js = _pie_chart_js(f"pie-{fid}", pie_labels, pie_values, pie_colors)
-    bar_js = _bar_chart_js(f"bar-{fid}", pie_labels, pie_values, "#1e6fba")
+    # Composicion general: usar comp_pie (L1+L2 detallado)
+    comp_pie = fd.get("comp_pie", comp)  # fallback a comp si no hay comp_pie
+    pie_labels_raw = list(comp_pie.keys())
+    pie_values_raw = list(comp_pie.values())
+    pie_colors = [COMP_PIE_COLORS.get(k, "#888") for k in pie_labels_raw]
+    pie_js = _pie_chart_js(f"pie_{fid}", pie_labels_raw, pie_values_raw, pie_colors)
+    # Tipo de ajuste: usar comp (AJUSTE_ORDER) ordenado de mayor a menor
+    bar_labels = sorted(comp.keys(), key=lambda k: -comp[k])
+    bar_values = [comp[k] for k in bar_labels]
+    bar_js = _bar_chart_js(f"bar_{fid}", bar_labels, bar_values, "#1e6fba")
     vcp_js = _vcp_chart_js(fid)
 
     top5_rows = "".join(
@@ -737,31 +933,31 @@ def _build_fondo_slide(fondo_data: dict, slide_num: int, total_slides: int) -> s
         f'      <div class="fd-title">{fd["nombre"]}</div>\n'
         f'      <div class="fd-subtitle">Performance y posicionamiento</div>\n'
         f'    </div>\n'
-        f'    <div style="display:flex;flex-direction:column;gap:10px;height:calc(100% - 64px)">\n'
-        f'      <div style="display:grid;grid-template-columns:150px 1fr 240px;gap:10px;flex:1;min-height:0">\n'
+        f'    <div class="fd-main">\n'
+        f'      <div class="fd-top-row">\n'
         f'        <div class="fd-kpi">\n'
-        f'          <div class="fd-kpi-item"><div class="fd-kpi-label">Patrimonio</div>'
+        f'          <div><div class="fd-kpi-label">Patrimonio</div>'
         f'<div class="fd-kpi-value">{pn_str}</div></div>\n'
         f'          {kpi_tir}\n'
-        f'          <div class="fd-kpi-item"><div class="fd-kpi-label">Duration*</div>'
+        f'          <div><div class="fd-kpi-label">Duration*</div>'
         f'<div class="fd-kpi-value">{dur_str}</div></div>\n'
-        f'          <div class="fd-kpi-item"><div class="fd-kpi-label">Datos al</div>'
+        f'          <div><div class="fd-kpi-label">Datos al</div>'
         f'<div class="fd-kpi-date">{fecha_str}</div></div>\n'
         f'        </div>\n'
-        f'        <div style="display:flex;flex-direction:column;gap:10px;min-height:0">\n'
+        f'        <div class="fd-charts-col">\n'
         f'          <div class="fd-quadrant" style="flex:1"><div class="fd-q-title">Composición General</div>'
-        f'<div class="fd-q-body"><canvas id="pie-{fid}" style="width:100%;height:100%;display:block"></canvas></div></div>\n'
+        f'<div class="fd-q-body"><canvas id="pie_{fid}" style="width:100%;height:100%;display:block"></canvas></div></div>\n'
         f'          <div class="fd-quadrant" style="flex:1"><div class="fd-q-title">Tipo de Ajuste</div>'
-        f'<div class="fd-q-body"><canvas id="bar-{fid}" style="width:100%;height:100%;display:block"></canvas></div></div>\n'
+        f'<div class="fd-q-body"><canvas id="bar_{fid}" style="width:100%;height:100%;display:block"></canvas></div></div>\n'
         f'        </div>\n'
         f'        <div class="fd-quadrant"><div class="fd-q-title">Principales Tenencias</div>'
         f'<div class="fd-q-body" style="align-items:flex-start;padding:12px 14px">'
         f'<table class="fd-top5" style="font-size:13px"><tbody>{top5_rows}</tbody></table></div></div>\n'
         f'      </div>\n'
-        f'      <div style="display:grid;grid-template-columns:1fr 280px;gap:10px;min-height:190px">\n'
+        f'      <div class="fd-vcp-row">\n'
         f'        <div class="fd-quadrant"><div class="fd-q-title">Variaciones VCP — {fd["tipo_vcp"]}</div>'
         f'<div class="fd-q-body" style="padding:8px 12px;flex-direction:column;align-items:stretch">'
-        f'<canvas id="vcp-cv-{fid}" style="width:100%;flex:1"></canvas></div></div>\n'
+        f'<canvas id="vcp_cv_{fid}" style="width:100%;flex:1"></canvas></div></div>\n'
         f'        <div class="fd-quadrant"><div class="fd-q-title">Ingresá valores</div>'
         f'<div class="fd-q-body" style="flex-direction:column;align-items:stretch;padding:8px 10px">'
         f'<div class="fd-vcp-note" style="margin-bottom:8px">✏ Valores en % (ej: 0.9 = 0.9%)</div>'
@@ -799,6 +995,16 @@ def generar_fondos_nav_items(fondos: list = None) -> str:
         <span style="font-size:10px;opacity:.6">Composición · Top 5</span>
       </span>
     </div>""")
+    # Nav item para slide 12 - Inputs VCP
+    num_inp = f"{7 + len(fondos) + 1:02d}"
+    items.append(
+        f'''    <div class="nav-item fd-nav-item" onclick="goToId('fd-slide-inputs')" id="fd-nav-inputs">\n'''
+        f'''      <span class="nav-num">{num_inp}</span>\n'''
+        '''      <span class="nav-label">Inputs VCP<br>\n'''
+        '''        <span style="font-size:10px;opacity:.6">Variaciones - Todos los fondos</span>\n'''
+        '''      </span>\n'''
+        '''    </div>'''
+    )
     return "\n".join(items)
 
 
@@ -867,6 +1073,114 @@ if (typeof goToId === 'undefined') {
 # =============================================================================
 # API PÚBLICA — PPTX
 # =============================================================================
+
+
+def generar_inputs_slide(fondos=None):
+    """Slide 12: inputs VCP para todos los fondos. Soporta pre-carga desde CSV."""
+    fondos = fondos or FONDOS
+    lbl_s1  = "Ult. semana (%)"
+    lbl_s30 = "Ult. 30d (%)"
+
+    rows_html = ""
+    for fd in fondos:
+        fid = fd["id"]
+        entities = [
+            ("fondo",     fd.get("peers_label", fd["nombre"])),
+            ("benchmark", "Benchmark"),
+            ("peers",     "Peers"),
+            ("industria", "Industria"),
+        ]
+        tbl_rows = ""
+        inp_style = "width:90px;border:1px solid #c0cdd8;border-radius:4px;padding:4px 8px;font-size:13px;text-align:center"
+        for eid, lbl in entities:
+            tbl_rows += "".join([
+                "<tr style='border-bottom:1px solid #edf0f3'>",
+                f"<td style='padding:6px 12px;font-weight:600;color:#333;font-size:13px;min-width:130px'>{lbl}</td>",
+                "<td style='padding:4px 8px;text-align:center'>",
+                f"<input type='number' step='0.01' placeholder='0.0' id='vcp-{fid}-s1-{eid}'",
+                f" oninput='if(typeof drawVcp_{fid}==\"function\") drawVcp_{fid}()'",
+                f" style='{inp_style}'></td>",
+                "<td style='padding:4px 8px;text-align:center'>",
+                f"<input type='number' step='0.01' placeholder='0.0' id='vcp-{fid}-s30-{eid}'",
+                f" oninput='if(typeof drawVcp_{fid}==\"function\") drawVcp_{fid}()'",
+                f" style='{inp_style}'></td>",
+                "</tr>",
+            ])
+
+        tipo = fd.get("tipo_vcp", "")
+        th_style = "padding:6px 12px;text-align:center;font-size:10px;color:#666;font-weight:700;text-transform:uppercase;border-bottom:1px solid #d0d9e4"
+        rows_html += "".join([
+            "<div style='background:white;border:1px solid #d0d9e4;border-radius:6px;overflow:hidden;margin-bottom:16px'>",
+            "<div style='background:#0f2557;color:white;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:7px 14px'>",
+            f"{fd['nombre']} <span style='font-weight:400;opacity:.7;font-size:10px;text-transform:none'>{tipo}</span>",
+            "</div>",
+            "<table style='width:100%;border-collapse:collapse;font-family:Calibri,Arial,sans-serif'>",
+            "<thead><tr style='background:#f5f7fa'>",
+            "<th style='padding:6px 12px;text-align:left;font-size:10px;color:#666;font-weight:700;text-transform:uppercase;border-bottom:1px solid #d0d9e4;min-width:130px'></th>",
+            f"<th style='{th_style}'>{lbl_s1}</th>",
+            f"<th style='{th_style}'>{lbl_s30}</th>",
+            "</tr></thead>",
+            f"<tbody>{tbl_rows}</tbody>",
+            "</table></div>",
+        ])
+
+    slide_js = "\n".join([
+        "<script>",
+        "(function(){",
+        "  function sizeInp(){",
+        "    var s=document.getElementById('fd-slide-inputs');",
+        "    var sc=document.getElementById('inp-scroll');",
+        "    if(!s||!sc||!s.classList.contains('active'))return;",
+        "    s.style.flexDirection='column';",
+        "    var h=s.getBoundingClientRect().height||window.innerHeight;",
+        "    var pb=s.querySelector('.progress-bar');",
+        "    var ft=s.querySelector('.slide-footer');",
+        "    var av=h-(pb?pb.offsetHeight:3)-(ft?ft.offsetHeight:36)-2;",
+        "    if(av>100){sc.style.height=av+'px';sc.style.flex='none';}",
+        "  }",
+        "  function patch(){",
+        "    var p=window.goToId;",
+        "    if(typeof p!=='function'){setTimeout(patch,100);return;}",
+        "    window.goToId=function(id){p(id);if(id==='fd-slide-inputs'){setTimeout(sizeInp,50);setTimeout(sizeInp,300);}};",
+        "  }",
+        "  patch();",
+        "  window.addEventListener('resize',function(){",
+        "    var s=document.getElementById('fd-slide-inputs');",
+        "    if(s&&s.classList.contains('active'))sizeInp();",
+        "  });",
+        "})();",
+        "</script>",
+    ])
+
+    css = (
+        "<style>"
+        "#fd-slide-inputs{display:none;height:100%;background:white;flex-direction:column;overflow:hidden}"
+        "#fd-slide-inputs.active{display:flex!important;flex-direction:column!important}"
+        "</style>"
+    )
+
+    btn = "goToId(\"slide-7\")"
+    return "\n".join([
+        css,
+        '<div class="slide-chapter fd-slide" id="fd-slide-inputs">',
+        '  <div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div>',
+        '  <div id="inp-scroll" style="overflow-y:auto;padding:24px 36px 16px;font-family:Calibri,Arial,sans-serif">',
+        '    <div style="font-size:24px;font-weight:700;color:#0f2557;margin-bottom:6px">Inputs - Variaciones VCP</div>',
+        '    <div style="font-size:13px;color:#5f7080;margin-bottom:4px">Completa los valores. Los graficos se actualizan automaticamente.</div>',
+        '    <div style="font-size:11px;color:#7a90a4;font-style:italic;margin-bottom:18px">Valores en % directo (ej: 0.9 = 0.9%)</div>',
+        '    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px">',
+        f'      {rows_html}',
+        '    </div>',
+        '  </div>',
+        '  <div class="slide-footer">',
+        '    <div class="slide-footer-left">Delta Asset Management - Inputs VCP</div>',
+        f'    <div class="slide-nav-btns"><button class="slide-nav-btn" onclick="{btn}">Volver al reporte</button></div>',
+        '    <div class="slide-footer-right">12</div>',
+        '  </div>',
+        '</div>',
+        slide_js,
+    ])
+
 
 def generar_fondos_pptx(
     rf_detalle_path: str,

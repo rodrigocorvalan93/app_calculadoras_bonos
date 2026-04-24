@@ -283,9 +283,6 @@ def _tna_from_tirea(bond_obj, tirea: float, bond_type: str) -> Optional[float]:
         if bt in ("cer", "cerproy"):
             return rentafija.tir_a_tna(tirea, 180, 365)
 
-        if bt == "corp_dlk":
-            return rentafija.tir_a_tna(tirea, 90, 365)
-
         if bt in ("hdsob", "bopreal"):
             return rentafija.tir_a_tna(tirea, 180, 360)
 
@@ -599,7 +596,6 @@ CURVES: List[CurveDef] = [
     CurveDef("corp_badlar", "Corp. BADLAR", "tamar"),
     CurveDef("corp_tasafija", "Corp. Tasa Fija", "lecap"),
     CurveDef("corp_uva", "Corp. UVA/CER", "cer"),
-    CurveDef("corp_dlk", "Corp. Dólar Linked", "corp_dlk"),
     CurveDef("corp_hdmep", "Corp. USD MEP", "hdmep"),
     CurveDef("corp_hdcable", "Corp. USD Cable", "hdcable"),
 ]
@@ -802,7 +798,6 @@ def build_curve_codes() -> Dict[str, List[str]]:
     corp_uva_set = set()
     corp_hdmep_set = set()
     corp_hdcable_set = set()
-    corp_dlk_set = set()
 
     for b in bonos:
         code = _codigo_obj(b)
@@ -819,8 +814,6 @@ def build_curve_codes() -> Dict[str, List[str]]:
             corp_tasafija_set.add(code)
         elif clas == "Corporativo UVA":
             corp_uva_set.add(code)
-        elif clas == "Corporativo Dolar Linked":
-            corp_dlk_set.add(code)
         elif clas == "Corporativo Hard Dolar MEP":
             corp_hdmep_set.add(code)
         elif clas == "Corporativo Hard Dolar":
@@ -848,7 +841,6 @@ def build_curve_codes() -> Dict[str, List[str]]:
         "corp_badlar": sorted(corp_badlar_set),
         "corp_tasafija": sorted(corp_tasafija_set),
         "corp_uva": sorted(corp_uva_set),
-        "corp_dlk": sorted(corp_dlk_set),
         "corp_hdmep": sorted(corp_hdmep_set),
         "corp_hdcable": sorted(corp_hdcable_set)
     }
@@ -3060,7 +3052,7 @@ def _render_yas(username, password, plazo, curve_labels):
         print(f"[YAS fragment] yas_code={yas_code}, mode={yas_mode}", flush=True)
 
         bond_obj_yas = _bond_obj(yas_code)
-        settle_yas_default = _settlement_date_str(plazo)  # dd/mm/YYYY o None para CI
+        settle_yas = _settlement_date_str(plazo)
 
         with col_inp:
             if yas_mode == "Precio":
@@ -3076,63 +3068,9 @@ def _render_yas(username, password, plazo, curve_labels):
                 yas_val = st.number_input("Margen TNA (decimal, ej 0.02)", value=0.02, step=0.005, format="%.6f", key="yas_val_m")
                 mode_key = "margen"
 
-            # ── Overrides opcionales (mismo patrón que .genera_ticket) ──
-            # Settlement: por defecto usa el plazo activo; se puede sobreescribir.
-            ovr_cols = st.columns(2)
-            with ovr_cols[0]:
-                use_custom_settle = st.checkbox(
-                    "Settlement custom", value=False, key="yas_ovr_settle",
-                    help="Por defecto usa el plazo activo. Activá para elegir fecha.",
-                )
-            settle_yas = settle_yas_default
-            if use_custom_settle:
-                # Default del date_input: hoy si CI, sino el default del plazo
-                try:
-                    if settle_yas_default:
-                        _d0 = datetime.strptime(settle_yas_default, "%d/%m/%Y").date()
-                    else:
-                        _d0 = date.today()
-                except Exception:
-                    _d0 = date.today()
-                with ovr_cols[1]:
-                    _d_sel = st.date_input(
-                        "Fecha de liquidación", value=_d0,
-                        format="DD/MM/YYYY", key="yas_settle_date",
-                    )
-                settle_yas = _d_sel.strftime("%d/%m/%Y") if _d_sel else settle_yas_default
-
-            # FX: editable siempre (útil para DLK y en general para sensibilizar TC)
-            # Se muestra sugerencia del A3500 hoy si está disponible.
             yas_tc = None
-            _fx_default = 1300.0
-            try:
-                # Prefer get_fx_hoy (waterfall MAE → BYMA DLR → serie A3500)
-                _v = get_fx_hoy(session=get_session(username, password))
-                if _v is not None and np.isfinite(float(_v)) and float(_v) > 0:
-                    _fx_default = float(_v)
-            except Exception:
-                try:
-                    # Fallback: última fila de rentafija.inputs['a3500']
-                    _df_a3500 = rentafija.inputs.get("a3500")
-                    if _df_a3500 is not None and len(_df_a3500) > 0:
-                        _v2 = float(_df_a3500.iloc[-1]["tca3500"])
-                        if np.isfinite(_v2) and _v2 > 0:
-                            _fx_default = _v2
-                except Exception:
-                    pass
-            _is_dlk = bool(bond_obj_yas and getattr(bond_obj_yas, "ajuste_sobre_capital", None) == "DLK")
-            tc_cols = st.columns(2)
-            with tc_cols[0]:
-                use_custom_fx = st.checkbox(
-                    "TC aplicable (FX)", value=_is_dlk, key="yas_ovr_fx",
-                    help="Necesario para DLK; opcional en otros bonos para sensibilidad.",
-                )
-            if use_custom_fx:
-                with tc_cols[1]:
-                    yas_tc = st.number_input(
-                        "TC (A3500)", value=_fx_default, step=0.5,
-                        format="%.4f", key="yas_tc",
-                    )
+            if bond_obj_yas and getattr(bond_obj_yas, "ajuste_sobre_capital", None) == "DLK":
+                yas_tc = st.number_input("TC aplicable (A3500)", value=1300.0, step=0.5, key="yas_tc")
 
         # ── Cálculo directo, sin fragment ni spinner ──
         # El flow es idéntico a bymaapi.py: obj.genera_ticket(...)
@@ -3189,8 +3127,7 @@ def _render_yas(username, password, plazo, curve_labels):
 
                 s1, s2, s3, s4 = st.columns(4)
                 with s1:
-                    # paridad/valor_residual ya vienen expresados como porcentaje (100.0 = 100%)
-                    st.metric("Paridad", f"{par_y:.2f}%" if np.isfinite(par_y) else "—")
+                    st.metric("Paridad", f"{par_y:.2%}" if np.isfinite(par_y) else "—")
                 with s2:
                     st.metric("Int. Corridos", f"{ic_y:.6f}" if np.isfinite(ic_y) else "—")
                 with s3:
