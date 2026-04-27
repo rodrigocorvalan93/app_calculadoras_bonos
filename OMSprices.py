@@ -1,0 +1,144 @@
+# -*- coding: utf-8 -*-
+"""OMSprices.py
+
+Helpers de extracción / normalización de MarketData (REST OMS/Primary).
+
+Notas:
+- Los entries (LA, CL, OP, HI, LO, BI, OF, TV, NV, etc.) vienen como dict o list[dict].
+- Este módulo intenta ser robusto: si cambia la forma del JSON, no rompe.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Optional
+
+import numpy as np
+import pandas as pd
+
+
+def safe_div(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    return a / b if (a is not None and b not in (0, 0.0, np.nan)) else None
+
+
+# -----------------------------------------------------------------------------
+# Parsers robustos
+# -----------------------------------------------------------------------------
+
+def _first(x: Any) -> Any:
+    """Si x es lista, devuelve el primer elemento; si no, devuelve x."""
+    if isinstance(x, list):
+        return x[0] if x else None
+    return x
+
+
+def _extract_num_from_dict(d: dict, keys: tuple[str, ...]) -> float:
+    for k in keys:
+        if k in d and d[k] is not None:
+            return float(d[k])
+    return np.nan
+
+
+def extract_price(entry: Any) -> float:
+    """Intenta extraer 'price' (float)."""
+    e = _first(entry)
+    if isinstance(e, dict):
+        return _extract_num_from_dict(e, ("price", "px", "value"))
+    if isinstance(e, (int, float, np.floating)):
+        return float(e)
+    return np.nan
+
+
+def extract_size(entry: Any) -> float:
+    """Intenta extraer 'size' (float)."""
+    e = _first(entry)
+    if isinstance(e, dict):
+        return _extract_num_from_dict(e, ("size", "qty", "quantity", "volume", "nominal", "amount"))
+    if isinstance(e, (int, float, np.floating)):
+        return float(e)
+    return np.nan
+
+
+# -----------------------------------------------------------------------------
+# Public API
+# -----------------------------------------------------------------------------
+
+def market_snapshot(df: pd.DataFrame) -> pd.DataFrame:
+    """Aplana un DataFrame de marketdata (index=symbol) a un snapshot tabular.
+
+    Devuelve columnas (si están disponibles):
+      - last, close, open, high, low
+      - bid_price, bid_size, offer_price, offer_size
+      - volume (prioriza TV, fallback NV)
+      - variation (last/close - 1)
+      - change (last - close)
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(index=df.index)
+
+    # Precios básicos
+    if "LA" in df.columns:
+        out["last"] = df["LA"].map(extract_price)
+    else:
+        out["last"] = np.nan
+
+    if "CL" in df.columns:
+        out["close"] = df["CL"].map(extract_price)
+    else:
+        out["close"] = np.nan
+
+    if "OP" in df.columns:
+        out["open"] = df["OP"].map(extract_price)
+    else:
+        out["open"] = np.nan
+
+    if "HI" in df.columns:
+        out["high"] = df["HI"].map(extract_price)
+    else:
+        out["high"] = np.nan
+
+    if "LO" in df.columns:
+        out["low"] = df["LO"].map(extract_price)
+    else:
+        out["low"] = np.nan
+
+    if "IV" in df.columns:
+        out["index_value"] = df["IV"].map(extract_price)
+    else:
+        out["index_value"] = np.nan
+
+    # Book (best)
+    if "BI" in df.columns:
+        out["bid_price"] = df["BI"].map(extract_price)
+        out["bid_size"] = df["BI"].map(extract_size)
+    else:
+        out["bid_price"] = np.nan
+        out["bid_size"] = np.nan
+
+    if "OF" in df.columns:
+        out["offer_price"] = df["OF"].map(extract_price)
+        out["offer_size"] = df["OF"].map(extract_size)
+    else:
+        out["offer_price"] = np.nan
+        out["offer_size"] = np.nan
+
+    # Volumen: prioriza TV, fallback NV (fila a fila)
+    vol_tv = df["TV"].map(extract_size) if "TV" in df.columns else pd.Series(np.nan, index=df.index)
+    vol_nv = df["NV"].map(extract_size) if "NV" in df.columns else pd.Series(np.nan, index=df.index)
+    out["volume"] = vol_tv.fillna(vol_nv)
+
+    # Variaciones
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out["variation"] = out["last"] / out["close"] - 1
+        out["change"] = out["last"] - out["close"]
+
+    return out
+
+
+def last_price(df: pd.DataFrame) -> pd.DataFrame:
+    """Compat: extrae último y cierre + variación."""
+    snap = market_snapshot(df)
+    if snap.empty:
+        return pd.DataFrame()
+    return snap[["last", "close", "variation"]].copy()
