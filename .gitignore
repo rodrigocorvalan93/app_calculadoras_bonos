@@ -62,6 +62,8 @@ Delta\ -\ *.xlsx
 historico_byma_px_tasas.xlsx
 historico_byma_*.xlsx
 Proyecciones_para_Claude.xlsx
+RF_Detalle_Carteras.xlsx
+Primary-API.pdf
 
 # Datos descargados / generados localmente
 /data/
