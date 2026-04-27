@@ -103,6 +103,11 @@ def market_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     else:
         out["low"] = np.nan
 
+    if "IV" in df.columns:
+        out["index_value"] = df["IV"].map(extract_price)
+    else:
+        out["index_value"] = np.nan
+
     # Book (best)
     if "BI" in df.columns:
         out["bid_price"] = df["BI"].map(extract_price)

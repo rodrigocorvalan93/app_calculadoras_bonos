@@ -22,7 +22,7 @@ from utils import *
 # =============================================================================
 MAX_WORKERS = 9  # ajustá según tu máquina / red
 GUARDAR_BYMA_XLSX = False  # ponelo True solo para debug
-DEFAULT_ENTRIES = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP"
+DEFAULT_ENTRIES = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP,IV"
 DEFAULT_DEPTH = 3
 
 # =============================================================================
@@ -816,7 +816,8 @@ if __name__ == '__main__':
 #    rf_detalle_path = r"C:\Users\juan.paolicchi\DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Codes\app_calculadoras_bonos\RF_Detalle_Carteras.xlsm",
 #    tamar_tna       = 0.2275,   # TNA actual de TAMAR
 #    tamar_tea       = 0.2532,   # TEA actual de TAMAR
-#    df_futuros = futuros_minorista,  # ← pasar directo,    
+#    df_futuros = futuros_minorista,  # ← pasar directo, 
+#    vcp_data_path   = r"C:\Users\juan.paolicchi\DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Codes\app_calculadoras_bonos\data_segmento.xlsx",
 #)
 
 # %%

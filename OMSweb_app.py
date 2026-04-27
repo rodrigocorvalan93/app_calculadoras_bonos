@@ -4004,10 +4004,10 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         @st.fragment
         def _futuros_live():
             st.subheader("Futuros DLR (ROFEX) — implícitas vs A3500")
-            st.caption("2 tablas (Minorista vs Mayorista con sufijo 'A'). Símbolos generados dinámicamente.")
+            st.caption("2 tablas (Minorista vs Mayorista con sufijo 'M'). Símbolos generados dinámicamente.")
 
             FUTUROS_BASE = _generate_futures_symbols(n_months=18)
-            FUTUROS_MAY = [f"{s}A" for s in FUTUROS_BASE]
+            FUTUROS_MAY = [f"{s}M" for s in FUTUROS_BASE]
 
             colS1, colS2 = st.columns([1, 1])
             with colS1:
@@ -4075,7 +4075,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         st.dataframe(style_futuros(df_min), width="stretch", height=560)
 
                 with colB:
-                    st.markdown("### Mayorista (DLR/MMMYYA)")
+                    st.markdown("### Mayorista (DLR/MMMYYM)")
                     df_may = out[out["Canal"] == "Mayorista"].drop(columns=["Canal"]).reset_index(drop=True)
                     if df_may.empty:
                         st.info("Sin datos mayorista.")

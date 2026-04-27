@@ -100,6 +100,7 @@ def _curve_points(df: pd.DataFrame, tir_col: str = "TIREA") -> List[list]:
         tir = _pct_float(r.get(tir_col))
         try:
             dur = float(r.get("Duration"))
+            if dur > 5: dur = dur / 365.0  # normalizar dias→años
         except Exception:
             continue
         if tir is None or not np.isfinite(dur) or not np.isfinite(tir):
@@ -115,6 +116,7 @@ def _bontam_points(df: pd.DataFrame, tamar_tea: float) -> List[list]:
         tir = _pct_float(r.get("TIREA"))
         try:
             dur = float(r.get("Duration"))
+            if dur > 5: dur = dur / 365.0  # normalizar dias→años
         except Exception:
             continue
         if tir is None or not np.isfinite(dur) or not np.isfinite(tir):
@@ -566,6 +568,7 @@ def _forward_matrix(df: pd.DataFrame, tir_col: str = "TIREA") -> tuple:
         tir = _pct_float(r.get(tir_col))
         try:
             dur = float(r.get("Duration"))
+            if dur > 5: dur = dur / 365.0  # normalizar dias→años
         except Exception:
             continue
         if tir is None or not np.isfinite(dur) or not np.isfinite(tir):
@@ -1053,14 +1056,14 @@ def _build_cap2_html(
       // dark bar
       var h1=Math.abs(sy(0)-sy(dark[i])), y1=sy(dark[i]);
       ctx.fillStyle=cd; ctx.fillRect(gx,y1,bw,h1);
-      ctx.font='bold 8.5px Barlow,Calibri,Arial';
+      ctx.font='bold 10px Barlow,Calibri,Arial';
       ctx.fillStyle=cd;ctx.textAlign='center';ctx.textBaseline='bottom';
       ctx.fillText(dark[i].toFixed(1)+'%',gx+bw/2,y1-2);
 
       // light bar
       var h2=Math.abs(sy(0)-sy(light[i])), y2=sy(light[i]);
       ctx.fillStyle=cl; ctx.fillRect(gx+bw+gap,y2,bw,h2);
-      ctx.font='bold 8.5px Barlow,Calibri,Arial';
+      ctx.font='bold 10px Barlow,Calibri,Arial';
       ctx.fillStyle='#444';ctx.textAlign='center';ctx.textBaseline='bottom';
       ctx.fillText(light[i].toFixed(1)+'%',gx+bw+gap+bw/2,y2-2);
 
@@ -1072,7 +1075,7 @@ def _build_cap2_html(
 
     // Legend
     var lx=ML, ly=H-11;
-    ctx.font='8px Barlow,Calibri,Arial';ctx.textBaseline='middle';
+    ctx.font='9.5px Barlow,Calibri,Arial';ctx.textBaseline='middle';
     ctx.fillStyle=cd;ctx.fillRect(lx,ly-3,10,7);
     ctx.fillStyle='#333';ctx.textAlign='left';ctx.fillText('TAMAR impl TNA',lx+13,ly);
     lx+=95;
@@ -1211,6 +1214,9 @@ def _get_bond_tr_data(df: pd.DataFrame, bond_type: str, hoy: date) -> list:
             continue
         if not np.isfinite(dur_f) or not np.isfinite(precio_f) or precio_f <= 0:
             continue
+        # Normalizar Duration: si es > 5 asumimos que está en días, no en años
+        if dur_f > 5:
+            dur_f = dur_f / 365.0
 
         # Intentar obtener datos exactos del objeto bono
         vn       = None
@@ -1292,6 +1298,9 @@ def _get_boncer_tr_data(df: pd.DataFrame, hoy: date) -> list:
             continue
         if not np.isfinite(dur_f) or not np.isfinite(precio_f) or precio_f <= 0:
             continue
+        # Normalizar Duration: si es > 5 asumimos que está en días, no en años
+        if dur_f > 5:
+            dur_f = dur_f / 365.0
 
         cer_ini   = None
         flujo_vto = None
@@ -1968,9 +1977,10 @@ def _assign_bond_to_dus(dus_date: date, df_lecap: pd.DataFrame,
     Usa ticker_to_vto() para obtener la fecha exacta (no Duration).
     """
     from datetime import timedelta
+    hoy = date.today()
 
     def _vto(dur: float) -> date:  # fallback si ticker no parseable
-        return date.today() + timedelta(days=round(float(dur) * 365))
+        return hoy + timedelta(days=round(float(dur) * 365))
 
     if used_tickers is None:
         used_tickers = set()
@@ -2004,7 +2014,7 @@ def _assign_bond_to_dus(dus_date: date, df_lecap: pd.DataFrame,
         if best:
             best_delta_abs = abs(best["delta"])
 
-    if best_delta_abs > 45:
+    if best is None:  # Solo usar BONCER j si no hay ningun BONCAP disponible
         candidates_cer = []
         for _, r in _clean_df(df_cer).iterrows():
             ticker = str(r.get("Código", "")); dur = r.get("Duration")
@@ -2290,22 +2300,22 @@ def _build_cap5_html(
         "".join(f"<td>{c['dias']}</td>" for c in dus_contracts) + "</tr>",
 
         "<tr class='c6-row-hi'><td class='c6-lbl'>TIR Contrato (TEA)</td>" +
-        "".join(f"<td>{c['tea']:.2f}%</td>" for c in dus_contracts) + "</tr>",
+        "".join(f"<td>{c['tea']:.1f}%</td>" for c in dus_contracts) + "</tr>",
 
         "<tr><td class='c6-lbl'>TNA Contrato</td>" +
-        "".join(f"<td>{c['tna']:.2f}%</td>" for c in dus_contracts) + "</tr>",
+        "".join(f"<td>{c['tna']:.1f}%</td>" for c in dus_contracts) + "</tr>",
 
         "<tr class='c6-row-sep'><td class='c6-lbl'>Deva mensual implícita</td>" +
-        "".join(f"<td>{c['deva_m']:.2f}%</td>" for c in dus_contracts) + "</tr>",
+        "".join(f"<td>{c['deva_m']:.1f}%</td>" for c in dus_contracts) + "</tr>",
 
         "<tr><td class='c6-lbl'>Fwd Contratos (mensual)</td>" +
-        "".join(f"<td>{c['fwd_m']:.2f}%</td>" for c in dus_contracts) + "</tr>",
+        "".join(f"<td>{c['fwd_m']:.1f}%</td>" for c in dus_contracts) + "</tr>",
 
         "<tr><td class='c6-lbl'>TNA FWD (norm. 30d)</td>" +
-        "".join(f"<td>{c['tna_fwd']:.2f}%</td>" for c in dus_contracts) + "</tr>",
+        "".join(f"<td>{c['tna_fwd']:.1f}%</td>" for c in dus_contracts) + "</tr>",
 
         "<tr class='c6-row-sep'><td class='c6-lbl'>Deva acumulada</td>" +
-        "".join(f"<td>{c['deva_acum']:.2f}%</td>" for c in dus_contracts) + "</tr>",
+        "".join(f"<td>{c['deva_acum']:.1f}%</td>" for c in dus_contracts) + "</tr>",
     ]
 
     # Tabla B — Sintéticos
@@ -2421,8 +2431,8 @@ def _build_cap5_html(
 .c6-table-wrap {{overflow-x:auto;margin-bottom:4px}}
 .c6-table {{border-collapse:collapse;font-size:11px;width:100%}}
 .c6-table thead tr th {{background:#0f2557;color:white;padding:7px 10px;text-align:center;font-size:10px;font-weight:600;white-space:nowrap;font-family:var(--font-title,'Barlow',Arial)}}
-.c6-lbl {{text-align:left!important;color:#5f7080;font-size:10.5px;background:#f7f9fc;border-right:1px solid #d8e2ed;min-width:170px;padding:5px 10px;font-family:var(--font-body,'Calibri',Arial)}}
-.c6-table td {{padding:5px 10px;text-align:center;border-bottom:1px solid #eaeef2;white-space:nowrap;font-family:var(--font-body,'Calibri',Arial)}}
+.c6-lbl {{text-align:left!important;color:#5f7080;font-size:10.5px;background:#f7f9fc;border-right:1px solid #d8e2ed;min-width:170px;padding:5px 11px;font-family:var(--font-body,'Calibri',Arial)}}
+.c6-table td {{padding:5px 11px;text-align:center;border-bottom:1px solid #eaeef2;white-space:nowrap;font-family:var(--font-body,'Calibri',Arial)}}
 .c6-row-hi td {{background:#f0f5ff;font-weight:600}}
 .c6-row-hi .c6-lbl {{background:#e8eef8;color:#0f2557}}
 .c6-row-sep td {{border-top:1.5px solid #d8e2ed}}
@@ -3690,6 +3700,10 @@ def generar_reporte(
 
     # ── Caps 6 y 7: snapshot + movimientos ───────────────────────────
     _fx_data  = _fetch_fx_data()
+    # Aplicar fallbacks para techo/piso si la descarga de BCRA falló
+    _spot_fb = _fx_data.get("spot") or 1398.0
+    if not _fx_data.get("techo_hoy"): _fx_data["techo_hoy"] = _spot_fb * 1.18
+    if not _fx_data.get("piso_hoy"):  _fx_data["piso_hoy"]  = _spot_fb * 0.60
     _snap_hoy = _build_snapshot_json(
         df_lecap, df_cer, df_tamar, df_dual,
         tamar_tna, tamar_tea, _fx_data, [], hoy
@@ -3726,37 +3740,100 @@ def generar_reporte(
                 # Fallback: antes del cierre del body
                 html = html.replace('</body>', fondos_html + '\n</body>', 1)
             print(f"[generar_reporte] ✓ Slides de fondos embebidas (entre cap 6 y cap 7)")
-            # Inyectar slide 12 (inputs VCP) antes de </body>
-            from generar_fondos import generar_inputs_slide
-            html = html.replace('</body>', generar_inputs_slide() + '\n</body>', 1)
+            # Slide 12 (inputs VCP) removido - valores cargados desde Excel
             # Leer CSV de variaciones VCP si se provee, e inyectar valores pre-cargados
             if vcp_data_path:
                 try:
-                    import csv as _csv
                     import re as _re_vcp
                     _vcp_vals = {}
-                    with open(vcp_data_path, 'r', encoding='utf-8-sig') as _f:
-                        for row in _csv.reader(_f):
-                            if not row or row[0].strip().startswith('#'): continue
-                            if row[0].strip().lower() == 'fondo': continue  # header
-                            try:
-                                fondo, entidad, s1, s30 = [x.strip() for x in row[:4]]
-                                _vcp_vals[(fondo, entidad)] = (float(s1), float(s30))
-                            except (ValueError, IndexError):
-                                continue
+                    _ext = str(vcp_data_path).lower()
+
+                    if _ext.endswith('.xlsx') or _ext.endswith('.xls'):
+                        # --- Leer desde Excel de Segmento (Power BI export) ---
+                        import pandas as _pd_vcp
+                        _df_vcp = _pd_vcp.read_excel(vcp_data_path, header=0)
+                        # Columnas: Moneda, Grupo, Subgrupo, Fondo, 7d, 30d, ...
+                        # s1 = columna "7d", s30 = columna "30d"
+                        # Mapeo fondo_id -> (nombre exacto en Excel, subgrupo)
+                        _FONDO_MAP = {
+                            "performance": {
+                                "fondo":     "Delta Performance",
+                                "benchmark": "Badlar Privada",
+                                "peers":     "Peers RF T+0",
+                                "industria": "Industria RF T+0",
+                            },
+                            "ahorro_plus": {
+                                "fondo":     "Delta Ahorro Plus",
+                                "benchmark": "Badlar Privada + 200 bps",
+                                "peers":     "Peers RF T+1",
+                                "industria": "Industria RF T+1",
+                            },
+                            "retorno_real": {
+                                "fondo":     "Delta Retorno Real",
+                                "benchmark": "Índice CER",
+                                "peers":     "Peers RF CER",
+                                "industria": "Industria RF CER",
+                            },
+                            "multimercado": {
+                                "fondo":     "Delta Multimercado I",
+                                "benchmark": "25% S&P Merval + 25% Índice CER + 25% A3500 + 25% CCL",
+                                "peers":     "Peers Renta Mixta",
+                                "industria": "Industria Renta Mixta",
+                            },
+                        }
+                        _name_to_row = {}
+                        for _, _r in _df_vcp.iterrows():
+                            _fn = str(_r.get("Fondo", "") or "").strip()
+                            if _fn and _fn != "nan":
+                                _s1  = _r.get("7d")
+                                _s30 = _r.get("30d")
+                                try:
+                                    _name_to_row[_fn] = (float(_s1)*100, float(_s30)*100)
+                                except Exception:
+                                    pass
+                        for _fid, _names in _FONDO_MAP.items():
+                            for _eid, _nombre in _names.items():
+                                if _nombre in _name_to_row:
+                                    _vcp_vals[(_fid, _eid)] = _name_to_row[_nombre]
+                        print(f"[generar_reporte] VCP Excel: {len(_vcp_vals)} valores cargados")
+
+                    else:
+                        # --- Leer desde CSV (formato legacy: fondo,entidad,s1,s30) ---
+                        import csv as _csv
+                        with open(vcp_data_path, 'r', encoding='utf-8-sig') as _f:
+                            for _row in _csv.reader(_f):
+                                if not _row or _row[0].strip().startswith('#'): continue
+                                if _row[0].strip().lower() == 'fondo': continue
+                                try:
+                                    _fondo, _entidad, _s1, _s30 = [x.strip() for x in _row[:4]]
+                                    _vcp_vals[(_fondo, _entidad)] = (float(_s1), float(_s30))
+                                except (ValueError, IndexError):
+                                    continue
+                        print(f"[generar_reporte] VCP CSV: {len(_vcp_vals)} valores cargados")
+
                     # Inyectar valores en los inputs HTML
                     def _set_vcp_val(ht, inp_id, val):
+                        # Replace value in any input with this id (hidden or visible)
+                        def _inject(m):
+                            tag = m.group(0)
+                            # Replace existing value="0" or value="..." or add before placeholder
+                            tag = _re_vcp.sub(r'value="[^"]*"', f'value="{round(val,3)}"', tag)
+                            if f'value="{round(val,3)}"' not in tag:
+                                tag = tag.replace('placeholder=', f'value="{round(val,3)}" placeholder=')
+                                if 'placeholder' not in tag and tag.endswith('>'):
+                                    tag = tag[:-1] + f' value="{round(val,3)}">' 
+                            return tag
                         return _re_vcp.sub(
-                            r'(id="' + _re_vcp.escape(inp_id) + r'"[^>]*)placeholder="0\.0"',
-                            lambda m: m.group(1) + f'value="{val}" placeholder="0.0"',
+                            r'<input[^>]*id=["\\\']' + _re_vcp.escape(inp_id) + r'["\\\'"][^>]*>',
+                            _inject,
                             ht
                         )
-                    for (fondo, entidad), (s1, s30) in _vcp_vals.items():
-                        html = _set_vcp_val(html, f'vcp-{fondo}-s1-{entidad}', s1)
-                        html = _set_vcp_val(html, f'vcp-{fondo}-s30-{entidad}', s30)
-                    print(f"[generar_reporte] VCP CSV: {len(_vcp_vals)} valores cargados")
+                    for (_fondo, _entidad), (_s1, _s30) in _vcp_vals.items():
+                        html = _set_vcp_val(html, f'vcp-{_fondo}-s1-{_entidad}', _s1)
+                        html = _set_vcp_val(html, f'vcp-{_fondo}-s30-{_entidad}', _s30)
+
                 except Exception as _e:
-                    print(f"[generar_reporte] Warning VCP CSV: {_e}")
+                    print(f"[generar_reporte] Warning VCP: {_e}")
             # Inyectar nav-items en el sidebar (después del nav-7)
             from generar_fondos import generar_fondos_nav_items
             nav_items = generar_fondos_nav_items()

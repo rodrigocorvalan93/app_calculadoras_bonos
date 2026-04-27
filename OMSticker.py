@@ -22,7 +22,6 @@ import pandas as pd
 import OMSmktdata
 import OMSprices
 
-
 # ──────────────────────────────────────────────────────────────────────
 # Activos
 # ──────────────────────────────────────────────────────────────────────
@@ -42,7 +41,7 @@ FIXED_ASSETS: List[TickerAsset] = [
     TickerAsset("GD35C",      "MERV - XMEV - GD35C - 24hs"),
     TickerAsset("GD41C",      "MERV - XMEV - GD41C - 24hs"),
     # Equity
-    TickerAsset("Merval",     "MERV - XMEV - I.MERVAL - 24hs"),
+    TickerAsset("Merval",     "MERV - XMEV - I.MERVAL"),
     TickerAsset("EWZ",        "MERV - XMEV - EWZ - 24hs"),
     # FX — DLR/SPOT va DIRECTO al ROFX, sin prefijo MERV - XMEV
     # TickerAsset("DLR/SPOT",   "DLR/SPOT", market_id="ROFX"),
@@ -173,7 +172,7 @@ def fetch_ticker_data(session, assets: List[TickerAsset]) -> List[TickerData]:
         raw = OMSmktdata.bulk_market_data(
             session, symbols,
             market_id=market_id,
-            entries="LA,CL,SE",
+            entries="LA,CL,SE,IV",
             depth=1,
         )
         if raw is None or raw.empty:
@@ -188,6 +187,7 @@ def fetch_ticker_data(session, assets: List[TickerAsset]) -> List[TickerData]:
                 continue
             r = snap.loc[a.symbol]
             last_val = float(r.get("last", np.nan))
+            index_val = float(r.get("index_value", np.nan))
             close_val = float(r.get("close", np.nan))
 
             # Fallback SE como close
@@ -196,9 +196,10 @@ def fetch_ticker_data(session, assets: List[TickerAsset]) -> List[TickerData]:
                 if np.isfinite(se):
                     close_val = se
 
-            var = (last_val / close_val - 1.0) if (
-                np.isfinite(last_val) and np.isfinite(close_val) and close_val != 0
-            ) else np.nan
+            var = (
+                (last_val / close_val - 1.0) if np.isfinite(last_val) else
+                (index_val / close_val - 1.0) if np.isfinite(index_val) else np.nan
+            ) if (np.isfinite(close_val) and close_val != 0) else np.nan
 
             results[a.symbol] = TickerData(
                 label=a.label, last=last_val, close=close_val,
