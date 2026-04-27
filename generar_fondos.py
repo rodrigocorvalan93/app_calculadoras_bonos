@@ -441,80 +441,100 @@ def _fmt_pct(v: float) -> str:
 # =============================================================================
 
 _FONDO_CSS = """
-/* Fondos: layout adaptativo a la pantalla */
+/* ── Slides de fondos Delta ── */
+/* REGLA CLAVE: todo usa alturas en px, no flex:1 sobre flex:1 */
+.fd-slide { display:none; background:#f0f3f7; flex-direction:column; overflow:hidden; }
+.fd-slide.active { display:flex !important; flex-direction:column !important; }
+
 .fd-slide-inner {
-  flex: 1; min-height: 0;
-  padding: 8px 14px 6px;
-  display: flex; flex-direction: column; gap: 6px;
+  flex: 1;
+  padding: 10px 16px 8px;
+  font-family: Calibri,'Segoe UI',Arial,sans-serif;
+  display: flex; flex-direction: column; gap: 8px;
   overflow: hidden; box-sizing: border-box;
 }
-.fd-header { flex-shrink:0; }
-.fd-title   { font-size: clamp(16px,2.2vh,22px); font-weight:700; color:#0f2557; }
-.fd-subtitle { font-size: clamp(10px,1.4vh,13px); color:#5f7080; margin-top:1px; }
 
-/* Top row: KPI | charts | tenencias */
-/* Uses fr so it fills available space; charts flex to fill */
+/* Header: titulo arriba */
+.fd-header { flex-shrink:0; margin-bottom:0; }
+.fd-title   { font-size:22px; font-weight:700; color:#0f2557; line-height:1.1; }
+.fd-subtitle { font-size:12px; color:#5f7080; margin-top:1px; }
+
+/* Grid principal: KPI izq | charts centro | tenencias der */
+/* Alturas fijas: top-row 260px, vcp-row 160px */
 .fd-top-row {
   display: grid;
-  grid-template-columns: clamp(100px,14vw,140px) 1fr clamp(150px,18vw,210px);
-  gap: 8px;
-  flex: 3; min-height: 0;
+  grid-template-columns: 130px 1fr 200px;
+  grid-template-rows: 260px;
+  gap: 8px; flex-shrink: 0;
 }
-
-/* VCP row: takes remaining space */
 .fd-vcp-row {
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
+  flex-shrink: 0;
+  height: 160px;
 }
-.fd-vcp-row .fd-quadrant { flex:1; min-height:0; }
-.fd-vcp-row canvas { width:100% !important; height:100% !important; display:block; }
 
-/* KPI panel */
+/* Panel KPI */
 .fd-kpi {
   background: #3f5060; border-radius:6px;
-  padding: clamp(8px,1.5vh,16px) 10px;
+  padding: 14px 10px;
   display: flex; flex-direction:column;
   justify-content: center; align-items: center;
-  gap: clamp(6px,1.2vh,14px); color:white; text-align:center;
-  box-sizing:border-box;
+  gap: 12px; color:white; text-align:center;
+  height: 260px; box-sizing:border-box;
 }
-.fd-kpi-label { font-size: clamp(8px,1vh,10px); font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:rgba(255,255,255,.6); margin-bottom:1px; }
-.fd-kpi-value { font-size: clamp(14px,2vh,22px); font-weight:700; color:white; line-height:1.1; }
-.fd-kpi-date  { font-size: clamp(9px,1.1vh,11px); color:rgba(255,255,255,.4); }
-.fd-kpi-item  { display:flex; flex-direction:column; align-items:center; }
+.fd-kpi-label {
+  font-size:9px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.8px;
+  color:rgba(255,255,255,.65); margin-bottom:2px;
+}
+.fd-kpi-value { font-size:20px; font-weight:700; color:white; line-height:1.1; }
+.fd-kpi-date  { font-size:10px; color:rgba(255,255,255,.45); margin-top:1px; }
 
-/* Charts column */
-.fd-charts-col { display:flex; flex-direction:column; gap:6px; min-height:0; }
-.fd-charts-col .fd-quadrant { flex:1; min-height:0; overflow:hidden; }
+/* Columna de charts: composicion + tipo apilados */
+.fd-charts-col {
+  display: flex; flex-direction:column; gap:8px; height:260px; box-sizing:border-box;
+}
+.fd-charts-col .fd-quadrant { flex:1; min-height:0; }
 
-/* Canvas fills its container */
-.fd-quadrant canvas { width:100% !important; height:100% !important; display:block; }
-
-/* Quadrant */
+/* Quadrante */
 .fd-quadrant {
   background:white; border:1px solid #d0d9e4;
-  border-radius:5px; overflow:hidden;
+  border-radius:6px; overflow:hidden;
   display:flex; flex-direction:column;
 }
 .fd-q-title {
   background:#0f2557; color:white;
-  font-size: clamp(8px,1vh,10px); font-weight:700;
-  text-transform:uppercase; letter-spacing:.4px;
+  font-size:10px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.5px;
   padding:4px 10px; flex-shrink:0;
 }
 .fd-q-body {
   flex:1; overflow:hidden;
   display:flex; align-items:center; justify-content:center;
-  padding:4px; box-sizing:border-box; min-height:0;
+  padding:6px;
 }
 
-/* Top5 table */
-.fd-top5 { width:100%; border-collapse:collapse; font-family:Calibri,Arial,sans-serif; font-size: clamp(10px,1.3vh,13px); }
+/* Tenencias */
+.fd-top5 {
+  width:100%; border-collapse:collapse;
+  font-family:Calibri,'Segoe UI',Arial,sans-serif; font-size:12px;
+}
 .fd-top5 tr { border-bottom:1px solid #edf0f3; }
-.fd-top5 td { padding: clamp(2px,.4vh,5px) 5px; }
+.fd-top5 td { padding:4px 5px; }
 .fd-top5 .tk  { font-weight:700; color:#0f2557; }
-.fd-top5 .pct { background:#5f7080; color:white; border-radius:3px; padding:1px 6px; font-weight:700; font-size: clamp(9px,1.1vh,12px); text-align:center; white-space:nowrap; }
-.fd-top5 .fecha { color:#8090a0; font-size: clamp(9px,1.1vh,11px); }
+.fd-top5 .pct {
+  background:#5f7080; color:white; border-radius:3px;
+  padding:2px 6px; font-weight:700; font-size:11px;
+  text-align:center; white-space:nowrap;
+}
+.fd-top5 .fecha { color:#8090a0; font-size:11px; }
+
+/* VCP row */
+.fd-vcp-row .fd-quadrant {
+  height:160px; box-sizing:border-box;
+}
+.fd-vcp-row canvas {
+  width:100% !important; height:136px !important; display:block;
+}
 """
 
 
@@ -531,8 +551,7 @@ def _pie_chart_js(canvas_id: str, labels: list, values: list, colors: list, fid:
     var cv = document.getElementById('{canvas_id}');
     if (!cv) return;
     var W = cv.parentElement.clientWidth || cv.offsetWidth || 300;
-    var H = cv.parentElement.clientHeight || cv.offsetHeight || 120;
-    if (H < 20) H = 120;
+    var H = cv.clientHeight || parseInt(cv.style.height) || 120;
     if (!W || W < 10) {{ setTimeout(drawPie_{canvas_id}, 200); return; }}
     var dpr = window.devicePixelRatio || 1;
     cv.width = W * dpr; cv.height = H * dpr;
@@ -716,8 +735,7 @@ def _bar_chart_js(canvas_id: str, labels: list, values: list, color: str) -> str
     var cv = document.getElementById('{canvas_id}');
     if (!cv) return;
     var W = cv.parentElement.clientWidth || cv.offsetWidth || 300;
-    var H = cv.parentElement.clientHeight || cv.offsetHeight || 110;
-    if (H < 20) H = 110;
+    var H = cv.clientHeight || parseInt(cv.style.height) || 112;
     if (!W || W < 10) {{ setTimeout(drawBar_{canvas_id}, 200); return; }}
     var dpr = window.devicePixelRatio || 1;
     cv.width = W * dpr; cv.height = H * dpr;
@@ -773,12 +791,11 @@ def _vcp_chart_js(fondo_id: str) -> str:
 <script>
 (function(){{
   function drawVcp_{fondo_id}(){{
-    var cv = document.getElementById('vcp_cv_{fondo_id}');
+    var cv = document.getElementById('vcp-cv-{fondo_id}');
     if (!cv) return;
     var W = cv.parentElement.clientWidth;
     if (!W || W < 10) {{ setTimeout(drawVcp_{fondo_id}, 80); return; }}
-    var H = cv.parentElement.clientHeight || cv.offsetHeight || 130;
-    if (H < 20) H = 130;
+    var H = cv.clientHeight || parseInt(cv.style.height) || 136;
     var dpr = window.devicePixelRatio || 1;
     cv.width = W * dpr; cv.height = H * dpr;
     cv.style.width = W + 'px'; cv.style.height = H + 'px';
@@ -921,12 +938,6 @@ def _build_fondo_slide(fondo_data: dict, slide_num: int, total_slides: int) -> s
         f'<input type="number" step="0.01" id="vcp-{fid}-s30-{eid}" placeholder="0.0" oninput="drawVcp_{fid}()">'
         for eid, lbl in entities
     )
-    # Hidden inputs en el slide del fondo (leidos por drawVcp, populados desde Excel)
-    vcp_rows_hidden = "".join(
-        f'<input type="hidden" id="vcp-{fid}-s1-{eid}" value="0">'
-        f'<input type="hidden" id="vcp-{fid}-s30-{eid}" value="0">'
-        for eid, lbl in entities
-    )
     # Hidden inputs para este slide (los visibles están en slide 12)
     # El canvas VCP los lee por id, así que deben existir en el DOM
     vcp_rows_hidden = "\n".join(
@@ -977,8 +988,7 @@ def _build_fondo_slide(fondo_data: dict, slide_num: int, total_slides: int) -> s
         f'<div class="fd-q-title">Variaciones VCP — {fd["tipo_vcp"]}</div>'
         f'<div class="fd-q-body" style="padding:6px 10px;display:block">'
         f'<input type="hidden" id="vcp-lbl-{fid}" value="{fd["peers_label"]}">'
-        f'{vcp_rows_hidden}'
-        f'<canvas id="vcp_cv_{fid}" style="width:100%;height:100%;display:block"></canvas>'
+        f'<canvas id="vcp_cv_{fid}" style="width:100%;height:136px;display:block"></canvas>'
         f'</div></div></div>\n'
         f'  </div>\n'
         f'  <div class="slide-footer">'
@@ -1009,7 +1019,16 @@ def generar_fondos_nav_items(fondos: list = None) -> str:
         <span style="font-size:10px;opacity:.6">Composición · Top 5</span>
       </span>
     </div>""")
-    # Slide 12 inputs removido
+    # Nav item para slide 12 - Inputs VCP
+    num_inp = f"{7 + len(fondos) + 1:02d}"
+    items.append(
+        f'''    <div class="nav-item fd-nav-item" onclick="goToId('fd-slide-inputs')" id="fd-nav-inputs">\n'''
+        f'''      <span class="nav-num">{num_inp}</span>\n'''
+        '''      <span class="nav-label">Inputs VCP<br>\n'''
+        '''        <span style="font-size:10px;opacity:.6">Variaciones - Todos los fondos</span>\n'''
+        '''      </span>\n'''
+        '''    </div>'''
+    )
     return "\n".join(items)
 
 
