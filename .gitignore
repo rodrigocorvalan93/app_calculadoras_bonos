@@ -62,10 +62,7 @@ Delta\ -\ *.xlsx
 historico_byma_px_tasas.xlsx
 historico_byma_*.xlsx
 Proyecciones_para_Claude.xlsx
-<<<<<<< HEAD
 RF_Detalle_Carteras.xlsx
-=======
->>>>>>> 12adb1e8c55fe442235561b53f4ab88544b8b2dd
 RF_Detalle_Carteras.xlsm
 Primary-API.pdf
 
