@@ -75,10 +75,44 @@ def ns_model(x, beta0, beta1, beta2, tau1):
     return beta0 + beta1 * f1 + beta2 * f2
 
 
+def _robust_outlier_mask(resid: np.ndarray, threshold_factor: float = 3.0) -> np.ndarray:
+    """
+    Máscara de NO-outliers usando MAD (Median Absolute Deviation) escalado.
+
+    A diferencia de un filtro clásico ±k·std, MAD no se infla con los propios
+    outliers — un único punto fuera de curva no ‘arrastra’ el umbral. Es el
+    estimador robusto estándar (Huber, Hampel).
+
+    sigma_robusto = 1.4826 * median(|r - median(r)|)
+    Punto i es válido si |r_i - median(r)| <= threshold_factor * sigma_robusto.
+
+    `threshold_factor` está en unidades de "sigmas robustos":
+      - 2.5 → bastante estricto
+      - 3.0 → estándar (recomendado)
+      - 4.0 → permisivo
+    """
+    r = np.asarray(resid, dtype=np.float64)
+    if r.size == 0:
+        return np.ones(0, dtype=bool)
+
+    med = float(np.nanmedian(r))
+    abs_dev = np.abs(r - med)
+    mad = float(np.nanmedian(abs_dev))
+    sigma = 1.4826 * mad
+
+    # Fallback si MAD es ~0 (curva casi exacta o muchos puntos repetidos)
+    if (not np.isfinite(sigma)) or sigma <= 1e-12:
+        sigma = float(np.nanstd(r, ddof=0))
+        if (not np.isfinite(sigma)) or sigma <= 1e-12:
+            return np.ones_like(r, dtype=bool)
+
+    return abs_dev <= (float(threshold_factor) * sigma)
+
+
 def _fit_ns_grid_ols(
     X: np.ndarray,
     y: np.ndarray,
-    threshold_factor: float = 2.0,
+    threshold_factor: float = 3.0,
     tau_bounds: tuple[float, float] = (0.05, 10.0),
     tau_grid: int = 80,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -128,16 +162,9 @@ def _fit_ns_grid_ols(
 
     popt = np.array(best, dtype=np.float64)
 
-    # outliers pass (igual criterio que NSS)
+    # outliers pass — MAD robusto (mismo criterio que NSS)
     yhat = ns_model(X, *popt)
-    resid = y - yhat
-    s = float(np.std(resid, ddof=0))
-
-    if (not np.isfinite(s)) or s == 0.0:
-        mask = np.ones_like(y, dtype=bool)
-        return popt, mask
-
-    mask = np.abs(resid) <= (float(threshold_factor) * s)
+    mask = _robust_outlier_mask(y - yhat, threshold_factor=float(threshold_factor))
     if np.count_nonzero(mask) < 4:
         mask = np.ones_like(y, dtype=bool)
         return popt, mask
@@ -231,7 +258,7 @@ def _prep_df(df: pd.DataFrame) -> pd.DataFrame:
 def _fit_nss_with_outliers(
     X: np.ndarray,
     y: np.ndarray,
-    threshold_factor: float = 2.0,
+    threshold_factor: float = 3.0,
     maxfev: int = 10000,
 ):
     """
@@ -240,6 +267,12 @@ def _fit_nss_with_outliers(
       - Si hay 4 o 5 puntos: fallback NS (4 params) y lo convierte a NSS equivalente:
             beta3 = 0
             tau2  = 2*tau1
+
+    Filtro de outliers: MAD escalado (1.4826·MAD) en vez de std clásica
+    — el std se infla con outliers y a veces ‘deja pasar’ el bono raro;
+    el MAD es robusto. Se hacen hasta 2 pasadas de refit + remask para
+    converger a un fit estable.
+
     Devuelve: popt (siempre 6 params NSS), mask
     """
     X = np.asarray(X, dtype=np.float64)
@@ -262,23 +295,24 @@ def _fit_nss_with_outliers(
         p0 = np.array([y_mean, 0.0, 0.0, 0.0, 1.0, 1.0], dtype=np.float64)
         popt, _ = curve_fit(nss_model, X_fit, y_fit, p0=p0, maxfev=maxfev)
 
-        yhat = nss_model(X, *popt)
-        resid = y - yhat
-        s = float(np.std(resid, ddof=0))
+        # Iteración robusta: refit + remask hasta converger (máx. 3 pasadas)
+        mask = np.ones_like(y, dtype=bool)
+        for _ in range(3):
+            yhat = nss_model(X, *popt)
+            new_mask = _robust_outlier_mask(y - yhat, threshold_factor=float(threshold_factor))
+            # Mantener al menos 6 puntos para no perder grados de libertad
+            if np.count_nonzero(new_mask) < 6:
+                break
+            if np.array_equal(new_mask, mask):
+                break
+            mask = new_mask
+            try:
+                popt, _ = curve_fit(nss_model, X[mask], y[mask], p0=popt, maxfev=maxfev)
+            except Exception:
+                # si el refit falla, mantenemos el último popt válido y cortamos
+                break
 
-        if (not np.isfinite(s)) or s == 0.0:
-            mask = np.ones_like(y, dtype=bool)
-            return popt, mask
-
-        mask = np.abs(resid) <= (float(threshold_factor) * s)
-
-        if np.count_nonzero(mask) < 6:
-            # con pocos puntos útiles, preferimos NO filtrar para no quedarnos sin grados de libertad
-            mask = np.ones_like(y, dtype=bool)
-            return popt, mask
-
-        popt2, _ = curve_fit(nss_model, X[mask], y[mask], p0=popt, maxfev=maxfev)
-        return popt2, mask
+        return popt, mask
 
     # ---------- Caso fallback NS (4-5 puntos) ----------
     popt_ns, mask = _fit_ns_grid_ols(
@@ -371,7 +405,7 @@ def _plot_nss(
 # ──────────────────────────────────
 def graficar_duration_tem_nss(
     df: pd.DataFrame,
-    threshold_factor: float = 2.0,
+    threshold_factor: float = 3.0,
     max_labels: int | None = None,
     rango_x_min_plot: float | None = None,
     rango_x_max_plot: float | None = None,
@@ -417,7 +451,7 @@ def graficar_duration_tem_nss(
 # ──────────────────────────────────
 def graficar_duration_tir_nss(
     df: pd.DataFrame,
-    threshold_factor: float = 2.0,
+    threshold_factor: float = 3.0,
     max_labels: int | None = None,
     rango_x_min_plot: float | None = None,
     rango_x_max_plot: float | None = None,
@@ -601,7 +635,7 @@ _NSS_FIT_CACHE: dict[tuple[int, float, str], tuple[np.ndarray, float, float]] = 
 def _fit_nss_cached(
     df: pd.DataFrame,
     which: str = "TIREA",              # "TIREA" o "TEM"
-    threshold_factor: float = 2.0,
+    threshold_factor: float = 3.0,
     use_cache: bool = True,
 ) -> tuple[np.ndarray, float, float]:
     """
@@ -642,7 +676,7 @@ def _fit_nss_cached(
 def estimar_dur_tirtem_nss(
     duration: float,
     curva: pd.DataFrame,
-    threshold_factor: float = 2.0,
+    threshold_factor: float = 3.0,
     clip: bool = True,
     use_cache: bool = True,
     tem_from_tir: bool = True,
