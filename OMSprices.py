@@ -78,15 +78,19 @@ def market_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=df.index)
 
     # Precios básicos
-    if "LA" in df.columns:
-        out["last"] = df["LA"].map(extract_price)
-    else:
-        out["last"] = np.nan
+    # Fallback post-mercado: si LA/CL vienen vacíos, BYMA suele publicar ACP
+    # (auction close price) como referencia oficial.
+    acp = df["ACP"].map(extract_price) if "ACP" in df.columns else pd.Series(np.nan, index=df.index)
 
     if "CL" in df.columns:
-        out["close"] = df["CL"].map(extract_price)
+        out["close"] = df["CL"].map(extract_price).fillna(acp)
     else:
-        out["close"] = np.nan
+        out["close"] = acp
+
+    if "LA" in df.columns:
+        out["last"] = df["LA"].map(extract_price).fillna(out["close"])
+    else:
+        out["last"] = out["close"]
 
     if "OP" in df.columns:
         out["open"] = df["OP"].map(extract_price)

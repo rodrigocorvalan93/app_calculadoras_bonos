@@ -231,16 +231,23 @@ def get_mktdata(
 
 
 def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
-    """Extrae 'Last Price' desde la entrada 'LA'."""
+    """Extrae 'Last Price' con fallback LA → CL → ACP (post-mercado)."""
     if market_data_df is None or market_data_df.empty:
         return pd.DataFrame(columns=["symbol", "Last Price"])
 
-    # aseguramos que el index no genere ambigüedad después
     idx = market_data_df.index
-    symbols = idx.to_numpy()  # más rápido y evita temas de name
+    symbols = idx.to_numpy()
 
-    last_prices = market_data_df["LA"].apply(lambda entry: entry.get("price") if isinstance(entry, dict) else None)
-    return pd.DataFrame({"symbol": symbols, "Last Price": last_prices.to_numpy()})
+    def _price(entry):
+        return entry.get("price") if isinstance(entry, dict) else None
+
+    last = market_data_df["LA"].apply(_price) if "LA" in market_data_df.columns else pd.Series(None, index=idx)
+    if "CL" in market_data_df.columns:
+        last = last.fillna(market_data_df["CL"].apply(_price))
+    if "ACP" in market_data_df.columns:
+        last = last.fillna(market_data_df["ACP"].apply(_price))
+
+    return pd.DataFrame({"symbol": symbols, "Last Price": last.to_numpy()})
 
 
 # =============================================================================
