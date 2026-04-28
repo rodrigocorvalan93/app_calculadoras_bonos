@@ -1,0 +1,121 @@
+# ======================================================================
+# .gitignore — app_calculadoras_bonos  (paradigma WHITELIST)
+# ======================================================================
+# Stack: Python 3.x + Streamlit + VS Code + Windows + OneDrive
+#
+# Filosofía:
+#   1) Ignoramos TODO por defecto.
+#   2) Whitelisteamos explícitamente lo que sí queremos versionar.
+#
+# Resultado: ningún secreto, dato sensible, caché de IDE, planilla de
+# Delta o backup de OneDrive puede colarse al repo "por accidente".
+# Si querés agregar algo nuevo al repo, hay que sumarlo abajo con `!`.
+# ======================================================================
+
+
+# ──────────────────────────────────────────────────────────────
+# 1) IGNORAR TODO
+# ──────────────────────────────────────────────────────────────
+*
+
+
+# ──────────────────────────────────────────────────────────────
+# 2) WHITELIST — lo que SÍ versionamos
+# ──────────────────────────────────────────────────────────────
+
+# Meta del repo
+!.gitignore
+!.gitattributes
+
+# Documentación
+!README.md
+!LICENSE
+
+# Dependencias
+!requirements.txt
+
+# Código fuente Python (todos los .py del root)
+!*.py
+
+# Re-ignorar versiones personales / experimentos que NO van al repo.
+# Tienen que ir DESPUÉS del `!*.py` para que el último patrón gane.
+OMSweb_app*JIP*.py
+generar_reporte.py
+generar_fondos.py
+
+# Scripts de arranque
+!*.bat
+
+# ── Datasets de referencia (estables, no sensibles) ──────────
+# A3500 (BCRA tipo de cambio mayorista) — serie histórica de uso público
+!a3500completo.csv
+# CER histórico — serie pública
+!cer_completo.csv
+# Snapshot de datos BCRA usado para fallback offline
+!bcra_data_backup.json
+# Mapping de tickers / precios BYMA usado por bymaapi/especies
+!bymaprices.xlsx
+# Data por segmento / clasificación interna (no sensible)
+!data_segmento.xlsx
+# Lista de exclusiones para forwards
+!fwd_exclusions.json
+# Ficha de bonos ya vencidos (referencia histórica)
+!ficha\ bonos\ vencidos.txt
+
+
+# ──────────────────────────────────────────────────────────────
+# 3) SUB-CARPETAS
+# ──────────────────────────────────────────────────────────────
+# Por ahora el repo es flat (sin subdirectorios trackeados).
+# Si en el futuro se agrega una carpeta, hay que un-ignorarla
+# explícitamente con dos líneas:
+#
+#     !nombre_carpeta/
+#     !nombre_carpeta/**
+#
+# y después volver a ignorar lo que no quieras adentro.
+
+
+# ======================================================================
+# RECORDATORIOS DE SEGURIDAD (lo que queda ignorado por el `*`)
+# ======================================================================
+# Estos patrones NO necesitan línea propia porque ya los come el `*`,
+# pero los listamos como referencia de lo que jamás debe entrar:
+#
+#   🔐 Secretos:
+#     secrets.txt, *.secrets, .env, .env.*, credentials*.json,
+#     *.key, *.pem, *.pfx, auth_token*, oms_session*,
+#     .streamlit/secrets.toml
+#
+#   📊 Data interna de Delta (vive en OneDrive):
+#     Delta_Composicion.xlsx, Delta_PN.xlsx, Delta_Futuros.xlsx,
+#     Delta_*.xlsx/xlsm/xlsb/csv, historico_byma_*.xlsx,
+#     Proyecciones_para_Claude.xlsx, RF_Detalle_Carteras.xls*,
+#     Primary-API.pdf
+#
+#   💳 Scoring crediticio propietario:
+#     credit_scores.json, credit_scores_*.json
+#
+#   🗂️ Versiones personales / experimentos:
+#     OMSweb_appJIP.py, OMSweb_app*JIP*.py, generar_reporte.py,
+#     generar_fondos.py, curvas/, old/, archive/, backup/
+#
+#   🐍 Python artefactos:
+#     __pycache__/, *.py[cod], .venv/, venv/, build/, dist/,
+#     *.egg-info/, .pytest_cache/, .mypy_cache/, .ruff_cache/,
+#     .coverage*, htmlcov/
+#
+#   💻 IDE / OS:
+#     .vscode/, *.code-workspace, .idea/,
+#     Thumbs.db, Desktop.ini, .DS_Store,
+#     *- Copia.*, *- Conflicto*, *(conflicted copy*).*
+#
+#   📓 Notebooks:
+#     .ipynb_checkpoints/, *.ipynb (no usamos notebooks acá)
+#
+#   📝 Logs / temporales:
+#     *.log, logs/, *.tmp, *.bak, *.swp, ~$*
+#
+# Si algo de la lista de arriba alguna vez tiene que versionarse,
+# se agrega con `!` en la sección 2.
+# ======================================================================
