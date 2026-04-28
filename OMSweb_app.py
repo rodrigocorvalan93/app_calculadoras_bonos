@@ -1514,9 +1514,12 @@ def plot_curve_plotly(
         go.Scatter(
             x=df["Duration"],
             y=y_last_pct,
-            mode="markers",
+            mode="markers+text",
             name=f"LAST ({which})",
             text=df.get("Código"),
+            texttemplate="%{text} %{y:.1f}%",
+            textposition="top center",
+            textfont=dict(size=9),
             hovertemplate="%{text}<br>Dur=%{x:.3f}<br>Yield=%{y:.2f}%<extra></extra>",
         )
     )
@@ -3259,9 +3262,12 @@ def _render_yas(username, password, plazo, curve_labels):
                                 fig_yas = go.Figure()
                                 y_pct_y = _yield_pct_points(df_curve_yas["TIREA"])
                                 fig_yas.add_trace(go.Scatter(
-                                    x=df_curve_yas["Duration"], y=y_pct_y, mode="markers",
+                                    x=df_curve_yas["Duration"], y=y_pct_y, mode="markers+text",
                                     name=f"Curva {curve_labels.get(curve_key_yas, curve_key_yas)}",
                                     text=df_curve_yas["Código"],
+                                    texttemplate="%{text} %{y:.1f}%",
+                                    textposition="top center",
+                                    textfont=dict(size=9),
                                     hovertemplate="%{text}<br>Dur=%{x:.3f}<br>TIREA=%{y:.2f}%<extra></extra>",
                                     marker=dict(size=8, opacity=0.6),
                                 ))
@@ -4235,9 +4241,12 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     go.Scatter(
                         x=df_last["Duration"],
                         y=_yield_pct_points(df_last["TIREA"]),
-                        mode="markers",
+                        mode="markers+text",
                         name="Actual (LAST)",
                         text=df_last["Código"],
+                        texttemplate="%{text} %{y:.1f}%",
+                        textposition="top center",
+                        textfont=dict(size=9),
                         hovertemplate="%{text}<br>Dur=%{x:.3f}<br>TIREA=%{y:.2f}%<extra></extra>",
                     )
                 )
@@ -4503,9 +4512,12 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                             fig_comp.add_trace(go.Scatter(
                                                 x=df_c["Duration"],
                                                 y=_yield_pct_points(df_c["TIREA"]),
-                                                mode="markers",
+                                                mode="markers+text",
                                                 name=f"Curva {curve_labels.get(curve_use, curve_use)}",
                                                 text=df_c["Código"],
+                                                texttemplate="%{text} %{y:.1f}%",
+                                                textposition="top center",
+                                                textfont=dict(size=9),
                                                 hovertemplate="%{text}<br>Dur=%{x:.3f}<br>TIREA=%{y:.2f}%<extra></extra>",
                                                 marker=dict(size=7, opacity=0.5),
                                             ))
