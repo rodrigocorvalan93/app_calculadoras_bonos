@@ -4264,12 +4264,6 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         _futuros_live()
         _lap("after futuros")
 
-        # ─────────────────────────
-        # Total Return
-        # ─────────────────────────
-        _futuros_live()
-        _lap("after futuros")
-
     if tab_tr:
         @st.fragment
         def _tr_live():
