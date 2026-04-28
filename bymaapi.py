@@ -231,9 +231,16 @@ def get_mktdata(
 
 
 def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
-    """Extrae 'Last Price' con fallback LA → CL → ACP (post-mercado)."""
+    """Extrae 'Last Price' con fallback LA → CL → ACP (post-mercado).
+
+    Devuelve columnas:
+        - symbol
+        - Last Price
+        - Price Source: 'LA' (último operado), 'CL' (cierre oficial),
+          'ACP' (subasta de cierre), o None si no hay precio.
+    """
     if market_data_df is None or market_data_df.empty:
-        return pd.DataFrame(columns=["symbol", "Last Price"])
+        return pd.DataFrame(columns=["symbol", "Last Price", "Price Source"])
 
     idx = market_data_df.index
     symbols = idx.to_numpy()
@@ -241,13 +248,22 @@ def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
     def _price(entry):
         return entry.get("price") if isinstance(entry, dict) else None
 
-    last = market_data_df["LA"].apply(_price) if "LA" in market_data_df.columns else pd.Series(None, index=idx)
-    if "CL" in market_data_df.columns:
-        last = last.fillna(market_data_df["CL"].apply(_price))
-    if "ACP" in market_data_df.columns:
-        last = last.fillna(market_data_df["ACP"].apply(_price))
+    la = market_data_df["LA"].apply(_price) if "LA" in market_data_df.columns else pd.Series(np.nan, index=idx)
+    cl = market_data_df["CL"].apply(_price) if "CL" in market_data_df.columns else pd.Series(np.nan, index=idx)
+    acp = market_data_df["ACP"].apply(_price) if "ACP" in market_data_df.columns else pd.Series(np.nan, index=idx)
 
-    return pd.DataFrame({"symbol": symbols, "Last Price": last.to_numpy()})
+    last = la.fillna(cl).fillna(acp)
+
+    source = pd.Series(index=idx, dtype="object")
+    source[la.notna()] = "LA"
+    source[la.isna() & cl.notna()] = "CL"
+    source[la.isna() & cl.isna() & acp.notna()] = "ACP"
+
+    return pd.DataFrame({
+        "symbol": symbols,
+        "Last Price": last.to_numpy(),
+        "Price Source": source.to_numpy(),
+    })
 
 
 # =============================================================================

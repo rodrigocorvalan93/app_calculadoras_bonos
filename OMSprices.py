@@ -80,17 +80,18 @@ def market_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     # Precios básicos
     # Fallback post-mercado: si LA/CL vienen vacíos, BYMA suele publicar ACP
     # (auction close price) como referencia oficial.
+    la_raw = df["LA"].map(extract_price) if "LA" in df.columns else pd.Series(np.nan, index=df.index)
+    cl_raw = df["CL"].map(extract_price) if "CL" in df.columns else pd.Series(np.nan, index=df.index)
     acp = df["ACP"].map(extract_price) if "ACP" in df.columns else pd.Series(np.nan, index=df.index)
 
-    if "CL" in df.columns:
-        out["close"] = df["CL"].map(extract_price).fillna(acp)
-    else:
-        out["close"] = acp
+    out["close"] = cl_raw.fillna(acp)
+    out["close_source"] = np.where(cl_raw.notna(), "CL", np.where(acp.notna(), "ACP", None))
 
-    if "LA" in df.columns:
-        out["last"] = df["LA"].map(extract_price).fillna(out["close"])
-    else:
-        out["last"] = out["close"]
+    out["last"] = la_raw.fillna(out["close"])
+    out["last_source"] = np.where(
+        la_raw.notna(), "LA",
+        np.where(cl_raw.notna(), "CL", np.where(acp.notna(), "ACP", None))
+    )
 
     if "OP" in df.columns:
         out["open"] = df["OP"].map(extract_price)
