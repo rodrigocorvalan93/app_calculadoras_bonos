@@ -144,7 +144,7 @@ def _settlement_date_str(plazo: str) -> Optional[str]:
 
 def _nss_defaults_level_slope_convex(
     df_last: pd.DataFrame,
-    threshold_factor: float = 2.0,
+    threshold_factor: float = 3.0,
     anchor: float = 1.0,
     which: str = "TIREA",
 ) -> Optional[Tuple[float, float, float]]:
@@ -1485,7 +1485,7 @@ def plot_curve_plotly(
     df_curve_mkt: Optional[pd.DataFrame] = None,
     title: str = "Curva",
     show_nss: bool = True,
-    threshold_factor: float = 2.0,
+    threshold_factor: float = 3.0,
     which: str = "TIREA",  # "TIREA" o "TEM"
 ) -> Tuple[Optional[go.Figure], Optional[np.ndarray]]:
     """Devuelve figura Plotly y params NSS (si aplica)."""
@@ -2371,7 +2371,7 @@ def compute_breakeven_table(
     try:
         tmp_lecap = df_lecap_last[["Código", "Duration", "TIREA", "TEM"]].copy()
         popt_lecap, xmin_l, xmax_l = plotter._fit_nss_cached(
-            tmp_lecap, which="TIREA", threshold_factor=2.0, use_cache=False)
+            tmp_lecap, which="TIREA", threshold_factor=3.0, use_cache=False)
     except Exception:
         return pd.DataFrame()
 
@@ -2382,7 +2382,7 @@ def compute_breakeven_table(
     try:
         tmp_cer = df_cer_last[["Código", "Duration", "TIREA", "TEM"]].copy()
         popt_cer, xmin_c, xmax_c = plotter._fit_nss_cached(
-            tmp_cer, which="TIREA", threshold_factor=2.0, use_cache=False)
+            tmp_cer, which="TIREA", threshold_factor=3.0, use_cache=False)
     except Exception:
         popt_cer = None
 
@@ -3274,7 +3274,7 @@ def _render_yas(username, password, plazo, curve_labels):
                                 try:
                                     tmp = df_curve_yas[["Código", "Duration", "TIREA", "TEM"]].copy()
                                     popt_y, xmin_y, xmax_y = plotter._fit_nss_cached(
-                                        tmp, which="TIREA", threshold_factor=2.0, use_cache=True,
+                                        tmp, which="TIREA", threshold_factor=3.0, use_cache=True,
                                     )
                                     xs_y = np.linspace(float(xmin_y), float(xmax_y), 160)
                                     ys_y = plotter.nss_model(xs_y, *popt_y)
@@ -3919,7 +3919,12 @@ def main():
             with c2:
                 show_nss = st.checkbox("Mostrar NSS", value=True, key="chart_show_nss")
             with c3:
-                thr = st.slider("Filtro outliers (threshold)", min_value=1.0, max_value=4.0, value=2.0, step=0.1, key="chart_thr")
+                thr = st.slider(
+                    "Filtro outliers (sigmas MAD)",
+                    min_value=1.5, max_value=5.0, value=3.0, step=0.25,
+                    key="chart_thr",
+                    help="Umbral robusto (MAD escalado). 2.5 = estricto, 3.0 = estándar, 4.0 = permisivo.",
+                )
             with c4:
                 st.caption("TIP: si la curva tiene pocos puntos, NSS puede fallar.")
 
@@ -4142,7 +4147,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         # Si todavía no hay defaults calculados, los calculamos con NSS
                         if not st.session_state[ss_key]:
                             anchor0 = d_med
-                            dflt = _nss_defaults_level_slope_convex(df_last, threshold_factor=2.0, anchor=anchor0, which="TIREA")
+                            dflt = _nss_defaults_level_slope_convex(df_last, threshold_factor=3.0, anchor=anchor0, which="TIREA")
                             if dflt is None:
                                 level0 = _safe_median_pct(df_last.get("TIREA"), default=40.0)
                                 slope0 = 0.0
@@ -4174,7 +4179,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         # Si cambiás anchor, recalculamos defaults NSS alrededor del nuevo anchor
                         last_anchor = st.session_state[ss_key].get("_last_anchor_used")
                         if last_anchor is None or abs(float(last_anchor) - float(anchor)) > 1e-12:
-                            dflt2 = _nss_defaults_level_slope_convex(df_last, threshold_factor=2.0, anchor=float(anchor), which="TIREA")
+                            dflt2 = _nss_defaults_level_slope_convex(df_last, threshold_factor=3.0, anchor=float(anchor), which="TIREA")
                             if dflt2 is not None:
                                 level0, slope0, convex0 = dflt2
                                 st.session_state[ss_key]["level_pct"] = float(level0)
@@ -4227,12 +4232,13 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     show_nss_tr = st.checkbox("Mostrar NSS (curva actual)", value=True, key="tr_show_nss")
                 with cN2:
                     thr_tr = st.slider(
-                        "Filtro outliers NSS (TR)",
-                        min_value=1.0,
-                        max_value=4.0,
-                        value=2.0,
-                        step=0.1,
+                        "Filtro outliers NSS (sigmas MAD)",
+                        min_value=1.5,
+                        max_value=5.0,
+                        value=3.0,
+                        step=0.25,
                         key="tr_thr",
+                        help="Umbral robusto (MAD escalado). 2.5 = estricto, 3.0 = estándar, 4.0 = permisivo.",
                     )
 
                 fig = go.Figure()
@@ -4524,7 +4530,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                             try:
                                                 tmp = df_c[["Código", "Duration", "TIREA", "TEM"]].copy()
                                                 popt_c, xmin_c, xmax_c = plotter._fit_nss_cached(
-                                                    tmp, which="TIREA", threshold_factor=2.0, use_cache=False)
+                                                    tmp, which="TIREA", threshold_factor=3.0, use_cache=False)
                                                 xs = np.linspace(float(xmin_c), float(xmax_c), 160)
                                                 fig_comp.add_trace(go.Scatter(
                                                     x=xs, y=plotter.nss_model(xs, *popt_c),
@@ -5064,7 +5070,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         try:
                             tmp_l = df_lecap_be[["Código", "Duration", "TIREA", "TEM"]].copy()
                             popt_l, xmin_l, xmax_l = plotter._fit_nss_cached(
-                                tmp_l, which="TIREA", threshold_factor=2.0, use_cache=False)
+                                tmp_l, which="TIREA", threshold_factor=3.0, use_cache=False)
                             if popt_l is not None:
                                 xs = np.linspace(float(xmin_l), float(xmax_l), 120)
                                 fig_be.add_trace(go.Scatter(
@@ -5078,7 +5084,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         try:
                             tmp_c = df_cer_be[["Código", "Duration", "TIREA", "TEM"]].copy()
                             popt_c, xmin_c, xmax_c = plotter._fit_nss_cached(
-                                tmp_c, which="TIREA", threshold_factor=2.0, use_cache=False)
+                                tmp_c, which="TIREA", threshold_factor=3.0, use_cache=False)
                             if popt_c is not None:
                                 xs = np.linspace(float(xmin_c), float(xmax_c), 120)
                                 fig_be.add_trace(go.Scatter(
