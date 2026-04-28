@@ -37,6 +37,12 @@
 # Código fuente Python (todos los .py del root)
 !*.py
 
+# Re-ignorar versiones personales / experimentos que NO van al repo.
+# Tienen que ir DESPUÉS del `!*.py` para que el último patrón gane.
+OMSweb_app*JIP*.py
+generar_reporte.py
+generar_fondos.py
+
 # Scripts de arranque
 !*.bat
 
