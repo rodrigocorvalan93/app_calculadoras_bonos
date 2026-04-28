@@ -238,9 +238,10 @@ def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
         - Last Price
         - Price Source: 'LA' (último operado), 'CL' (cierre oficial),
           'ACP' (subasta de cierre), o None si no hay precio.
+        - Price Date: fecha/hora del entry que terminó usándose (o None).
     """
     if market_data_df is None or market_data_df.empty:
-        return pd.DataFrame(columns=["symbol", "Last Price", "Price Source"])
+        return pd.DataFrame(columns=["symbol", "Last Price", "Price Source", "Price Date"])
 
     idx = market_data_df.index
     symbols = idx.to_numpy()
@@ -248,21 +249,39 @@ def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
     def _price(entry):
         return entry.get("price") if isinstance(entry, dict) else None
 
-    la = market_data_df["LA"].apply(_price) if "LA" in market_data_df.columns else pd.Series(np.nan, index=idx)
-    cl = market_data_df["CL"].apply(_price) if "CL" in market_data_df.columns else pd.Series(np.nan, index=idx)
-    acp = market_data_df["ACP"].apply(_price) if "ACP" in market_data_df.columns else pd.Series(np.nan, index=idx)
+    def _date(entry):
+        return entry.get("date") if isinstance(entry, dict) else None
 
-    last = la.fillna(cl).fillna(acp)
+    la_p = market_data_df["LA"].apply(_price) if "LA" in market_data_df.columns else pd.Series(np.nan, index=idx)
+    cl_p = market_data_df["CL"].apply(_price) if "CL" in market_data_df.columns else pd.Series(np.nan, index=idx)
+    acp_p = market_data_df["ACP"].apply(_price) if "ACP" in market_data_df.columns else pd.Series(np.nan, index=idx)
+
+    la_d = market_data_df["LA"].apply(_date) if "LA" in market_data_df.columns else pd.Series(None, index=idx, dtype="object")
+    cl_d = market_data_df["CL"].apply(_date) if "CL" in market_data_df.columns else pd.Series(None, index=idx, dtype="object")
+    acp_d = market_data_df["ACP"].apply(_date) if "ACP" in market_data_df.columns else pd.Series(None, index=idx, dtype="object")
+
+    last = la_p.fillna(cl_p).fillna(acp_p)
 
     source = pd.Series(index=idx, dtype="object")
-    source[la.notna()] = "LA"
-    source[la.isna() & cl.notna()] = "CL"
-    source[la.isna() & cl.isna() & acp.notna()] = "ACP"
+    date = pd.Series(index=idx, dtype="object")
+
+    use_la = la_p.notna()
+    use_cl = (~use_la) & cl_p.notna()
+    use_acp = (~use_la) & (~use_cl) & acp_p.notna()
+
+    source[use_la] = "LA"
+    source[use_cl] = "CL"
+    source[use_acp] = "ACP"
+
+    date[use_la] = la_d[use_la]
+    date[use_cl] = cl_d[use_cl]
+    date[use_acp] = acp_d[use_acp]
 
     return pd.DataFrame({
         "symbol": symbols,
         "Last Price": last.to_numpy(),
         "Price Source": source.to_numpy(),
+        "Price Date": date.to_numpy(),
     })
 
 

@@ -58,6 +58,17 @@ def extract_size(entry: Any) -> float:
     return np.nan
 
 
+def extract_date(entry: Any) -> Optional[str]:
+    """Intenta extraer 'date' / timestamp del entry (string o None)."""
+    e = _first(entry)
+    if isinstance(e, dict):
+        for k in ("date", "datetime", "timestamp", "ts"):
+            v = e.get(k)
+            if v:
+                return v
+    return None
+
+
 # -----------------------------------------------------------------------------
 # Public API
 # -----------------------------------------------------------------------------
@@ -84,13 +95,22 @@ def market_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     cl_raw = df["CL"].map(extract_price) if "CL" in df.columns else pd.Series(np.nan, index=df.index)
     acp = df["ACP"].map(extract_price) if "ACP" in df.columns else pd.Series(np.nan, index=df.index)
 
+    la_d = df["LA"].map(extract_date) if "LA" in df.columns else pd.Series(None, index=df.index, dtype="object")
+    cl_d = df["CL"].map(extract_date) if "CL" in df.columns else pd.Series(None, index=df.index, dtype="object")
+    acp_d = df["ACP"].map(extract_date) if "ACP" in df.columns else pd.Series(None, index=df.index, dtype="object")
+
     out["close"] = cl_raw.fillna(acp)
     out["close_source"] = np.where(cl_raw.notna(), "CL", np.where(acp.notna(), "ACP", None))
+    out["close_date"] = np.where(cl_raw.notna(), cl_d, np.where(acp.notna(), acp_d, None))
 
     out["last"] = la_raw.fillna(out["close"])
     out["last_source"] = np.where(
         la_raw.notna(), "LA",
         np.where(cl_raw.notna(), "CL", np.where(acp.notna(), "ACP", None))
+    )
+    out["last_date"] = np.where(
+        la_raw.notna(), la_d,
+        np.where(cl_raw.notna(), cl_d, np.where(acp.notna(), acp_d, None))
     )
 
     if "OP" in df.columns:
