@@ -1244,6 +1244,32 @@ def _apply_color_by_variation(sty: pd.io.formats.style.Styler, df: pd.DataFrame,
 # ──────────────────────────────────────────────────────────────────────
 
 _SOURCE_LABEL = {"LA": "🟢 LA", "CL": "🔵 CL", "ACP": "🟡 ACP"}
+_SOURCE_ICON = {"LA": "🟢", "CL": "🔵", "ACP": "🟡"}
+
+
+def _fmt_price_source_cell(x):
+    """Formato de celda para columna 'Price Source': '🟡 ACP'."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return ""
+    icon = _SOURCE_ICON.get(str(x), "")
+    return f"{icon} {x}".strip()
+
+
+def _fmt_price_date_cell(x):
+    """Formato de celda para columna 'Price Date': 'DD/MM HH:MM:SS' (hora Argentina)."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return "—"
+    try:
+        dt = pd.to_datetime(x, utc=True, errors="coerce")
+        if pd.isna(dt):
+            return str(x)
+        try:
+            dt = dt.tz_convert("America/Argentina/Buenos_Aires")
+        except Exception:
+            pass
+        return dt.strftime("%d/%m %H:%M:%S")
+    except Exception:
+        return str(x)
 
 
 def _render_price_source_footer(*aux_dfs: pd.DataFrame, source_col: str = "Price Source", date_col: str = "Price Date") -> None:
@@ -1304,6 +1330,8 @@ def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "tem_spread": "{:+.2%}",
         "Margen TNA": "{:+.2%}",
         "Volumen": "{:,.0f}",
+        "Price Source": _fmt_price_source_cell,
+        "Price Date": _fmt_price_date_cell,
     }
 
     sty = df.style.format(fmt)
@@ -1344,6 +1372,8 @@ def style_mercado(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "Volumen": "{:,.0f}",
         "Variación %": "{:+.2%}",
         "Variación px": "{:+.4f}",
+        "Price Source": _fmt_price_source_cell,
+        "Price Date": _fmt_price_date_cell,
     }
 
     sty = df.style.format(fmt)
