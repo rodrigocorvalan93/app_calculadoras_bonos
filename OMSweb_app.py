@@ -1091,6 +1091,12 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
                 margen_col.append(np.nan)
         out["Margen TNA"] = margen_col
 
+    # Renombrar last_source/last_date a "Price Source" / "Price Date" para mostrarlos
+    if "last_source" in out.columns:
+        out = out.rename(columns={"last_source": "Price Source"})
+    if "last_date" in out.columns:
+        out = out.rename(columns={"last_date": "Price Date"})
+
     cols = [
         "Código",
         "Close",
@@ -1104,11 +1110,9 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
         "tem_spread",
         "Margen TNA",
         "Volumen",
-        # auxiliares (no se muestran como columnas; los usa el footer de fuente/fecha):
-        "last_source",
-        "last_date",
-        "close_source",
-        "close_date",
+        # Al final: fuente y fecha del precio
+        "Price Source",
+        "Price Date",
     ]
     cols = [c for c in cols if c in out.columns]
     return out[cols].copy()
@@ -1157,6 +1161,12 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
     out["Bid TIREA"] = bid_tir
     out["Offer TIREA"] = off_tir
 
+    # Renombrar last_source/last_date a "Price Source" / "Price Date" para mostrarlos
+    if "last_source" in out.columns:
+        out = out.rename(columns={"last_source": "Price Source"})
+    if "last_date" in out.columns:
+        out = out.rename(columns={"last_date": "Price Date"})
+
     cols = [
         "Código",
         "Open",
@@ -1175,11 +1185,9 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
         "Offer TIREA",
         "Offer Size",
         "Volumen",
-        # auxiliares (no se muestran como columnas; los usa el footer de fuente/fecha):
-        "last_source",
-        "last_date",
-        "close_source",
-        "close_date",
+        # Al final: fuente y fecha del precio
+        "Price Source",
+        "Price Date",
     ]
     cols = [c for c in cols if c in out.columns]
     out = out[cols].copy()
@@ -1235,21 +1243,10 @@ def _apply_color_by_variation(sty: pd.io.formats.style.Styler, df: pd.DataFrame,
 # Footer: fuente del precio (LA / CL / ACP) + última operación observada
 # ──────────────────────────────────────────────────────────────────────
 
-_AUX_PRICE_COLS = ("last_source", "last_date", "close_source", "close_date")
 _SOURCE_LABEL = {"LA": "🟢 LA", "CL": "🔵 CL", "ACP": "🟡 ACP"}
 
 
-def _split_aux_price_cols(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Devuelve (df_display, df_aux). df_display no tiene columnas auxiliares."""
-    if df is None or df.empty:
-        return df, pd.DataFrame()
-    aux_cols = [c for c in _AUX_PRICE_COLS if c in df.columns]
-    if not aux_cols:
-        return df, pd.DataFrame()
-    return df.drop(columns=aux_cols), df[aux_cols].copy()
-
-
-def _render_price_source_footer(*aux_dfs: pd.DataFrame, source_col: str = "last_source", date_col: str = "last_date") -> None:
+def _render_price_source_footer(*aux_dfs: pd.DataFrame, source_col: str = "Price Source", date_col: str = "Price Date") -> None:
     """Footer con leyenda de fuentes + última operación observada.
 
     Acepta uno o varios DataFrames auxiliares (uno por curva/tabla rendereada).
@@ -3677,22 +3674,21 @@ def main():
                 title = f"{c.label}"
 
                 df = load_curve_last_table(username, password, c.key, plazo)
-                df_disp, df_aux = _split_aux_price_cols(df)
-                if not df_aux.empty:
-                    aux_frames.append(df_aux)
+                if df is not None and not df.empty:
+                    aux_frames.append(df)
 
                 if compact:
                     with st.expander(title, expanded=(c.key in ("cer", "lecap"))):
-                        if df_disp is None or df_disp.empty:
+                        if df is None or df.empty:
                             st.info("Sin datos (mercado cerrado o sin respuesta de marketdata).")
                         else:
-                            st.dataframe(style_curvas(df_disp), width="stretch", height=520)
+                            st.dataframe(style_curvas(df), width="stretch", height=520)
                 else:
                     st.subheader(title)
-                    if df_disp is None or df_disp.empty:
+                    if df is None or df.empty:
                         st.info("Sin datos (mercado cerrado o sin respuesta de marketdata).")
                     else:
-                        st.dataframe(style_curvas(df_disp), width="stretch", height=520)
+                        st.dataframe(style_curvas(df), width="stretch", height=520)
 
             _render_price_source_footer(*aux_frames)
 
@@ -3731,22 +3727,21 @@ def main():
             if not is_market_open():
                 st.info("⚪ Mercado cerrado — métricas calculadas sobre **Close** del último cierre. Bid/Offer usan sus precios si hay book.")
             dfm = load_curve_market_table(username, password, curve_key_mkt, plazo)
-            dfm_disp, dfm_aux = _split_aux_price_cols(dfm)
-            if dfm_disp is None or dfm_disp.empty:
+            if dfm is None or dfm.empty:
                 st.info("Sin datos (mercado cerrado o sin respuesta de marketdata).")
             else:
                 if mkt_metric == "TEM":
-                    dfm_disp = dfm_disp.copy()
+                    dfm = dfm.copy()
                     rename_map = {}
                     for col in ("Bid TIREA", "TIREA", "Offer TIREA"):
-                        if col in dfm_disp.columns:
-                            v = pd.to_numeric(dfm_disp[col], errors="coerce")
-                            dfm_disp[col] = (1.0 + v) ** (30.0 / 360.0) - 1.0
+                        if col in dfm.columns:
+                            v = pd.to_numeric(dfm[col], errors="coerce")
+                            dfm[col] = (1.0 + v) ** (30.0 / 360.0) - 1.0
                             rename_map[col] = col.replace("TIREA", "TEM")
                     if rename_map:
-                        dfm_disp.rename(columns=rename_map, inplace=True)
-                st.dataframe(style_mercado(dfm_disp), width="stretch", height=680)
-                _render_price_source_footer(dfm_aux)
+                        dfm.rename(columns=rename_map, inplace=True)
+                st.dataframe(style_mercado(dfm), width="stretch", height=680)
+                _render_price_source_footer(dfm)
 
         _mercado_live()
         _lap("after mercado")

@@ -231,17 +231,19 @@ def get_mktdata(
 
 
 def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
-    """Extrae 'Last Price' con fallback LA → CL → ACP (post-mercado).
+    """Extrae precios con fallback LA → CL → ACP (post-mercado).
 
     Devuelve columnas:
         - symbol
-        - Last Price
+        - Last Price: precio "actual" (LA → CL → ACP)
+        - Close Price: precio de cierre/referencia (CL → ACP)
         - Price Source: 'LA' (último operado), 'CL' (cierre oficial),
           'ACP' (subasta de cierre), o None si no hay precio.
-        - Price Date: fecha/hora del entry que terminó usándose (o None).
+        - Price Date: fecha/hora del entry que terminó usándose para Last (o None).
     """
+    cols = ["symbol", "Last Price", "Close Price", "Price Source", "Price Date"]
     if market_data_df is None or market_data_df.empty:
-        return pd.DataFrame(columns=["symbol", "Last Price", "Price Source", "Price Date"])
+        return pd.DataFrame(columns=cols)
 
     idx = market_data_df.index
     symbols = idx.to_numpy()
@@ -264,6 +266,7 @@ def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
     acp_d = market_data_df["ACP"].apply(_date) if "ACP" in market_data_df.columns else pd.Series(None, index=idx, dtype="object")
 
     last = la_p.fillna(cl_p).fillna(acp_p)
+    close = cl_p.fillna(acp_p)
 
     source = pd.Series(index=idx, dtype="object")
     date = pd.Series(index=idx, dtype="object")
@@ -283,6 +286,7 @@ def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({
         "symbol": symbols,
         "Last Price": last.to_numpy(),
+        "Close Price": close.to_numpy(),
         "Price Source": source.to_numpy(),
         "Price Date": date.to_numpy(),
     })
@@ -385,10 +389,9 @@ def process_bond_dataframe(
     eval_suffix: str = ""
 ) -> pd.DataFrame:
     """
-    Procesa un DataFrame con columnas: 'Código' y 'Last Price'
-    agrega métricas.
-
-    Mejora: tem_spread se calcula numérico antes de formatear strings.
+    Procesa un DataFrame con columnas: 'Código' y 'Last Price' (opcional
+    'Close Price', 'Price Source', 'Price Date' que se propagan).
+    Agrega métricas y Variación %.
     """
     df = df.copy()
 
@@ -402,23 +405,37 @@ def process_bond_dataframe(
     metrics = df.apply(calcular_metricas, axis=1, result_type="expand")
     df = pd.concat([df, metrics], axis=1)
 
-    # --- Spread numérico ---
-    try:
-        tem_num = pd.to_numeric(df["TEM"], errors="coerce")
-        df["tem_spread"] = tem_num.diff().fillna(0)
-    except Exception as e:
-        print(f"Error al calcular tem_spread: {e}")
-        df["tem_spread"] = np.nan
+    # --- Variación %: Last vs Close ---
+    if "Close Price" in df.columns:
+        last_num = pd.to_numeric(df["Last Price"], errors="coerce")
+        close_num = pd.to_numeric(df["Close Price"], errors="coerce")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            df["Variación %"] = (last_num / close_num) - 1.0
+    else:
+        df["Variación %"] = np.nan
 
     # --- Formateo a % (mantengo tu salida para no romper cosas aguas abajo) ---
     for col in ["TEM", "TNA", "TIREA"]:
         df[col] = df[col].apply(lambda x: f"{x:.2%}" if isinstance(x, (float, int, np.floating)) else None)
 
-    df["tem_spread"] = df["tem_spread"].apply(
-        lambda x: f"{(x*100):.2f}%" if isinstance(x, (float, int, np.floating)) else None
+    df["Variación %"] = df["Variación %"].apply(
+        lambda x: f"{x:+.2%}" if isinstance(x, (float, int, np.floating)) and pd.notnull(x) else None
     )
 
-    return df.sort_values(by="Duration").reset_index(drop=True)
+    df = df.sort_values(by="Duration").reset_index(drop=True)
+
+    # --- Orden de columnas: métricas en el medio, Price Source / Price Date al final ---
+    metric_order = [
+        "symbol", "Código", "Last Price", "Close Price", "Variación %",
+        "TIREA", "TNA", "TEM", "Paridad", "Duration",
+    ]
+    tail_cols = ["Price Source", "Price Date"]
+    leading = [c for c in metric_order if c in df.columns]
+    tail = [c for c in tail_cols if c in df.columns]
+    middle = [c for c in df.columns if c not in leading and c not in tail]
+    df = df[leading + middle + tail]
+
+    return df
 
 
 def create_bond_prices_df(
@@ -471,9 +488,9 @@ def create_bond_prices_df(
     if "symbol" not in lp.columns or "Last Price" not in lp.columns:
         raise ValueError("last_prices_df debe tener columnas ['symbol', 'Last Price'] (o 'symbol' en el índice).")
 
-    # Merge limpio (incluye Price Source / Price Date si vienen)
+    # Merge limpio (incluye Close Price / Price Source / Price Date si vienen)
     merge_cols = ["symbol", "Last Price"]
-    for opt_col in ("Price Source", "Price Date"):
+    for opt_col in ("Close Price", "Price Source", "Price Date"):
         if opt_col in lp.columns:
             merge_cols.append(opt_col)
     out = base.merge(lp[merge_cols], on="symbol", how="left")
@@ -551,11 +568,12 @@ def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
     Guarda el DF en Excel, concatenando con datos existentes si existe.
     Mantengo tu lógica, pero ojo: ahora TEM/TNA/TIREA vienen formateadas como % strings.
     """
-    for col in ['TIREA', 'TNA', 'TEM', 'tem_spread']:
-        df[col] = pd.to_numeric(
-            df[col].astype(str).str.replace('%', '').str.replace(',', '.').str.strip(),
-            errors='coerce'
-        ) / 100
+    for col in ['TIREA', 'TNA', 'TEM', 'Variación %']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(
+                df[col].astype(str).str.replace('%', '').str.replace(',', '.').str.replace('+', '').str.strip(),
+                errors='coerce'
+            ) / 100
 
     try:
         if os.path.exists(file_path):
