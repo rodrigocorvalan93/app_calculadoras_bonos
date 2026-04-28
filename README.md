@@ -52,8 +52,9 @@ OMScauciones.py           Lógica específica de cauciones
 OMScredit.py              Scoring crediticio (lee credit_scores.json)
 OMSposiciones.py          Gestión de posiciones / cartera / PnL
 OMSnews.py                Feed asíncrono de noticias (feedparser)
-OMStransformaciones.py    BondWrapper — adapter entre objetos Bond y la GUI
 ```
+
+> El adapter `BondWrapper` que poblaba `BONDS` vive ahora dentro de `especies.py` (antes en un módulo `OMStransformaciones.py` aparte).
 
 ### Calculadora interactiva — VS Code (`bymaapi.py`)
 
