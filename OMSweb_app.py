@@ -1250,9 +1250,10 @@ def _split_aux_price_cols(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
 
 
 def _render_price_source_footer(*aux_dfs: pd.DataFrame, source_col: str = "last_source", date_col: str = "last_date") -> None:
-    """Caption con leyenda de fuentes + última operación observada.
+    """Footer con leyenda de fuentes + última operación observada.
 
     Acepta uno o varios DataFrames auxiliares (uno por curva/tabla rendereada).
+    Si ninguna fila tiene fecha conocida, omite el bloque "Última operación".
     """
     frames = [d for d in aux_dfs if d is not None and not d.empty and source_col in d.columns]
     if not frames:
@@ -1260,17 +1261,19 @@ def _render_price_source_footer(*aux_dfs: pd.DataFrame, source_col: str = "last_
     aux = pd.concat(frames, ignore_index=True)
     counts = aux[source_col].value_counts(dropna=False)
 
-    parts = []
+    chips = []
     for code in ("LA", "CL", "ACP"):
         n = int(counts.get(code, 0))
         if n:
-            parts.append(f"{_SOURCE_LABEL[code]}: {n}")
+            chips.append(f"{_SOURCE_LABEL[code]}: **{n}**")
     n_none = int(aux[source_col].isna().sum())
     if n_none:
-        parts.append(f"⚪ s/d: {n_none}")
-    legend = "  ·  ".join(parts) if parts else "Sin precios"
+        chips.append(f"⚪ s/d: **{n_none}**")
+    if not chips:
+        return
+    legend = "  ·  ".join(chips)
 
-    last_str = "—"
+    last_str = None
     if date_col in aux.columns:
         dates = pd.to_datetime(aux[date_col], errors="coerce", utc=True)
         if dates.notna().any():
@@ -1281,10 +1284,11 @@ def _render_price_source_footer(*aux_dfs: pd.DataFrame, source_col: str = "last_
                 pass
             last_str = last_dt.strftime("%d/%m %H:%M:%S")
 
-    st.caption(
-        f"{legend}  ·  Última operación observada: **{last_str}**  ·  "
-        "🟢 last operado · 🔵 cierre oficial · 🟡 subasta de cierre"
-    )
+    explain = "🟢 last operado · 🔵 cierre oficial · 🟡 subasta de cierre"
+    if last_str:
+        st.markdown(f"{legend}  ·  Última operación observada: **{last_str}**  ·  _{explain}_")
+    else:
+        st.markdown(f"{legend}  ·  _{explain}_")
 
 
 def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
