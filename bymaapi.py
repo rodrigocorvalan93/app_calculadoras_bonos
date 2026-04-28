@@ -252,9 +252,12 @@ def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
     def _date(entry):
         return entry.get("date") if isinstance(entry, dict) else None
 
-    la_p = market_data_df["LA"].apply(_price) if "LA" in market_data_df.columns else pd.Series(np.nan, index=idx)
-    cl_p = market_data_df["CL"].apply(_price) if "CL" in market_data_df.columns else pd.Series(np.nan, index=idx)
-    acp_p = market_data_df["ACP"].apply(_price) if "ACP" in market_data_df.columns else pd.Series(np.nan, index=idx)
+    def _to_float(s):
+        return pd.to_numeric(s, errors="coerce")
+
+    la_p = _to_float(market_data_df["LA"].apply(_price)) if "LA" in market_data_df.columns else pd.Series(np.nan, index=idx, dtype="float64")
+    cl_p = _to_float(market_data_df["CL"].apply(_price)) if "CL" in market_data_df.columns else pd.Series(np.nan, index=idx, dtype="float64")
+    acp_p = _to_float(market_data_df["ACP"].apply(_price)) if "ACP" in market_data_df.columns else pd.Series(np.nan, index=idx, dtype="float64")
 
     la_d = market_data_df["LA"].apply(_date) if "LA" in market_data_df.columns else pd.Series(None, index=idx, dtype="object")
     cl_d = market_data_df["CL"].apply(_date) if "CL" in market_data_df.columns else pd.Series(None, index=idx, dtype="object")

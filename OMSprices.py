@@ -91,9 +91,9 @@ def market_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     # Precios básicos
     # Fallback post-mercado: si LA/CL vienen vacíos, BYMA suele publicar ACP
     # (auction close price) como referencia oficial.
-    la_raw = df["LA"].map(extract_price) if "LA" in df.columns else pd.Series(np.nan, index=df.index)
-    cl_raw = df["CL"].map(extract_price) if "CL" in df.columns else pd.Series(np.nan, index=df.index)
-    acp = df["ACP"].map(extract_price) if "ACP" in df.columns else pd.Series(np.nan, index=df.index)
+    la_raw = pd.to_numeric(df["LA"].map(extract_price), errors="coerce") if "LA" in df.columns else pd.Series(np.nan, index=df.index, dtype="float64")
+    cl_raw = pd.to_numeric(df["CL"].map(extract_price), errors="coerce") if "CL" in df.columns else pd.Series(np.nan, index=df.index, dtype="float64")
+    acp = pd.to_numeric(df["ACP"].map(extract_price), errors="coerce") if "ACP" in df.columns else pd.Series(np.nan, index=df.index, dtype="float64")
 
     la_d = df["LA"].map(extract_date) if "LA" in df.columns else pd.Series(None, index=df.index, dtype="object")
     cl_d = df["CL"].map(extract_date) if "CL" in df.columns else pd.Series(None, index=df.index, dtype="object")
