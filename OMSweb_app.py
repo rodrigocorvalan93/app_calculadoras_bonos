@@ -592,6 +592,7 @@ CURVES: List[CurveDef] = [
     # Dual separadas:
     CurveDef("dualfija", "Dual Fija (base)", "dual"),
     CurveDef("dualtamar", "Dual Tamar (v)", "dual"),
+    CurveDef("dualcer", "Dual CER (base)", "dual"),
 
 
     # --- Corporativos ---
@@ -782,8 +783,14 @@ def build_curve_codes() -> Dict[str, List[str]]:
         if clas == "Soberano"
     })
 
+    # DUAL CER (base)
+    dualcer = sorted({
+        c for c, clas, _ in by_ind.get("Soberano ARS Dual CER/Tamar", [])
+        if clas == "Soberano"
+    })
+
     # DUAL TAMAR/VARIABLE (sufijo v)
-    dualtamar = sorted({_apply_curve_suffix("dualtamar", c) for c in dualfija})
+    dualtamar = sorted({_apply_curve_suffix("dualtamar", c) for c in dualfija + dualcer})
 
     bonares = sorted({
         c for c, qpc in by_ind_clas.get(("Soberano USD Ley Argentina D", "Soberano"), [])
@@ -843,6 +850,7 @@ def build_curve_codes() -> Dict[str, List[str]]:
         "bonares": bonares,
         "bopreales": bopreales,
         "dualfija": dualfija,
+        "dualcer": dualcer,
         "dualtamar": dualtamar,
         "corp_tamar": sorted(corp_tamar_set),
         "corp_badlar": sorted(corp_badlar_set),
@@ -1351,6 +1359,60 @@ def style_futuros(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     }
     sty = df.style.format(fmt)
     sty = _apply_variation_bar(sty, df, "Variación")
+    return sty
+
+def _style_futuros_mercado(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+    """Estilo para la tabla de mercado completa de futuros DLR.
+    Min en azul sutil, May en violeta sutil, variaciones con barras."""
+    if df is None or df.empty:
+        return pd.DataFrame().style
+
+    fmt = {
+        "Open": "{:,.4f}", "Close": "{:,.4f}", "High": "{:,.4f}", "Low": "{:,.4f}",
+        "Last": "{:,.4f}", "Bid": "{:,.4f}", "Offer": "{:,.4f}",
+        "Δ Last-Close": "{:+,.4f}",
+        "Variación %": "{:+.2%}",
+        "Bid Size": "{:,.0f}", "Offer Size": "{:,.0f}",
+        "OI": "{:,.0f}", "Volumen": "{:,.0f}",
+        "Dias Vto": "{:,.0f}",
+        "Fecha Vto": lambda d: d.strftime("%d-%m-%Y") if isinstance(d, date) else "—",
+        "Rdto Directo Bid": "{:+.2%}", "Rdto Directo Offer": "{:+.2%}",
+        "TEM Bid": "{:.2%}", "TEM Offer": "{:.2%}",
+        "TNA Bid": "{:.2%}", "TNA Offer": "{:.2%}",
+        "TEA Bid": "{:.2%}", "TEA Offer": "{:.2%}",
+    }
+    sty = df.style.format(fmt, na_rep="—")
+
+    # Coloreado por tipo (filas enteras, sutil)
+    def _row_tipo(row):
+        if row.get("Tipo") == "May":
+            return ["background-color: rgba(155, 89, 182, 0.08);"] * len(row)
+        return ["background-color: rgba(52, 152, 219, 0.06);"] * len(row)
+    sty = sty.apply(_row_tipo, axis=1)
+
+    # Barras + colores en variaciones
+    sty = _apply_variation_bar(sty, df, "Variación %")
+    sty = _apply_variation_bar(sty, df, "Δ Last-Close")
+    sty = _apply_color_by_variation(sty, df, "Variación %", "Last")
+
+    # Bid verde / Offer rojo en las columnas de book
+    if "Bid" in df.columns:
+        sty = sty.map(lambda v: "color: #1b8a3a; font-weight:600;" if pd.notna(v) else "",
+                      subset=["Bid"])
+    if "Offer" in df.columns:
+        sty = sty.map(lambda v: "color: #b02a37; font-weight:600;" if pd.notna(v) else "",
+                      subset=["Offer"])
+
+    # Separadores visuales para agrupar zonas (book / tasas / vol)
+    table_styles = []
+    for col_anchor in ("Bid Size", "Rdto Directo Bid", "OI"):
+        if col_anchor in df.columns:
+            j = df.columns.get_loc(col_anchor)
+            table_styles.append({"selector": f"th.col{j}", "props": "border-left: 2px solid #555;"})
+            table_styles.append({"selector": f"td.col{j}", "props": "border-left: 2px solid #555;"})
+    if table_styles:
+        sty = sty.set_table_styles(table_styles, overwrite=False)
+
     return sty
 
 
@@ -4015,83 +4077,192 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         @st.fragment
         def _futuros_live():
             st.subheader("Futuros DLR (ROFEX) — implícitas vs A3500")
-            st.caption("2 tablas (Minorista vs Mayorista con sufijo 'M'). Símbolos generados dinámicamente.")
+            st.caption(
+                "Tablas apiladas: Minorista arriba (DLR/MMMYY), Mayorista abajo (sufijo 'M'). "
+                "Símbolos generados dinámicamente."
+            )
 
             FUTUROS_BASE = _generate_futures_symbols(n_months=18)
             FUTUROS_MAY = [f"{s}M" for s in FUTUROS_BASE]
+            symbols_all = FUTUROS_BASE + FUTUROS_MAY
 
-            colS1, colS2 = st.columns([1, 1])
-            with colS1:
-                # >>> PATCH FX 04/2026: usa get_fx_hoy() con waterfall MAE → BYMA DLR/SPOT → serie
-                a3500_auto = get_fx_hoy(session=get_session(username, password))
-                a3500 = st.number_input("A3500 spot (mayorista)", value=float(a3500_auto), step=0.5)
-            with colS2:
+            # ── FX A3500: por default el del OMS; override opcional ─────────────
+            fx_oms = float(get_fx_hoy(session=get_session(username, password)))
+            fx_cols = st.columns([1, 1, 2])
+            with fx_cols[0]:
+                override_fx = st.toggle(
+                    "🔓 Override FX A3500",
+                    value=False,
+                    key="fut_override_fx",
+                    help="Si está apagado, usa el último A3500 que levantó el OMS.",
+                )
+            with fx_cols[1]:
+                if override_fx:
+                    a3500 = st.number_input(
+                        "A3500 spot (mayorista)", value=fx_oms, step=0.5,
+                        format="%.4f", key="fut_a3500_override",
+                    )
+                else:
+                    a3500 = fx_oms
+                    st.metric("A3500 spot (OMS)", f"{a3500:,.4f}")
+            with fx_cols[2]:
                 st.caption(fx_status_text())
 
-            entries_fut = "LA,CL,SE"
-            symbols_all = FUTUROS_BASE + FUTUROS_MAY
-            raw = fetch_marketdata(username, password, symbols_all, market_id=DEFAULT_MARKET_ID, entries=entries_fut, depth=1)
+            # ── Fetch único para todos los símbolos ─────────────────────────────
+            # Usamos cfg.ENTRIES (incluye LA, BI, OF, OP, CL, SE, HI, LO, TV,
+            # OI, EV, NV, ACP, IV) en vez de hardcodear — así si mañana sumás
+            # un entry, no queda atrás.
+            raw = fetch_marketdata(
+                username, password, symbols_all,
+                market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+            )
+
             if raw is None or raw.empty:
                 st.info("Sin datos de futuros (puede ser horario o mercado cerrado).")
+                return
+
+            snap = OMSprices.market_snapshot(raw)
+            snap = _ensure_codigo_col(snap, source="index")
+            snap["Código"] = snap["Código"].astype(str)
+
+            # Fallback de close: CL → SE
+            # CL puede venir vacío con mercado recién abierto o vencimientos
+            # poco operados; SE (settlement) suele tener dato igual.
+            if "SE" in raw.columns:
+                se = raw["SE"].map(OMSprices.extract_price)
+                if "close" in snap.columns:
+                    snap["close"] = snap["close"].fillna(se)
+                else:
+                    snap["close"] = se
+
+            # ── FIX bug clasificación: el sufijo es 'M' (no 'A') ────────────────
+            cod_upper = snap["Código"].str.upper()
+            is_may = cod_upper.str.endswith("M")
+            snap["Canal"] = np.where(is_may, "Mayorista", "Minorista")
+
+            # ── Vencimientos y días al vto (vectorizado) ────────────────────────
+            today = date.today()
+            maturities = snap["Código"].map(_parsear_vencimiento_futuro)
+            dias_vto = maturities.map(
+                lambda d: (d - today).days if isinstance(d, date) else np.nan
+            )
+
+            # ── Cálculos de rendimiento (todo numpy, recalcula con FX en vivo) ──
+            lp = pd.to_numeric(snap.get("last"), errors="coerce")
+            cp = pd.to_numeric(snap.get("close"), errors="coerce")
+            op = pd.to_numeric(snap.get("open"), errors="coerce")
+            hi = pd.to_numeric(snap.get("high"), errors="coerce")
+            lo = pd.to_numeric(snap.get("low"), errors="coerce")
+            bid_p = pd.to_numeric(snap.get("bid_price"), errors="coerce")
+            bid_s = pd.to_numeric(snap.get("bid_size"), errors="coerce")
+            off_p = pd.to_numeric(snap.get("offer_price"), errors="coerce")
+            off_s = pd.to_numeric(snap.get("offer_size"), errors="coerce")
+            vol = pd.to_numeric(snap.get("volume"), errors="coerce")
+
+            # OI (Open Interest): puede venir como list/dict o número crudo
+            oi = pd.Series(np.nan, index=snap.index)
+            if "OI" in raw.columns:
+                oi = raw["OI"].map(OMSprices.extract_size).reindex(snap.index)
+
+            fx = float(a3500) if a3500 and a3500 > 0 else np.nan
+            dv = dias_vto.astype("float64")
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                # Variaciones del último vs cierre
+                var_last_pct = lp / cp - 1.0
+                var_last_close = lp - cp
+
+                # Rendimientos sobre Last/Bid/Offer respecto del FX
+                td_last = lp / fx - 1.0
+                td_bid = bid_p / fx - 1.0
+                td_off = off_p / fx - 1.0
+
+                # Anualizaciones (TNA lineal · TEA compuesta · TEM mensual capitaliz.)
+                tna_last = td_last * 365.0 / dv
+                tna_bid = td_bid * 365.0 / dv
+                tna_off = td_off * 365.0 / dv
+
+                tea_last = (1.0 + td_last * 30.0 / dv) ** 12 - 1.0
+                tea_bid = (1.0 + td_bid * 30.0 / dv) ** 12 - 1.0
+                tea_off = (1.0 + td_off * 30.0 / dv) ** 12 - 1.0
+
+                tem_last = (1.0 + tea_last) ** (1.0 / 12.0) - 1.0
+                tem_bid = (1.0 + tea_bid) ** (1.0 / 12.0) - 1.0
+                tem_off = (1.0 + tea_off) ** (1.0 / 12.0) - 1.0
+
+            # ── DataFrames de salida ────────────────────────────────────────────
+            base = pd.DataFrame({
+                "Tipo": np.where(is_may, "May", "Min"),
+                "Código": snap["Código"].values,
+                "Dias Vto": dias_vto.values,
+                "Fecha Vto": maturities.values,
+                "Open": op.values,
+                "Close": cp.values,
+                "High": hi.values,
+                "Low": lo.values,
+                "Last": lp.values,
+                "Variación %": var_last_pct.values,
+                "Δ Last-Close": var_last_close.values,
+                "Bid Size": bid_s.values,
+                "Bid": bid_p.values,
+                "Offer": off_p.values,
+                "Offer Size": off_s.values,
+                "Rdto Directo Bid": td_bid.values,
+                "Rdto Directo Offer": td_off.values,
+                "TEM Bid": tem_bid.values,
+                "TEM Offer": tem_off.values,
+                "TNA Bid": tna_bid.values,
+                "TNA Offer": tna_off.values,
+                "TEA Bid": tea_bid.values,
+                "TEA Offer": tea_off.values,
+                "OI": oi.values,
+                "Volumen": vol.values,
+            }).replace([np.inf, -np.inf], np.nan)
+
+            # Tabla de tasas (Min/May separadas, simple — la que viste antes mejorada)
+            tasas = pd.DataFrame({
+                "Código": snap["Código"].values,
+                "Canal": snap["Canal"].values,
+                "Close Price": cp.values,
+                "Last Price": lp.values,
+                "Variación": var_last_pct.values,
+                "Dias Vto": dias_vto.values,
+                "Tasa Directa": td_last.values,
+                "TNA": tna_last.values,
+                "TEA": tea_last.values,
+            }).replace([np.inf, -np.inf], np.nan)
+
+            tasas = tasas.sort_values("Dias Vto", ascending=True, na_position="last").reset_index(drop=True)
+            base = base.sort_values(["Tipo", "Dias Vto"], ascending=[True, True], na_position="last").reset_index(drop=True)
+
+            # ── Tablas Min/May apiladas (ex-columnas) ──────────────────────────
+            st.markdown("### Minorista (DLR/MMMYY)")
+            df_min = tasas[tasas["Canal"] == "Minorista"].drop(columns=["Canal"]).reset_index(drop=True)
+            if df_min.empty:
+                st.info("Sin datos minorista.")
             else:
-                snap = OMSprices.market_snapshot(raw)
-                snap = _ensure_codigo_col(snap, source="index")
-                snap["Código"] = snap["Código"].astype(str)
+                st.dataframe(style_futuros(df_min), width="stretch",
+                             height=min(560, 40 + 35 * len(df_min)))
 
-                if "SE" in raw.columns:
-                    se = raw["SE"].map(OMSprices.extract_price)
-                    if "close" in snap.columns:
-                        snap["close"] = snap["close"].fillna(se)
-                    else:
-                        snap["close"] = se
+            st.markdown("### Mayorista (DLR/MMMYYM)")
+            df_may = tasas[tasas["Canal"] == "Mayorista"].drop(columns=["Canal"]).reset_index(drop=True)
+            if df_may.empty:
+                st.info("Sin datos mayorista.")
+            else:
+                st.dataframe(style_futuros(df_may), width="stretch",
+                             height=min(560, 40 + 35 * len(df_may)))
 
-                maturities = snap["Código"].map(_parsear_vencimiento_futuro)
-                today = date.today()
-                dias_vto = maturities.map(lambda d: (d - today).days if isinstance(d, date) else np.nan)
+            # ── Tabla de mercado completa (lazy, en expander) ──────────────────
+            with st.expander("📊 Mercado completo (book + OLH + tasas Bid/Offer)", expanded=False):
+                st.caption(
+                    f"Min ({(base['Tipo'] == 'Min').sum()}) + May ({(base['Tipo'] == 'May').sum()}) · "
+                    f"Rdto/TEM/TNA/TEA calculados sobre A3500 = **{fx:,.4f}** "
+                    f"({'OVERRIDE manual' if override_fx else 'OMS'})"
+                )
+                st.dataframe(_style_futuros_mercado(base), width="stretch", height=720)
 
-                lp = pd.to_numeric(snap.get("last"), errors="coerce")
-                cp = pd.to_numeric(snap.get("close"), errors="coerce")
-
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    var = lp / cp - 1
-                    tasa_directa = lp / float(a3500) - 1
-                    tna = tasa_directa * 365.0 / dias_vto
-                    tea = (1.0 + tasa_directa * 30.0 / dias_vto) ** 12 - 1.0
-
-                canal = snap["Código"].map(lambda s: "Mayorista" if str(s).upper().endswith("A") else "Minorista")
-
-                out = pd.DataFrame(
-                    {
-                        "Código": snap["Código"],
-                        "Canal": canal,
-                        "Close Price": cp,
-                        "Last Price": lp,
-                        "Variación": var,
-                        "Dias Vto": dias_vto,
-                        "Tasa Directa": tasa_directa,
-                        "TNA": tna,
-                        "TEA": tea,
-                    }
-                ).replace([np.inf, -np.inf], np.nan)
-
-                out = out.sort_values(by="Dias Vto", ascending=True).reset_index(drop=True)
-
-                colA, colB = st.columns(2)
-                with colA:
-                    st.markdown("### Minorista (DLR/MMMYY)")
-                    df_min = out[out["Canal"] == "Minorista"].drop(columns=["Canal"]).reset_index(drop=True)
-                    if df_min.empty:
-                        st.info("Sin datos minorista.")
-                    else:
-                        st.dataframe(style_futuros(df_min), width="stretch", height=560)
-
-                with colB:
-                    st.markdown("### Mayorista (DLR/MMMYYM)")
-                    df_may = out[out["Canal"] == "Mayorista"].drop(columns=["Canal"]).reset_index(drop=True)
-                    if df_may.empty:
-                        st.info("Sin datos mayorista.")
-                    else:
-                        st.dataframe(style_futuros(df_may), width="stretch", height=560)
+        _futuros_live()
+        _lap("after futuros")
 
         # ─────────────────────────
         # Total Return
