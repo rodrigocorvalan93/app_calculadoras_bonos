@@ -1,231 +1,115 @@
 # ======================================================================
-# .gitignore — app_calculadoras_bonos
+# .gitignore — app_calculadoras_bonos  (paradigma WHITELIST)
 # ======================================================================
 # Stack: Python 3.x + Streamlit + VS Code + Windows + OneDrive
-# Objetivo: nunca versionar secretos, datos internos, cachés ni basura de
-# OS/IDE. Sólo el código fuente y la documentación.
-# ======================================================================
-
-
-# ──────────────────────────────────────────────────────────────
-# 🗂️ Archivos y carpetas locales del proyecto (NO versionar)
-# ──────────────────────────────────────────────────────────────
-# Versiones personales / scripts locales que no son parte del core.
-OMSweb_appJIP.py
-OMSweb_app*JIP*.py
-generar_reporte.py
-generar_fondos.py
-
-# Data interna (scoring crediticio propietario, etc.)
-credit_scores.json
-credit_scores_*.json
-
-# Carpetas de versiones anteriores y experimentos
-curvas/
-old/
-old OMS module/
-old_OMS_module/
-archive/
-backup/
-
-
-# ──────────────────────────────────────────────────────────────
-# 🔐 SECRETOS Y CREDENCIALES  —  NUNCA SUBIR
-# ──────────────────────────────────────────────────────────────
-secrets.txt
-secrets.*.txt
-*.secrets
-.env
-.env.*
-!.env.example
-credentials.json
-credentials.*.json
-*.key
-*.pem
-*.pfx
-auth_token*
-oms_session*
-
-
-# ──────────────────────────────────────────────────────────────
-# 📊 DATOS INTERNOS DE DELTA  —  NO versionar planillas de negocio
-# ──────────────────────────────────────────────────────────────
-# Las bases de Delta viven en OneDrive, no en el repo.
-Delta_Composicion.xlsx
-Delta_PN.xlsx
-Delta_Futuros.xlsx
-Delta_*.xlsx
-Delta_*.xlsm
-Delta_*.xlsb
-Delta_*.csv
-Delta\ -\ *.xlsx
-historico_byma_px_tasas.xlsx
-historico_byma_*.xlsx
-Proyecciones_para_Claude.xlsx
-RF_Detalle_Carteras.xlsx
-RF_Detalle_Carteras.xlsm
-Primary-API.pdf
-
-# Datos descargados / generados localmente
-/data/
-/datos/
-/exports/
-*.parquet
-*.feather
-
-# Backups temporales de Excel (cuando el archivo está abierto)
-~$*.xlsx
-~$*.xlsm
-~$*.docx
-
-
-# ──────────────────────────────────────────────────────────────
-# 🐍 Python
-# ──────────────────────────────────────────────────────────────
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-
-# Distribución / empaquetado
-build/
-dist/
-*.egg-info/
-*.egg
-.eggs/
-wheels/
-pip-wheel-metadata/
-MANIFEST
-
-# Virtual envs (cualquier convención)
-.venv/
-venv/
-env/
-.env_venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Pyenv / pipenv / poetry lock local
-.python-version
-Pipfile.lock
-poetry.lock
-# Nota: si querés versionar poetry.lock (recomendado), quitá la línea de arriba.
-
-# Tests / coverage / type-checking
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.nox/
-coverage.xml
-*.cover
-.hypothesis/
-.mypy_cache/
-.dmypy.json
-.pyre/
-.pytype/
-.ruff_cache/
-
-
-# ──────────────────────────────────────────────────────────────
-# 🎛️ Streamlit
-# ──────────────────────────────────────────────────────────────
-# El config.toml local puede tener puertos / creds → no subir
-.streamlit/secrets.toml
-# Pero sí versioná el config base si lo tenés:
-# (dejalo visible, no está ignorado)
-
-
-# ──────────────────────────────────────────────────────────────
-# 📓 Jupyter / notebooks
-# ──────────────────────────────────────────────────────────────
-.ipynb_checkpoints/
-*.ipynb_checkpoints
-*-checkpoint.ipynb
-profile_default/
-ipython_config.py
-
-
-# ──────────────────────────────────────────────────────────────
-# 💻 VS Code
-# ──────────────────────────────────────────────────────────────
-# .vscode/ suele tener settings personales (paths locales, etc.)
-# Si querés compartir una config de equipo, versioná sólo settings.json
-# y launch.json explícitamente con `git add -f`.
-.vscode/
-*.code-workspace
-
-
-# ──────────────────────────────────────────────────────────────
-# 🪟 Windows
-# ──────────────────────────────────────────────────────────────
-Thumbs.db
-ehthumbs.db
-ehthumbs_vista.db
-Desktop.ini
-$RECYCLE.BIN/
-*.lnk
-
-
-# ──────────────────────────────────────────────────────────────
-# ☁️ OneDrive (archivos de conflicto y marcadores de sync)
-# ──────────────────────────────────────────────────────────────
-# Cuando OneDrive detecta conflictos de edición genera archivos con sufijo.
-# Los nombres varían según idioma del sistema (ES/EN) y tipo de conflicto.
-*- Copia.*
-*- Copia (*).*
-*- Copy.*
-*- Copy (*).*
-*- Conflicto*
-*- Conflict*
-*(conflicted copy*).*
-*.sb-*
-
-
-# ──────────────────────────────────────────────────────────────
-# 🍏 macOS (por si alguien del equipo usa Mac)
-# ──────────────────────────────────────────────────────────────
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-
-
-# ──────────────────────────────────────────────────────────────
-# 📝 Logs / output
-# ──────────────────────────────────────────────────────────────
-*.log
-logs/
-*.log.*
-debug.log
-npm-debug.log*
-
-
-# ──────────────────────────────────────────────────────────────
-# 📦 Archivos temporales / editor
-# ──────────────────────────────────────────────────────────────
-*.tmp
-*.temp
-*.bak
-*.swp
-*.swo
-*~
-.idea/
-
-
-# ======================================================================
-# 💡 CÓMO AGREGAR UNA EXCEPCIÓN
-# ======================================================================
-# Si algún día querés versionar un archivo que un patrón está ignorando,
-# agregalo con '!' al final del .gitignore. Ejemplo:
 #
-#     !ejemplo_composicion.xlsx      ← este sí se versiona
+# Filosofía:
+#   1) Ignoramos TODO por defecto.
+#   2) Whitelisteamos explícitamente lo que sí queremos versionar.
 #
-# Y forzá el add con:
-#     git add -f ejemplo_composicion.xlsx
+# Resultado: ningún secreto, dato sensible, caché de IDE, planilla de
+# Delta o backup de OneDrive puede colarse al repo "por accidente".
+# Si querés agregar algo nuevo al repo, hay que sumarlo abajo con `!`.
+# ======================================================================
+
+
+# ──────────────────────────────────────────────────────────────
+# 1) IGNORAR TODO
+# ──────────────────────────────────────────────────────────────
+*
+
+
+# ──────────────────────────────────────────────────────────────
+# 2) WHITELIST — lo que SÍ versionamos
+# ──────────────────────────────────────────────────────────────
+
+# Meta del repo
+!.gitignore
+!.gitattributes
+
+# Documentación
+!README.md
+!LICENSE
+
+# Dependencias
+!requirements.txt
+
+# Código fuente Python (todos los .py del root)
+!*.py
+
+# Scripts de arranque
+!*.bat
+
+# ── Datasets de referencia (estables, no sensibles) ──────────
+# A3500 (BCRA tipo de cambio mayorista) — serie histórica de uso público
+!a3500completo.csv
+# CER histórico — serie pública
+!cer_completo.csv
+# Snapshot de datos BCRA usado para fallback offline
+!bcra_data_backup.json
+# Mapping de tickers / precios BYMA usado por bymaapi/especies
+!bymaprices.xlsx
+# Data por segmento / clasificación interna (no sensible)
+!data_segmento.xlsx
+# Lista de exclusiones para forwards
+!fwd_exclusions.json
+# Ficha de bonos ya vencidos (referencia histórica)
+!ficha\ bonos\ vencidos.txt
+
+
+# ──────────────────────────────────────────────────────────────
+# 3) SUB-CARPETAS
+# ──────────────────────────────────────────────────────────────
+# Por ahora el repo es flat (sin subdirectorios trackeados).
+# Si en el futuro se agrega una carpeta, hay que un-ignorarla
+# explícitamente con dos líneas:
+#
+#     !nombre_carpeta/
+#     !nombre_carpeta/**
+#
+# y después volver a ignorar lo que no quieras adentro.
+
+
+# ======================================================================
+# RECORDATORIOS DE SEGURIDAD (lo que queda ignorado por el `*`)
+# ======================================================================
+# Estos patrones NO necesitan línea propia porque ya los come el `*`,
+# pero los listamos como referencia de lo que jamás debe entrar:
+#
+#   🔐 Secretos:
+#     secrets.txt, *.secrets, .env, .env.*, credentials*.json,
+#     *.key, *.pem, *.pfx, auth_token*, oms_session*,
+#     .streamlit/secrets.toml
+#
+#   📊 Data interna de Delta (vive en OneDrive):
+#     Delta_Composicion.xlsx, Delta_PN.xlsx, Delta_Futuros.xlsx,
+#     Delta_*.xlsx/xlsm/xlsb/csv, historico_byma_*.xlsx,
+#     Proyecciones_para_Claude.xlsx, RF_Detalle_Carteras.xls*,
+#     Primary-API.pdf
+#
+#   💳 Scoring crediticio propietario:
+#     credit_scores.json, credit_scores_*.json
+#
+#   🗂️ Versiones personales / experimentos:
+#     OMSweb_appJIP.py, OMSweb_app*JIP*.py, generar_reporte.py,
+#     generar_fondos.py, curvas/, old/, archive/, backup/
+#
+#   🐍 Python artefactos:
+#     __pycache__/, *.py[cod], .venv/, venv/, build/, dist/,
+#     *.egg-info/, .pytest_cache/, .mypy_cache/, .ruff_cache/,
+#     .coverage*, htmlcov/
+#
+#   💻 IDE / OS:
+#     .vscode/, *.code-workspace, .idea/,
+#     Thumbs.db, Desktop.ini, .DS_Store,
+#     *- Copia.*, *- Conflicto*, *(conflicted copy*).*
+#
+#   📓 Notebooks:
+#     .ipynb_checkpoints/, *.ipynb (no usamos notebooks acá)
+#
+#   📝 Logs / temporales:
+#     *.log, logs/, *.tmp, *.bak, *.swp, ~$*
+#
+# Si algo de la lista de arriba alguna vez tiene que versionarse,
+# se agrega con `!` en la sección 2.
 # ======================================================================
