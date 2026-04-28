@@ -100,8 +100,8 @@ DEFAULT_MARKET_ID = "ROFX"
 DEFAULT_PLAZO = "24hs"  # "24hs" o "CI"
 
 # Cache TTL (segundos)
-TTL_MKT = 15
-TTL_METRICS = 15
+TTL_MKT = 7
+TTL_METRICS = 10
 
 # Auto-refresh interval (seconds) — Bloomberg-style live update
 AUTO_REFRESH_SECS = 15
@@ -1060,6 +1060,16 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
 
     mdf = _parallel_metrics(codes_arr, price_arr, bond_type, settle)
 
+    # ∆ Yield (bps): TIREA(Last) - TIREA(Close). Computa metrics también sobre Close.
+    close_arr = pd.to_numeric(snap.get("Close"), errors="coerce").to_numpy(dtype="float64") if "Close" in snap.columns else np.full(len(snap), np.nan)
+    if np.isfinite(close_arr).any():
+        mdf_close = _parallel_metrics(codes_arr, close_arr, bond_type, settle)
+        tirea_last = pd.to_numeric(mdf.get("TIREA"), errors="coerce")
+        tirea_close = pd.to_numeric(mdf_close.get("TIREA"), errors="coerce")
+        mdf["∆ Yield (bps)"] = (tirea_last - tirea_close) * 10000.0
+    else:
+        mdf["∆ Yield (bps)"] = np.nan
+
     out = pd.concat([snap.reset_index(drop=True), mdf], axis=1)
     out = _sort_duration_nan_last(out, "Duration")
 
@@ -1102,6 +1112,7 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
         "Close",
         "Last",
         "Variación %",
+        "∆ Yield (bps)",
         "TIREA",
         "TNA",
         "TEM",
@@ -1388,6 +1399,7 @@ def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "Close": "{:,.4f}",
         "Last": "{:,.4f}",
         "Variación %": "{:+.2%}",
+        "∆ Yield (bps)": "{:+.1f}",
         "TIREA": "{:.2%}",
         "TNA": "{:.2%}",
         "TEM": "{:.2%}",
@@ -1402,6 +1414,15 @@ def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
 
     sty = df.style.format(fmt)
     sty = _apply_variation_bar(sty, df, "Variación %")
+    # Para yield: amplió (positivo) = caro/rojo si es spread vs cierre, comprimió (negativo) = verde.
+    # Mantenemos la convención visual de "positivo = bueno" → invertimos los colores: -bps = verde, +bps = rojo.
+    if "∆ Yield (bps)" in df.columns:
+        v = pd.to_numeric(df["∆ Yield (bps)"], errors="coerce")
+        lim_bps = float(np.nanmax(np.abs(v.to_numpy(dtype="float64")))) if len(v) else 0.0
+        if not np.isfinite(lim_bps) or lim_bps <= 0:
+            lim_bps = 1.0
+        sty = sty.bar(subset=["∆ Yield (bps)"], align="mid",
+                      color=["#8bf58b", "#fa7a7a"], vmin=-lim_bps, vmax=lim_bps)
 
     if "tem_spread" in df.columns:
         v = pd.to_numeric(df["tem_spread"], errors="coerce")
@@ -1912,10 +1933,10 @@ def compute_total_return_table(
     out_rows = []
     df_in = df_curve_last.reset_index(drop=True)
 
-    for i, row in df_in.iterrows():
-        code = str(row.get("Código", "")).strip()
-        dur = row.get("Duration")
-        y0 = row.get("TIREA")
+    for i, tup in enumerate(df_in.itertuples(index=False)):
+        code = str(getattr(tup, "Código", "") or "").strip()
+        dur = getattr(tup, "Duration", None)
+        y0 = getattr(tup, "TIREA", None)
         y1 = scenario_y[i] if i < len(scenario_y) else np.nan
 
         if not code or not np.isfinite(y0) or not np.isfinite(y1):
@@ -2279,10 +2300,10 @@ def compute_inflation_bootstrap(
     short_bonds: List[Dict[str, Any]] = []  # se resuelven por Fisher
 
     try:
-        for _, row in df_cer_last.iterrows():
-            code = str(row.get("Código", "")).strip()
-            dur = pd.to_numeric(row.get("Duration"), errors="coerce")
-            tirea_real = pd.to_numeric(row.get("TIREA"), errors="coerce")
+        for tup in df_cer_last.itertuples(index=False):
+            code = str(getattr(tup, "Código", "") or "").strip()
+            dur = pd.to_numeric(getattr(tup, "Duration", None), errors="coerce")
+            tirea_real = pd.to_numeric(getattr(tup, "TIREA", None), errors="coerce")
             if not code or not np.isfinite(dur) or not np.isfinite(tirea_real):
                 continue
 
@@ -2291,13 +2312,13 @@ def compute_inflation_bootstrap(
                 continue
 
             # Precio de mercado
-            px_last = pd.to_numeric(row.get("Last"), errors="coerce")
-            px_close = pd.to_numeric(row.get("Close"), errors="coerce")
+            px_last = pd.to_numeric(getattr(tup, "Last", None), errors="coerce")
+            px_close = pd.to_numeric(getattr(tup, "Close", None), errors="coerce")
             px = float(px_last if np.isfinite(px_last) else px_close)
             if not np.isfinite(px):
                 continue
 
-            volumen = float(pd.to_numeric(row.get("Volumen"), errors="coerce") or 0.0)
+            volumen = float(pd.to_numeric(getattr(tup, "Volumen", None), errors="coerce") or 0.0)
 
             # Target LECAP (nearest por duration)
             if not ok_lecap.any():
@@ -2626,11 +2647,11 @@ def compute_breakeven_table(
     do_iter = method in ("iter", "both")
     do_fisher = method in ("fisher", "both")
 
-    for _, row in df_cer_last.iterrows():
-        code = str(row.get("Código", "")).strip()
-        dur = row.get("Duration")
-        tirea_real = row.get("TIREA")
-        tem_real = row.get("TEM")
+    for tup in df_cer_last.itertuples(index=False):
+        code = str(getattr(tup, "Código", "") or "").strip()
+        dur = getattr(tup, "Duration", None)
+        tirea_real = getattr(tup, "TIREA", None)
+        tem_real = getattr(tup, "TEM", None)
 
         if not code or not np.isfinite(dur) or not np.isfinite(tirea_real):
             continue
@@ -2671,7 +2692,7 @@ def compute_breakeven_table(
         if do_iter and bond_obj is not None and np.isfinite(nominal_nearest):
             price_cer_pct = getattr(bond_obj, "precio", np.nan)
             if not np.isfinite(price_cer_pct):
-                price_cer_pct = float(pd.to_numeric(row.get("Last") or row.get("Close"), errors="coerce"))
+                price_cer_pct = float(pd.to_numeric(getattr(tup, "Last", None) or getattr(tup, "Close", None), errors="coerce"))
             if np.isfinite(price_cer_pct):
                 try:
                     _iter_result = _breakeven_iter_tem(
