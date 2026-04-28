@@ -1265,11 +1265,14 @@ def style_mercado(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "Bid Size": "{:,.0f}",
         "Bid Price": "{:,.4f}",
         "Bid TIREA": "{:.2%}",
+        "Bid TEM": "{:.2%}",
         "Last Price": "{:,.4f}",
         "TIREA": "{:.2%}",
+        "TEM": "{:.2%}",
         "Duration": "{:.4f}",
         "Offer Price": "{:,.4f}",
         "Offer TIREA": "{:.2%}",
+        "Offer TEM": "{:.2%}",
         "Offer Size": "{:,.0f}",
         "Volumen": "{:,.0f}",
         "Variación %": "{:+.2%}",
@@ -3637,13 +3640,34 @@ def main():
             invalidate_fx_cache()
             refresh_a3500_in_rentafija(session=get_session(username, password))
 
-            st.caption(market_status_caption(plazo, auto_refresh=auto_refresh))
+            col_metric, col_status = st.columns([1, 4])
+            with col_metric:
+                mkt_metric = st.radio(
+                    "Métrica",
+                    options=["TIREA", "TEM"],
+                    horizontal=True,
+                    key="mkt_metric",
+                    label_visibility="collapsed",
+                )
+            with col_status:
+                st.caption(market_status_caption(plazo, auto_refresh=auto_refresh))
+
             if not is_market_open():
-                st.info("⚪ Mercado cerrado — métricas calculadas sobre **Close** del último cierre. Bid/Offer TIREA usan sus precios si hay book.")
+                st.info("⚪ Mercado cerrado — métricas calculadas sobre **Close** del último cierre. Bid/Offer usan sus precios si hay book.")
             dfm = load_curve_market_table(username, password, curve_key_mkt, plazo)
             if dfm is None or dfm.empty:
                 st.info("Sin datos (mercado cerrado o sin respuesta de marketdata).")
             else:
+                if mkt_metric == "TEM":
+                    dfm = dfm.copy()
+                    rename_map = {}
+                    for col in ("Bid TIREA", "TIREA", "Offer TIREA"):
+                        if col in dfm.columns:
+                            v = pd.to_numeric(dfm[col], errors="coerce")
+                            dfm[col] = (1.0 + v) ** (30.0 / 360.0) - 1.0
+                            rename_map[col] = col.replace("TIREA", "TEM")
+                    if rename_map:
+                        dfm.rename(columns=rename_map, inplace=True)
                 st.dataframe(style_mercado(dfm), width="stretch", height=680)
 
         _mercado_live()
@@ -4233,7 +4257,10 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             }).replace([np.inf, -np.inf], np.nan)
 
             tasas = tasas.sort_values("Dias Vto", ascending=True, na_position="last").reset_index(drop=True)
+            # Min antes que May (alfabéticamente "May" < "Min", forzamos orden lógico)
+            base["Tipo"] = pd.Categorical(base["Tipo"], categories=["Min", "May"], ordered=True)
             base = base.sort_values(["Tipo", "Dias Vto"], ascending=[True, True], na_position="last").reset_index(drop=True)
+            base["Tipo"] = base["Tipo"].astype(str)
 
             # ── Tablas Min/May apiladas (ex-columnas) ──────────────────────────
             st.markdown("### Minorista (DLR/MMMYY)")
