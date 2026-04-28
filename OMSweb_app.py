@@ -1314,6 +1314,72 @@ def _render_price_source_footer(*aux_dfs: pd.DataFrame, source_col: str = "Price
         st.markdown(f"{legend}  ·  _{explain}_")
 
 
+def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> None:
+    """Trae book con profundidad para un símbolo y muestra Bids / Offers en 2 columnas."""
+    if not calc_code:
+        return
+    try:
+        full_symbol = _build_symbols([calc_code], plazo)[0]
+    except Exception:
+        st.caption(f"No pude reconstruir el símbolo BYMA para {calc_code}.")
+        return
+
+    try:
+        raw = OMSmktdata.bulk_market_data(
+            session,
+            symbols=[full_symbol],
+            entries="BI,OF",
+            depth=depth,
+            use_blacklist=False,
+            verbose=False,
+        )
+    except Exception as e:
+        st.caption(f"Error trayendo book de {calc_code}: {e}")
+        return
+
+    if raw is None or raw.empty or full_symbol not in raw.index:
+        st.caption(f"Sin book disponible para **{calc_code}**.")
+        return
+
+    row = raw.loc[full_symbol]
+    bi = row.get("BI") if "BI" in raw.columns else None
+    of = row.get("OF") if "OF" in raw.columns else None
+    if not isinstance(bi, list):
+        bi = [bi] if isinstance(bi, dict) else []
+    if not isinstance(of, list):
+        of = [of] if isinstance(of, dict) else []
+
+    bi_df = pd.DataFrame(
+        [{"Bid Price": x.get("price"), "Bid Size": x.get("size")} for x in bi if isinstance(x, dict)]
+    )
+    of_df = pd.DataFrame(
+        [{"Offer Price": x.get("price"), "Offer Size": x.get("size")} for x in of if isinstance(x, dict)]
+    )
+
+    st.markdown(f"#### 📖 Book — `{calc_code}`")
+    col_b, col_o = st.columns(2)
+    with col_b:
+        st.markdown("**📥 Bids**")
+        if bi_df.empty:
+            st.caption("(sin bids)")
+        else:
+            st.dataframe(
+                bi_df.style.format({"Bid Price": "{:,.4f}", "Bid Size": "{:,.0f}"}),
+                width="stretch",
+                hide_index=True,
+            )
+    with col_o:
+        st.markdown("**📤 Offers**")
+        if of_df.empty:
+            st.caption("(sin offers)")
+        else:
+            st.dataframe(
+                of_df.style.format({"Offer Price": "{:,.4f}", "Offer Size": "{:,.0f}"}),
+                width="stretch",
+                hide_index=True,
+            )
+
+
 def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
@@ -3770,8 +3836,31 @@ def main():
                             rename_map[col] = col.replace("TIREA", "TEM")
                     if rename_map:
                         dfm.rename(columns=rename_map, inplace=True)
-                st.dataframe(style_mercado(dfm), width="stretch", height=680)
+                mkt_event = st.dataframe(
+                    style_mercado(dfm),
+                    width="stretch",
+                    height=680,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key=f"mkt_table_select::{curve_key_mkt}",
+                )
                 _render_price_source_footer(dfm)
+
+                sel_rows = []
+                try:
+                    sel_rows = list(getattr(getattr(mkt_event, "selection", None), "rows", []) or [])
+                except Exception:
+                    sel_rows = []
+                if sel_rows:
+                    sel_idx = sel_rows[0]
+                    if 0 <= sel_idx < len(dfm) and "Código" in dfm.columns:
+                        sel_code = str(dfm.iloc[sel_idx]["Código"])
+                        _render_book_depth(
+                            get_session(username, password),
+                            sel_code,
+                            plazo,
+                            depth=5,
+                        )
 
         _mercado_live()
         _lap("after mercado")
