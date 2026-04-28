@@ -468,8 +468,12 @@ def create_bond_prices_df(
     if "symbol" not in lp.columns or "Last Price" not in lp.columns:
         raise ValueError("last_prices_df debe tener columnas ['symbol', 'Last Price'] (o 'symbol' en el índice).")
 
-    # Merge limpio
-    out = base.merge(lp[["symbol", "Last Price"]], on="symbol", how="left")
+    # Merge limpio (incluye Price Source / Price Date si vienen)
+    merge_cols = ["symbol", "Last Price"]
+    for opt_col in ("Price Source", "Price Date"):
+        if opt_col in lp.columns:
+            merge_cols.append(opt_col)
+    out = base.merge(lp[merge_cols], on="symbol", how="left")
     return out
 
 
