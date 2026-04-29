@@ -153,6 +153,11 @@ def _nss_defaults_level_slope_convex(
     - level_pct: puntos porcentuales (ej 42.35)
     - slope_bps: bps por 1 año de duration
     - convex_bps: bps por año^2
+
+    NOTA: convex_bps queda clampeado a ±150 bps/año² para evitar que la
+    parábola del escenario explote a -99% en duration largas (la NSS
+    real satura, una parábola con convexidad alta no sabe saturar).
+    El usuario puede sobreescribir manualmente desde la UI.
     """
     try:
         if df_last is None or df_last.empty:
@@ -188,6 +193,12 @@ def _nss_defaults_level_slope_convex(
         # 1% = 100 bps
         slope_bps = float(slope_pct_per_year * 100.0)
         convex_bps = float(convex_pct_per_year2 * 100.0)
+
+        # Clamp defensivo: una parábola con convexidad muy negativa explota
+        # a -99% en duration largas. Limitamos a ±150 bps/año² (rango sano
+        # para curvas reales). El usuario puede tipear valores fuera del
+        # rango si los necesita explícitamente.
+        convex_bps = float(np.clip(convex_bps, -150.0, 150.0))
 
         level_pct = float(y0)
         return level_pct, slope_bps, convex_bps
@@ -584,6 +595,7 @@ CURVES: List[CurveDef] = [
     CurveDef("lecap", "LECAP / Tasa fija", "lecap"),
     CurveDef("tamar", "TAMAR", "tamar"),
     CurveDef("cerproy", "CER Proyectado", "cerproy"),
+    CurveDef("todos_ars_proyectado", "Todos ARS (Proyectado)", "_aggregate"),
     CurveDef("dolarlinked", "Dólar Linked", "dlksob"),
     CurveDef("globales", "Globales (Ley Extranjera)", "hdsob"),
     CurveDef("bonares", "Bonares (Ley Argentina)", "hdsob"),
@@ -604,6 +616,15 @@ CURVES: List[CurveDef] = [
     CurveDef("corp_hdmep", "Corp. USD MEP", "hdmep"),
     CurveDef("corp_hdcable", "Corp. USD Cable", "hdcable"),
 ]
+
+
+# Curvas "agregadas": no son bonos en sí, sino unión de sub-curvas existentes.
+# Cada sub-curva se carga por separado (con su propio bond_type) y los
+# resultados se concatenan agregando una columna "Curva" para identificar
+# el origen de cada fila.
+AGGREGATES: Dict[str, List[str]] = {
+    "todos_ars_proyectado": ["cerproy", "tamar", "lecap"],
+}
 
 
 def _codigo_obj(b) -> str:
@@ -840,7 +861,7 @@ def build_curve_codes() -> Dict[str, List[str]]:
                 corp_hdcable_set.add(code)  # ya está como dirty
 
 
-    return {
+    out = {
         "cer": cer,
         "lecap": lecap,
         "tamar": tamar,
@@ -858,8 +879,17 @@ def build_curve_codes() -> Dict[str, List[str]]:
         "corp_uva": sorted(corp_uva_set),
         "corp_dlk": sorted(corp_dlk_set),
         "corp_hdmep": sorted(corp_hdmep_set),
-        "corp_hdcable": sorted(corp_hdcable_set)
+        "corp_hdcable": sorted(corp_hdcable_set),
     }
+    # Agregar curvas-agregado (unión de sub-curvas) para que aparezcan
+    # como opciones disponibles en `c.key in curves`. La carga real
+    # se dispatcha en load_curve_*_table al detectar el key en AGGREGATES.
+    for agg_key, sub_keys in AGGREGATES.items():
+        union: set = set()
+        for sk in sub_keys:
+            union.update(out.get(sk, []))
+        out[agg_key] = sorted(union)
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1074,8 +1104,52 @@ def _load_curve_base(username: str, password: str, curve_key: str, plazo: str) -
     return snap
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Curvas agregadas: cargan cada sub-curva con su bond_type real y
+# concatenan los resultados con una columna "Curva" identificando origen.
+# Se cachean igual que las normales para no recomputar en cada rerun.
+# ──────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=TTL_METRICS, show_spinner=False)
+def _load_aggregate_last_table(username: str, password: str, agg_key: str, plazo: str) -> pd.DataFrame:
+    sub_keys = AGGREGATES.get(agg_key, [])
+    parts = []
+    label_by_key = {c.key: c.label for c in CURVES}
+    for sk in sub_keys:
+        df = load_curve_last_table(username, password, sk, plazo)
+        if df is None or df.empty:
+            continue
+        df = df.copy()
+        df.insert(0, "Curva", label_by_key.get(sk, sk))
+        parts.append(df)
+    if not parts:
+        return pd.DataFrame()
+    out = pd.concat(parts, ignore_index=True)
+    return _sort_duration_nan_last(out, "Duration")
+
+
+@st.cache_data(ttl=TTL_METRICS, show_spinner=False)
+def _load_aggregate_market_table(username: str, password: str, agg_key: str, plazo: str) -> pd.DataFrame:
+    sub_keys = AGGREGATES.get(agg_key, [])
+    parts = []
+    label_by_key = {c.key: c.label for c in CURVES}
+    for sk in sub_keys:
+        df = load_curve_market_table(username, password, sk, plazo)
+        if df is None or df.empty:
+            continue
+        df = df.copy()
+        df.insert(0, "Curva", label_by_key.get(sk, sk))
+        parts.append(df)
+    if not parts:
+        return pd.DataFrame()
+    out = pd.concat(parts, ignore_index=True)
+    return _sort_duration_nan_last(out, "Duration")
+
+
 @st.cache_data(ttl=TTL_METRICS, show_spinner=False)
 def load_curve_last_table(username: str, password: str, curve_key: str, plazo: str) -> pd.DataFrame:
+    if curve_key in AGGREGATES:
+        return _load_aggregate_last_table(username, password, curve_key, plazo)
     snap = _load_curve_base(username, password, curve_key, plazo)
     if snap is None or snap.empty:
         return pd.DataFrame()
@@ -1178,6 +1252,8 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
 @st.cache_data(ttl=TTL_METRICS, show_spinner=False)
 def load_curve_market_table(username: str, password: str, curve_key: str, plazo: str) -> pd.DataFrame:
     """Tabla Mercado: incluye OLH + book + TIRs."""
+    if curve_key in AGGREGATES:
+        return _load_aggregate_market_table(username, password, curve_key, plazo)
     snap = _load_curve_base(username, password, curve_key, plazo)
     if snap is None or snap.empty:
         return pd.DataFrame()
@@ -4597,9 +4673,12 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
                 with colB:
                     if mode.startswith("Nivel"):
-                        # Anchor default: duration mediana de la curva (más representativo que 1.0 fijo)
+                        # Anchor default: cuartil 75% de durations (no la mediana).
+                        # Razonamiento: la parábola del escenario extrapola mal hacia
+                        # los extremos. Anclar al 75% hace que el fit sea más
+                        # conservador en el largo plazo (la parte que más se aleja).
                         durs = pd.to_numeric(df_last.get("Duration"), errors="coerce").to_numpy(dtype="float64")
-                        d_med = float(np.nanmedian(durs)) if np.isfinite(durs).any() else 1.0
+                        d_med = float(np.nanquantile(durs, 0.75)) if np.isfinite(durs).any() else 1.0
 
                         # defaults por curva/plazo
                         ss_key = f"tr_defaults::{curve_key}::{plazo}"
