@@ -4891,8 +4891,8 @@ TXMJ9 = {
     "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
     "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
     "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Días Lag índice desde inc": -10, # enteros negativos
+    "Días Lag índice hasta inc": -10, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": "CER", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
     "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
@@ -4927,8 +4927,8 @@ TXMJ9j = {
     "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
     "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
     "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Días Lag índice desde inc": -10, # enteros negativos
+    "Días Lag índice hasta inc": -10, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": "CER PROYECTADO", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
     "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
