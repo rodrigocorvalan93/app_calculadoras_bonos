@@ -298,6 +298,56 @@ def proyectadeva(proyeccion_mensual, fecha_inicial, valor_inicial):
     return df
 
 
+def proyectar_tasa_mensual_step(proyeccion_mensual: dict, fecha_inicial: str, valor_inicial: float, columna: str) -> pd.DataFrame:
+    """Proyecta una tasa diaria (TAMAR, BADLAR) con step function por mes.
+
+    Para cada día hábil, usa el valor del último mes ≤ esa fecha. Distinto
+    a `proyectadeva` (FX) porque las tasas no se "interpolan" día a día —
+    la tasa del mes M aplica a todos los días hábiles del mes M y salta
+    al siguiente valor cuando arranca el mes M+1.
+
+    proyeccion_mensual: dict {'YYYY-MM-DD': valor}
+        clave = primer día del mes; valor aplica todo el mes.
+    fecha_inicial: 'YYYY-MM-DD' string del último día observado.
+    valor_inicial: float, último valor real (usado hasta arrancar el primer
+        mes proyectado).
+    columna: 'TAMAR' o 'BADLAR' (nombre de la columna del output).
+
+    Devuelve DataFrame indexed por fecha (.date) con una columna `columna`.
+    Si proyeccion_mensual viene vacío, devuelve DataFrame vacío.
+    """
+    if not proyeccion_mensual:
+        return pd.DataFrame(columns=[columna])
+
+    cambios = sorted(
+        (datetime.strptime(f, "%Y-%m-%d").date(), proyeccion_mensual[f])
+        for f in proyeccion_mensual
+    )
+
+    fecha_inicial_dt = datetime.strptime(fecha_inicial, "%Y-%m-%d")
+    fechas_habiles = _calendario_habiles_30_anios(fecha_inicial_dt)
+
+    rows = []
+    valor_actual = float(valor_inicial)
+    next_idx = 0
+    for fecha_np in fechas_habiles:
+        fecha_d = pd.Timestamp(fecha_np).date()
+        while next_idx < len(cambios) and cambios[next_idx][0] <= fecha_d:
+            valor_actual = float(cambios[next_idx][1])
+            next_idx += 1
+        rows.append((fecha_d, valor_actual))
+
+    if not rows:
+        return pd.DataFrame(columns=[columna])
+
+    df = pd.DataFrame(rows, columns=["fecha", columna])
+    df["fecha"] = pd.to_datetime(df["fecha"])
+    df.set_index("fecha", inplace=True)
+    df.index = df.index.date
+    df.index.name = "fecha"
+    return df
+
+
 def _calendario_habiles_30_anios(fecha_inicio: datetime) -> np.ndarray:
     """
     Genera un array de fechas hábiles (sin fines de semana ni feriados de dias_habiles.ar_holidays)
