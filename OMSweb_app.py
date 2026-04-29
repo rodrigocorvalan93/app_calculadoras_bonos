@@ -3385,6 +3385,122 @@ def scenario_overrides(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Total Return: editor de escenario proyectado (UI puro, sin cálculo).
+# El hook al cálculo se hace en el Paso 4 (botón "Calcular con escenario").
+# ──────────────────────────────────────────────────────────────────────
+
+_TR_SCENARIO_KEY = "_tr_scenario"
+_TR_SCENARIO_N_MONTHS = 12
+
+_TR_SCENARIO_SERIES = (
+    # (key interno, label UI, columna de la tabla, valor default si no hay observado)
+    ("infl",   "Inflación MoM (%)",   2.0),
+    ("tamar",  "TAMAR (TNA %)",      22.0),
+    ("badlar", "BADLAR (TNA %)",     20.0),
+    ("a3500",  "A3500 (ARS / USD)", 1400.0),
+)
+
+# Cómo leer el último observado de cada serie en rentafija.inputs.
+_TR_SERIES_LAST_VALUE = {
+    "infl":   ("inflamom",         "inflacionmom"),
+    "tamar":  ("tamar",            "TAMAR"),
+    "badlar": ("badlar",           "BADLAR"),
+    "a3500":  ("a3500",            "tca3500"),
+}
+
+
+def _tr_default_months(n_months: int = _TR_SCENARIO_N_MONTHS) -> List[str]:
+    """Retorna [YYYY-MM-01, ...] para los próximos n_months meses calendario,
+    arrancando con el mes siguiente al actual."""
+    today = date.today()
+    y, m = today.year, today.month + 1
+    if m > 12:
+        y += 1
+        m = 1
+    months = []
+    for _ in range(n_months):
+        months.append(f"{y:04d}-{m:02d}-01")
+        m += 1
+        if m > 12:
+            y += 1
+            m = 1
+    return months
+
+
+def _tr_last_observed(series_key: str, default: float = 0.0) -> float:
+    """Lee el último valor observado de rentafija.inputs para una serie del escenario."""
+    info = _TR_SERIES_LAST_VALUE.get(series_key)
+    if info is None:
+        return default
+    inputs_key, col = info
+    try:
+        df = rentafija.inputs.get(inputs_key)
+        if df is None or len(df) == 0:
+            return default
+        return float(df.iloc[-1][col])
+    except Exception:
+        return default
+
+
+def _tr_init_scenario_state():
+    """Si no hay escenario en session_state, crea uno con last-observed × n meses."""
+    if _TR_SCENARIO_KEY in st.session_state:
+        return
+    months = _tr_default_months()
+    sc: Dict[str, List[Dict[str, Any]]] = {}
+    for series_key, label, default_val in _TR_SCENARIO_SERIES:
+        last = _tr_last_observed(series_key, default=default_val)
+        sc[series_key] = [{"Mes": m, label: float(last)} for m in months]
+    st.session_state[_TR_SCENARIO_KEY] = sc
+
+
+def _tr_render_scenario_editors():
+    """Renderea los 4 editores de escenario (inflación, TAMAR, BADLAR, A3500).
+    Solo UI: graba el state pero no aplica al cálculo (eso es el Paso 4).
+    """
+    _tr_init_scenario_state()
+    sc = st.session_state[_TR_SCENARIO_KEY]
+
+    with st.expander("🎯 Escenario proyectado (CER + TAMAR + BADLAR + A3500)", expanded=False):
+        st.caption(
+            "Editá las series mensuales. El escenario se aplica solo cuando "
+            "presiones **'Calcular con escenario'** (próximo paso). Por ahora "
+            "el Total Return de abajo sigue corriendo con datos reales."
+        )
+
+        col_left, col_right = st.columns(2)
+        layout = {"infl": col_left, "badlar": col_left, "tamar": col_right, "a3500": col_right}
+
+        for series_key, label, _default_val in _TR_SCENARIO_SERIES:
+            target_col = layout[series_key]
+            with target_col:
+                st.markdown(f"**{label}**")
+                df_in = pd.DataFrame(sc[series_key])
+                edited = st.data_editor(
+                    df_in,
+                    num_rows="fixed",
+                    width="stretch",
+                    hide_index=True,
+                    key=f"_tr_editor_{series_key}",
+                    column_config={
+                        "Mes": st.column_config.TextColumn("Mes", disabled=True),
+                        label: st.column_config.NumberColumn(label, format="%.4f", step=0.1),
+                    },
+                )
+                # Persistir el editado en session_state.
+                sc[series_key] = edited.to_dict(orient="records")
+
+        st.markdown("")
+        col_btn1, col_btn2 = st.columns([1, 1])
+        with col_btn1:
+            if st.button("↺ Reset a defaults (last observado)", key="_tr_scenario_reset"):
+                st.session_state.pop(_TR_SCENARIO_KEY, None)
+                st.rerun()
+        with col_btn2:
+            st.caption(f"📅 {_TR_SCENARIO_N_MONTHS} meses proyectados")
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Inflation projection → CER recalculation helpers
 # ──────────────────────────────────────────────────────────────────────
 
@@ -4909,6 +5025,10 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     margin=dict(l=10, r=10, t=50, b=10),
                 )
                 _st_plotly(fig)
+
+                # Editor de escenario proyectado (CER / TAMAR / BADLAR / A3500).
+                # Por ahora UI sola — el hook al cálculo viene en el siguiente paso.
+                _tr_render_scenario_editors()
 
                 st.markdown("### Total Return por instrumento")
                 tr_df = compute_total_return_table(df_last, plazo=plazo, terminal_date=terminal_date, scenario_y=scenario_y)
