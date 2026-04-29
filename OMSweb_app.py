@@ -3442,23 +3442,144 @@ def _tr_last_observed(series_key: str, default: float = 0.0) -> float:
         return default
 
 
-def _tr_init_scenario_state():
-    """Si no hay escenario en session_state, crea uno con last-observed × n meses."""
+def _tr_interp_monthly_dict(known: Dict[str, float], target_months: List[str]) -> Dict[str, float]:
+    """Interpola linealmente sobre meses faltantes.
+    `known` y `target_months` usan keys 'YYYY-MM-01'.
+    Si `known` está vacío devuelve {} (caller decide qué hacer).
+    """
+    if not known or not target_months:
+        return {}
+    known_sorted = sorted(known.items())
+    xs = [datetime.strptime(k, "%Y-%m-%d").toordinal() for k, _ in known_sorted]
+    ys = [float(v) for _, v in known_sorted]
+    out: Dict[str, float] = {}
+    for m in target_months:
+        x = datetime.strptime(m, "%Y-%m-%d").toordinal()
+        out[m] = float(np.interp(x, xs, ys))
+    return out
+
+
+def _tr_default_inflation(months: List[str]) -> Dict[str, float]:
+    """Default de inflación: lo proyectado en otras tabs.
+
+    Prioridad: _custom_inflation_proy (session_state) → indices.proyeccion_inflacion_mensual.
+    Convierte keys 'May-26' → '2026-05-01' e interpola lineal en meses faltantes.
+    Si no hay nada, fallback al último observado carry-forward.
+    """
+    src = st.session_state.get("_custom_inflation_proy") or {}
+    if not src:
+        try:
+            import indices as _idx
+            src = getattr(_idx, "proyeccion_inflacion_mensual", {}) or {}
+        except Exception:
+            src = {}
+
+    known: Dict[str, float] = {}
+    for k, v in src.items():
+        try:
+            dt = datetime.strptime(str(k), "%b-%y")
+            known[dt.strftime("%Y-%m-01")] = float(v)
+        except Exception:
+            continue
+
+    if not known:
+        last = _tr_last_observed("infl", default=2.0)
+        return {m: last for m in months}
+    return _tr_interp_monthly_dict(known, months)
+
+
+@st.cache_data(ttl=TTL_MKT, show_spinner=False)
+def _tr_dlr_futures_by_month(username: str, password: str) -> Dict[str, float]:
+    """Snapshot de futuros DLR/MMMYY ROFEX (last con fallback a close).
+    Devuelve dict {'YYYY-MM-01': precio} mapeado por mes de vencimiento.
+    Cacheado con TTL_MKT para no pegarle al OMS en cada rerun.
+    """
+    try:
+        symbols = _generate_futures_symbols(n_months=24)
+        raw = fetch_marketdata(
+            username, password, symbols,
+            market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+        )
+        if raw is None or raw.empty:
+            return {}
+        snap = OMSprices.market_snapshot(raw)
+        if snap is None or snap.empty:
+            return {}
+        snap = _ensure_codigo_col(snap, source="index")
+        # Fallback close → settlement
+        if "SE" in raw.columns:
+            se = raw["SE"].map(OMSprices.extract_price)
+            if "close" in snap.columns:
+                snap["close"] = snap["close"].fillna(se)
+            else:
+                snap["close"] = se
+        # Mapear vencimiento → precio (last → close)
+        result: Dict[str, float] = {}
+        last_arr = pd.to_numeric(snap.get("last"), errors="coerce")
+        close_arr = pd.to_numeric(snap.get("close"), errors="coerce")
+        codes = snap["Código"].astype(str).tolist()
+        for i, code in enumerate(codes):
+            if not code.upper().startswith("DLR/"):
+                continue
+            mat = _parsear_vencimiento_futuro(code)
+            if not isinstance(mat, date):
+                continue
+            px = float(last_arr.iloc[i]) if pd.notna(last_arr.iloc[i]) else (
+                float(close_arr.iloc[i]) if pd.notna(close_arr.iloc[i]) else None
+            )
+            if px is None or px <= 0:
+                continue
+            key = f"{mat.year:04d}-{mat.month:02d}-01"
+            # Si hay duplicados (raro), nos quedamos con el primero (no-mayorista).
+            result.setdefault(key, px)
+        return result
+    except Exception:
+        return {}
+
+
+def _tr_default_fx(months: List[str], username: str, password: str) -> Dict[str, float]:
+    """Default de A3500: precios futuros ROFEX por mes de vencimiento, interpolados.
+    Si ROFEX no devuelve nada, fallback al último A3500 observado (carry-forward).
+    """
+    known = _tr_dlr_futures_by_month(username, password)
+    if not known:
+        last = _tr_last_observed("a3500", default=1400.0)
+        return {m: last for m in months}
+    return _tr_interp_monthly_dict(known, months)
+
+
+def _tr_init_scenario_state(username: str, password: str):
+    """Si no hay escenario en session_state, crea uno con defaults inteligentes:
+    - Inflación: la proyectada en otras tabs.
+    - A3500: futuros DLR/MMMYY de ROFEX.
+    - TAMAR / BADLAR: último observado carry-forward.
+    Meses faltantes se interpolan linealmente.
+    """
     if _TR_SCENARIO_KEY in st.session_state:
         return
     months = _tr_default_months()
+
+    infl_vals = _tr_default_inflation(months)
+    fx_vals = _tr_default_fx(months, username, password)
+
     sc: Dict[str, List[Dict[str, Any]]] = {}
     for series_key, label, default_val in _TR_SCENARIO_SERIES:
-        last = _tr_last_observed(series_key, default=default_val)
-        sc[series_key] = [{"Mes": m, label: float(last)} for m in months]
+        if series_key == "infl":
+            sc[series_key] = [{"Mes": m, label: float(infl_vals.get(m, default_val))} for m in months]
+        elif series_key == "a3500":
+            sc[series_key] = [{"Mes": m, label: float(fx_vals.get(m, default_val))} for m in months]
+        else:
+            # TAMAR / BADLAR: carry-forward del último observado
+            last = _tr_last_observed(series_key, default=default_val)
+            sc[series_key] = [{"Mes": m, label: float(last)} for m in months]
     st.session_state[_TR_SCENARIO_KEY] = sc
 
 
-def _tr_render_scenario_editors():
+def _tr_render_scenario_editors(username: str, password: str):
     """Renderea los 4 editores de escenario (inflación, TAMAR, BADLAR, A3500).
     Solo UI: graba el state pero no aplica al cálculo (eso es el Paso 4).
     """
-    _tr_init_scenario_state()
+    _tr_init_scenario_state(username, password)
     sc = st.session_state[_TR_SCENARIO_KEY]
 
     with st.expander("🎯 Escenario proyectado (CER + TAMAR + BADLAR + A3500)", expanded=False):
@@ -5028,7 +5149,7 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
                 # Editor de escenario proyectado (CER / TAMAR / BADLAR / A3500).
                 # Por ahora UI sola — el hook al cálculo viene en el siguiente paso.
-                _tr_render_scenario_editors()
+                _tr_render_scenario_editors(username, password)
 
                 st.markdown("### Total Return por instrumento")
                 tr_df = compute_total_return_table(df_last, plazo=plazo, terminal_date=terminal_date, scenario_y=scenario_y)
