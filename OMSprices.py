@@ -58,14 +58,37 @@ def extract_size(entry: Any) -> float:
     return np.nan
 
 
-def extract_date(entry: Any) -> Optional[str]:
-    """Intenta extraer 'date' / timestamp del entry (string o None)."""
+def extract_date(entry: Any):
+    """Extrae 'date' del entry y lo convierte a Timestamp tz-aware (Argentina) o None.
+
+    BYMA suele enviar millis epoch como número. También se aceptan segundos epoch
+    e ISO strings.
+    """
     e = _first(entry)
-    if isinstance(e, dict):
-        for k in ("date", "datetime", "timestamp", "ts"):
-            v = e.get(k)
-            if v:
-                return v
+    if not isinstance(e, dict):
+        return None
+    for k in ("date", "datetime", "timestamp", "ts"):
+        v = e.get(k)
+        if v is None:
+            continue
+        try:
+            if isinstance(v, (int, float)):
+                if v > 1e12:
+                    ts = pd.to_datetime(v, unit="ms", utc=True, errors="coerce")
+                elif v > 1e9:
+                    ts = pd.to_datetime(v, unit="s", utc=True, errors="coerce")
+                else:
+                    continue
+            else:
+                ts = pd.to_datetime(v, utc=True, errors="coerce")
+            if pd.isna(ts):
+                continue
+            try:
+                return ts.tz_convert("America/Argentina/Buenos_Aires")
+            except Exception:
+                return ts
+        except Exception:
+            continue
     return None
 
 

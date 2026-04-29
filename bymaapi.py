@@ -252,7 +252,31 @@ def extract_last_prices(market_data_df: pd.DataFrame) -> pd.DataFrame:
         return entry.get("price") if isinstance(entry, dict) else None
 
     def _date(entry):
-        return entry.get("date") if isinstance(entry, dict) else None
+        """Convierte el campo 'date' de BYMA (millis epoch / segundos epoch / ISO) a Timestamp tz-aware en hora Argentina."""
+        if not isinstance(entry, dict):
+            return None
+        v = entry.get("date")
+        if v is None:
+            return None
+        try:
+            if isinstance(v, (int, float)):
+                # Heurística: > 10^12 → millis epoch ; > 10^9 → segundos epoch
+                if v > 1e12:
+                    ts = pd.to_datetime(v, unit="ms", utc=True, errors="coerce")
+                elif v > 1e9:
+                    ts = pd.to_datetime(v, unit="s", utc=True, errors="coerce")
+                else:
+                    return None
+            else:
+                ts = pd.to_datetime(v, utc=True, errors="coerce")
+            if pd.isna(ts):
+                return None
+            try:
+                return ts.tz_convert("America/Argentina/Buenos_Aires")
+            except Exception:
+                return ts
+        except Exception:
+            return None
 
     def _to_float(s):
         return pd.to_numeric(s, errors="coerce")
