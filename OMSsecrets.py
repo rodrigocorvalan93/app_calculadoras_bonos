@@ -30,7 +30,10 @@ Formato soportado:
 from __future__ import annotations
 
 import os
+import re
 from typing import Dict, List, Optional
+
+_WIN_VAR_RE = re.compile(r"%([A-Za-z_][A-Za-z0-9_]*)%")
 
 _SECRETS_FILENAME = "secrets.txt"
 
@@ -72,6 +75,10 @@ def _parse_line(raw: str) -> Optional[tuple]:
     - Líneas vacías o que empiezan con '#' → None
     - KEY sin '=' → None
     - Valor vacío (KEY=) → None (para no pisar env real con '')
+
+    Expansión: si el valor contiene `%VAR%`, `$VAR`, `${VAR}` o `~`, se
+    expande con os.path.expandvars / expanduser (útil para paths
+    portables tipo `%USERPROFILE%\\Carpeta\\...`).
     """
     line = raw.strip()
     if not line or line.startswith("#"):
@@ -93,6 +100,17 @@ def _parse_line(raw: str) -> Optional[tuple]:
     # Valor vacío → skip (respetamos la env var real si existe)
     if value == "":
         return None
+
+    # Expandir vars del entorno y ~/  →  paths portables entre PCs.
+    # Manual para %VAR% (porque os.path.expandvars en Linux solo entiende $VAR).
+    if "%" in value:
+        value = _WIN_VAR_RE.sub(
+            lambda m: os.environ.get(m.group(1), m.group(0)),
+            value,
+        )
+    if "$" in value or value.startswith("~"):
+        value = os.path.expandvars(value)
+        value = os.path.expanduser(value)
 
     return key, value
 

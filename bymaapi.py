@@ -918,6 +918,25 @@ if __name__ == '__main__':
 # df.style.format(decimal=',', thousands='.')
 # df.to_csv('curva_tasas.csv', sep=';', decimal=',', index=False)
 
+# ─────────────────────────────────────────────────────────────────────
+# Generación de reporte para Comité (descomentar para correr).
+# Credenciales y paths desde secrets.txt vía OMSsecrets:
+#   OMS_USER, OMS_PASS, REPORTE_TEMPLATE_PATH, RF_DETALLE_PATH, VCP_DATA_PATH
+# ─────────────────────────────────────────────────────────────────────
+#
+# from generar_reporte import generar_reporte
+#
+# generar_reporte(
+#     username        = os.getenv("OMS_USER"),
+#     password        = os.getenv("OMS_PASS"),
+#     template_path   = os.getenv("REPORTE_TEMPLATE_PATH"),
+#     rf_detalle_path = os.getenv("RF_DETALLE_PATH"),
+#     tamar_tna       = 0.2275,   # TNA actual de TAMAR
+#     tamar_tea       = 0.2532,   # TEA actual de TAMAR
+#     df_futuros      = futuros_minorista,
+#     vcp_data_path   = os.getenv("VCP_DATA_PATH"),
+# )
+
 
 # %%
 
