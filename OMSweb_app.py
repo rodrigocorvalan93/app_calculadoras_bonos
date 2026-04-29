@@ -1637,6 +1637,9 @@ def style_total_return(df: pd.DataFrame, tr_col: str = "_tr_num") -> pd.io.forma
         "P&L Capital": "{:,.4f}",
         "TIREA inicial": "{:.2%}",
         "TIREA final": "{:.2%}",
+        "Drift CER": "{:+.2%}",
+        "Drift FX": "{:+.2%}",
+        "TR Total (con drift)": "{:+.2%}",
         tr_col: "{:+.2%}",
     }
 
@@ -3676,9 +3679,9 @@ def _tr_render_scenario_editors(username: str, password: str):
 
     with st.expander("🎯 Escenario proyectado (CER + TAMAR + BADLAR + A3500)", expanded=False):
         st.caption(
-            "Editá las series mensuales. El escenario se aplica solo cuando "
-            "presiones **'Calcular con escenario'** (próximo paso). Por ahora "
-            "el Total Return de abajo sigue corriendo con datos reales."
+            "Editá las series mensuales. Para que el escenario afecte el "
+            "cálculo de Total Return, **tildá '🎯 Aplicar al cálculo'** abajo. "
+            "Solo afecta esta tab — las otras tabs siguen viendo datos reales."
         )
 
         col_left, col_right = st.columns(2)
@@ -3750,25 +3753,121 @@ def _tr_render_scenario_editors(username: str, password: str):
                             st.error("No se pudo borrar.")
 
         st.markdown("---")
-        col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 3])
+        col_btn1, col_btn2, col_btn3, col_btn4 = st.columns([2, 2, 2, 2])
         with col_btn1:
             st.toggle(
                 "🎯 Aplicar al cálculo",
                 value=st.session_state.get("_tr_apply_scenario", False),
                 key="_tr_apply_scenario",
                 help=(
-                    "Cuando está ON, la tabla de Total Return abajo usa estas "
-                    "proyecciones custom para los flujos de fondos (CER, TAMAR, "
-                    "BADLAR, A3500). Solo afecta esta tab — las otras tabs siguen "
-                    "con datos reales."
+                    "Recalcula los flujos de fondos con las series proyectadas. "
+                    "Es la versión **precisa** pero solo afecta bonos con "
+                    "ajuste proyectado (CER PROYECTADO, A3500 PROYECTADO, "
+                    "TAMAR, BADLAR). Para bonos CER reales, usá la curva "
+                    "'CER Proyectado' arriba."
                 ),
             )
         with col_btn2:
+            st.toggle(
+                "📊 Mostrar TR descompuesto",
+                value=st.session_state.get("_tr_show_decomp", False),
+                key="_tr_show_decomp",
+                help=(
+                    "Agrega columnas **Drift CER / Drift FX / TR Total** a la "
+                    "tabla. Multiplica el TR base por la variación CER/FX "
+                    "terminal usando tu escenario. **Exacta para bonos zero-"
+                    "coupon, aproximada para bonos con cupón intermedio.** "
+                    "No depende del toggle de aplicar."
+                ),
+            )
+        with col_btn3:
             if st.button("↺ Reset a defaults", key="_tr_scenario_reset"):
                 st.session_state.pop(_TR_SCENARIO_KEY, None)
                 st.rerun()
-        with col_btn3:
+        with col_btn4:
             st.caption(f"📅 {_TR_SCENARIO_N_MONTHS} meses proyectados")
+
+
+def _tr_compute_drifts(
+    tr_df: "pd.DataFrame",
+    scenario_state: Dict[str, List[Dict[str, Any]]],
+    plazo: str,
+    terminal_date: date,
+) -> "pd.DataFrame":
+    """Calcula Drift CER y Drift FX por bono según el escenario del usuario.
+
+    Para cada Código en `tr_df`, mira el bond_obj y:
+      - Si tiene ajuste CER / CER PROYECTADO → drift_cer = (CER_terminal_lag /
+        CER_settle_lag) - 1, usando la serie proyectada de CER del escenario.
+      - Si tiene ajuste A3500 / A3500 PROYECTADO → drift_fx análogo con A3500.
+      - Else → 0.
+
+    Las fechas se "lagean" con `bond.dias_lag_ajuste_base` (típicamente -10
+    para CER, -X para A3500). Lookup nearest-prior si la fecha exacta no está.
+
+    Devuelve DataFrame con columns: Código, Drift CER, Drift FX.
+    """
+    if tr_df is None or tr_df.empty or "Código" not in tr_df.columns:
+        return pd.DataFrame(columns=["Código", "Drift CER", "Drift FX"])
+
+    overrides = _tr_build_projected_dfs(scenario_state or {})
+    cer_proy = overrides.get("cer_proyectado")
+    a3500_proy = overrides.get("a3500_proyectado")
+
+    settle_str = _settlement_date_str(plazo)
+    try:
+        settle_d = datetime.strptime(settle_str, "%d/%m/%Y").date() if settle_str else date.today()
+    except Exception:
+        settle_d = date.today()
+    terminal_d = terminal_date if isinstance(terminal_date, date) else date.today()
+
+    def _lookup_nearest_prior(df, target, col):
+        if df is None or df.empty or target is None:
+            return None
+        try:
+            idx_dt = pd.to_datetime(df.index)
+            target_ts = pd.Timestamp(target)
+            mask = idx_dt <= target_ts
+            if not mask.any():
+                # Si target es anterior al primer dato, usamos el primero
+                return float(df.iloc[0][col])
+            last_idx = df.index[mask][-1]
+            v = df.loc[last_idx, col]
+            if isinstance(v, pd.Series):
+                v = v.iloc[0]
+            return float(v) if pd.notna(v) else None
+        except Exception:
+            return None
+
+    rows = []
+    for code in tr_df["Código"].astype(str):
+        drift_cer = 0.0
+        drift_fx = 0.0
+        try:
+            bond = _bond_obj(code)
+            if bond is not None:
+                ajuste = getattr(bond, "ajuste_sobre_capital", None)
+                lag = int(getattr(bond, "dias_lag_ajuste_base", -10) or -10)
+                settle_lagged = rentafija.n_dias_laborales(settle_d, lag)
+                terminal_lagged = rentafija.n_dias_laborales(terminal_d, lag)
+
+                if ajuste in ("CER", "CER PROYECTADO") and cer_proy is not None:
+                    cs = _lookup_nearest_prior(cer_proy, settle_lagged, "CER")
+                    ct = _lookup_nearest_prior(cer_proy, terminal_lagged, "CER")
+                    if cs and ct and cs > 0:
+                        drift_cer = float(ct / cs - 1)
+
+                if ajuste in ("A3500", "A3500 PROYECTADO") and a3500_proy is not None:
+                    fs = _lookup_nearest_prior(a3500_proy, settle_lagged, "tca3500")
+                    ft = _lookup_nearest_prior(a3500_proy, terminal_lagged, "tca3500")
+                    if fs and ft and fs > 0:
+                        drift_fx = float(ft / fs - 1)
+        except Exception:
+            pass
+
+        rows.append({"Código": code, "Drift CER": drift_cer, "Drift FX": drift_fx})
+
+    return pd.DataFrame(rows)
 
 
 def _tr_build_projected_dfs(state: Dict[str, List[Dict[str, Any]]]) -> Dict[str, "pd.DataFrame"]:
@@ -5479,6 +5578,27 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 if tr_df.empty:
                     st.info("No se pudo calcular Total Return (faltan datos o bonos sin método).")
                 else:
+                    # Si está activo el toggle de descomposición, mergeamos drifts.
+                    _show_decomp = bool(st.session_state.get("_tr_show_decomp", False))
+                    if _show_decomp:
+                        _scenario_state_d = st.session_state.get(_TR_SCENARIO_KEY, {}) or {}
+                        try:
+                            drift_df = _tr_compute_drifts(
+                                tr_df, _scenario_state_d, plazo, terminal_date,
+                            )
+                            tr_df = tr_df.merge(drift_df, on="Código", how="left")
+                            tr_base_num = pd.to_numeric(tr_df.get("_tr_num"), errors="coerce").fillna(0.0)
+                            dc = pd.to_numeric(tr_df.get("Drift CER"), errors="coerce").fillna(0.0)
+                            dfx = pd.to_numeric(tr_df.get("Drift FX"), errors="coerce").fillna(0.0)
+                            tr_df["TR Total (con drift)"] = (1 + tr_base_num) * (1 + dc) * (1 + dfx) - 1.0
+                            st.caption(
+                                "📊 Descomposición activa — `TR Total = (1+TR Base) × (1+Drift CER) × (1+Drift FX) − 1`. "
+                                "Drifts construidos desde tu escenario con lag por bono. "
+                                "**Exacto para zero-coupon, aproximado para bonos con cupón intermedio.**"
+                            )
+                        except Exception as e:
+                            st.warning(f"No se pudieron calcular los drifts: {e}")
+
                     cols_show = [
                         "Código",
                         "Duration",
@@ -5490,6 +5610,8 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                         "TIREA final",
                         "_tr_num",
                     ]
+                    if _show_decomp:
+                        cols_show.extend(["Drift CER", "Drift FX", "TR Total (con drift)"])
                     cols_show = [c for c in cols_show if c in tr_df.columns]
                     tr_show = tr_df[cols_show].copy()
 
