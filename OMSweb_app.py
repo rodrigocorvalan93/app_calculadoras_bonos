@@ -3678,6 +3678,12 @@ def main():
     OMSticker.start_ticker_background(session, _ticker_assets, interval=15)
     _lap("after start_ticker_background")
 
+    # Daemon FX: mantiene caliente el cache de get_fx_hoy() para que
+    # _render_bars no bloquee 6-14s en cada expiración del TTL de 30s.
+    import indices as _indices
+    _indices.start_fx_background(session=session, interval=10)
+    _lap("after start_fx_background")
+
     _is_dark = st.session_state.get("bbg_theme", False)
 
     @st.fragment(run_every=15)

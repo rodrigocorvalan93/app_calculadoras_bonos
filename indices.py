@@ -469,7 +469,7 @@ def _fx_cache_valid():
     return _fx_cached is not None and (_time.time() - _fx_cached_ts) < _FX_CACHE_TTL
 
 
-def _fetch_fx_mae(timeout=6):
+def _fetch_fx_mae(timeout=2):
     api_key = os.getenv("MAE_API_KEY")
     if not api_key:
         return None  # sin key → fallback a BYMA / serie / default
@@ -507,7 +507,7 @@ def _fetch_fx_byma_dlr_spot(session):
             "https://api.latinsecurities.matrizoms.com.ar/rest/marketdata/get",
             params={"marketId": "ROFX", "symbol": "DLR/SPOT",
                     "entries": "LA,CL,SE", "depth": 1},
-            timeout=8,
+            timeout=2,
         )
         if not resp.ok:
             return None
@@ -605,6 +605,39 @@ def invalidate_fx_cache():
     with _fx_lock:
         _fx_cached = None
         _fx_cached_ts = 0.0
+
+
+# =============================================================================
+# Daemon: refresca FX cada `interval` segundos para que get_fx_hoy() siempre
+# encuentre cache caliente y no bloquee el render.
+# =============================================================================
+
+_fx_thread = None
+_fx_thread_lock = threading.Lock()
+
+
+def start_fx_background(session=None, interval: int = 10):
+    """Daemon idempotente que llama a get_fx_hoy(force_refresh=True) cada
+    `interval` segundos. Si ya hay uno corriendo, no spawnea otro.
+    """
+    global _fx_thread
+    with _fx_thread_lock:
+        if _fx_thread is not None and _fx_thread.is_alive():
+            return _fx_thread
+
+        def _loop():
+            while True:
+                try:
+                    get_fx_hoy(session=session, force_refresh=True)
+                except Exception as e:
+                    _log_fx.warning(f"[FX bg] error: {e}")
+                _time.sleep(interval)
+
+        t = threading.Thread(target=_loop, daemon=True, name="fx-bg")
+        t.start()
+        _fx_thread = t
+        return t
+
 
 # =============================================================================
 # MAIN
