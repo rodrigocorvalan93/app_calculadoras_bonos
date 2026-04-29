@@ -3581,6 +3581,92 @@ def _tr_init_scenario_state(username: str, password: str):
     st.session_state[_TR_SCENARIO_KEY] = sc
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Presets de escenario: persistencia en JSON dentro de scenarios/
+# ──────────────────────────────────────────────────────────────────────
+
+def _tr_scenarios_dir() -> str:
+    """Path al directorio de presets. Se crea si no existe."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    p = os.path.join(here, "scenarios")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _tr_safe_name(name: str) -> str:
+    """Sanitiza nombre de preset (no path traversal, solo chars seguros)."""
+    name = (name or "").strip()
+    if not name:
+        return ""
+    return re.sub(r"[^\w\s\-.]", "", name).strip()
+
+
+def _tr_list_presets() -> List[str]:
+    """Lista nombres de presets disponibles (sin extensión .json), ordenados."""
+    try:
+        d = _tr_scenarios_dir()
+        files = [f for f in os.listdir(d) if f.endswith(".json")]
+        return sorted(f[:-5] for f in files)
+    except Exception:
+        return []
+
+
+def _tr_save_preset(name: str, state: Dict[str, List[Dict[str, Any]]]) -> "Tuple[bool, str]":
+    """Guarda state como JSON. Devuelve (ok, message)."""
+    import json as _json
+    safe = _tr_safe_name(name)
+    if not safe:
+        return False, "Nombre inválido (vacío o solo caracteres especiales)."
+    path = os.path.join(_tr_scenarios_dir(), f"{safe}.json")
+    payload = {
+        "name": safe,
+        "saved_at": datetime.now().astimezone().isoformat(),
+        "n_months": _TR_SCENARIO_N_MONTHS,
+        "series": state,
+    }
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+        return True, f"Guardado: {safe}"
+    except Exception as e:
+        return False, f"Error guardando: {type(e).__name__}: {e}"
+
+
+def _tr_load_preset(name: str) -> "Optional[Dict[str, List[Dict[str, Any]]]]":
+    """Carga preset por nombre. Devuelve el state dict o None si falla."""
+    import json as _json
+    safe = _tr_safe_name(name)
+    if not safe:
+        return None
+    path = os.path.join(_tr_scenarios_dir(), f"{safe}.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = _json.load(f)
+        series = payload.get("series")
+        if not isinstance(series, dict):
+            return None
+        return series
+    except Exception:
+        return None
+
+
+def _tr_delete_preset(name: str) -> bool:
+    """Borra un preset. True si se borró, False si no existía o falló."""
+    safe = _tr_safe_name(name)
+    if not safe:
+        return False
+    path = os.path.join(_tr_scenarios_dir(), f"{safe}.json")
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _tr_render_scenario_editors(username: str, password: str):
     """Renderea los 4 editores de escenario (inflación, TAMAR, BADLAR, A3500).
     Solo UI: graba el state pero no aplica al cálculo (eso es el Paso 4).
@@ -3617,7 +3703,53 @@ def _tr_render_scenario_editors(username: str, password: str):
                 # Persistir el editado en session_state.
                 sc[series_key] = edited.to_dict(orient="records")
 
-        st.markdown("")
+        st.markdown("---")
+        st.markdown("**📦 Presets**")
+        presets = _tr_list_presets()
+        col_p1, col_p2, col_p3, col_p4 = st.columns([3, 1, 3, 1])
+        with col_p1:
+            new_name = st.text_input(
+                "Nombre nuevo preset",
+                key="_tr_preset_name",
+                placeholder="ej. Bull case mayo 2026",
+                label_visibility="collapsed",
+            )
+        with col_p2:
+            if st.button("💾 Guardar", key="_tr_preset_save", width="stretch"):
+                ok, msg = _tr_save_preset(new_name, sc)
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+        with col_p3:
+            options = ["(elegí uno)"] + presets
+            sel_preset = st.selectbox(
+                "Cargar preset",
+                options=options,
+                key="_tr_preset_select",
+                label_visibility="collapsed",
+            )
+        with col_p4:
+            sub1, sub2 = st.columns(2)
+            with sub1:
+                if st.button("📂", key="_tr_preset_load", help="Cargar preset seleccionado", width="stretch"):
+                    if sel_preset and sel_preset != "(elegí uno)":
+                        loaded = _tr_load_preset(sel_preset)
+                        if loaded:
+                            st.session_state[_TR_SCENARIO_KEY] = loaded
+                            st.success(f"Cargado: {sel_preset}")
+                            st.rerun()
+                        else:
+                            st.error(f"No se pudo cargar: {sel_preset}")
+            with sub2:
+                if st.button("🗑️", key="_tr_preset_delete", help="Borrar preset seleccionado", width="stretch"):
+                    if sel_preset and sel_preset != "(elegí uno)":
+                        if _tr_delete_preset(sel_preset):
+                            st.success(f"Borrado: {sel_preset}")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo borrar.")
+
+        st.markdown("---")
         col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 3])
         with col_btn1:
             st.toggle(
