@@ -3324,6 +3324,67 @@ def _find_curve_for_bond(code: str) -> Optional[str]:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Scenario override: aplicar series proyectadas custom solo durante
+# el cálculo de Total Return, sin afectar las otras tabs.
+# ──────────────────────────────────────────────────────────────────────
+
+from contextlib import contextmanager as _contextmanager
+
+_scenario_lock = threading.Lock()
+
+
+@_contextmanager
+def scenario_overrides(
+    cer_proyectado=None,
+    tamar_proyectado=None,
+    badlar_proyectado=None,
+    a3500_proyectado=None,
+):
+    """Aplica temporalmente proyecciones custom a rentafija.inputs.
+
+    Cada arg None significa "no override". Solo se reemplazan las claves
+    que reciben un DataFrame. Al salir del bloque (incluso ante excepción)
+    se restauran los valores originales.
+
+    Serializado con un lock global para evitar que dos contextos
+    concurrentes (ej. dos fragments en paralelo) se pisen.
+
+    Uso típico:
+        with scenario_overrides(cer_proyectado=df_cer, tamar_proyectado=df_tamar):
+            # calcular_total_return(...) ahora ve las series proyectadas custom
+            ...
+    """
+    overrides = {}
+    if cer_proyectado is not None:
+        overrides["cer_proyectado"] = cer_proyectado
+    if tamar_proyectado is not None:
+        overrides["tamar_proyectado"] = tamar_proyectado
+    if badlar_proyectado is not None:
+        overrides["badlar_proyectado"] = badlar_proyectado
+    if a3500_proyectado is not None:
+        overrides["a3500_proyectado"] = a3500_proyectado
+
+    if not overrides:
+        # Nada que pisar: ejecutamos sin tomar lock para no agregar latencia.
+        yield
+        return
+
+    with _scenario_lock:
+        # Snapshot (referencias, no copias — los DFs originales no se mutan).
+        original = {key: rentafija.inputs.get(key) for key in overrides}
+        try:
+            for key, df in overrides.items():
+                rentafija.inputs[key] = df
+            yield
+        finally:
+            for key, val in original.items():
+                if val is None:
+                    rentafija.inputs.pop(key, None)
+                else:
+                    rentafija.inputs[key] = val
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Inflation projection → CER recalculation helpers
 # ──────────────────────────────────────────────────────────────────────
 
