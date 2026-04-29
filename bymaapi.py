@@ -406,6 +406,9 @@ def compute_bond_metrics(
         return {"TIREA": None, "TNA": None, "TEM": None, "Paridad": None, "Duration": None}
 
 
+_NAN_BOND_METRICS = {"TIREA": None, "TNA": None, "TEM": None, "Paridad": None, "Duration": None}
+
+
 def process_bond_dataframe(
     df: pd.DataFrame,
     bond_type: str = "lecap",
@@ -418,16 +421,32 @@ def process_bond_dataframe(
     Agrega métricas y Variación %.
     """
     df = df.copy()
+    n = len(df)
 
-    def calcular_metricas(row):
-        lp = row.get("Last Price", None)
-        if pd.notnull(lp):
-            price = lp / 100  # tu convención (precio*100)
-            return compute_bond_metrics(row["Código"], price, bond_type, today_str, eval_suffix)
-        return {"TIREA": None, "TNA": None, "TEM": None, "Paridad": None, "Duration": None}
+    if n == 0:
+        for k in _NAN_BOND_METRICS:
+            df[k] = None
+    else:
+        codes_arr = df["Código"].astype(str).to_numpy()
+        prices_arr = pd.to_numeric(df.get("Last Price"), errors="coerce").to_numpy(dtype="float64") / 100.0
 
-    metrics = df.apply(calcular_metricas, axis=1, result_type="expand")
-    df = pd.concat([df, metrics], axis=1)
+        results = [None] * n
+
+        def _work(i: int):
+            px = prices_arr[i]
+            if not np.isfinite(px):
+                return i, _NAN_BOND_METRICS
+            return i, compute_bond_metrics(codes_arr[i], px, bond_type, today_str, eval_suffix)
+
+        workers = min(MAX_WORKERS, n)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_work, i) for i in range(n)]
+            for fut in as_completed(futures):
+                idx, m = fut.result()
+                results[idx] = m
+
+        metrics = pd.DataFrame(results)
+        df = pd.concat([df.reset_index(drop=True), metrics.reset_index(drop=True)], axis=1)
 
     # --- Variación %: Last vs Close ---
     if "Close Price" in df.columns:
