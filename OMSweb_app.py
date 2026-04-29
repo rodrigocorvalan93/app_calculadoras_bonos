@@ -153,6 +153,11 @@ def _nss_defaults_level_slope_convex(
     - level_pct: puntos porcentuales (ej 42.35)
     - slope_bps: bps por 1 año de duration
     - convex_bps: bps por año^2
+
+    NOTA: convex_bps queda clampeado a ±150 bps/año² para evitar que la
+    parábola del escenario explote a -99% en duration largas (la NSS
+    real satura, una parábola con convexidad alta no sabe saturar).
+    El usuario puede sobreescribir manualmente desde la UI.
     """
     try:
         if df_last is None or df_last.empty:
@@ -188,6 +193,12 @@ def _nss_defaults_level_slope_convex(
         # 1% = 100 bps
         slope_bps = float(slope_pct_per_year * 100.0)
         convex_bps = float(convex_pct_per_year2 * 100.0)
+
+        # Clamp defensivo: una parábola con convexidad muy negativa explota
+        # a -99% en duration largas. Limitamos a ±150 bps/año² (rango sano
+        # para curvas reales). El usuario puede tipear valores fuera del
+        # rango si los necesita explícitamente.
+        convex_bps = float(np.clip(convex_bps, -150.0, 150.0))
 
         level_pct = float(y0)
         return level_pct, slope_bps, convex_bps
@@ -4662,9 +4673,12 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
                 with colB:
                     if mode.startswith("Nivel"):
-                        # Anchor default: duration mediana de la curva (más representativo que 1.0 fijo)
+                        # Anchor default: cuartil 75% de durations (no la mediana).
+                        # Razonamiento: la parábola del escenario extrapola mal hacia
+                        # los extremos. Anclar al 75% hace que el fit sea más
+                        # conservador en el largo plazo (la parte que más se aleja).
                         durs = pd.to_numeric(df_last.get("Duration"), errors="coerce").to_numpy(dtype="float64")
-                        d_med = float(np.nanmedian(durs)) if np.isfinite(durs).any() else 1.0
+                        d_med = float(np.nanquantile(durs, 0.75)) if np.isfinite(durs).any() else 1.0
 
                         # defaults por curva/plazo
                         ss_key = f"tr_defaults::{curve_key}::{plazo}"
