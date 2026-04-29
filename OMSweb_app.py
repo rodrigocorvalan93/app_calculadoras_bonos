@@ -3339,6 +3339,8 @@ def scenario_overrides(
     tamar_proyectado=None,
     badlar_proyectado=None,
     a3500_proyectado=None,
+    inflamom=None,
+    uva_proyectado=None,
 ):
     """Aplica temporalmente proyecciones custom a rentafija.inputs.
 
@@ -3363,6 +3365,10 @@ def scenario_overrides(
         overrides["badlar_proyectado"] = badlar_proyectado
     if a3500_proyectado is not None:
         overrides["a3500_proyectado"] = a3500_proyectado
+    if inflamom is not None:
+        overrides["inflamom"] = inflamom
+    if uva_proyectado is not None:
+        overrides["uva_proyectado"] = uva_proyectado
 
     if not overrides:
         # Nada que pisar: ejecutamos sin tomar lock para no agregar latencia.
@@ -3612,13 +3618,167 @@ def _tr_render_scenario_editors(username: str, password: str):
                 sc[series_key] = edited.to_dict(orient="records")
 
         st.markdown("")
-        col_btn1, col_btn2 = st.columns([1, 1])
+        col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 3])
         with col_btn1:
-            if st.button("↺ Reset a defaults (last observado)", key="_tr_scenario_reset"):
+            st.toggle(
+                "🎯 Aplicar al cálculo",
+                value=st.session_state.get("_tr_apply_scenario", False),
+                key="_tr_apply_scenario",
+                help=(
+                    "Cuando está ON, la tabla de Total Return abajo usa estas "
+                    "proyecciones custom para los flujos de fondos (CER, TAMAR, "
+                    "BADLAR, A3500). Solo afecta esta tab — las otras tabs siguen "
+                    "con datos reales."
+                ),
+            )
+        with col_btn2:
+            if st.button("↺ Reset a defaults", key="_tr_scenario_reset"):
                 st.session_state.pop(_TR_SCENARIO_KEY, None)
                 st.rerun()
-        with col_btn2:
+        with col_btn3:
             st.caption(f"📅 {_TR_SCENARIO_N_MONTHS} meses proyectados")
+
+
+def _tr_build_projected_dfs(state: Dict[str, List[Dict[str, Any]]]) -> Dict[str, "pd.DataFrame"]:
+    """Construye DataFrames diarios proyectados a partir del state del escenario.
+
+    Devuelve dict con las keys que entiende scenario_overrides:
+      cer_proyectado, inflamom, uva_proyectado,
+      tamar_proyectado, badlar_proyectado, a3500_proyectado.
+
+    Si una serie del state está vacía o tiene NaN en todas las filas, esa
+    key se omite (scenario_overrides la deja sin tocar).
+    """
+    import indices as _idx
+
+    out: Dict[str, "pd.DataFrame"] = {}
+
+    def _records_to_dict(records, label):
+        d = {}
+        for rec in records or []:
+            m = rec.get("Mes")
+            v = rec.get(label)
+            if m is None or v is None:
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if pd.isna(fv):
+                continue
+            d[m] = fv
+        return d
+
+    def _last_index_str(key, fallback=None):
+        try:
+            df = rentafija.inputs.get(key)
+            if df is None or len(df) == 0:
+                return fallback or date.today().strftime("%Y-%m-%d")
+            return pd.to_datetime(df.index[-1]).strftime("%Y-%m-%d")
+        except Exception:
+            return fallback or date.today().strftime("%Y-%m-%d")
+
+    # ── 1. CER + inflamom + uva_proyectado ──
+    new_proy_infl_iso = _records_to_dict(state.get("infl"), "Inflación MoM (%)")
+    if new_proy_infl_iso:
+        # Convertir a formato 'Mmm-yy' que entiende _recalculate_cer_proyectado.
+        new_proy = {}
+        for m_iso, v in new_proy_infl_iso.items():
+            try:
+                dt = datetime.strptime(m_iso, "%Y-%m-%d")
+                new_proy[dt.strftime("%b-%y")] = float(v)
+            except Exception:
+                continue
+
+        inp = rentafija.inputs
+        combined_df_cer = inp.get("CER")
+        combined_df_inflamom_obs = inp.get("inflamom_observado", inp.get("inflamom"))
+
+        if combined_df_cer is not None and not combined_df_cer.empty and new_proy:
+            proy_inf_df = pd.DataFrame(
+                list(new_proy.items()), columns=["d", "inflacionmomproy"]
+            )
+            proy_inf_df["d"] = pd.to_datetime(proy_inf_df["d"], format="%b-%y").dt.strftime("%Y-%m-%d")
+            proy_inf_df.set_index("d", inplace=True)
+            proy_inf_df.index = (
+                pd.to_datetime(proy_inf_df.index)
+                .to_period("M")
+                .to_timestamp("M")
+                .date
+            )
+            proy_inf_df.rename(columns={"inflacionmomproy": "inflacionmom"}, inplace=True)
+            proy_inf_df.index.name = "fecha"
+            proy_inf_df.sort_index(inplace=True)
+
+            if combined_df_inflamom_obs is not None and not combined_df_inflamom_obs.empty:
+                df_inflamom_new = combined_df_inflamom_obs.combine_first(proy_inf_df)
+            else:
+                df_inflamom_new = proy_inf_df.copy()
+            df_inflamom_new.sort_index(inplace=True)
+
+            cer_inicial = combined_df_cer["CER"].iloc[-1]
+            fecha_inicial_cer = combined_df_cer.index[-1]
+            try:
+                df_cer_proy_new = _idx.calcular_CER_diario_proyectado(
+                    df_inflamom_new, cer_inicial, fecha_inicial_cer,
+                )
+                cer_completo_new = pd.concat(
+                    [combined_df_cer.iloc[:-1], df_cer_proy_new], axis=0,
+                )
+                out["cer_proyectado"] = cer_completo_new
+                out["inflamom"] = df_inflamom_new
+                uva_completo_new = (cer_completo_new * 2.5217)
+                uva_completo_new.columns = ["UVA"]
+                out["uva_proyectado"] = uva_completo_new
+            except Exception:
+                pass
+
+    # ── 2. TAMAR ──
+    proy_tamar = _records_to_dict(state.get("tamar"), "TAMAR (TNA %)")
+    if proy_tamar:
+        last = _tr_last_observed("tamar", default=22.0)
+        fecha_inicial = _last_index_str("tamar")
+        try:
+            df_proj = _idx.proyectar_tasa_mensual_step(proy_tamar, fecha_inicial, last, "TAMAR")
+            tamar_hist = rentafija.inputs.get("tamar")
+            if tamar_hist is not None and not tamar_hist.empty:
+                out["tamar_proyectado"] = pd.concat([tamar_hist, df_proj])
+            else:
+                out["tamar_proyectado"] = df_proj
+        except Exception:
+            pass
+
+    # ── 3. BADLAR ──
+    proy_badlar = _records_to_dict(state.get("badlar"), "BADLAR (TNA %)")
+    if proy_badlar:
+        last = _tr_last_observed("badlar", default=20.0)
+        fecha_inicial = _last_index_str("badlar")
+        try:
+            df_proj = _idx.proyectar_tasa_mensual_step(proy_badlar, fecha_inicial, last, "BADLAR")
+            badlar_hist = rentafija.inputs.get("badlar")
+            if badlar_hist is not None and not badlar_hist.empty:
+                out["badlar_proyectado"] = pd.concat([badlar_hist, df_proj])
+            else:
+                out["badlar_proyectado"] = df_proj
+        except Exception:
+            pass
+
+    # ── 4. A3500 (FX) ──
+    proy_fx = _records_to_dict(state.get("a3500"), "A3500 (ARS / USD)")
+    if proy_fx:
+        last = _tr_last_observed("a3500", default=1400.0)
+        fecha_inicial = _last_index_str("a3500")
+        try:
+            df_proj = _idx.proyectadeva(proy_fx, fecha_inicial, last)
+            fx_hist = rentafija.inputs.get("a3500")
+            if fx_hist is not None and not fx_hist.empty:
+                out["a3500_proyectado"] = pd.concat([fx_hist, df_proj])
+            else:
+                out["a3500_proyectado"] = df_proj
+        except Exception:
+            pass
+
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -5152,7 +5312,38 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 _tr_render_scenario_editors(username, password)
 
                 st.markdown("### Total Return por instrumento")
-                tr_df = compute_total_return_table(df_last, plazo=plazo, terminal_date=terminal_date, scenario_y=scenario_y)
+
+                # Si el usuario activó "Aplicar escenario", construimos los DFs
+                # proyectados y corremos compute_total_return_table dentro del
+                # context manager scenario_overrides. Solo afecta esta llamada;
+                # las otras tabs siguen viendo rentafija.inputs original.
+                _apply_scenario = bool(st.session_state.get("_tr_apply_scenario", False))
+                if _apply_scenario:
+                    _scenario_state = st.session_state.get(_TR_SCENARIO_KEY, {}) or {}
+                    _overrides = _tr_build_projected_dfs(_scenario_state)
+                    if _overrides:
+                        st.success(
+                            f"🎯 Escenario aplicado · series proyectadas: "
+                            f"{', '.join(_overrides.keys())}"
+                        )
+                        with scenario_overrides(**_overrides):
+                            tr_df = compute_total_return_table(
+                                df_last, plazo=plazo,
+                                terminal_date=terminal_date,
+                                scenario_y=scenario_y,
+                            )
+                    else:
+                        st.warning(
+                            "🎯 Escenario activo pero no hay valores válidos en "
+                            "ninguna serie. Corriendo con datos reales."
+                        )
+                        tr_df = compute_total_return_table(
+                            df_last, plazo=plazo,
+                            terminal_date=terminal_date,
+                            scenario_y=scenario_y,
+                        )
+                else:
+                    tr_df = compute_total_return_table(df_last, plazo=plazo, terminal_date=terminal_date, scenario_y=scenario_y)
                 if tr_df.empty:
                     st.info("No se pudo calcular Total Return (faltan datos o bonos sin método).")
                 else:
