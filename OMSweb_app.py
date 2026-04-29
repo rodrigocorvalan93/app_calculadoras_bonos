@@ -990,6 +990,52 @@ def _global_snapshot(username: str, password: str, plazo: str) -> Optional[pd.Da
     return snap
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Daemon de snapshot: pre-calienta `_global_snapshot` cada `interval`
+# segundos así el render de Mercado/Curvas siempre pega cache hit.
+# Single-thread; los args (u, p, plazo) se actualizan en cada llamada
+# para que el daemon siga el plazo seleccionado por el usuario.
+# ──────────────────────────────────────────────────────────────────────
+
+import threading as _snap_threading
+import time as _snap_time
+import logging as _snap_logging
+
+_snap_log = _snap_logging.getLogger("snapshot_bg")
+_snap_thread: Optional["_snap_threading.Thread"] = None
+_snap_thread_lock = _snap_threading.Lock()
+_snap_state = {"username": None, "password": None, "plazo": None, "interval": 5}
+
+
+def _snapshot_loop():
+    while True:
+        try:
+            u = _snap_state["username"]
+            p = _snap_state["password"]
+            pl = _snap_state["plazo"]
+            if u and p and pl:
+                _global_snapshot(u, p, pl)
+        except Exception as e:
+            _snap_log.warning(f"[snapshot bg] {type(e).__name__}: {e}")
+        _snap_time.sleep(_snap_state["interval"])
+
+
+def start_snapshot_background(username: str, password: str, plazo: str, interval: int = 5):
+    """Idempotente. Spawnea UN solo daemon que persigue el plazo activo."""
+    global _snap_thread
+    with _snap_thread_lock:
+        _snap_state["username"] = username
+        _snap_state["password"] = password
+        _snap_state["plazo"] = plazo
+        _snap_state["interval"] = interval
+        if _snap_thread is None or not _snap_thread.is_alive():
+            _snap_thread = _snap_threading.Thread(
+                target=_snapshot_loop, daemon=True, name="snapshot-bg"
+            )
+            _snap_thread.start()
+        return _snap_thread
+
+
 @st.cache_data(ttl=TTL_MKT, show_spinner=False)
 def _load_curve_base(username: str, password: str, curve_key: str, plazo: str) -> Optional[pd.DataFrame]:
     """
@@ -3683,6 +3729,11 @@ def main():
     import indices as _indices
     _indices.start_fx_background(session=session, interval=10)
     _lap("after start_fx_background")
+
+    # Daemon de snapshot: pre-calienta _global_snapshot cada 5s para
+    # que el render de Mercado/Curvas no bloquee ~6s en el bulk fetch.
+    start_snapshot_background(username, password, plazo, interval=5)
+    _lap("after start_snapshot_background")
 
     _is_dark = st.session_state.get("bbg_theme", False)
 
