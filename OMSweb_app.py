@@ -1560,7 +1560,13 @@ def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     # Mantenemos la convención visual de "positivo = bueno" → invertimos los colores: -bps = verde, +bps = rojo.
     if "∆ Yield (bps)" in df.columns:
         v = pd.to_numeric(df["∆ Yield (bps)"], errors="coerce")
-        lim_bps = float(np.nanmax(np.abs(v.to_numpy(dtype="float64")))) if len(v) else 0.0
+        arr_bps = v.to_numpy(dtype="float64")
+        # Evitar RuntimeWarning 'All-NaN slice encountered' cuando la columna
+        # viene toda en NaN (curva sin Close, primer fetch, etc.).
+        if len(arr_bps) and np.isfinite(arr_bps).any():
+            lim_bps = float(np.nanmax(np.abs(arr_bps)))
+        else:
+            lim_bps = 0.0
         if not np.isfinite(lim_bps) or lim_bps <= 0:
             lim_bps = 1.0
         sty = sty.bar(subset=["∆ Yield (bps)"], align="mid",
@@ -1568,7 +1574,11 @@ def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
 
     if "tem_spread" in df.columns:
         v = pd.to_numeric(df["tem_spread"], errors="coerce")
-        lim2 = float(np.nanmax(np.abs(v.to_numpy(dtype="float64")))) if len(v) else 0.0
+        arr_tem = v.to_numpy(dtype="float64")
+        if len(arr_tem) and np.isfinite(arr_tem).any():
+            lim2 = float(np.nanmax(np.abs(arr_tem)))
+        else:
+            lim2 = 0.0
         if not np.isfinite(lim2) or lim2 <= 0:
             lim2 = 1.0
         sty = sty.map(lambda x: _diverging_bg(x, lim2, bold=False), subset=["tem_spread"])
