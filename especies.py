@@ -1324,7 +1324,7 @@ X29Y6 = {
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
-    "Industria": "Soberano Inflación",
+    "Industria": "Soberano ARS Tasa Fija",
     "Moneda": "ARS",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "28/11/2025",
@@ -4891,13 +4891,13 @@ TXMJ9 = {
     "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
     "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
     "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": -10, # enteros negativos
-    "Días Lag índice hasta inc": -10, # enteros negativos
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": "CER", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
     "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": 0,
+    "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -10,
     "Fechas de cupón": ['29/06/2029'], # Lista de fechas como ejemplo
     "Amortización": None,
     "Callable": False , # Es binario True or False
@@ -4927,13 +4927,13 @@ TXMJ9j = {
     "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
     "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
     "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": -10, # enteros negativos
-    "Días Lag índice hasta inc": -10, # enteros negativos
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": "CER PROYECTADO", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
     "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": 0,
+    "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -10,
     "Fechas de cupón": ['29/06/2029'], # Lista de fechas como ejemplo
     "Amortización": None,
     "Callable": False , # Es binario True or False
