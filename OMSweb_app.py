@@ -194,11 +194,31 @@ def _nss_defaults_level_slope_convex(
         slope_bps = float(slope_pct_per_year * 100.0)
         convex_bps = float(convex_pct_per_year2 * 100.0)
 
-        # Clamp defensivo: una parábola con convexidad muy negativa explota
-        # a -99% en duration largas. Limitamos a ±150 bps/año² (rango sano
-        # para curvas reales). El usuario puede tipear valores fuera del
-        # rango si los necesita explícitamente.
-        convex_bps = float(np.clip(convex_bps, -150.0, 150.0))
+        # Clamp defensivo dinámico según el rango de durations de la curva.
+        # Una parábola con convexidad alta diverge a -∞/+∞ en los extremos.
+        # Limitamos la contribución de convexidad a ≤ 10 puntos porcentuales
+        # en el extremo más lejano respecto al anchor: convex_max·dx_max² ≤ 0.10.
+        # Resultado: para curvas largas (duration max 11) el clamp es chico
+        # (~12 bps); para curvas cortas (duration max 3) el clamp es generoso
+        # (hasta 150 bps). El usuario puede tipear valores fuera del rango si
+        # los necesita explícitamente.
+        try:
+            durs = pd.to_numeric(df_last["Duration"], errors="coerce").to_numpy(dtype="float64")
+            durs = durs[np.isfinite(durs)]
+            if len(durs) > 0:
+                max_dx = max(
+                    float(durs.max()) - float(anchor),
+                    float(anchor) - float(durs.min()),
+                    1.0,
+                )
+                # 0.10 (10pp) tolerancia · 10000 (decimal→bps) = 1000.
+                max_convex_bps = 1000.0 / (max_dx ** 2)
+                max_convex_bps = float(np.clip(max_convex_bps, 10.0, 150.0))
+            else:
+                max_convex_bps = 150.0
+        except Exception:
+            max_convex_bps = 150.0
+        convex_bps = float(np.clip(convex_bps, -max_convex_bps, max_convex_bps))
 
         level_pct = float(y0)
         return level_pct, slope_bps, convex_bps
@@ -5045,9 +5065,13 @@ def main():
             with c3:
                 thr = st.slider(
                     "Filtro outliers (sigmas MAD)",
-                    min_value=1.5, max_value=5.0, value=3.0, step=0.25,
-                    key="chart_thr",
-                    help="Umbral robusto (MAD escalado). 2.5 = estricto, 3.0 = estándar, 4.0 = permisivo.",
+                    min_value=1.5, max_value=10.0, value=10.0, step=0.25,
+                    key="chart_thr_v2",
+                    help=(
+                        "Umbral robusto (MAD escalado). "
+                        "2.5 = estricto · 3.0 = estándar · 4.0 = permisivo · "
+                        "**10.0 = sin filtro (default)**."
+                    ),
                 )
             with c4:
                 st.caption("TIP: si la curva tiene pocos puntos, NSS puede fallar.")
@@ -5467,11 +5491,15 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     thr_tr = st.slider(
                         "Filtro outliers NSS (sigmas MAD)",
                         min_value=1.5,
-                        max_value=5.0,
-                        value=3.0,
+                        max_value=10.0,
+                        value=10.0,
                         step=0.25,
-                        key="tr_thr",
-                        help="Umbral robusto (MAD escalado). 2.5 = estricto, 3.0 = estándar, 4.0 = permisivo.",
+                        key="tr_thr_v2",
+                        help=(
+                            "Umbral robusto (MAD escalado). "
+                            "2.5 = estricto · 3.0 = estándar · 4.0 = permisivo · "
+                            "**10.0 = sin filtro (default)**."
+                        ),
                     )
 
                 fig = go.Figure()
