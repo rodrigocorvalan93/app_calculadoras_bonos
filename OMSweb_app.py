@@ -3760,11 +3760,14 @@ def _tr_render_scenario_editors(username: str, password: str):
                 value=st.session_state.get("_tr_apply_scenario", False),
                 key="_tr_apply_scenario",
                 help=(
-                    "Recalcula los flujos de fondos con las series proyectadas. "
-                    "Es la versión **precisa** pero solo afecta bonos con "
-                    "ajuste proyectado (CER PROYECTADO, A3500 PROYECTADO, "
-                    "TAMAR, BADLAR). Para bonos CER reales, usá la curva "
-                    "'CER Proyectado' arriba."
+                    "What-if **preciso** desde el precio de mercado de hoy:\n"
+                    "- **Px inicial** = precio de mercado real (sin override).\n"
+                    "- **Px final** y **Cupones cobrados** = repriciados con tu "
+                    "escenario.\n"
+                    "- **TR = (Px final - Px inicial + Cupones) / Px inicial**.\n\n"
+                    "Solo mueve resultados de bonos con ajuste proyectado "
+                    "(CER PROYECTADO, A3500 PROYECTADO, TAMAR, BADLAR). Para "
+                    "bonos CER reales, usá la curva 'CER Proyectado' arriba."
                 ),
             )
         with col_btn2:
@@ -5545,24 +5548,48 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 st.markdown("### Total Return por instrumento")
 
                 # Si el usuario activó "Aplicar escenario", construimos los DFs
-                # proyectados y corremos compute_total_return_table dentro del
-                # context manager scenario_overrides. Solo afecta esta llamada;
-                # las otras tabs siguen viendo rentafija.inputs original.
+                # proyectados y reprice Px final + Cupones bajo el escenario,
+                # manteniendo Px inicial = precio de hoy real (semántica what-if).
                 _apply_scenario = bool(st.session_state.get("_tr_apply_scenario", False))
                 if _apply_scenario:
                     _scenario_state = st.session_state.get(_TR_SCENARIO_KEY, {}) or {}
                     _overrides = _tr_build_projected_dfs(_scenario_state)
                     if _overrides:
-                        st.success(
-                            f"🎯 Escenario aplicado · series proyectadas: "
-                            f"{', '.join(_overrides.keys())}"
+                        # Pasada 1: REAL (sin override) → Px inicial, TIREA inicial.
+                        tr_df_real = compute_total_return_table(
+                            df_last, plazo=plazo,
+                            terminal_date=terminal_date,
+                            scenario_y=scenario_y,
                         )
+                        # Pasada 2: ESCENARIO (con override) → Px final, Cupones cobrados.
                         with scenario_overrides(**_overrides):
-                            tr_df = compute_total_return_table(
+                            tr_df_scen = compute_total_return_table(
                                 df_last, plazo=plazo,
                                 terminal_date=terminal_date,
                                 scenario_y=scenario_y,
                             )
+                        # Híbrido: usa scen como base y pisa Px inicial / TIREA inicial
+                        # con los del cálculo real. Recalcula P&L Capital y TR.
+                        if (tr_df_real is not None and not tr_df_real.empty
+                                and tr_df_scen is not None and not tr_df_scen.empty):
+                            tr_df = tr_df_scen.copy()
+                            real_idx = tr_df_real.set_index("Código")
+                            tr_df["Px inicial"] = tr_df["Código"].map(real_idx["Px inicial"])
+                            tr_df["TIREA inicial"] = tr_df["Código"].map(real_idx["TIREA inicial"])
+                            px_i = pd.to_numeric(tr_df["Px inicial"], errors="coerce")
+                            px_f = pd.to_numeric(tr_df["Px final"], errors="coerce")
+                            cup = pd.to_numeric(tr_df["Cupones cobrados"], errors="coerce")
+                            tr_df["P&L Capital"] = px_f - px_i
+                            with np.errstate(divide="ignore", invalid="ignore"):
+                                denom = px_i.where(px_i != 0)
+                                tr_df["_tr_num"] = (px_f - px_i + cup) / denom
+                        else:
+                            tr_df = tr_df_scen if (tr_df_scen is not None and not tr_df_scen.empty) else tr_df_real
+                        st.success(
+                            f"🎯 Escenario aplicado · Px inicial = **real (hoy)**, "
+                            f"Px final + Cupones = **escenario**. "
+                            f"Series proyectadas: {', '.join(_overrides.keys())}"
+                        )
                     else:
                         st.warning(
                             "🎯 Escenario activo pero no hay valores válidos en "
@@ -5579,7 +5606,16 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     st.info("No se pudo calcular Total Return (faltan datos o bonos sin método).")
                 else:
                     # Si está activo el toggle de descomposición, mergeamos drifts.
+                    # Cuando "Aplicar al cálculo" ya está ON, el escenario YA está
+                    # incorporado en _tr_num — agregar drift acá double-contaría.
                     _show_decomp = bool(st.session_state.get("_tr_show_decomp", False))
+                    if _show_decomp and _apply_scenario:
+                        st.caption(
+                            "ℹ️ Descomposición desactivada: 'Aplicar al cálculo' ya "
+                            "incorpora el escenario en Px final / Cupones / TR. "
+                            "Apagá 'Aplicar' si querés ver el desglose drift CER / FX."
+                        )
+                        _show_decomp = False
                     if _show_decomp:
                         _scenario_state_d = st.session_state.get(_TR_SCENARIO_KEY, {}) or {}
                         try:
