@@ -365,7 +365,7 @@ S12J6 = {
     "Días Lag índice hasta inc": 0, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": (1+0.0210)**((72/360)*12), # Factor de ajuste, por defecto 1
+    "Factor Capitalización": (1+0.0210)**((42/360)*12), # Factor de ajuste, por defecto 1
     "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": 0,
     "Fechas de cupón": ['12/06/2026'], # Lista de fechas como ejemplo
