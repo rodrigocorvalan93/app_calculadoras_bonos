@@ -24806,6 +24806,7 @@ todos_los_bonos = [
     X29Y6j, X31L6j, TZXO6j, X30N6j, X30S6j,
     DICP, PARP, CUAP,
     D30A6, TZV26, TZV27, TZV28,
+    TXMJ9, TXMJ9v, TXMJ9j,
 
     # GLOBALES (SOBERANOS HARD DÓLAR)
 
@@ -24938,3 +24939,5 @@ BONDS = {
 }
 
 
+
+# %%
