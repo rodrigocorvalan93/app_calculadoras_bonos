@@ -1303,10 +1303,20 @@ def style_forwards(df: pd.DataFrame) -> "pd.io.formats.style.Styler":
     if df is None or df.empty:
         return pd.DataFrame().style
     sty = df.style.format("{:.2f}%", na_rep="")
-    try:
-        sty = sty.background_gradient(cmap="Blues", axis=None)
-    except Exception:
-        pass
+
+    # background_gradient se computa lazy en Styler._compute(); un try/except
+    # acá NO lo atrapa. Si la matriz no tiene rango finito (todo NaN o un
+    # único valor), pandas hace rng = smax - smin con NaN y dispara
+    # RuntimeWarning("invalid value encountered in scalar multiply").
+    flat = pd.to_numeric(pd.Series(df.values.ravel()), errors="coerce")
+    finite = flat[np.isfinite(flat)]
+    if len(finite) >= 2:
+        vmin, vmax = float(finite.min()), float(finite.max())
+        if vmin < vmax:
+            sty = sty.background_gradient(
+                cmap="Blues", axis=None, vmin=vmin, vmax=vmax,
+            )
+
     sty = sty.map(lambda v: "background-color: transparent;" if pd.isna(v) else "")
     return sty
 
