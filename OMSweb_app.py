@@ -4342,17 +4342,48 @@ def _render_yas(username, password, plazo, curve_labels):
                 with s4:
                     st.metric("Val. Residual", f"{vr_y:.2f}%" if np.isfinite(vr_y) else "—")
 
-                with st.expander("Ver ticket completo (DataFrame)", expanded=False):
-                    if ticket_df_yas is not None:
-                        # Cast columnas object-mixed a str para evitar ArrowTypeError
-                        # (comparar_* / genera_ticket hacen concat con tipos heterogéneos)
-                        _show = ticket_df_yas.copy()
-                        for _col in _show.columns:
-                            if _show[_col].dtype == object:
-                                _show[_col] = _show[_col].astype(str)
-                        st.dataframe(_show, width="stretch")
-                    else:
-                        st.info("No se pudo generar el ticket.")
+                _col_ticket, _col_cf = st.columns(2)
+                with _col_ticket:
+                    with st.expander("Ver ticket completo (DataFrame)", expanded=False):
+                        if ticket_df_yas is not None:
+                            # Cast columnas object-mixed a str para evitar ArrowTypeError
+                            # (comparar_* / genera_ticket hacen concat con tipos heterogéneos)
+                            _show = ticket_df_yas.copy()
+                            for _col in _show.columns:
+                                if _show[_col].dtype == object:
+                                    _show[_col] = _show[_col].astype(str)
+                            st.dataframe(_show, width="stretch")
+                        else:
+                            st.info("No se pudo generar el ticket.")
+                with _col_cf:
+                    with st.expander("Cashflows (CPN / PMT)", expanded=False):
+                        _cf_cpn = getattr(bond_obj_yas, "cashflow_cpn", None)
+                        _cf_pmt = getattr(bond_obj_yas, "cashflow_pmt", None)
+                        _cf_cpn_full = getattr(bond_obj_yas, "cashflow_cpn_full", None)
+                        _cf_pmt_full = getattr(bond_obj_yas, "cashflow_pmt_full", None)
+                        if _cf_cpn is None and _cf_pmt is None:
+                            st.info("Cashflows no disponibles para este bono.")
+                        else:
+                            _full = st.toggle(
+                                "Ver cashflow completo (desde emisión)",
+                                value=False, key=f"yas_cf_full_{yas_code}",
+                                help="Si está apagado, muestra sólo cupones posteriores al settlement.",
+                            )
+                            _cpn_show = _cf_cpn_full if _full else _cf_cpn
+                            _pmt_show = _cf_pmt_full if _full else _cf_pmt
+                            _c1, _c2 = st.columns(2)
+                            with _c1:
+                                st.caption("**CPN** — fechas de cupón")
+                                if _cpn_show is not None and not _cpn_show.empty:
+                                    st.dataframe(_cpn_show, width="stretch", hide_index=True)
+                                else:
+                                    st.info("Sin cupones para mostrar.")
+                            with _c2:
+                                st.caption("**PMT** — fechas de pago efectivo")
+                                if _pmt_show is not None and not _pmt_show.empty:
+                                    st.dataframe(_pmt_show, width="stretch", hide_index=True)
+                                else:
+                                    st.info("Sin pagos para mostrar.")
 
                 # Gráfico de la curva (lazy - sólo si se abre)
                 with st.expander("📈 Ver en la curva (NSS)", expanded=False):
