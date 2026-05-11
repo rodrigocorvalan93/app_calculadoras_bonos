@@ -342,7 +342,7 @@ S29Y6 = {
 S12J6 = {
     "Nombre Security": "Letra del Tesoro Nacional en Pesos Capitalizable Vto 12 06 2026",
     "Código": "S12J6",
-    "ISIN": "S12J6",
+    "ISIN": "AR0675961715",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -4872,7 +4872,7 @@ TTD26 = {
 TXMJ9 = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 29 06 2029",
     "Código": "TXMJ9",
-    "ISIN": "TXMJ9",
+    "ISIN": "AR0585812156",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -4908,11 +4908,11 @@ TXMJ9 = {
 TXMJ9j = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 29 06 2029",
     "Código": "TXMJ9",
-    "ISIN": "TXMJ9",
+    "ISIN": "AR0585812156",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
-    "Industria": "Soberano ARS Dual CER/Tamar",
+    "Industria": "Soberano ARS Dual CER/Tamar Proyectado",
     "Moneda": "ARS",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "30/04/2026",
@@ -5055,11 +5055,11 @@ TTD26v = {
 TXMJ9v = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 29 06 2029",
     "Código": "TXMJ9v",
-    "ISIN": "TXMJ9v",
+    "ISIN": "AR0585812156",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
-    "Industria": "Soberano ARS Dual CER/Tamar",
+    "Industria": "Soberano ARS Dual Tamar/CER",
     "Moneda": "ARS",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "30/04/2026",
@@ -16078,6 +16078,89 @@ BF38O = {
     "Aviso Resultados": """https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/EbyB612ESYZHtHJIeFxOj4MBmeRXxZ4_VcNoTCF1dMtz7A""",
     "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/EUGIjm3H_mVEi0Z9YPuKATABgMx_h0xqPyvmYICHc3ZUVg""",
 }
+BF41O = {
+    "Nombre Security": "ON Banco BBVA Argentina S.A. Clase 41 Vto. 04 03 2027",
+    "Código": "BF41O",
+    "ISIN": "AR0275916358",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "04/03/2026",
+    "Vencimiento": "04/03/2027",
+    "Fecha Primer Cupón": "04/06/2026",
+    "Cupón / Spread": 3.50, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE", # FIJA o VARIABLE
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+    "04/06/2026",
+    "04/09/2026",
+    "04/12/2026",
+    "04/03/2027"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/e1001fa7-ca67-47eb-94cb-c96a21656ca9""",
+    "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/3419d31c-8795-4252-b565-9a82616564e9""",
+}
+VBC3O = {
+    "Nombre Security": "ON Banco de Valores S.A. Clase 3 Vto 24 10 2026",
+    "Código": "VBC3O",
+    "ISIN": "AR0531585807",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "24/04/2026",
+    "Vencimiento": "24/10/2026",
+    "Fecha Primer Cupón": "24/10/2026",
+    "Cupón / Spread": 3., # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE", # FIJA o VARIABLE
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+    "24/10/2026"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """""",
+    "Suplemento Prospecto": """""",
+}
 ICC4O = {
     "Nombre Security": "ON ICBC (Argentina) S.A.U Clase IV Vto 27 11 2026",
     "Código": "ICC4O",
@@ -16120,6 +16203,49 @@ ICC4O = {
     "Comentarios": "",
     "Aviso Resultados": """https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQAWfVpzS2v0S6740TSa5c_nAdLrr5M5C7bWSm9Y78tpxuo""",
     "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQBHuqzMQar1RK9OZICKD6ugAV5YRR99m8P7OrSKSYCMw5E""",
+}
+ICC5O = {
+    "Nombre Security": "ON ICBC (Argentina) S.A.U Clase V Vto 11 03 2027",
+    "Código": "ICC5O",
+    "ISIN": "AR0092791067",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "11/03/2026",
+    "Vencimiento": "11/03/2027",
+    "Fecha Primer Cupón": "11/06/2026",
+    "Cupón / Spread": 3.50, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE", # FIJA o VARIABLE
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+    "11/06/2026",
+    "11/09/2026",
+    "11/12/2026",
+    "11/03/2027"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/a5293a49-b94a-4bdd-83e1-370c60c99e9c""",
+    "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/955e6f56-1e56-4ce6-aa65-b89ce8984d5d""",
 }
 SXC1O = {
     "Nombre Security": "ON Mercado Pago SP S.R.L. Clase 1 Vto. 18 07 2026",
@@ -16249,6 +16375,49 @@ BNCWO = {
     "Comentarios": "",
     "Aviso Resultados": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9647%2FMPA3%2DRES%2DON%20BANCO%20SANTANDER%20ARGENTINA%20CLASE%2029%20Y%2030%2D%20Aviso%20de%20Resultado%2021%2D05%2D25%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9647&p=true&ga=1""",
     "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9647%2FMPA3%2DANU%2DON%20BANCO%20SANTANDER%20ARGENTINA%20CLASE%2029%20Y%2030%2DSuplemento%2019%2D05%2D25%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9647&p=true&ga=1""",
+}
+BNCXO = {
+    "Nombre Security": "ON Banco Santander Argentina S.A. Clase 31 Vto. 28 04 2027",
+    "Código": "BNCXO",
+    "ISIN": "AR0945841937",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "28/04/2026",
+    "Vencimiento": "28/04/2027",
+    "Fecha Primer Cupón": "28/07/2026",
+    "Cupón / Spread": 3.25, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE", # FIJA o VARIABLE
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+    "28/07/2025",
+    "28/10/2025",
+    "28/01/2027",
+    "28/04/2027"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/12d4dc7c-f5b9-4aac-b8df-d5e74ecd0cbf""",
+    "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/73b0525b-35cc-4695-bfe4-f1d508c97042""",
 }
 RCCTO = {
     "Nombre Security": "ON ARCOR S.A.I.C Clase XXVII Vto 09 05 2026",
@@ -24287,7 +24456,9 @@ BSCRO = rentafija.Bono(BSCRO)
 BYCQO = rentafija.Bono(BYCQO)
 FTM3O = rentafija.Bono(FTM3O)
 FTN3O = rentafija.Bono(FTN3O)
+VBC3O = rentafija.Bono(VBC3O)
 ICC4O = rentafija.Bono(ICC4O)
+ICC5O = rentafija.Bono(ICC5O)
 RB59O = rentafija.Bono(RB59O)
 RB61O = rentafija.Bono(RB61O)
 RB64O = rentafija.Bono(RB64O)
@@ -24295,9 +24466,11 @@ AFCGO = rentafija.Bono(AFCGO)
 AFCNO = rentafija.Bono(AFCNO)
 BF36O = rentafija.Bono(BF36O)
 BF38O = rentafija.Bono(BF38O)
+BF41O = rentafija.Bono(BF41O)
 SXC1O = rentafija.Bono(SXC1O)
 SXC3O = rentafija.Bono(SXC3O)
 BNCWO = rentafija.Bono(BNCWO)
+BNCXO = rentafija.Bono(BNCXO)
 BDCKO = rentafija.Bono(BDCKO)
 DHSGO = rentafija.Bono(DHSGO)
 BPCRO = rentafija.Bono(BPCRO)
@@ -24855,12 +25028,13 @@ todos_los_bonos = [
     # CORPORATIVOS TAMAR
 
     T643O, T651O, T661O, TY34O, HBCBO, WNCNO,
-    BSCRO, BYCQO, FTM3O, RB59O, RB61O,  
+    BSCRO, BYCQO, FTM3O, RB59O, RB61O, BNCXO,
     BF36O, SXC1O, BNCWO, BDCKO, DHSGO, PSSWO,
     BPCRO, PVC4O, BYCMO, TLCRO, ZPC1O, PS37O,
     RCCTO, RC3CO, RVS1O, MR42O, PSSYO, PS35O,  
     LNS3P, VWCDO, RB64O, TY37O, SXC3O, FTN3O, 
     RC4CO, HBCEO, AFCGO, BF38O, ICC4O, AFCNO,
+    ICC5O, BF41O, VBC3O,
 
     # CORPORATIVOS UVA
 
@@ -24920,14 +25094,7 @@ todos_los_bonos = [
 # ------------------------------------------------------------------
 # Mapa global que usan los módulos refactorizados
 # ------------------------------------------------------------------
-from dataclasses import dataclass
-
-
-@dataclass
-class BondWrapper:
-    """Adapter mínimo (código, objeto Bond) que puebla el dict BONDS."""
-    code: str
-    obj: object
+from OMStransformaciones import BondWrapper  # importa el wrapper nuevo
 
 
 def _codigo(bono):
