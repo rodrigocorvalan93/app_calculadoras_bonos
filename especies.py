@@ -25094,9 +25094,14 @@ todos_los_bonos = [
 # ------------------------------------------------------------------
 # Mapa global que usan los módulos refactorizados
 # ------------------------------------------------------------------
-from OMStransformaciones import BondWrapper  # importa el wrapper nuevo
+from dataclasses import dataclass
 
 
+@dataclass
+class BondWrapper:
+    """Adapter mínimo (código, objeto Bond) que puebla el dict BONDS."""
+    code: str
+    obj: object
 def _codigo(bono):
     """Intenta leer el código/ticker del objeto; ajustá si tu clase cambia."""
     return (
