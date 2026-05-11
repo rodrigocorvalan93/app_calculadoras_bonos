@@ -342,7 +342,7 @@ S29Y6 = {
 S12J6 = {
     "Nombre Security": "Letra del Tesoro Nacional en Pesos Capitalizable Vto 12 06 2026",
     "Código": "S12J6",
-    "ISIN": "AR0675961715",
+    "ISIN": "S12J6",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -4872,7 +4872,7 @@ TTD26 = {
 TXMJ9 = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 29 06 2029",
     "Código": "TXMJ9",
-    "ISIN": "AR0585812156",
+    "ISIN": "TXMJ9",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -4908,7 +4908,7 @@ TXMJ9 = {
 TXMJ9j = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 29 06 2029",
     "Código": "TXMJ9",
-    "ISIN": "AR0585812156",
+    "ISIN": "TXMJ9",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -5055,7 +5055,7 @@ TTD26v = {
 TXMJ9v = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 29 06 2029",
     "Código": "TXMJ9v",
-    "ISIN": "AR0585812156",
+    "ISIN": "TXMJ9v",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
