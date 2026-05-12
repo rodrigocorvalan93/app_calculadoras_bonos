@@ -548,6 +548,59 @@ def _fetch_fx_mae(timeout=2):
     return None
 
 
+_FX_FOREX_TTL = 15
+_forex_lock = threading.Lock()
+_forex_cached = None
+_forex_cached_ts = 0.0
+
+
+def fetch_mae_forex_snapshot(force_refresh: bool = False, timeout: int = 4):
+    """Trae el snapshot completo de MAE forex (SIOPEL).
+
+    Devuelve un DataFrame con todas las filas que devuelve la API
+    (UST$T, UST$C, UST$D, etc., distintos plazos y segmentos), con
+    columnas crudas como vinieron. Cachea 15s.
+
+    Si no hay MAE_API_KEY o falla la llamada, devuelve None.
+    """
+    global _forex_cached, _forex_cached_ts
+    with _forex_lock:
+        if (not force_refresh and _forex_cached is not None
+                and (_time.time() - _forex_cached_ts) < _FX_FOREX_TTL):
+            return _forex_cached
+
+    api_key = os.getenv("MAE_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        r = requests.get(
+            "https://api.mae.com.ar/MarketData/v1/mercado/cotizaciones/forex",
+            headers={"x-api-key": api_key},
+            timeout=timeout,
+        )
+        if not r.ok:
+            return None
+        data = r.json()
+    except Exception as e:
+        _log_fx.warning(f"[MAE forex] excepción: {e}")
+        return None
+
+    if not isinstance(data, list) or not data:
+        return None
+
+    try:
+        import pandas as _pd
+        df = _pd.DataFrame(data)
+    except Exception:
+        return None
+
+    with _forex_lock:
+        _forex_cached = df
+        _forex_cached_ts = _time.time()
+    return df
+
+
 def _fetch_fx_byma_dlr_spot(session):
     """DLR/SPOT desde BYMA — requiere session autenticada."""
     if session is None:
