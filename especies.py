@@ -4869,6 +4869,42 @@ TTD26 = {
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
 }
+TXMJ8 = {
+    "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 30 06 2028",
+    "Código": "TXMJ8",
+    "ISIN": "TXMJ8",
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberano ARS Dual CER/Tamar",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "30/04/2026",
+    "Vencimiento": "30/06/2028",
+    "Fecha Primer Cupón": None,
+    "Cupón / Spread": 0, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "CER", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -10,
+    "Fechas de cupón": ['29/06/2029'], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None  # Precio Call
+}
 TXMJ9 = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 29 06 2029",
     "Código": "TXMJ9",
@@ -4899,6 +4935,42 @@ TXMJ9 = {
     "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": -10,
     "Fechas de cupón": ['29/06/2029'], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None  # Precio Call
+}
+TXMJ8j = {
+    "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 30 06 2028",
+    "Código": "TXMJ8",
+    "ISIN": "TXMJ8",
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberano ARS Dual CER/Tamar Proyectado",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "30/04/2026",
+    "Vencimiento": "30/06/2028",
+    "Fecha Primer Cupón": None,
+    "Cupón / Spread": 0, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "CER", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -10,
+    "Fechas de cupón": ['30/06/2028'], # Lista de fechas como ejemplo
     "Amortización": None,
     "Callable": False , # Es binario True or False
     "Tipo de Call": None,
@@ -5065,7 +5137,7 @@ TXMJ9v = {
     "Emisión": "30/04/2026",
     "Vencimiento": "29/06/2029",
     "Fecha Primer Cupón": None,
-    "Cupón / Spread": 3., # es un nro flotante
+    "Cupón / Spread": 3, # es un nro flotante
     "Step-up": False, # Es binario True or False
     "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
     "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
@@ -5082,6 +5154,42 @@ TXMJ9v = {
     "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": 0,
     "Fechas de cupón": ['29/06/2029'], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None  # Precio Call
+}
+TXMJ8v = {
+    "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 30 06 2028",
+    "Código": "TXMJ8",
+    "ISIN": "TXMJ",
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberano ARS Dual Tamar/CER",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "30/04/2026",
+    "Vencimiento": "30/06/2028",
+    "Fecha Primer Cupón": None,
+    "Cupón / Spread": 0, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE_CAP", # FIJA o VARIABLE o VARIABLE_CAP(para tamar)
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -10, # enteros negativos
+    "Días Lag índice hasta inc": -10, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1, # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": 0,
+    "Fechas de cupón": ['29/06/2028'], # Lista de fechas como ejemplo
     "Amortización": None,
     "Callable": False , # Es binario True or False
     "Tipo de Call": None,
@@ -5880,66 +5988,6 @@ Desde 24/10/2028: 100.00%
 A los valores indicados se adicionan intereses devengados e impagos y Montos Adicionales, si los hubiera. Los tenedores mantienen derecho a cobrar el cupón correspondiente si están registrados en la fecha de corte previa al rescate""",
     "Aviso Resultados": """https://lt.mydplr.com/5ba0c69ee743d8555b9db1d15110a243-fd388f880eeed95f651bb714f572f2c5""",
     "Suplemento Prospecto": """https://lt.mydplr.com/529dac2989edf19a0f10193f75dd2109-fd388f880eeed95f651bb714f572f2c5"""
-}
-DNCAO = {
-    "Nombre Security": "ON EDENOR S.A. Clase 10 Serie A Vto. 22 04 2033",
-    "Código": "EDNAR 33",
-    "ISIN": "USP3710FBA14",
-    "Calificación": "B-",
-    "País": "Argentina",
-    "Clasificación": "Corporativo Hard Dolar",
-    "Industria": "Energy",
-    "Legislación": "Estados Unidos",
-    "Moneda": "USD",
-    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "22/04/2026",
-    "Vencimiento": "22/04/2033",
-    "Fecha Primer Cupón": "22/10/2026",
-    "Cupón / Spread": 9.5, # es un nro flotante
-    "Step-up": False, # Es binario True or False
-    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
-    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
-    "Convención de devengamiento": "NASD-30", # Actual, ISMA-30, NASD-30
-    "Convención Base": 360., # 365 o 360
-    "Tipo de Amortización": "AMORTIZABLE", # AMORTIZBALE O BULLET
-    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
-    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": -3, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": -3,
-    "Fechas de cupón": [
-    "22/10/2026",
-    "22/04/2027",
-    "22/10/2027",
-    "22/04/2028",
-    "22/10/2028",
-    "22/04/2029",
-    "22/10/2029",
-    "22/04/2030",
-    "22/10/2030",
-    "22/04/2031",
-    "22/10/2031",
-    "22/04/2032",
-    "22/10/2032",
-    "22/04/2033"
-    ], # Lista de fechas como ejemplo
-    "Amortización": ([0] * 9 + [33.33] + [0] + [33.33] + [0] + [33.34]),
-    "Quote Price Convention": "CLEAN",
-    "Callable": True,
-    "Tipo de Call": "Call parcial o total a opción de la sociedad con prima fija decreciente a partir de abril de 2028",
-    "Fecha Call": "28/04/2028",
-    "Precio Call": {
-        "28/04/2028 hasta 27/04/2029": 1.04750,
-        "28/04/2029 hasta 27/04/2030": 1.02375,
-        "28/04/2030 en adelante hasta vencimiento": 1.00000
-    },
-    "Comentarios": "La Compañía podrá rescatar la totalidad o parte de las ONs a partir del 28 de abril de 2028. Los precios de rescate se aplican sobre el capital pendiente de pago si ya se hubieran realizado amortizaciones. Requiere una notificación previa de entre 30 y 60 días. El rescate incluye intereses devengados, impagos y montos adicionales si correspondieran.",
-    "Aviso Resultados": """https://lt.mydplr.com/1fc5aec85b2d7e780537b1eb785b04a0-fd388f880eeed95f651bb714f572f2c5""",
-    "Suplemento Prospecto": """https://lt.mydplr.com/26db2285d8b128fa5f0caada44dc184e-fd388f880eeed95f651bb714f572f2c5"""
 }
 TTCAO = {
     "Nombre Security": "ON Tecpetrol Clase X Vto. 22 01 2033",
@@ -24705,7 +24753,6 @@ MGCOO = rentafija.Bono(MGCOO)
 MGCRO = rentafija.Bono(MGCRO)
 RUCDO = rentafija.Bono(RUCDO)
 DNC7O = rentafija.Bono(DNC7O)
-DNCAO = rentafija.Bono(DNCAO)
 TLCMO = rentafija.Bono(TLCMO)
 TLCTO = rentafija.Bono(TLCTO)
 LMS8O = rentafija.Bono(LMS8O)
@@ -25131,7 +25178,7 @@ todos_los_bonos = [
     BACAO, RC1CO, RCCJO, MTCGO, PNXCO, PN43O, TLCPO, PLC4O,
     YMCXO, IRCFO, YMCUO, YMC1O, YM39O, MGCOO, MGCRO, RUCDO,
     DNC7O, TLCMO, LMS8O, LMS9O, IRCPO, VSCOO, VSCUO, VSCVO,
-    CP38O, TLCTO, VSCXO, BACHO, TTCAO, DNCAO,
+    CP38O, TLCTO, VSCXO, BACHO, TTCAO,
 
     # CORPORATIVOS HARD DÓLAR MEP
 
