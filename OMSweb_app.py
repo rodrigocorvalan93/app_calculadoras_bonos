@@ -75,6 +75,7 @@ from especies import todos_los_bonos
 
 OMScredit.init(todos_los_bonos)
 from indices import (
+    fetch_mae_forex_snapshot,
     fx_status_text,
     get_fx_hoy,
     invalidate_fx_cache,
@@ -1551,6 +1552,145 @@ def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> N
                 width="stretch",
                 hide_index=True,
             )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Dólar implícito vía bonos (USD/Cable=C, USB/MEP=D)
+# ──────────────────────────────────────────────────────────────────────
+
+# Sufijo por convención BYMA en este app: C = cable (USD), D = MEP (USB).
+_FX_LEG_SUFFIX = {"USD": "C", "USB": "D"}
+
+
+def _build_implicit_fx_table(
+    username: str,
+    password: str,
+    bond_bases: List[str],
+    plazo: str,
+    leg: str,
+    fx_close: Optional[float] = None,
+) -> pd.DataFrame:
+    """Calcula bid/last/offer del dólar implícito para cada bono base.
+
+    Convención:
+      bid_FX = ARS_bid / USDleg_offer
+      offer_FX = ARS_offer / USDleg_bid
+      last_FX = ARS_last / USDleg_last
+      var_vs_close = last_FX / fx_close - 1
+
+    Args:
+      leg: "USD" (usa ticker C, cable) o "USB" (usa ticker D, MEP).
+      fx_close: A3500 close de ayer (para variación). Si None, var=NaN.
+
+    Returns DataFrame con columnas:
+      Bono, Bid, Last, Offer, Var %, Vol ARS (M), Vol USD (M)
+    """
+    suf = _FX_LEG_SUFFIX.get(leg.upper())
+    if not suf or not bond_bases:
+        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
+
+    ars_codes = list(bond_bases)
+    usd_codes = [f"{b}{suf}" for b in bond_bases]
+    syms_ars = _build_symbols(ars_codes, plazo)
+    syms_usd = _build_symbols(usd_codes, plazo)
+    all_syms = syms_ars + syms_usd
+
+    raw = fetch_marketdata(
+        username, password, all_syms,
+        market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+    )
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
+
+    snap = OMSprices.market_snapshot(raw)
+    snap = _ensure_codigo_col(snap, source="index")
+    snap = snap.set_index("Código", drop=False)
+
+    rows: List[Dict[str, Any]] = []
+    for base, usd_code in zip(ars_codes, usd_codes):
+        if base not in snap.index or usd_code not in snap.index:
+            continue
+        a = snap.loc[base]
+        u = snap.loc[usd_code]
+
+        def _f(x):
+            try:
+                v = float(x)
+                return v if np.isfinite(v) and v > 0 else np.nan
+            except Exception:
+                return np.nan
+
+        ars_bid = _f(a.get("bid_price"))
+        ars_off = _f(a.get("offer_price"))
+        ars_last = _f(a.get("last"))
+        usd_bid = _f(u.get("bid_price"))
+        usd_off = _f(u.get("offer_price"))
+        usd_last = _f(u.get("last"))
+        ars_vol = _f(a.get("volume"))
+        usd_vol = _f(u.get("volume"))
+
+        bid_fx = ars_bid / usd_off if (np.isfinite(ars_bid) and np.isfinite(usd_off)) else np.nan
+        off_fx = ars_off / usd_bid if (np.isfinite(ars_off) and np.isfinite(usd_bid)) else np.nan
+        last_fx = ars_last / usd_last if (np.isfinite(ars_last) and np.isfinite(usd_last)) else np.nan
+
+        var_pct = (last_fx / fx_close - 1.0) if (fx_close and np.isfinite(last_fx) and fx_close > 0) else np.nan
+
+        rows.append({
+            "Bono": base,
+            "Bid": bid_fx,
+            "Last": last_fx,
+            "Offer": off_fx,
+            "Var %": var_pct,
+            "Vol ARS (M)": (ars_vol / 1e6) if np.isfinite(ars_vol) else np.nan,
+            "Vol USD (M)": (usd_vol / 1e6) if np.isfinite(usd_vol) else np.nan,
+        })
+
+    if not rows:
+        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
+    return pd.DataFrame(rows)
+
+
+def _style_implicit_fx(df: pd.DataFrame):
+    if df is None or df.empty:
+        return pd.DataFrame().style
+    fmt = {
+        "Bid": "{:,.2f}",
+        "Last": "{:,.2f}",
+        "Offer": "{:,.2f}",
+        "Var %": "{:+.2%}",
+        "Vol ARS (M)": "{:,.1f}",
+        "Vol USD (M)": "{:,.2f}",
+    }
+    sty = df.style.format(fmt, na_rep="—")
+    if "Var %" in df.columns:
+        def _color_var(v):
+            try:
+                vf = float(v)
+            except Exception:
+                return ""
+            if not np.isfinite(vf):
+                return ""
+            if vf > 0:
+                return "color: #2ecc71;"
+            if vf < 0:
+                return "color: #e74c3c;"
+            return ""
+        sty = sty.map(_color_var, subset=["Var %"])
+    return sty
+
+
+def _top_volume_bond(df: pd.DataFrame) -> Optional[pd.Series]:
+    """Bono con mayor Vol USD (M) en el DataFrame de FX implícito."""
+    if df is None or df.empty or "Vol USD (M)" not in df.columns:
+        return None
+    v = pd.to_numeric(df["Vol USD (M)"], errors="coerce")
+    if not v.notna().any():
+        return None
+    idx = v.idxmax()
+    try:
+        return df.loc[idx]
+    except Exception:
+        return None
 
 
 def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
@@ -3197,10 +3337,22 @@ def _render_sidebar_macro():
         except Exception:
             return str(f)
 
-    # A3500
+    # A3500 — delta numérico día/día (signo correcto: ▲ verde / ▼ rojo)
     f, v = _last_val("a3500", "tca3500")
     if v is not None:
-        st.sidebar.metric("A3500 (mayorista)", f"{v:,.2f}", delta=f"al {_fecha_str(f)}")
+        df_a3500 = inp.get("a3500")
+        delta_str = None
+        if df_a3500 is not None and len(df_a3500) >= 2:
+            try:
+                v_prev = float(df_a3500.iloc[-2]["tca3500"])
+                if v_prev > 0:
+                    chg = float(v) - v_prev
+                    pct = chg / v_prev * 100.0
+                    delta_str = f"{chg:+,.2f} ({pct:+.2f}%)"
+            except Exception:
+                delta_str = None
+        st.sidebar.metric("A3500 (mayorista)", f"{v:,.2f}", delta=delta_str)
+        st.sidebar.caption(f"al {_fecha_str(f)}")
 
     # Badlar
     f, v = _last_val("badlar", "BADLAR")
@@ -4634,6 +4786,62 @@ def main():
     _lap("after build_curve_codes")
     curve_labels = {c.key: c.label for c in CURVES}
 
+    # ── Monitor sidebar: USD / USB del bono más operado (auto-refresh) ──
+    @st.fragment(run_every=refresh_interval if refresh_interval else 30)
+    def _render_sidebar_dolares_live():
+        try:
+            base_codes = sorted(set(
+                (curves.get("globales", []) or []) + (curves.get("bonares", []) or [])
+            ))
+            if not base_codes:
+                return
+            fx_close = None
+            try:
+                _df = rentafija.inputs.get("a3500")
+                if _df is not None and len(_df) >= 2:
+                    fx_close = float(_df.iloc[-2]["tca3500"])
+                elif _df is not None and len(_df) == 1:
+                    fx_close = float(_df.iloc[-1]["tca3500"])
+            except Exception:
+                fx_close = None
+
+            # Computamos sobre 24hs (más liquidez)
+            df_usd = _build_implicit_fx_table(
+                username, password, base_codes, "24hs", "USD", fx_close=fx_close
+            )
+            df_usb = _build_implicit_fx_table(
+                username, password, base_codes, "24hs", "USB", fx_close=fx_close
+            )
+
+            with st.sidebar:
+                st.divider()
+                st.header("💵 Dólar (bono top-vol)")
+
+                def _show(label: str, df: pd.DataFrame):
+                    top = _top_volume_bond(df)
+                    if top is None or pd.isna(top.get("Last")):
+                        st.metric(label, "—")
+                        return
+                    last = float(top["Last"])
+                    var = top.get("Var %")
+                    delta = None
+                    if pd.notna(var):
+                        delta = f"{float(var) * 100:+.2f}% vs A3500 close"
+                    st.metric(
+                        f"{label} · {top.get('Bono', '?')}",
+                        f"${last:,.2f}",
+                        delta=delta,
+                    )
+
+                _show("USD (cable)", df_usd)
+                _show("USB (MEP)", df_usb)
+        except Exception as e:
+            with st.sidebar:
+                st.caption(f"⚠️ Monitor dólar: {e}")
+
+    _render_sidebar_dolares_live()
+    _lap("after sidebar dolares live")
+
     # Navegación: pestañas
     # ── NAVEGACIÓN: radio en vez de st.tabs ──
     # Rationale: st.tabs ejecuta el código de TODOS los tabs en cada rerun,
@@ -4642,6 +4850,7 @@ def main():
     # activo, sólo corre el tab visible → render en <1s.
     _TAB_LABELS = [
         "Curvas", "Mercado", "Cauciones", "Forwards", "Gráficos", "Futuros",
+        "Dólares",
         "Total Return", "Análisis Yields", "Comparador Yields",
         "Breakeven Inflación", "Crédito Corp.", "Histórico",
         "Posiciones", "Matriz Tenencias",
@@ -4675,6 +4884,7 @@ def main():
     tab_fwds = _TabGuard("Forwards")
     tab_graficos = _TabGuard("Gráficos")
     tab_futuros = _TabGuard("Futuros")
+    tab_dolares = _TabGuard("Dólares")
     tab_tr = _TabGuard("Total Return")
     tab_yas = _TabGuard("Análisis Yields")
     tab_comp = _TabGuard("Comparador Yields")
@@ -5423,6 +5633,268 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
         _futuros_live()
         _lap("after futuros")
+
+    # ─────────────────────────
+    # Dólares (SIOPEL + USD/USB implícito por bono + calculadora FX)
+    # ─────────────────────────
+    if tab_dolares:
+        @st.fragment(run_every=refresh_interval)
+        def _dolares_live():
+            st.subheader("💵 Monitor de Dólares")
+            st.caption(
+                "USD = vía Cable (ticker C). USB = vía MEP/Bolsa (ticker D). "
+                "Bid implícito = ARS bid / USD-leg offer. Offer implícito = ARS offer / USD-leg bid. "
+                "Last implícito = ARS last / USD-leg last."
+            )
+
+            # FX close de ayer (referencia para variación)
+            fx_close = None
+            try:
+                _df_a3500 = rentafija.inputs.get("a3500")
+                if _df_a3500 is not None and len(_df_a3500) >= 2:
+                    fx_close = float(_df_a3500.iloc[-2]["tca3500"])
+                elif _df_a3500 is not None and len(_df_a3500) == 1:
+                    fx_close = float(_df_a3500.iloc[-1]["tca3500"])
+            except Exception:
+                fx_close = None
+
+            # ── 1. SIOPEL — FX oficial MAE ───────────────────────────
+            st.markdown("#### 🏛️ SIOPEL — Mercado Abierto Electrónico (oficial)")
+            mae_df = fetch_mae_forex_snapshot()
+            if mae_df is None or mae_df.empty:
+                st.info(
+                    "SIOPEL no disponible (sin `MAE_API_KEY` o API caída). "
+                    "Se sigue mostrando el A3500 que levanta el waterfall MAE→BYMA→serie."
+                )
+            else:
+                # Columnas que solemos esperar; las desconocidas se preservan al final
+                preferred = ["ticker", "segmento", "plazo",
+                             "precioCompra", "precioVenta", "precioUltimo",
+                             "variacion", "volumenOperado", "horaUltima"]
+                cols = [c for c in preferred if c in mae_df.columns]
+                extras = [c for c in mae_df.columns if c not in cols]
+                mae_view = mae_df[cols + extras].copy()
+                # Tipado numérico de las columnas relevantes
+                for c in ("precioCompra", "precioVenta", "precioUltimo",
+                          "variacion", "volumenOperado"):
+                    if c in mae_view.columns:
+                        mae_view[c] = pd.to_numeric(mae_view[c], errors="coerce")
+                fmt_mae = {
+                    "precioCompra": "{:,.4f}",
+                    "precioVenta": "{:,.4f}",
+                    "precioUltimo": "{:,.4f}",
+                    "variacion": "{:+.2%}",
+                    "volumenOperado": "{:,.0f}",
+                }
+                fmt_mae = {k: v for k, v in fmt_mae.items() if k in mae_view.columns}
+                st.dataframe(
+                    mae_view.style.format(fmt_mae, na_rep="—"),
+                    width="stretch",
+                    hide_index=True,
+                    height=min(420, 50 + 35 * len(mae_view)),
+                )
+                st.caption(f"A3500 close (referencia para variación): **{fx_close:,.2f}**" if fx_close else "")
+
+            st.divider()
+
+            # ── 2. Tablas FX implícito por bono ──────────────────────
+            # Bases: globales (con C y D) + bonares (sólo D, pero igual probamos C)
+            globales_codes = curves.get("globales", []) or []
+            bonares_codes = curves.get("bonares", []) or []
+            base_codes = sorted(set(list(globales_codes) + list(bonares_codes)))
+
+            if not base_codes:
+                st.warning("No hay globales ni bonares en el universo cargado.")
+            else:
+                col_plazo, col_leg = st.columns([1, 1])
+                with col_plazo:
+                    plazos_show = st.multiselect(
+                        "Plazos",
+                        options=["24hs", "CI"],
+                        default=["24hs"],
+                        key="dolares_plazos",
+                    )
+                with col_leg:
+                    legs_show = st.multiselect(
+                        "Legs",
+                        options=["USD (cable)", "USB (MEP)"],
+                        default=["USD (cable)", "USB (MEP)"],
+                        key="dolares_legs",
+                    )
+
+                leg_map = {"USD (cable)": "USD", "USB (MEP)": "USB"}
+
+                for leg_lbl in legs_show:
+                    leg = leg_map[leg_lbl]
+                    for pz in plazos_show:
+                        st.markdown(f"##### {leg_lbl} — {pz}")
+                        df_fx = _build_implicit_fx_table(
+                            username, password,
+                            base_codes, pz, leg, fx_close=fx_close,
+                        )
+                        if df_fx.empty:
+                            st.caption(f"Sin datos {leg_lbl} {pz}.")
+                            continue
+                        # Ordenar por Vol USD desc (más operados arriba)
+                        try:
+                            df_fx = df_fx.sort_values(
+                                "Vol USD (M)", ascending=False, na_position="last"
+                            ).reset_index(drop=True)
+                        except Exception:
+                            pass
+                        st.dataframe(
+                            _style_implicit_fx(df_fx),
+                            width="stretch",
+                            hide_index=True,
+                            height=min(560, 50 + 35 * len(df_fx)),
+                        )
+
+            st.divider()
+
+            # ── 3. Mini calculadora FX ───────────────────────────────
+            st.markdown("#### 🧮 Calculadora de operación FX")
+            st.caption(
+                "Estimá la compra/venta cruzada para hacerte de USD o ARS. "
+                "Usá el bono y leg que prefieras (default: GD30 / USD cable)."
+            )
+
+            calc_c1, calc_c2, calc_c3, calc_c4 = st.columns([1, 1, 1, 1])
+            with calc_c1:
+                calc_bono = st.selectbox(
+                    "Bono",
+                    options=base_codes,
+                    index=(base_codes.index("GD30") if "GD30" in base_codes else 0),
+                    key="dolar_calc_bono",
+                )
+            with calc_c2:
+                calc_leg_lbl = st.radio(
+                    "Leg", options=["USD (cable)", "USB (MEP)"],
+                    horizontal=True, key="dolar_calc_leg",
+                )
+            with calc_c3:
+                calc_plazo = st.radio(
+                    "Plazo", options=["24hs", "CI"],
+                    horizontal=True, key="dolar_calc_plazo",
+                )
+            with calc_c4:
+                calc_side = st.radio(
+                    "Operación", options=["Comprar USD", "Vender USD"],
+                    horizontal=True, key="dolar_calc_side",
+                )
+
+            calc_leg = leg_map[calc_leg_lbl]
+            # Fetch single pair fresh
+            df_one = _build_implicit_fx_table(
+                username, password,
+                [calc_bono], calc_plazo, calc_leg, fx_close=fx_close,
+            )
+            if df_one.empty:
+                st.warning(f"Sin book para {calc_bono} / {calc_leg_lbl} / {calc_plazo}.")
+            else:
+                r = df_one.iloc[0]
+                bid_fx = float(r["Bid"]) if pd.notna(r["Bid"]) else None
+                last_fx = float(r["Last"]) if pd.notna(r["Last"]) else None
+                offer_fx = float(r["Offer"]) if pd.notna(r["Offer"]) else None
+
+                # Levantamos precios brutos del bono ARS y USD-leg para mostrar la ruta
+                suf = _FX_LEG_SUFFIX[calc_leg]
+                usd_code = f"{calc_bono}{suf}"
+                syms = _build_symbols([calc_bono, usd_code], calc_plazo)
+                _raw = fetch_marketdata(username, password, syms,
+                                        market_id=DEFAULT_MARKET_ID,
+                                        entries=cfg.ENTRIES, depth=1)
+                _snap = OMSprices.market_snapshot(_raw) if (_raw is not None and not _raw.empty) else None
+                if _snap is not None and not _snap.empty:
+                    _snap = _ensure_codigo_col(_snap, source="index").set_index("Código", drop=False)
+
+                def _p(code, field):
+                    if _snap is None or code not in _snap.index:
+                        return None
+                    try:
+                        v = float(_snap.loc[code, field])
+                        return v if np.isfinite(v) and v > 0 else None
+                    except Exception:
+                        return None
+
+                ars_bid = _p(calc_bono, "bid_price")
+                ars_off = _p(calc_bono, "offer_price")
+                usd_bid = _p(usd_code, "bid_price")
+                usd_off = _p(usd_code, "offer_price")
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric(f"Bid {calc_leg}", f"{bid_fx:,.2f}" if bid_fx else "—")
+                m2.metric(f"Last {calc_leg}", f"{last_fx:,.2f}" if last_fx else "—")
+                m3.metric(f"Offer {calc_leg}", f"{offer_fx:,.2f}" if offer_fx else "—")
+
+                st.markdown("**Cantidad a operar**")
+                qty_c1, qty_c2 = st.columns([1, 1])
+                with qty_c1:
+                    qty_mode = st.radio(
+                        "Definir por", options=["USD a obtener/entregar", "ARS a invertir/recibir"],
+                        horizontal=True, key="dolar_calc_qty_mode",
+                    )
+                with qty_c2:
+                    qty_val = st.number_input(
+                        "Cantidad", value=10000.0, step=100.0,
+                        format="%.2f", key="dolar_calc_qty",
+                    )
+
+                # En la convención BYMA, los precios cotizan por VN 100.
+                # Por eso para tomar/dar X nominales pagás X * precio / 100.
+                # Cuando hacés MEP/cable, comprás VN bono en ARS y vendés mismo VN en USD-leg.
+                #   VN = ARS_out * 100 / price_ARS_offer   (al comprar bono ARS pagás offer)
+                #   USD_in = VN * price_USDleg_bid / 100   (al vender USD-leg te pagan bid)
+                # Tipo de cambio efectivo = ARS_out / USD_in = price_ARS_offer / price_USDleg_bid
+                # ↑ esto coincide con offer_fx que definimos arriba.
+
+                if calc_side == "Comprar USD":
+                    # ARS → comprar bono ARS al offer, vender USD-leg al bid → USD_in
+                    px_a = ars_off
+                    px_u = usd_bid
+                    fx_eff = offer_fx
+                    side_lbl_a = "compra bono ARS"
+                    side_lbl_u = "venta bono USD-leg"
+                else:
+                    # USD → comprar USD-leg al offer, vender bono ARS al bid → ARS_in
+                    px_a = ars_bid
+                    px_u = usd_off
+                    fx_eff = bid_fx
+                    side_lbl_a = "venta bono ARS"
+                    side_lbl_u = "compra bono USD-leg"
+
+                if px_a is None or px_u is None or not fx_eff:
+                    st.warning("Faltan puntas para esta operación (sin book completo).")
+                else:
+                    if qty_mode.startswith("USD"):
+                        usd_qty = float(qty_val)
+                        # USD_in = VN * px_u / 100  →  VN = USD_qty * 100 / px_u
+                        vn = usd_qty * 100.0 / px_u
+                        ars_amt = vn * px_a / 100.0
+                    else:
+                        ars_qty = float(qty_val)
+                        # ARS_out = VN * px_a / 100  →  VN = ARS_qty * 100 / px_a
+                        vn = ars_qty * 100.0 / px_a
+                        ars_amt = ars_qty
+                        usd_qty = vn * px_u / 100.0
+
+                    st.markdown(
+                        f"**TC efectivo:** `{fx_eff:,.2f}` "
+                        f"(≈ {qty_mode.split()[0]} → {('USD' if qty_mode.startswith('USD') else 'ARS')})"
+                    )
+
+                    res_c1, res_c2, res_c3 = st.columns(3)
+                    with res_c1:
+                        st.metric(f"VN {calc_bono} ({side_lbl_a})", f"{vn:,.0f}")
+                        st.caption(f"@ ARS {px_a:,.4f} (por VN 100)")
+                    with res_c2:
+                        st.metric(f"VN {usd_code} ({side_lbl_u})", f"{vn:,.0f}")
+                        st.caption(f"@ USD {px_u:,.4f} (por VN 100)")
+                    with res_c3:
+                        st.metric("ARS", f"{ars_amt:,.2f}")
+                        st.metric("USD", f"{usd_qty:,.2f}")
+
+        _dolares_live()
+        _lap("after dolares")
 
     if tab_tr:
         @st.fragment
