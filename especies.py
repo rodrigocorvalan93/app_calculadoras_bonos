@@ -16406,8 +16406,8 @@ BNCXO = {
     "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": None,
     "Fechas de cupón": [
-    "28/07/2025",
-    "28/10/2025",
+    "28/07/2026",
+    "28/10/2026",
     "28/01/2027",
     "28/04/2027"], # Lista de fechas como ejemplo
     "Amortización": None,
