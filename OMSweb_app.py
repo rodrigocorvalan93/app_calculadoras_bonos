@@ -1509,6 +1509,18 @@ def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> N
         [{"Offer Price": x.get("price"), "Offer Size": x.get("size")} for x in of if isinstance(x, dict)]
     )
 
+    settle = _settlement_date_str(plazo)
+    if not bi_df.empty:
+        bi_df["Bid TIR"] = [
+            tirea_for_price(calc_code, p, settle) for p in bi_df["Bid Price"].tolist()
+        ]
+        bi_df = bi_df[["Bid Price", "Bid TIR", "Bid Size"]]
+    if not of_df.empty:
+        of_df["Offer TIR"] = [
+            tirea_for_price(calc_code, p, settle) for p in of_df["Offer Price"].tolist()
+        ]
+        of_df = of_df[["Offer Price", "Offer TIR", "Offer Size"]]
+
     st.markdown(f"#### 📖 Book — `{calc_code}`")
     col_b, col_o = st.columns(2)
     with col_b:
@@ -1517,7 +1529,11 @@ def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> N
             st.caption("(sin bids)")
         else:
             st.dataframe(
-                bi_df.style.format({"Bid Price": "{:,.4f}", "Bid Size": "{:,.0f}"}),
+                bi_df.style.format({
+                    "Bid Price": "{:,.4f}",
+                    "Bid TIR": "{:.2%}",
+                    "Bid Size": "{:,.0f}",
+                }),
                 width="stretch",
                 hide_index=True,
             )
@@ -1527,7 +1543,11 @@ def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> N
             st.caption("(sin offers)")
         else:
             st.dataframe(
-                of_df.style.format({"Offer Price": "{:,.4f}", "Offer Size": "{:,.0f}"}),
+                of_df.style.format({
+                    "Offer Price": "{:,.4f}",
+                    "Offer TIR": "{:.2%}",
+                    "Offer Size": "{:,.0f}",
+                }),
                 width="stretch",
                 hide_index=True,
             )
