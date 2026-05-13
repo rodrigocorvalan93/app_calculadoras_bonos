@@ -1720,6 +1720,69 @@ def _top_volume_bond(df: pd.DataFrame) -> Optional[pd.Series]:
         return None
 
 
+def _ccl_last_close(df_implicit: pd.DataFrame) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    """Devuelve (last, close, bono) del FX implícito del bono top-vol.
+
+    El close se reconstruye como ars_close/usdleg_close del mismo par y se
+    embute en _build_implicit_fx_table como columna implícita — acá la
+    derivamos invirtiendo la fórmula de Var %:
+       close = last / (1 + var)
+    Es algebraicamente equivalente a tener una columna 'Close FX' separada
+    y evita re-fetchear el snapshot.
+    """
+    top = _top_volume_bond(df_implicit)
+    if top is None:
+        return None, None, None
+    try:
+        last = float(top["Last"])
+        if not np.isfinite(last):
+            return None, None, str(top.get("Bono"))
+        var = top.get("Var %")
+        if pd.isna(var) or not np.isfinite(float(var)):
+            return last, None, str(top.get("Bono"))
+        close = last / (1.0 + float(var))
+        return last, close, str(top.get("Bono"))
+    except Exception:
+        return None, None, None
+
+
+def _compute_brecha_canje(
+    df_usd: pd.DataFrame,
+    df_usb: pd.DataFrame,
+    oficial_last: Optional[float],
+    oficial_close: Optional[float],
+) -> Dict[str, Optional[float]]:
+    """Brecha = CCL/oficial − 1.  Canje = CCL/MEP − 1.
+
+    Variación expresada en puntos porcentuales (delta absoluto entre hoy y
+    el cierre de ayer).
+    """
+    ccl_last, ccl_close, ccl_bono = _ccl_last_close(df_usd)
+    mep_last, mep_close, mep_bono = _ccl_last_close(df_usb)
+
+    out: Dict[str, Optional[float]] = {
+        "ccl_bono": ccl_bono, "mep_bono": mep_bono,
+        "ccl_last": ccl_last, "mep_last": mep_last,
+        "brecha_hoy": None, "brecha_ayer": None, "brecha_var_pp": None,
+        "canje_hoy": None, "canje_ayer": None, "canje_var_pp": None,
+    }
+    if ccl_last and oficial_last and oficial_last > 0:
+        out["brecha_hoy"] = ccl_last / oficial_last - 1.0
+    if ccl_close and oficial_close and oficial_close > 0:
+        out["brecha_ayer"] = ccl_close / oficial_close - 1.0
+    if out["brecha_hoy"] is not None and out["brecha_ayer"] is not None:
+        out["brecha_var_pp"] = out["brecha_hoy"] - out["brecha_ayer"]
+
+    if ccl_last and mep_last and mep_last > 0:
+        out["canje_hoy"] = ccl_last / mep_last - 1.0
+    if ccl_close and mep_close and mep_close > 0:
+        out["canje_ayer"] = ccl_close / mep_close - 1.0
+    if out["canje_hoy"] is not None and out["canje_ayer"] is not None:
+        out["canje_var_pp"] = out["canje_hoy"] - out["canje_ayer"]
+
+    return out
+
+
 def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     if df is None or df.empty:
         return pd.DataFrame().style
@@ -3407,19 +3470,28 @@ def _render_sidebar_macro():
     if v is not None:
         st.sidebar.metric("CER", f"{v:,.5f}", delta=f"al {_fecha_str(f)}")
 
-    # Inflación MOM — último dato observado (no proyectado)
-    df_inflam = inp.get("inflamom")
-    if df_inflam is not None and not df_inflam.empty and "inflacionmom" in df_inflam.columns:
-        # inflamom es hist+proy (combine_first). Filtramos solo fechas <= hoy
-        # y descartamos meses futuros (proyección). El dato BCRA real siempre
-        # tiene fecha = último día del mes observado, anterior al mes en curso.
-        hoy = date.today()
-        primer_dia_mes = hoy.replace(day=1)
-        obs = df_inflam[df_inflam.index < primer_dia_mes]
-        if not obs.empty:
-            f_inf = obs.index[-1]
-            v_inf = obs.iloc[-1]["inflacionmom"]
-            st.sidebar.metric("Inflación MOM (obs.)", f"{v_inf:.1f}%", delta=f"al {f_inf}")
+    # Inflación MOM — último dato BCRA observado (no proyección del usuario).
+    # Usamos 'inflamom_observado' (solo BCRA); 'inflamom' es hist + proy
+    # combinados, donde la proy puede pisar meses que aún no publicó INDEC.
+    df_obs = inp.get("inflamom_observado")
+    if df_obs is None or df_obs.empty:
+        # Fallback: usar inflamom completo pero filtrar meses cuyo dato real
+        # ya debería estar publicado (INDEC publica ~14 días después de fin
+        # de mes). Conservador: exigimos que el último día del mes esté
+        # al menos 15 días atrás.
+        df_obs = inp.get("inflamom")
+        if df_obs is not None and not df_obs.empty and "inflacionmom" in df_obs.columns:
+            cutoff = date.today() - pd.Timedelta(days=15)
+            idx_dates = pd.to_datetime(df_obs.index).date
+            df_obs = df_obs[idx_dates <= cutoff]
+    if df_obs is not None and not df_obs.empty and "inflacionmom" in df_obs.columns:
+        f_inf = df_obs.index[-1]
+        v_inf = df_obs.iloc[-1]["inflacionmom"]
+        try:
+            f_inf_str = f_inf.strftime("%Y-%m")
+        except Exception:
+            f_inf_str = str(f_inf)[:7]
+        st.sidebar.metric("Inflación MOM (obs.)", f"{v_inf:.1f}%", delta=f"mes {f_inf_str}")
 
     # UVA
     f, v = _last_val("UVA", "UVA")
@@ -4866,6 +4938,30 @@ def main():
 
             _show("USD (cable)", df_usd)
             _show("USB (MEP)", df_usb)
+
+            # Brecha (CCL vs oficial) y Canje (CCL vs MEP)
+            oficial_last = None
+            try:
+                oficial_last = float(get_fx_hoy(session=session))
+            except Exception:
+                oficial_last = None
+            bc = _compute_brecha_canje(df_usd, df_usb, oficial_last, fx_close)
+
+            def _pp(v):
+                return None if v is None else f"{v * 100:+.2f} pp"
+
+            if bc["brecha_hoy"] is not None:
+                st.metric(
+                    "Brecha (CCL/oficial)",
+                    f"{bc['brecha_hoy'] * 100:.2f}%",
+                    delta=_pp(bc["brecha_var_pp"]),
+                )
+            if bc["canje_hoy"] is not None:
+                st.metric(
+                    "Canje (CCL/MEP)",
+                    f"{bc['canje_hoy'] * 100:.2f}%",
+                    delta=_pp(bc["canje_var_pp"]),
+                )
         except Exception as e:
             st.caption(f"⚠️ Monitor dólar: {e}")
 
@@ -5790,7 +5886,63 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
             st.divider()
 
-            # ── 3. Mini calculadora FX ───────────────────────────────
+            # ── 3. Brecha y Canje (sobre el bono top-vol de 24hs) ────
+            st.markdown("#### 📐 Brecha y Canje")
+            st.caption(
+                "Brecha = CCL / A3500 oficial − 1. "
+                "Canje = CCL / MEP − 1. "
+                "Var en puntos porcentuales (pp) vs cierre de ayer. "
+                "Se computa con el bono de mayor volumen del día (24hs) en cada leg."
+            )
+            try:
+                df_usd_24 = _build_implicit_fx_table(
+                    username, password, base_codes, "24hs", "USD", fx_close=fx_close,
+                )
+                df_usb_24 = _build_implicit_fx_table(
+                    username, password, base_codes, "24hs", "USB", fx_close=fx_close,
+                )
+                oficial_last_tab = None
+                try:
+                    oficial_last_tab = float(get_fx_hoy(session=get_session(username, password)))
+                except Exception:
+                    oficial_last_tab = None
+                bc_tab = _compute_brecha_canje(df_usd_24, df_usb_24, oficial_last_tab, fx_close)
+
+                b_c1, b_c2, b_c3, b_c4 = st.columns(4)
+                with b_c1:
+                    if bc_tab["ccl_last"]:
+                        st.metric(f"CCL · {bc_tab['ccl_bono']}", f"${bc_tab['ccl_last']:,.2f}")
+                    if bc_tab["mep_last"]:
+                        st.metric(f"MEP · {bc_tab['mep_bono']}", f"${bc_tab['mep_last']:,.2f}")
+                with b_c2:
+                    if oficial_last_tab:
+                        st.metric("A3500 (last intraday)", f"${oficial_last_tab:,.2f}")
+                    if fx_close:
+                        st.metric("A3500 (close ayer)", f"${fx_close:,.2f}")
+                with b_c3:
+                    if bc_tab["brecha_hoy"] is not None:
+                        delta_b = (f"{bc_tab['brecha_var_pp'] * 100:+.2f} pp"
+                                   if bc_tab["brecha_var_pp"] is not None else None)
+                        st.metric(
+                            "Brecha (CCL/oficial)",
+                            f"{bc_tab['brecha_hoy'] * 100:.2f}%",
+                            delta=delta_b,
+                        )
+                with b_c4:
+                    if bc_tab["canje_hoy"] is not None:
+                        delta_c = (f"{bc_tab['canje_var_pp'] * 100:+.2f} pp"
+                                   if bc_tab["canje_var_pp"] is not None else None)
+                        st.metric(
+                            "Canje (CCL/MEP)",
+                            f"{bc_tab['canje_hoy'] * 100:.2f}%",
+                            delta=delta_c,
+                        )
+            except Exception as e:
+                st.warning(f"No se pudo calcular brecha/canje: {e}")
+
+            st.divider()
+
+            # ── 4. Mini calculadora FX ───────────────────────────────
             st.markdown("#### 🧮 Calculadora de operación FX")
             st.caption(
                 "Estimá la compra/venta cruzada para hacerte de USD o ARS. "
@@ -5864,6 +6016,61 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 m1.metric(f"Bid {calc_leg}", f"{bid_fx:,.2f}" if bid_fx else "—")
                 m2.metric(f"Last {calc_leg}", f"{last_fx:,.2f}" if last_fx else "—")
                 m3.metric(f"Offer {calc_leg}", f"{offer_fx:,.2f}" if offer_fx else "—")
+
+                # Brecha y canje del bono seleccionado (vs A3500 last y vs leg opuesta)
+                try:
+                    oficial_last_calc = float(get_fx_hoy(session=get_session(username, password)))
+                except Exception:
+                    oficial_last_calc = None
+                # Last del leg opuesto sobre el MISMO bono
+                opp_suf = "D" if suf == "C" else "C"
+                opp_code = f"{calc_bono}{opp_suf}"
+                if _snap is None or opp_code not in _snap.index:
+                    _raw_opp = fetch_marketdata(
+                        username, password,
+                        _build_symbols([opp_code], calc_plazo),
+                        market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+                    )
+                    if _raw_opp is not None and not _raw_opp.empty:
+                        _snap_opp = OMSprices.market_snapshot(_raw_opp)
+                        _snap_opp = _ensure_codigo_col(_snap_opp, source="index").set_index("Código", drop=False)
+                    else:
+                        _snap_opp = None
+                else:
+                    _snap_opp = _snap
+                opp_last = None
+                if _snap_opp is not None and opp_code in _snap_opp.index:
+                    try:
+                        _v = float(_snap_opp.loc[opp_code, "last"])
+                        if np.isfinite(_v) and _v > 0:
+                            # last_fx_opuesto = ars_last / opp_last
+                            ars_last_raw = _p(calc_bono, "last")
+                            if ars_last_raw:
+                                opp_last = ars_last_raw / _v
+                    except Exception:
+                        opp_last = None
+
+                brecha_calc = (last_fx / oficial_last_calc - 1.0
+                               if (last_fx and oficial_last_calc and oficial_last_calc > 0) else None)
+                # Canje siempre se reporta como CCL/MEP (signo positivo si cable > mep)
+                if last_fx and opp_last:
+                    ccl_v = last_fx if calc_leg == "USD" else opp_last
+                    mep_v = opp_last if calc_leg == "USD" else last_fx
+                    canje_calc = ccl_v / mep_v - 1.0 if mep_v > 0 else None
+                else:
+                    canje_calc = None
+
+                bcc1, bcc2 = st.columns(2)
+                with bcc1:
+                    st.metric(
+                        f"Brecha (last {calc_leg} / A3500)",
+                        f"{brecha_calc * 100:.2f}%" if brecha_calc is not None else "—",
+                    )
+                with bcc2:
+                    st.metric(
+                        f"Canje ({calc_bono}: CCL/MEP)",
+                        f"{canje_calc * 100:.2f}%" if canje_calc is not None else "—",
+                    )
 
                 st.markdown("**Cantidad a operar**")
                 qty_c1, qty_c2 = st.columns([1, 1])
