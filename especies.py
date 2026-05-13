@@ -24810,6 +24810,7 @@ TTD26 = rentafija.Bono(TTD26)
 TTJ26v = rentafija.Bono(TTJ26v)
 TTS26v = rentafija.Bono(TTS26v)
 TTD26v = rentafija.Bono(TTD26v)
+TXMJ8v = rentafija.Bono(TXMJ8v)
 TXMJ9v = rentafija.Bono(TXMJ9v)
 T15E7 = rentafija.Bono(T15E7)
 T30A7 = rentafija.Bono(T30A7)
@@ -24827,6 +24828,7 @@ TZXD6 = rentafija.Bono(TZXD6)
 TZXM7 = rentafija.Bono(TZXM7)
 TZXM8 = rentafija.Bono(TZXM8)
 TZXM9 = rentafija.Bono(TZXM9)
+TXMJ8 = rentafija.Bono(TXMJ8)
 TXMJ9 = rentafija.Bono(TXMJ9)
 TZXA7 = rentafija.Bono(TZXA7)
 TZXY7 = rentafija.Bono(TZXY7)
@@ -24854,6 +24856,7 @@ TZXD7j = rentafija.Bono(TZXD7j)
 TZXS7j = rentafija.Bono(TZXS7j)
 TZX28j = rentafija.Bono(TZX28j)
 TZXS8j = rentafija.Bono(TZXS8j)
+TXMJ8j = rentafija.Bono(TXMJ8j)
 TXMJ9j = rentafija.Bono(TXMJ9j)
 TX26 = rentafija.Bono(TX26)
 TX28 = rentafija.Bono(TX28)
@@ -24979,6 +24982,7 @@ todos_los_bonos = [
     X29Y6j, X31L6j, TZXO6j, X30N6j, X30S6j,
     DICP, PARP, CUAP,
     D30A6, TZV26, TZV27, TZV28,
+    TXMJ8, TXMJ8v, TXMJ8j,
     TXMJ9, TXMJ9v, TXMJ9j,
 
     # GLOBALES (SOBERANOS HARD DÓLAR)
