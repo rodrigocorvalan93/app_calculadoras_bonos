@@ -1562,36 +1562,56 @@ def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> N
 _FX_LEG_SUFFIX = {"USD": "C", "USB": "D"}
 
 
+def _normalize_bond_base(code: str) -> str:
+    """Devuelve la base sin sufijo C/D.
+
+    Ejemplos:
+      GD30  -> GD30
+      GD30C -> GD30
+      AL30D -> AL30
+    """
+    if not code:
+        return code
+    c = str(code).strip()
+    if len(c) > 2 and c[-1] in ("C", "D") and not c.endswith("CC") and not c.endswith("DD"):
+        # Heurística: la base nunca termina en C/D en este universo
+        # (CER/Lecap usan otros sufijos como S/T/etc.).
+        return c[:-1]
+    return c
+
+
 def _build_implicit_fx_table(
     username: str,
     password: str,
-    bond_bases: List[str],
+    bond_codes: List[str],
     plazo: str,
     leg: str,
     fx_close: Optional[float] = None,
 ) -> pd.DataFrame:
-    """Calcula bid/last/offer del dólar implícito para cada bono base.
+    """Calcula bid/last/offer del dólar implícito para cada bono.
 
-    Convención:
-      bid_FX = ARS_bid / USDleg_offer
-      offer_FX = ARS_offer / USDleg_bid
-      last_FX = ARS_last / USDleg_last
-      var_vs_close = last_FX / fx_close - 1
+    `bond_codes` puede contener cualquier mezcla de bases (GD30, AL30) o
+    tickers con sufijo (GD30C, AL30D) — la base se normaliza internamente.
 
-    Args:
-      leg: "USD" (usa ticker C, cable) o "USB" (usa ticker D, MEP).
-      fx_close: A3500 close de ayer (para variación). Si None, var=NaN.
+    Convención BYMA en este app:
+      base + 'C' = cable (USD)
+      base + 'D' = MEP (USB)
+
+    Para cable (leg='USD') usamos pata ARS = base + ticker C.
+    Para MEP (leg='USB')   usamos pata ARS = base + ticker D.
+    Si la pata correspondiente no está cargada en BYMA, la fila se omite.
 
     Returns DataFrame con columnas:
       Bono, Bid, Last, Offer, Var %, Vol ARS (M), Vol USD (M)
     """
     suf = _FX_LEG_SUFFIX.get(leg.upper())
-    if not suf or not bond_bases:
+    if not suf or not bond_codes:
         return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
 
-    ars_codes = list(bond_bases)
-    usd_codes = [f"{b}{suf}" for b in bond_bases]
-    syms_ars = _build_symbols(ars_codes, plazo)
+    # Deduplicar por base (GD30 y GD30C colapsan a la misma fila)
+    bases = sorted({_normalize_bond_base(c) for c in bond_codes if c})
+    usd_codes = [f"{b}{suf}" for b in bases]
+    syms_ars = _build_symbols(bases, plazo)
     syms_usd = _build_symbols(usd_codes, plazo)
     all_syms = syms_ars + syms_usd
 
@@ -1607,7 +1627,7 @@ def _build_implicit_fx_table(
     snap = snap.set_index("Código", drop=False)
 
     rows: List[Dict[str, Any]] = []
-    for base, usd_code in zip(ars_codes, usd_codes):
+    for base, usd_code in zip(bases, usd_codes):
         if base not in snap.index or usd_code not in snap.index:
             continue
         a = snap.loc[base]
@@ -4793,9 +4813,11 @@ def main():
     @st.fragment(run_every=refresh_interval if refresh_interval else 30)
     def _render_sidebar_dolares_live():
         try:
-            base_codes = sorted(set(
-                (curves.get("globales", []) or []) + (curves.get("bonares", []) or [])
-            ))
+            base_codes = sorted({
+                _normalize_bond_base(c)
+                for c in (curves.get("globales", []) or []) + (curves.get("bonares", []) or [])
+                if c
+            })
             if not base_codes:
                 return
             fx_close = None
@@ -5700,10 +5722,16 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             st.divider()
 
             # ── 2. Tablas FX implícito por bono ──────────────────────
-            # Bases: globales (con C y D) + bonares (sólo D, pero igual probamos C)
+            # Bases: globales (cargados como C) + bonares (cargados como D).
+            # Normalizamos a la base (sin sufijo) para que _build_implicit_fx_table
+            # arme las dos patas (ARS + C/D) correctamente.
             globales_codes = curves.get("globales", []) or []
             bonares_codes = curves.get("bonares", []) or []
-            base_codes = sorted(set(list(globales_codes) + list(bonares_codes)))
+            base_codes = sorted({
+                _normalize_bond_base(c)
+                for c in list(globales_codes) + list(bonares_codes)
+                if c
+            })
 
             if not base_codes:
                 st.warning("No hay globales ni bonares en el universo cargado.")
