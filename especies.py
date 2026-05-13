@@ -5052,6 +5052,42 @@ TTD26v = {
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
 }
+TXMJ8v = {
+    "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 30 06 2028",
+    "Código": "TXMJ8v",
+    "ISIN": "TXMJ8",
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberano ARS Dual Tamar/CER",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "30/04/2026",
+    "Vencimiento": "30/06/2028",
+    "Fecha Primer Cupón": None,
+    "Cupón / Spread": 3, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE_CAP", # FIJA o VARIABLE o VARIABLE_CAP(para tamar)
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -10, # enteros negativos
+    "Días Lag índice hasta inc": -10, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1, # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": 0,
+    "Fechas de cupón": ['30/06/2028'], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None  # Precio Call
+}
 TXMJ9v = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 29 06 2029",
     "Código": "TXMJ9v",
@@ -5065,7 +5101,7 @@ TXMJ9v = {
     "Emisión": "30/04/2026",
     "Vencimiento": "29/06/2029",
     "Fecha Primer Cupón": None,
-    "Cupón / Spread": 0, # es un nro flotante
+    "Cupón / Spread": 3, # es un nro flotante
     "Step-up": False, # Es binario True or False
     "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
     "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
