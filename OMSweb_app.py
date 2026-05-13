@@ -1582,6 +1582,99 @@ def _normalize_bond_base(code: str) -> str:
 
 _FX_TABLE_COLS = ["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"]
 
+_CANJE_TABLE_COLS = ["Bono", "Bid", "Last", "Offer", "Var %", "Vol C (M USD)", "Vol D (M USD)"]
+
+
+def _canje_rows_from_snap(snap: pd.DataFrame, bases: List[str]) -> pd.DataFrame:
+    """Tabla de canje (cable vs MEP) sobre el MISMO bono, para cada base.
+
+    Convención solicitada por el usuario:
+      canje last  = px_C_last  / px_D_last
+      canje bid   = px_C_offer / px_D_bid
+      canje offer = px_C_bid   / px_D_offer
+
+    Var % = last/close − 1, donde close = px_C_close / px_D_close.
+    """
+    if snap is None or snap.empty:
+        return pd.DataFrame(columns=_CANJE_TABLE_COLS)
+
+    def _f(x):
+        try:
+            v = float(x)
+            return v if np.isfinite(v) and v > 0 else np.nan
+        except Exception:
+            return np.nan
+
+    rows: List[Dict[str, Any]] = []
+    for base in bases:
+        c_code = f"{base}C"
+        d_code = f"{base}D"
+        if c_code not in snap.index or d_code not in snap.index:
+            continue
+        c = snap.loc[c_code]
+        d = snap.loc[d_code]
+
+        c_bid = _f(c.get("bid_price"))
+        c_off = _f(c.get("offer_price"))
+        c_last = _f(c.get("last"))
+        c_close = _f(c.get("close"))
+        c_vol = _f(c.get("volume"))
+        d_bid = _f(d.get("bid_price"))
+        d_off = _f(d.get("offer_price"))
+        d_last = _f(d.get("last"))
+        d_close = _f(d.get("close"))
+        d_vol = _f(d.get("volume"))
+
+        bid_cj = c_off / d_bid if (np.isfinite(c_off) and np.isfinite(d_bid)) else np.nan
+        off_cj = c_bid / d_off if (np.isfinite(c_bid) and np.isfinite(d_off)) else np.nan
+        last_cj = c_last / d_last if (np.isfinite(c_last) and np.isfinite(d_last)) else np.nan
+        close_cj = c_close / d_close if (np.isfinite(c_close) and np.isfinite(d_close)) else np.nan
+
+        var_pct = (last_cj / close_cj - 1.0) if (np.isfinite(last_cj) and np.isfinite(close_cj) and close_cj > 0) else np.nan
+
+        rows.append({
+            "Bono": base,
+            "Bid": bid_cj,
+            "Last": last_cj,
+            "Offer": off_cj,
+            "Var %": var_pct,
+            "Vol C (M USD)": (c_vol / 1e6) if np.isfinite(c_vol) else np.nan,
+            "Vol D (M USD)": (d_vol / 1e6) if np.isfinite(d_vol) else np.nan,
+        })
+
+    if not rows:
+        return pd.DataFrame(columns=_CANJE_TABLE_COLS)
+    return pd.DataFrame(rows)
+
+
+def _style_canje(df: pd.DataFrame):
+    if df is None or df.empty:
+        return pd.DataFrame().style
+    fmt = {
+        "Bid": "{:,.4f}",
+        "Last": "{:,.4f}",
+        "Offer": "{:,.4f}",
+        "Var %": "{:+.2%}",
+        "Vol C (M USD)": "{:,.2f}",
+        "Vol D (M USD)": "{:,.2f}",
+    }
+    sty = df.style.format(fmt, na_rep="—")
+    if "Var %" in df.columns:
+        def _color_var(v):
+            try:
+                vf = float(v)
+            except Exception:
+                return ""
+            if not np.isfinite(vf):
+                return ""
+            if vf > 0:
+                return "color: #2ecc71;"
+            if vf < 0:
+                return "color: #e74c3c;"
+            return ""
+        sty = sty.map(_color_var, subset=["Var %"])
+    return sty
+
 
 def _get_last_price(
     username: str,
@@ -5975,6 +6068,37 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                             hide_index=True,
                             height=min(560, 50 + 35 * len(df_fx)),
                         )
+
+                # ── 2.b Tabla Canje (cable vs MEP, mismo bono) ───────
+                st.markdown("##### 🔁 Canje por bono (C vs D)")
+                st.caption(
+                    "Last = px C last / px D last. "
+                    "Bid = px C offer / px D bid. "
+                    "Offer = px C bid / px D offer. "
+                    "Var % = last hoy / close ayer − 1."
+                )
+                for pz in plazos_show:
+                    _df_usd_pz, _df_usb_pz, _snap_pz_cj = fx_by_plazo.get(pz, (None, None, None))
+                    if _snap_pz_cj is None or _snap_pz_cj.empty:
+                        st.caption(f"Sin snap para canje {pz}.")
+                        continue
+                    df_cj = _canje_rows_from_snap(_snap_pz_cj, base_codes)
+                    if df_cj.empty:
+                        st.caption(f"Sin pares C/D con datos en {pz}.")
+                        continue
+                    try:
+                        df_cj = df_cj.sort_values(
+                            "Vol C (M USD)", ascending=False, na_position="last"
+                        ).reset_index(drop=True)
+                    except Exception:
+                        pass
+                    st.markdown(f"_Plazo: **{pz}**_")
+                    st.dataframe(
+                        _style_canje(df_cj),
+                        width="stretch",
+                        hide_index=True,
+                        height=min(420, 50 + 35 * len(df_cj)),
+                    )
 
             st.divider()
 
