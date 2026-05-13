@@ -1583,6 +1583,62 @@ def _normalize_bond_base(code: str) -> str:
 _FX_TABLE_COLS = ["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"]
 
 
+def _get_last_price(
+    username: str,
+    password: str,
+    code: str,
+    plazo: str,
+) -> Optional[float]:
+    """Devuelve el último precio (% VN) de un bono.
+
+    Lee del bulk cache (que mantiene caliente start_snapshot_background)
+    así que el costo es ~0 si ya está. Si el bono no está cacheado o no
+    tiene last válido, devuelve None.
+    """
+    if not code:
+        return None
+    try:
+        sym = _build_symbols([code], plazo)
+        raw = fetch_marketdata(
+            username, password, sym,
+            market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+        )
+        if raw is None or raw.empty:
+            return None
+        snap = OMSprices.market_snapshot(raw)
+        if snap is None or snap.empty:
+            return None
+        last = snap.iloc[0].get("last")
+        v = float(last) if last is not None else None
+        return v if (v is not None and np.isfinite(v) and v > 0) else None
+    except Exception:
+        return None
+
+
+def _autofill_price_default(
+    username: str,
+    password: str,
+    code: str,
+    plazo: str,
+    widget_key: str,
+    tracker_key: str,
+    fallback: float = 100.0,
+) -> None:
+    """Setea session_state[widget_key] = last_price del bono cuando cambia.
+
+    Llamar ANTES de crear el number_input. Mantiene el valor editado por
+    el usuario hasta que vuelva a cambiar el bono. Si todavía no hay
+    nada en session_state (primer render) inicializa con fallback.
+    """
+    prev = st.session_state.get(tracker_key)
+    if prev != code:
+        last_px = _get_last_price(username, password, code, plazo)
+        st.session_state[widget_key] = round(last_px, 4) if last_px else fallback
+        st.session_state[tracker_key] = code
+    elif widget_key not in st.session_state:
+        st.session_state[widget_key] = fallback
+
+
 def _fx_rows_from_snap(snap: pd.DataFrame, bases: List[str], suf: str) -> pd.DataFrame:
     """Construye la tabla FX implícito (una pata) a partir de un snap precargado."""
     if snap is None or snap.empty:
@@ -4499,7 +4555,14 @@ def _render_yas(username, password, plazo, curve_labels):
 
         with col_inp:
             if yas_mode == "Precio":
-                yas_val = st.number_input("Precio (% VN)", value=100.0, step=0.01, format="%.4f", key="yas_val_px")
+                # Auto-populate con el last del bono cuando cambia la selección.
+                _autofill_price_default(
+                    username, password, yas_code, plazo,
+                    widget_key="yas_val_px", tracker_key="_yas_px_bond",
+                )
+                yas_val = st.number_input(
+                    "Precio (% VN)", step=0.01, format="%.4f", key="yas_val_px",
+                )
                 mode_key = "precio"
             elif yas_mode == "TIREA":
                 yas_val = st.number_input("TIREA (decimal, ej 0.42)", value=0.40, step=0.005, format="%.6f", key="yas_val_tir")
@@ -6546,7 +6609,13 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     st.markdown("#### Bono A")
                     code_a = st.selectbox("Bono A", options=all_codes_c, key="comp_a")
                     if comp_mode == "Por Precio":
-                        val_a = st.number_input("Precio A (% VN)", value=100.0, step=0.01, format="%.4f", key="comp_val_a")
+                        _autofill_price_default(
+                            username, password, code_a, plazo,
+                            widget_key="comp_val_a", tracker_key="_comp_px_bond_a",
+                        )
+                        val_a = st.number_input(
+                            "Precio A (% VN)", step=0.01, format="%.4f", key="comp_val_a",
+                        )
                     else:
                         val_a = st.number_input("TNA A (decimal)", value=0.38, step=0.005, format="%.6f", key="comp_val_a")
 
@@ -6554,7 +6623,13 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     st.markdown("#### Bono B")
                     code_b = st.selectbox("Bono B", options=all_codes_c, key="comp_b")
                     if comp_mode == "Por Precio":
-                        val_b = st.number_input("Precio B (% VN)", value=100.0, step=0.01, format="%.4f", key="comp_val_b")
+                        _autofill_price_default(
+                            username, password, code_b, plazo,
+                            widget_key="comp_val_b", tracker_key="_comp_px_bond_b",
+                        )
+                        val_b = st.number_input(
+                            "Precio B (% VN)", step=0.01, format="%.4f", key="comp_val_b",
+                        )
                     else:
                         val_b = st.number_input("TNA B (decimal)", value=0.38, step=0.005, format="%.6f", key="comp_val_b")
 
