@@ -1580,65 +1580,28 @@ def _normalize_bond_base(code: str) -> str:
     return c
 
 
-def _build_implicit_fx_table(
-    username: str,
-    password: str,
-    bond_codes: List[str],
-    plazo: str,
-    leg: str,
-    fx_close: Optional[float] = None,
-) -> pd.DataFrame:
-    """Calcula bid/last/offer del dólar implícito para cada bono.
+_FX_TABLE_COLS = ["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"]
 
-    `bond_codes` puede contener cualquier mezcla de bases (GD30, AL30) o
-    tickers con sufijo (GD30C, AL30D) — la base se normaliza internamente.
 
-    Convención BYMA en este app:
-      base + 'C' = cable (USD)
-      base + 'D' = MEP (USB)
+def _fx_rows_from_snap(snap: pd.DataFrame, bases: List[str], suf: str) -> pd.DataFrame:
+    """Construye la tabla FX implícito (una pata) a partir de un snap precargado."""
+    if snap is None or snap.empty:
+        return pd.DataFrame(columns=_FX_TABLE_COLS)
 
-    Para cable (leg='USD') usamos pata ARS = base + ticker C.
-    Para MEP (leg='USB')   usamos pata ARS = base + ticker D.
-    Si la pata correspondiente no está cargada en BYMA, la fila se omite.
-
-    Returns DataFrame con columnas:
-      Bono, Bid, Last, Offer, Var %, Vol ARS (M), Vol USD (M)
-    """
-    suf = _FX_LEG_SUFFIX.get(leg.upper())
-    if not suf or not bond_codes:
-        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
-
-    # Deduplicar por base (GD30 y GD30C colapsan a la misma fila)
-    bases = sorted({_normalize_bond_base(c) for c in bond_codes if c})
-    usd_codes = [f"{b}{suf}" for b in bases]
-    syms_ars = _build_symbols(bases, plazo)
-    syms_usd = _build_symbols(usd_codes, plazo)
-    all_syms = syms_ars + syms_usd
-
-    raw = fetch_marketdata(
-        username, password, all_syms,
-        market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
-    )
-    if raw is None or raw.empty:
-        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
-
-    snap = OMSprices.market_snapshot(raw)
-    snap = _ensure_codigo_col(snap, source="index")
-    snap = snap.set_index("Código", drop=False)
+    def _f(x):
+        try:
+            v = float(x)
+            return v if np.isfinite(v) and v > 0 else np.nan
+        except Exception:
+            return np.nan
 
     rows: List[Dict[str, Any]] = []
-    for base, usd_code in zip(bases, usd_codes):
+    for base in bases:
+        usd_code = f"{base}{suf}"
         if base not in snap.index or usd_code not in snap.index:
             continue
         a = snap.loc[base]
         u = snap.loc[usd_code]
-
-        def _f(x):
-            try:
-                v = float(x)
-                return v if np.isfinite(v) and v > 0 else np.nan
-            except Exception:
-                return np.nan
 
         ars_bid = _f(a.get("bid_price"))
         ars_off = _f(a.get("offer_price"))
@@ -1656,10 +1619,6 @@ def _build_implicit_fx_table(
         last_fx = ars_last / usd_last if (np.isfinite(ars_last) and np.isfinite(usd_last)) else np.nan
         close_fx = ars_close / usd_close if (np.isfinite(ars_close) and np.isfinite(usd_close)) else np.nan
 
-        # Variación = last FX implícito hoy / close FX implícito ayer - 1.
-        # NOTA: comparar contra A3500_close mediría la brecha estructural
-        # (MEP/cable vs oficial), no el movimiento intradiario del dólar
-        # implícito que es lo que el usuario quiere ver.
         var_pct = (last_fx / close_fx - 1.0) if (np.isfinite(last_fx) and np.isfinite(close_fx) and close_fx > 0) else np.nan
 
         rows.append({
@@ -1673,8 +1632,69 @@ def _build_implicit_fx_table(
         })
 
     if not rows:
-        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
+        return pd.DataFrame(columns=_FX_TABLE_COLS)
     return pd.DataFrame(rows)
+
+
+def _fetch_implicit_fx_snap(
+    username: str,
+    password: str,
+    bond_codes: List[str],
+    plazo: str,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Single fetch para ARS + C + D legs. Devuelve (snap_indexado_por_Código, bases).
+
+    El snap es la entrada a `_fx_rows_from_snap` para cualquier leg.
+    """
+    bases = sorted({_normalize_bond_base(c) for c in bond_codes if c})
+    if not bases:
+        return pd.DataFrame(), []
+    c_codes = [f"{b}C" for b in bases]
+    d_codes = [f"{b}D" for b in bases]
+    all_syms = (
+        _build_symbols(bases, plazo)
+        + _build_symbols(c_codes, plazo)
+        + _build_symbols(d_codes, plazo)
+    )
+    raw = fetch_marketdata(
+        username, password, all_syms,
+        market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+    )
+    if raw is None or raw.empty:
+        return pd.DataFrame(), bases
+    snap = OMSprices.market_snapshot(raw)
+    snap = _ensure_codigo_col(snap, source="index").set_index("Código", drop=False)
+    return snap, bases
+
+
+def _build_implicit_fx_both(
+    username: str,
+    password: str,
+    bond_codes: List[str],
+    plazo: str,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Devuelve (df_usd_cable, df_usb_mep, snap_completo) en un único fetch."""
+    snap, bases = _fetch_implicit_fx_snap(username, password, bond_codes, plazo)
+    df_usd = _fx_rows_from_snap(snap, bases, "C")
+    df_usb = _fx_rows_from_snap(snap, bases, "D")
+    return df_usd, df_usb, snap
+
+
+def _build_implicit_fx_table(
+    username: str,
+    password: str,
+    bond_codes: List[str],
+    plazo: str,
+    leg: str,
+    fx_close: Optional[float] = None,  # noqa: ARG001 — compat (no usado)
+) -> pd.DataFrame:
+    """Compat: una sola pata. Internamente reusa el fetch combinado."""
+    suf = _FX_LEG_SUFFIX.get(leg.upper())
+    if not suf or not bond_codes:
+        return pd.DataFrame(columns=_FX_TABLE_COLS)
+    snap, bases = _fetch_implicit_fx_snap(username, password, bond_codes, plazo)
+    return _fx_rows_from_snap(snap, bases, suf)
+
 
 
 def _style_implicit_fx(df: pd.DataFrame):
@@ -4909,12 +4929,11 @@ def main():
             except Exception:
                 fx_close = None
 
-            # Computamos sobre 24hs (más liquidez)
-            df_usd = _build_implicit_fx_table(
-                username, password, base_codes, "24hs", "USD", fx_close=fx_close
-            )
-            df_usb = _build_implicit_fx_table(
-                username, password, base_codes, "24hs", "USB", fx_close=fx_close
+            # Computamos sobre 24hs (más liquidez). UN solo fetch para
+            # ambas patas — el sidebar se llama en cada refresh, así que
+            # ahorrar la doble vuelta vale.
+            df_usd, df_usb, _ = _build_implicit_fx_both(
+                username, password, base_codes, "24hs"
             )
 
             st.divider()
@@ -5838,6 +5857,9 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 if c
             })
 
+            # Cache local de fetches (compartido con brecha/canje y calc abajo)
+            fx_by_plazo: Dict[str, Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]] = {}
+
             if not base_codes:
                 st.warning("No hay globales ni bonares en el universo cargado.")
             else:
@@ -5859,14 +5881,21 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
                 leg_map = {"USD (cable)": "USD", "USB (MEP)": "USB"}
 
+                # Una sola pasada por plazo (devuelve ambas patas + snap crudo).
+                # Cacheamos en local para reusar en la sección Brecha/Canje y
+                # en la calculadora sin re-fetchear.
+                fx_by_plazo: Dict[str, Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]] = {}
+                for pz in plazos_show:
+                    fx_by_plazo[pz] = _build_implicit_fx_both(
+                        username, password, base_codes, pz,
+                    )
+
                 for leg_lbl in legs_show:
                     leg = leg_map[leg_lbl]
                     for pz in plazos_show:
                         st.markdown(f"##### {leg_lbl} — {pz}")
-                        df_fx = _build_implicit_fx_table(
-                            username, password,
-                            base_codes, pz, leg, fx_close=fx_close,
-                        )
+                        df_usd_pz, df_usb_pz, _snap_pz = fx_by_plazo[pz]
+                        df_fx = df_usd_pz if leg == "USD" else df_usb_pz
                         if df_fx.empty:
                             st.caption(f"Sin datos {leg_lbl} {pz}.")
                             continue
@@ -5895,12 +5924,13 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 "Se computa con el bono de mayor volumen del día (24hs) en cada leg."
             )
             try:
-                df_usd_24 = _build_implicit_fx_table(
-                    username, password, base_codes, "24hs", "USD", fx_close=fx_close,
-                )
-                df_usb_24 = _build_implicit_fx_table(
-                    username, password, base_codes, "24hs", "USB", fx_close=fx_close,
-                )
+                # Reusa el fetch 24hs si lo hicimos arriba; sino lo hace ahora.
+                if "24hs" in fx_by_plazo:
+                    df_usd_24, df_usb_24, _ = fx_by_plazo["24hs"]
+                else:
+                    df_usd_24, df_usb_24, _ = _build_implicit_fx_both(
+                        username, password, base_codes, "24hs",
+                    )
                 oficial_last_tab = None
                 try:
                     oficial_last_tab = float(get_fx_hoy(session=get_session(username, password)))
@@ -5974,29 +6004,31 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 )
 
             calc_leg = leg_map[calc_leg_lbl]
-            # Fetch single pair fresh
-            df_one = _build_implicit_fx_table(
-                username, password,
-                [calc_bono], calc_plazo, calc_leg, fx_close=fx_close,
-            )
-            if df_one.empty:
+            suf = _FX_LEG_SUFFIX[calc_leg]
+            usd_code = f"{calc_bono}{suf}"
+
+            # Si ya hicimos el fetch combinado para este plazo arriba, reusamos
+            # el snap. Sino, fetcheamos las 3 patas del MISMO bono de una vez
+            # (base + C + D) para alimentar tanto las puntas como brecha/canje.
+            cached = fx_by_plazo.get(calc_plazo)
+            if cached is not None and cached[2] is not None and not cached[2].empty:
+                _snap = cached[2]
+                # Tablas df ya tienen todas las bases. Tomemos la fila del bono.
+                df_leg = cached[0] if calc_leg == "USD" else cached[1]
+                df_one = df_leg[df_leg["Bono"] == calc_bono] if not df_leg.empty else pd.DataFrame()
+            else:
+                _snap, _bases_local = _fetch_implicit_fx_snap(
+                    username, password, [calc_bono], calc_plazo,
+                )
+                df_one = _fx_rows_from_snap(_snap, _bases_local, suf)
+
+            if df_one is None or df_one.empty:
                 st.warning(f"Sin book para {calc_bono} / {calc_leg_lbl} / {calc_plazo}.")
             else:
                 r = df_one.iloc[0]
                 bid_fx = float(r["Bid"]) if pd.notna(r["Bid"]) else None
                 last_fx = float(r["Last"]) if pd.notna(r["Last"]) else None
                 offer_fx = float(r["Offer"]) if pd.notna(r["Offer"]) else None
-
-                # Levantamos precios brutos del bono ARS y USD-leg para mostrar la ruta
-                suf = _FX_LEG_SUFFIX[calc_leg]
-                usd_code = f"{calc_bono}{suf}"
-                syms = _build_symbols([calc_bono, usd_code], calc_plazo)
-                _raw = fetch_marketdata(username, password, syms,
-                                        market_id=DEFAULT_MARKET_ID,
-                                        entries=cfg.ENTRIES, depth=1)
-                _snap = OMSprices.market_snapshot(_raw) if (_raw is not None and not _raw.empty) else None
-                if _snap is not None and not _snap.empty:
-                    _snap = _ensure_codigo_col(_snap, source="index").set_index("Código", drop=False)
 
                 def _p(code, field):
                     if _snap is None or code not in _snap.index:
