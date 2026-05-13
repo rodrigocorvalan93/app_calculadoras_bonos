@@ -1643,17 +1643,24 @@ def _build_implicit_fx_table(
         ars_bid = _f(a.get("bid_price"))
         ars_off = _f(a.get("offer_price"))
         ars_last = _f(a.get("last"))
+        ars_close = _f(a.get("close"))
         usd_bid = _f(u.get("bid_price"))
         usd_off = _f(u.get("offer_price"))
         usd_last = _f(u.get("last"))
+        usd_close = _f(u.get("close"))
         ars_vol = _f(a.get("volume"))
         usd_vol = _f(u.get("volume"))
 
         bid_fx = ars_bid / usd_off if (np.isfinite(ars_bid) and np.isfinite(usd_off)) else np.nan
         off_fx = ars_off / usd_bid if (np.isfinite(ars_off) and np.isfinite(usd_bid)) else np.nan
         last_fx = ars_last / usd_last if (np.isfinite(ars_last) and np.isfinite(usd_last)) else np.nan
+        close_fx = ars_close / usd_close if (np.isfinite(ars_close) and np.isfinite(usd_close)) else np.nan
 
-        var_pct = (last_fx / fx_close - 1.0) if (fx_close and np.isfinite(last_fx) and fx_close > 0) else np.nan
+        # Variación = last FX implícito hoy / close FX implícito ayer - 1.
+        # NOTA: comparar contra A3500_close mediría la brecha estructural
+        # (MEP/cable vs oficial), no el movimiento intradiario del dólar
+        # implícito que es lo que el usuario quiere ver.
+        var_pct = (last_fx / close_fx - 1.0) if (np.isfinite(last_fx) and np.isfinite(close_fx) and close_fx > 0) else np.nan
 
         rows.append({
             "Bono": base,
@@ -4850,7 +4857,7 @@ def main():
                 var = top.get("Var %")
                 delta = None
                 if pd.notna(var):
-                    delta = f"{float(var) * 100:+.2f}% vs A3500 close"
+                    delta = f"{float(var) * 100:+.2f}% vs close"
                 st.metric(
                     f"{label} · {top.get('Bono', '?')}",
                     f"${last:,.2f}",
@@ -5668,7 +5675,8 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             st.caption(
                 "USD = vía Cable (ticker C). USB = vía MEP/Bolsa (ticker D). "
                 "Bid implícito = ARS bid / USD-leg offer. Offer implícito = ARS offer / USD-leg bid. "
-                "Last implícito = ARS last / USD-leg last."
+                "Last implícito = ARS last / USD-leg last. "
+                "Var % = last hoy / close de ayer del mismo dólar implícito − 1."
             )
 
             # FX close de ayer (referencia para variación)
@@ -5717,7 +5725,8 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     hide_index=True,
                     height=min(420, 50 + 35 * len(mae_view)),
                 )
-                st.caption(f"A3500 close (referencia para variación): **{fx_close:,.2f}**" if fx_close else "")
+                if fx_close:
+                    st.caption(f"A3500 close de ayer (mayorista oficial, referencia): **{fx_close:,.2f}**")
 
             st.divider()
 
