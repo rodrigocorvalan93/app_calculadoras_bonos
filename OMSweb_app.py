@@ -6860,6 +6860,54 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                 if np.isfinite(met_a.get("Margen TNA", np.nan)) or np.isfinite(met_b.get("Margen TNA", np.nan)):
                                     _comp_row("Margen TNA", "Margen TNA", "{:.4%}")
 
+                                # ── Forward implícita entre A y B ──
+                                # Identifica corto/largo por Duration y calcula:
+                                #   fwd = ((1+y_l)^d_l / (1+y_s)^d_s)^(1/(d_l-d_s)) - 1
+                                tir_a_f = met_a.get("TIREA", np.nan)
+                                tir_b_f = met_b.get("TIREA", np.nan)
+                                dur_a_f = met_a.get("Duration", np.nan)
+                                dur_b_f = met_b.get("Duration", np.nan)
+                                if (
+                                    np.isfinite(tir_a_f) and np.isfinite(tir_b_f)
+                                    and np.isfinite(dur_a_f) and np.isfinite(dur_b_f)
+                                    and dur_a_f != dur_b_f
+                                ):
+                                    if dur_a_f < dur_b_f:
+                                        code_s, code_l = code_a, code_b
+                                        y_s, y_l = float(tir_a_f), float(tir_b_f)
+                                        d_s, d_l = float(dur_a_f), float(dur_b_f)
+                                    else:
+                                        code_s, code_l = code_b, code_a
+                                        y_s, y_l = float(tir_b_f), float(tir_a_f)
+                                        d_s, d_l = float(dur_b_f), float(dur_a_f)
+
+                                    fwd_val = np.nan
+                                    if (1.0 + y_s) > 0 and (1.0 + y_l) > 0 and (d_l - d_s) > 0:
+                                        try:
+                                            fwd_val = ((1.0 + y_l) ** d_l / (1.0 + y_s) ** d_s) ** (1.0 / (d_l - d_s)) - 1.0
+                                        except (ValueError, ZeroDivisionError, OverflowError):
+                                            fwd_val = np.nan
+
+                                    st.markdown("---")
+                                    st.markdown("#### Forward implícita")
+                                    st.caption(
+                                        f"Bloquea la tasa entre Dur={d_s:.4f} ({code_s}) y Dur={d_l:.4f} ({code_l})."
+                                    )
+                                    fc1, fc2, fc3 = st.columns([2, 2, 2])
+                                    with fc1:
+                                        st.metric(f"{code_s} (corto)", f"{y_s:.4%}", f"Dur {d_s:.4f}",
+                                                  delta_color="off")
+                                    with fc2:
+                                        st.metric(f"{code_l} (largo)", f"{y_l:.4%}", f"Dur {d_l:.4f}",
+                                                  delta_color="off")
+                                    with fc3:
+                                        st.metric(
+                                            f"Fwd {code_s} → {code_l}",
+                                            f"{fwd_val:.4%}" if np.isfinite(fwd_val) else "—",
+                                            f"Δdur {d_l - d_s:.4f}",
+                                            delta_color="off",
+                                        )
+
                             # Tabla completa
                             with st.expander("Ver tabla completa (comparar_precio/tna)", expanded=False):
                                 # Cast columnas object-mixed a str para evitar ArrowTypeError
