@@ -7559,6 +7559,65 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                     )
                                     _st_plotly(fig)
 
+                                    # ── Variación en la ventana (Δ por bono + promedio) ──
+                                    # Cheap: ya tenemos df_curve_hist en memoria; sólo first/last por Código.
+                                    is_rate = hist_y_metric in ("TIREA", "TEM", "TNA")
+                                    delta_unit = "bps" if is_rate else "pp"
+                                    delta_mult = 10000.0 if is_rate else 100.0
+                                    fmt_delta = "{:+.0f}" if is_rate else "{:+.2f}"
+
+                                    fl = (
+                                        df_curve_hist
+                                        .dropna(subset=[hist_y_metric])
+                                        .sort_values("fecha_hoy")
+                                        .groupby("Código", as_index=False)
+                                        .agg(
+                                            valor_ini=(hist_y_metric, "first"),
+                                            valor_fin=(hist_y_metric, "last"),
+                                            fecha_ini=("fecha_hoy", "first"),
+                                            fecha_fin=("fecha_hoy", "last"),
+                                            obs=(hist_y_metric, "size"),
+                                        )
+                                    )
+                                    fl = fl[fl["obs"] >= 2]  # bonos con un solo punto no tienen Δ
+
+                                    if not fl.empty:
+                                        fl[f"Δ ({delta_unit})"] = (fl["valor_fin"] - fl["valor_ini"]) * delta_mult
+                                        fl = fl.sort_values(f"Δ ({delta_unit})", ascending=False).reset_index(drop=True)
+                                        avg_d = float(fl[f"Δ ({delta_unit})"].mean())
+                                        min_d = float(fl[f"Δ ({delta_unit})"].min())
+                                        max_d = float(fl[f"Δ ({delta_unit})"].max())
+
+                                        st.markdown(f"**Variación {hist_y_metric} en la ventana ({date_from} → {date_to})**")
+                                        d1, d2, d3, d4 = st.columns(4)
+                                        d1.metric(f"Δ Promedio ({delta_unit})", fmt_delta.format(avg_d))
+                                        d2.metric(f"Δ Mín ({delta_unit})", fmt_delta.format(min_d))
+                                        d3.metric(f"Δ Máx ({delta_unit})", fmt_delta.format(max_d))
+                                        d4.metric("Bonos c/ Δ", f"{len(fl)}")
+
+                                        with st.expander(f"Δ {hist_y_metric} por bono", expanded=False):
+                                            tbl_delta = fl.rename(columns={
+                                                "valor_ini": f"{hist_y_metric} ini",
+                                                "valor_fin": f"{hist_y_metric} fin",
+                                                "fecha_ini": "Desde",
+                                                "fecha_fin": "Hasta",
+                                                "obs": "Obs.",
+                                            })[["Código", f"Δ ({delta_unit})", f"{hist_y_metric} ini",
+                                                f"{hist_y_metric} fin", "Desde", "Hasta", "Obs."]]
+                                            val_fmt = "{:.2%}" if hist_y_metric != "Paridad" else "{:.2%}"
+                                            st.dataframe(
+                                                tbl_delta.style.format({
+                                                    f"Δ ({delta_unit})": fmt_delta,
+                                                    f"{hist_y_metric} ini": val_fmt,
+                                                    f"{hist_y_metric} fin": val_fmt,
+                                                    "Desde": lambda d: pd.to_datetime(d).strftime("%Y-%m-%d"),
+                                                    "Hasta": lambda d: pd.to_datetime(d).strftime("%Y-%m-%d"),
+                                                    "Obs.": "{:,.0f}",
+                                                }),
+                                                width="stretch",
+                                                height=min(360, 40 + 35 * len(tbl_delta)),
+                                            )
+
                                     # Stats agregadas
                                     all_vals = pd.to_numeric(df_curve_hist[hist_y_metric], errors="coerce").dropna() * scale
                                     if not all_vals.empty:
@@ -7620,6 +7679,56 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                     legend_yanchor="bottom", legend_y=1.02,
                                 )
                                 _st_plotly(fig)
+
+                                # ── Variación TIREA en la ventana (Δ por bono + promedio) ──
+                                fl_cmp = (
+                                    df_f[df_f["Código"].isin(codes_multi)]
+                                    .dropna(subset=["TIREA"])
+                                    .sort_values("fecha_hoy")
+                                    .groupby("Código", as_index=False)
+                                    .agg(
+                                        TIREA_ini=("TIREA", "first"),
+                                        TIREA_fin=("TIREA", "last"),
+                                        fecha_ini=("fecha_hoy", "first"),
+                                        fecha_fin=("fecha_hoy", "last"),
+                                        obs=("TIREA", "size"),
+                                    )
+                                )
+                                fl_cmp = fl_cmp[fl_cmp["obs"] >= 2]
+                                if not fl_cmp.empty:
+                                    fl_cmp["Δ (bps)"] = (fl_cmp["TIREA_fin"] - fl_cmp["TIREA_ini"]) * 10000.0
+                                    fl_cmp = fl_cmp.sort_values("Δ (bps)", ascending=False).reset_index(drop=True)
+                                    avg_d = float(fl_cmp["Δ (bps)"].mean())
+                                    min_d = float(fl_cmp["Δ (bps)"].min())
+                                    max_d = float(fl_cmp["Δ (bps)"].max())
+
+                                    st.markdown(f"**Variación TIREA en la ventana ({date_from} → {date_to})**")
+                                    d1, d2, d3, d4 = st.columns(4)
+                                    d1.metric("Δ Promedio (bps)", f"{avg_d:+.0f}")
+                                    d2.metric("Δ Mín (bps)", f"{min_d:+.0f}")
+                                    d3.metric("Δ Máx (bps)", f"{max_d:+.0f}")
+                                    d4.metric("Bonos c/ Δ", f"{len(fl_cmp)}")
+
+                                    with st.expander("Δ TIREA por bono", expanded=False):
+                                        tbl_delta = fl_cmp.rename(columns={
+                                            "TIREA_ini": "TIREA ini",
+                                            "TIREA_fin": "TIREA fin",
+                                            "fecha_ini": "Desde",
+                                            "fecha_fin": "Hasta",
+                                            "obs": "Obs.",
+                                        })[["Código", "Δ (bps)", "TIREA ini", "TIREA fin", "Desde", "Hasta", "Obs."]]
+                                        st.dataframe(
+                                            tbl_delta.style.format({
+                                                "Δ (bps)": "{:+.0f}",
+                                                "TIREA ini": "{:.2%}",
+                                                "TIREA fin": "{:.2%}",
+                                                "Desde": lambda d: pd.to_datetime(d).strftime("%Y-%m-%d"),
+                                                "Hasta": lambda d: pd.to_datetime(d).strftime("%Y-%m-%d"),
+                                                "Obs.": "{:,.0f}",
+                                            }),
+                                            width="stretch",
+                                            height=min(360, 40 + 35 * len(tbl_delta)),
+                                        )
 
                         # ── Vista 3: Spread entre bonos ──
                         elif view_mode.startswith("Spread"):
