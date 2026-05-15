@@ -8149,6 +8149,89 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                 )
                                 _st_plotly(fig)
 
+                                # ── Forward implícita entre los bonos comparados ──
+                                # Snapshot más reciente por bono. Cálculo barato (solo aritmética
+                                # sobre el último registro de cada código).
+                                latest_rows = (
+                                    df_f[df_f["Código"].isin(codes_multi)]
+                                    .dropna(subset=["TIREA", "Duration"])
+                                    .sort_values("fecha_hoy")
+                                    .groupby("Código", as_index=False)
+                                    .tail(1)
+                                    [["Código", "fecha_hoy", "TIREA", "Duration"]]
+                                )
+                                latest_rows["TIREA"] = pd.to_numeric(latest_rows["TIREA"], errors="coerce")
+                                latest_rows["Duration"] = pd.to_numeric(latest_rows["Duration"], errors="coerce")
+                                latest_rows = (
+                                    latest_rows.dropna(subset=["TIREA", "Duration"])
+                                    .sort_values("Duration")
+                                    .reset_index(drop=True)
+                                )
+
+                                if len(latest_rows) >= 2:
+                                    codes_o = latest_rows["Código"].tolist()
+                                    durs = latest_rows["Duration"].astype(float).tolist()
+                                    tirs = latest_rows["TIREA"].astype(float).tolist()
+                                    n = len(codes_o)
+
+                                    def _fwd(y_short, d_short, y_long, d_long):
+                                        if d_long <= d_short:
+                                            return None
+                                        if (1.0 + y_short) <= 0 or (1.0 + y_long) <= 0:
+                                            return None
+                                        try:
+                                            return ((1.0 + y_long) ** d_long / (1.0 + y_short) ** d_short) ** (1.0 / (d_long - d_short)) - 1.0
+                                        except (ValueError, ZeroDivisionError, OverflowError):
+                                            return None
+
+                                    snap_date = latest_rows["fecha_hoy"].max()
+                                    snap_date_str = pd.to_datetime(snap_date).strftime("%Y-%m-%d") if pd.notna(snap_date) else "—"
+
+                                    st.markdown(f"**Forward implícita** — snapshot {snap_date_str}")
+
+                                    if n == 2:
+                                        fwd_val = _fwd(tirs[0], durs[0], tirs[1], durs[1])
+                                        col_a, col_b, col_c = st.columns(3)
+                                        col_a.metric(
+                                            f"{codes_o[0]} (corto)",
+                                            f"{tirs[0]*100:.2f}%",
+                                            f"Dur {durs[0]:.2f}",
+                                            delta_color="off",
+                                        )
+                                        col_b.metric(
+                                            f"{codes_o[1]} (largo)",
+                                            f"{tirs[1]*100:.2f}%",
+                                            f"Dur {durs[1]:.2f}",
+                                            delta_color="off",
+                                        )
+                                        col_c.metric(
+                                            f"Fwd {codes_o[0]} → {codes_o[1]}",
+                                            f"{fwd_val*100:.2f}%" if fwd_val is not None else "—",
+                                            f"Δdur {durs[1]-durs[0]:.2f}",
+                                            delta_color="off",
+                                        )
+                                    else:
+                                        # Matriz NxN: filas = bono corto, columnas = bono largo
+                                        mat = [[float("nan")] * n for _ in range(n)]
+                                        for i in range(n):
+                                            for j in range(i + 1, n):
+                                                v = _fwd(tirs[i], durs[i], tirs[j], durs[j])
+                                                if v is not None:
+                                                    mat[i][j] = v
+                                        df_fwd = pd.DataFrame(mat, index=codes_o, columns=codes_o, dtype=float)
+                                        df_fwd.index.name = "Corto \\ Largo"
+                                        caption_parts = [
+                                            f"{c}: TIR={t*100:.2f}%, Dur={d:.2f}"
+                                            for c, t, d in zip(codes_o, tirs, durs)
+                                        ]
+                                        st.caption(" · ".join(caption_parts))
+                                        st.dataframe(
+                                            df_fwd.style.format(
+                                                lambda v: f"{v*100:.2f}%" if pd.notna(v) else "—"
+                                            ),
+                                            use_container_width=True,
+                                        )
+
                         # ── Vista 3: Spread entre bonos ──
                         elif view_mode.startswith("Spread"):
                             col_sp1, col_sp2 = st.columns(2)
