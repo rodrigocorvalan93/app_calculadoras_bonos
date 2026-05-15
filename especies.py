@@ -1324,7 +1324,7 @@ X29Y6 = {
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
-    "Industria": "Soberano Inflación",
+    "Industria": "Soberano ARS Tasa Fija",
     "Moneda": "ARS",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "28/11/2025",
