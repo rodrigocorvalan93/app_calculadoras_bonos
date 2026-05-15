@@ -7988,15 +7988,39 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                     codes_in_hist = sorted(df_curve_hist["Código"].unique())
                                     scale = 100.0 if hist_y_metric in ("TIREA", "TEM", "TNA", "Paridad") else 1.0
 
-                                    # Un trace por código
+                                    # Δ en la ventana (último − primero) por bono. Cálculo barato:
+                                    # un solo groupby sobre el DF ya cargado en memoria.
+                                    is_yield_metric = hist_y_metric in ("TIREA", "TEM", "TNA")
+                                    delta_unit_factor = 10000.0 if is_yield_metric else 100.0  # bps o pp
+                                    delta_unit_label = "bps" if is_yield_metric else "pp"
+                                    df_for_delta = (
+                                        df_curve_hist[["Código", "fecha_hoy", hist_y_metric]]
+                                        .assign(_v=lambda d: pd.to_numeric(d[hist_y_metric], errors="coerce"))
+                                        .dropna(subset=["_v"])
+                                        .sort_values("fecha_hoy")
+                                    )
+                                    if not df_for_delta.empty:
+                                        grp = df_for_delta.groupby("Código", sort=False)["_v"]
+                                        deltas_by_code = ((grp.last() - grp.first()) * delta_unit_factor).dropna()
+                                    else:
+                                        deltas_by_code = pd.Series(dtype=float)
+
+                                    # Un trace por código (con Δ en el nombre de la leyenda)
                                     for c in codes_in_hist:
                                         sub = df_curve_hist[df_curve_hist["Código"] == c].sort_values("fecha_hoy")
                                         if sub.empty or hist_y_metric not in sub.columns:
                                             continue
                                         y = pd.to_numeric(sub[hist_y_metric], errors="coerce") * scale
+                                        d_val = deltas_by_code.get(c)
+                                        if d_val is None or pd.isna(d_val):
+                                            trace_name = c
+                                        elif is_yield_metric:
+                                            trace_name = f"{c} ({d_val:+.0f} {delta_unit_label})"
+                                        else:
+                                            trace_name = f"{c} ({d_val:+.2f} {delta_unit_label})"
                                         fig.add_trace(go.Scatter(
                                             x=sub["fecha_hoy"], y=y,
-                                            mode="lines", name=c,
+                                            mode="lines", name=trace_name,
                                             hovertemplate=f"{c}<br>%{{x|%Y-%m-%d}}<br>{hist_y_metric}=%{{y:.2f}}%<extra></extra>",
                                         ))
 
@@ -8039,12 +8063,39 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                     # Stats agregadas
                                     all_vals = pd.to_numeric(df_curve_hist[hist_y_metric], errors="coerce").dropna() * scale
                                     if not all_vals.empty:
-                                        s1, s2, s3, s4, s5 = st.columns(5)
+                                        avg_delta = float(deltas_by_code.mean()) if not deltas_by_code.empty else None
+                                        if avg_delta is None:
+                                            delta_str = "—"
+                                        elif is_yield_metric:
+                                            delta_str = f"{avg_delta:+.0f} {delta_unit_label}"
+                                        else:
+                                            delta_str = f"{avg_delta:+.2f} {delta_unit_label}"
+                                        s1, s2, s3, s4, s5, s6 = st.columns(6)
                                         s1.metric("Bonos", len(codes_in_hist))
                                         s2.metric(f"Prom {hist_y_metric}", f"{all_vals.mean():.2f}%")
                                         s3.metric("Mín", f"{all_vals.min():.2f}%")
                                         s4.metric("Máx", f"{all_vals.max():.2f}%")
                                         s5.metric("Desvío", f"{all_vals.std():.2f}%")
+                                        s6.metric(f"Δ Prom (ventana)", delta_str)
+
+                                    # Detalle Δ por bono en la ventana (último − primero)
+                                    if not deltas_by_code.empty:
+                                        with st.expander("Variación por bono en la ventana (Δ último − primero)", expanded=False):
+                                            d_sorted = deltas_by_code.sort_values(ascending=False)
+                                            if is_yield_metric:
+                                                vals_fmt = [f"{v:+.0f} {delta_unit_label}" for v in d_sorted.values]
+                                            else:
+                                                vals_fmt = [f"{v:+.2f} {delta_unit_label}" for v in d_sorted.values]
+                                            df_delta_show = pd.DataFrame({
+                                                "Bono": d_sorted.index.tolist(),
+                                                f"Δ {hist_y_metric}": vals_fmt,
+                                            })
+                                            st.dataframe(
+                                                df_delta_show,
+                                                use_container_width=True,
+                                                hide_index=True,
+                                                height=min(320, 60 + 35 * len(df_delta_show)),
+                                            )
 
                                     # Snapshot de la última fecha por bono (útil para comparar con la curva actual)
                                     with st.expander("Último valor por bono (snapshot más reciente)", expanded=False):
