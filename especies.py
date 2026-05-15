@@ -1220,8 +1220,8 @@ TZV28 = {
     "Moneda": "ARS",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
     "Emisión": "28/02/2026",
-    "Vencimiento": "30/06/2027",
-    "Fecha Primer Cupón": "30/06/2027",
+    "Vencimiento": "30/06/2028",
+    "Fecha Primer Cupón": "30/06/2028",
     "Cupón / Spread": 0., # es un nro flotante
     "Step-up": False, # Es binario True or False
     "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
@@ -1238,7 +1238,7 @@ TZV28 = {
     "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
     "Días lag Ajuste base": -1, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": -3,
-    "Fechas de cupón": ["30/06/2027"], # Lista de fechas como ejemplo
+    "Fechas de cupón": ["30/06/2028"], # Lista de fechas como ejemplo
     "Amortización": None,
     "Callable": False , # Es binario True or False
     "Tipo de Call": None,
