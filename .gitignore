@@ -75,6 +75,12 @@ generar_fondos.py
 #
 # y después volver a ignorar lo que no quieras adentro.
 
+# Proyecto satélite ML cauciones (extractor histórico + recorder)
+# Versionamos sólo código .py — los parquet/csv generados quedan fuera.
+!proyecto_cauciones_ml/
+!proyecto_cauciones_ml/*.py
+proyecto_cauciones_ml/data/
+
 
 # ======================================================================
 # RECORDATORIOS DE SEGURIDAD (lo que queda ignorado por el `*`)
