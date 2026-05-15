@@ -1562,78 +1562,213 @@ def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> N
 _FX_LEG_SUFFIX = {"USD": "C", "USB": "D"}
 
 
-def _build_implicit_fx_table(
-    username: str,
-    password: str,
-    bond_bases: List[str],
-    plazo: str,
-    leg: str,
-    fx_close: Optional[float] = None,
-) -> pd.DataFrame:
-    """Calcula bid/last/offer del dólar implícito para cada bono base.
+def _normalize_bond_base(code: str) -> str:
+    """Devuelve la base sin sufijo C/D.
 
-    Convención:
-      bid_FX = ARS_bid / USDleg_offer
-      offer_FX = ARS_offer / USDleg_bid
-      last_FX = ARS_last / USDleg_last
-      var_vs_close = last_FX / fx_close - 1
-
-    Args:
-      leg: "USD" (usa ticker C, cable) o "USB" (usa ticker D, MEP).
-      fx_close: A3500 close de ayer (para variación). Si None, var=NaN.
-
-    Returns DataFrame con columnas:
-      Bono, Bid, Last, Offer, Var %, Vol ARS (M), Vol USD (M)
+    Ejemplos:
+      GD30  -> GD30
+      GD30C -> GD30
+      AL30D -> AL30
     """
-    suf = _FX_LEG_SUFFIX.get(leg.upper())
-    if not suf or not bond_bases:
-        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
+    if not code:
+        return code
+    c = str(code).strip()
+    if len(c) > 2 and c[-1] in ("C", "D") and not c.endswith("CC") and not c.endswith("DD"):
+        # Heurística: la base nunca termina en C/D en este universo
+        # (CER/Lecap usan otros sufijos como S/T/etc.).
+        return c[:-1]
+    return c
 
-    ars_codes = list(bond_bases)
-    usd_codes = [f"{b}{suf}" for b in bond_bases]
-    syms_ars = _build_symbols(ars_codes, plazo)
-    syms_usd = _build_symbols(usd_codes, plazo)
-    all_syms = syms_ars + syms_usd
 
-    raw = fetch_marketdata(
-        username, password, all_syms,
-        market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
-    )
-    if raw is None or raw.empty:
-        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
+_FX_TABLE_COLS = ["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"]
 
-    snap = OMSprices.market_snapshot(raw)
-    snap = _ensure_codigo_col(snap, source="index")
-    snap = snap.set_index("Código", drop=False)
+_CANJE_TABLE_COLS = ["Bono", "Bid", "Last", "Offer", "Var %", "Vol C (M USD)", "Vol D (M USD)"]
+
+
+def _canje_rows_from_snap(snap: pd.DataFrame, bases: List[str]) -> pd.DataFrame:
+    """Tabla de canje (cable vs MEP) sobre el MISMO bono, para cada base.
+
+    Convención solicitada por el usuario:
+      canje last  = px_C_last  / px_D_last
+      canje bid   = px_C_offer / px_D_bid
+      canje offer = px_C_bid   / px_D_offer
+
+    Var % = last/close − 1, donde close = px_C_close / px_D_close.
+    """
+    if snap is None or snap.empty:
+        return pd.DataFrame(columns=_CANJE_TABLE_COLS)
+
+    def _f(x):
+        try:
+            v = float(x)
+            return v if np.isfinite(v) and v > 0 else np.nan
+        except Exception:
+            return np.nan
 
     rows: List[Dict[str, Any]] = []
-    for base, usd_code in zip(ars_codes, usd_codes):
+    for base in bases:
+        c_code = f"{base}C"
+        d_code = f"{base}D"
+        if c_code not in snap.index or d_code not in snap.index:
+            continue
+        c = snap.loc[c_code]
+        d = snap.loc[d_code]
+
+        c_bid = _f(c.get("bid_price"))
+        c_off = _f(c.get("offer_price"))
+        c_last = _f(c.get("last"))
+        c_close = _f(c.get("close"))
+        c_vol = _f(c.get("volume"))
+        d_bid = _f(d.get("bid_price"))
+        d_off = _f(d.get("offer_price"))
+        d_last = _f(d.get("last"))
+        d_close = _f(d.get("close"))
+        d_vol = _f(d.get("volume"))
+
+        bid_cj = c_off / d_bid if (np.isfinite(c_off) and np.isfinite(d_bid)) else np.nan
+        off_cj = c_bid / d_off if (np.isfinite(c_bid) and np.isfinite(d_off)) else np.nan
+        last_cj = c_last / d_last if (np.isfinite(c_last) and np.isfinite(d_last)) else np.nan
+        close_cj = c_close / d_close if (np.isfinite(c_close) and np.isfinite(d_close)) else np.nan
+
+        var_pct = (last_cj / close_cj - 1.0) if (np.isfinite(last_cj) and np.isfinite(close_cj) and close_cj > 0) else np.nan
+
+        rows.append({
+            "Bono": base,
+            "Bid": bid_cj,
+            "Last": last_cj,
+            "Offer": off_cj,
+            "Var %": var_pct,
+            "Vol C (M USD)": (c_vol / 1e6) if np.isfinite(c_vol) else np.nan,
+            "Vol D (M USD)": (d_vol / 1e6) if np.isfinite(d_vol) else np.nan,
+        })
+
+    if not rows:
+        return pd.DataFrame(columns=_CANJE_TABLE_COLS)
+    return pd.DataFrame(rows)
+
+
+def _style_canje(df: pd.DataFrame):
+    if df is None or df.empty:
+        return pd.DataFrame().style
+    fmt = {
+        "Bid": "{:,.4f}",
+        "Last": "{:,.4f}",
+        "Offer": "{:,.4f}",
+        "Var %": "{:+.2%}",
+        "Vol C (M USD)": "{:,.2f}",
+        "Vol D (M USD)": "{:,.2f}",
+    }
+    sty = df.style.format(fmt, na_rep="—")
+    if "Var %" in df.columns:
+        def _color_var(v):
+            try:
+                vf = float(v)
+            except Exception:
+                return ""
+            if not np.isfinite(vf):
+                return ""
+            if vf > 0:
+                return "color: #2ecc71;"
+            if vf < 0:
+                return "color: #e74c3c;"
+            return ""
+        sty = sty.map(_color_var, subset=["Var %"])
+    return sty
+
+
+def _get_last_price(
+    username: str,
+    password: str,
+    code: str,
+    plazo: str,
+) -> Optional[float]:
+    """Devuelve el último precio (% VN) de un bono.
+
+    Lee del bulk cache (que mantiene caliente start_snapshot_background)
+    así que el costo es ~0 si ya está. Si el bono no está cacheado o no
+    tiene last válido, devuelve None.
+    """
+    if not code:
+        return None
+    try:
+        sym = _build_symbols([code], plazo)
+        raw = fetch_marketdata(
+            username, password, sym,
+            market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+        )
+        if raw is None or raw.empty:
+            return None
+        snap = OMSprices.market_snapshot(raw)
+        if snap is None or snap.empty:
+            return None
+        last = snap.iloc[0].get("last")
+        v = float(last) if last is not None else None
+        return v if (v is not None and np.isfinite(v) and v > 0) else None
+    except Exception:
+        return None
+
+
+def _autofill_price_default(
+    username: str,
+    password: str,
+    code: str,
+    plazo: str,
+    widget_key: str,
+    tracker_key: str,
+    fallback: float = 100.0,
+) -> None:
+    """Setea session_state[widget_key] = last_price del bono cuando cambia.
+
+    Llamar ANTES de crear el number_input. Mantiene el valor editado por
+    el usuario hasta que vuelva a cambiar el bono. Si todavía no hay
+    nada en session_state (primer render) inicializa con fallback.
+    """
+    prev = st.session_state.get(tracker_key)
+    if prev != code:
+        last_px = _get_last_price(username, password, code, plazo)
+        st.session_state[widget_key] = round(last_px, 4) if last_px else fallback
+        st.session_state[tracker_key] = code
+    elif widget_key not in st.session_state:
+        st.session_state[widget_key] = fallback
+
+
+def _fx_rows_from_snap(snap: pd.DataFrame, bases: List[str], suf: str) -> pd.DataFrame:
+    """Construye la tabla FX implícito (una pata) a partir de un snap precargado."""
+    if snap is None or snap.empty:
+        return pd.DataFrame(columns=_FX_TABLE_COLS)
+
+    def _f(x):
+        try:
+            v = float(x)
+            return v if np.isfinite(v) and v > 0 else np.nan
+        except Exception:
+            return np.nan
+
+    rows: List[Dict[str, Any]] = []
+    for base in bases:
+        usd_code = f"{base}{suf}"
         if base not in snap.index or usd_code not in snap.index:
             continue
         a = snap.loc[base]
         u = snap.loc[usd_code]
 
-        def _f(x):
-            try:
-                v = float(x)
-                return v if np.isfinite(v) and v > 0 else np.nan
-            except Exception:
-                return np.nan
-
         ars_bid = _f(a.get("bid_price"))
         ars_off = _f(a.get("offer_price"))
         ars_last = _f(a.get("last"))
+        ars_close = _f(a.get("close"))
         usd_bid = _f(u.get("bid_price"))
         usd_off = _f(u.get("offer_price"))
         usd_last = _f(u.get("last"))
+        usd_close = _f(u.get("close"))
         ars_vol = _f(a.get("volume"))
         usd_vol = _f(u.get("volume"))
 
         bid_fx = ars_bid / usd_off if (np.isfinite(ars_bid) and np.isfinite(usd_off)) else np.nan
         off_fx = ars_off / usd_bid if (np.isfinite(ars_off) and np.isfinite(usd_bid)) else np.nan
         last_fx = ars_last / usd_last if (np.isfinite(ars_last) and np.isfinite(usd_last)) else np.nan
+        close_fx = ars_close / usd_close if (np.isfinite(ars_close) and np.isfinite(usd_close)) else np.nan
 
-        var_pct = (last_fx / fx_close - 1.0) if (fx_close and np.isfinite(last_fx) and fx_close > 0) else np.nan
+        var_pct = (last_fx / close_fx - 1.0) if (np.isfinite(last_fx) and np.isfinite(close_fx) and close_fx > 0) else np.nan
 
         rows.append({
             "Bono": base,
@@ -1646,8 +1781,69 @@ def _build_implicit_fx_table(
         })
 
     if not rows:
-        return pd.DataFrame(columns=["Bono", "Bid", "Last", "Offer", "Var %", "Vol ARS (M)", "Vol USD (M)"])
+        return pd.DataFrame(columns=_FX_TABLE_COLS)
     return pd.DataFrame(rows)
+
+
+def _fetch_implicit_fx_snap(
+    username: str,
+    password: str,
+    bond_codes: List[str],
+    plazo: str,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Single fetch para ARS + C + D legs. Devuelve (snap_indexado_por_Código, bases).
+
+    El snap es la entrada a `_fx_rows_from_snap` para cualquier leg.
+    """
+    bases = sorted({_normalize_bond_base(c) for c in bond_codes if c})
+    if not bases:
+        return pd.DataFrame(), []
+    c_codes = [f"{b}C" for b in bases]
+    d_codes = [f"{b}D" for b in bases]
+    all_syms = (
+        _build_symbols(bases, plazo)
+        + _build_symbols(c_codes, plazo)
+        + _build_symbols(d_codes, plazo)
+    )
+    raw = fetch_marketdata(
+        username, password, all_syms,
+        market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+    )
+    if raw is None or raw.empty:
+        return pd.DataFrame(), bases
+    snap = OMSprices.market_snapshot(raw)
+    snap = _ensure_codigo_col(snap, source="index").set_index("Código", drop=False)
+    return snap, bases
+
+
+def _build_implicit_fx_both(
+    username: str,
+    password: str,
+    bond_codes: List[str],
+    plazo: str,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Devuelve (df_usd_cable, df_usb_mep, snap_completo) en un único fetch."""
+    snap, bases = _fetch_implicit_fx_snap(username, password, bond_codes, plazo)
+    df_usd = _fx_rows_from_snap(snap, bases, "C")
+    df_usb = _fx_rows_from_snap(snap, bases, "D")
+    return df_usd, df_usb, snap
+
+
+def _build_implicit_fx_table(
+    username: str,
+    password: str,
+    bond_codes: List[str],
+    plazo: str,
+    leg: str,
+    fx_close: Optional[float] = None,  # noqa: ARG001 — compat (no usado)
+) -> pd.DataFrame:
+    """Compat: una sola pata. Internamente reusa el fetch combinado."""
+    suf = _FX_LEG_SUFFIX.get(leg.upper())
+    if not suf or not bond_codes:
+        return pd.DataFrame(columns=_FX_TABLE_COLS)
+    snap, bases = _fetch_implicit_fx_snap(username, password, bond_codes, plazo)
+    return _fx_rows_from_snap(snap, bases, suf)
+
 
 
 def _style_implicit_fx(df: pd.DataFrame):
@@ -1691,6 +1887,69 @@ def _top_volume_bond(df: pd.DataFrame) -> Optional[pd.Series]:
         return df.loc[idx]
     except Exception:
         return None
+
+
+def _ccl_last_close(df_implicit: pd.DataFrame) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    """Devuelve (last, close, bono) del FX implícito del bono top-vol.
+
+    El close se reconstruye como ars_close/usdleg_close del mismo par y se
+    embute en _build_implicit_fx_table como columna implícita — acá la
+    derivamos invirtiendo la fórmula de Var %:
+       close = last / (1 + var)
+    Es algebraicamente equivalente a tener una columna 'Close FX' separada
+    y evita re-fetchear el snapshot.
+    """
+    top = _top_volume_bond(df_implicit)
+    if top is None:
+        return None, None, None
+    try:
+        last = float(top["Last"])
+        if not np.isfinite(last):
+            return None, None, str(top.get("Bono"))
+        var = top.get("Var %")
+        if pd.isna(var) or not np.isfinite(float(var)):
+            return last, None, str(top.get("Bono"))
+        close = last / (1.0 + float(var))
+        return last, close, str(top.get("Bono"))
+    except Exception:
+        return None, None, None
+
+
+def _compute_brecha_canje(
+    df_usd: pd.DataFrame,
+    df_usb: pd.DataFrame,
+    oficial_last: Optional[float],
+    oficial_close: Optional[float],
+) -> Dict[str, Optional[float]]:
+    """Brecha = CCL/oficial − 1.  Canje = CCL/MEP − 1.
+
+    Variación expresada en puntos porcentuales (delta absoluto entre hoy y
+    el cierre de ayer).
+    """
+    ccl_last, ccl_close, ccl_bono = _ccl_last_close(df_usd)
+    mep_last, mep_close, mep_bono = _ccl_last_close(df_usb)
+
+    out: Dict[str, Optional[float]] = {
+        "ccl_bono": ccl_bono, "mep_bono": mep_bono,
+        "ccl_last": ccl_last, "mep_last": mep_last,
+        "brecha_hoy": None, "brecha_ayer": None, "brecha_var_pp": None,
+        "canje_hoy": None, "canje_ayer": None, "canje_var_pp": None,
+    }
+    if ccl_last and oficial_last and oficial_last > 0:
+        out["brecha_hoy"] = ccl_last / oficial_last - 1.0
+    if ccl_close and oficial_close and oficial_close > 0:
+        out["brecha_ayer"] = ccl_close / oficial_close - 1.0
+    if out["brecha_hoy"] is not None and out["brecha_ayer"] is not None:
+        out["brecha_var_pp"] = out["brecha_hoy"] - out["brecha_ayer"]
+
+    if ccl_last and mep_last and mep_last > 0:
+        out["canje_hoy"] = ccl_last / mep_last - 1.0
+    if ccl_close and mep_close and mep_close > 0:
+        out["canje_ayer"] = ccl_close / mep_close - 1.0
+    if out["canje_hoy"] is not None and out["canje_ayer"] is not None:
+        out["canje_var_pp"] = out["canje_hoy"] - out["canje_ayer"]
+
+    return out
 
 
 def style_curvas(df: pd.DataFrame) -> pd.io.formats.style.Styler:
@@ -3380,19 +3639,28 @@ def _render_sidebar_macro():
     if v is not None:
         st.sidebar.metric("CER", f"{v:,.5f}", delta=f"al {_fecha_str(f)}")
 
-    # Inflación MOM — último dato observado (no proyectado)
-    df_inflam = inp.get("inflamom")
-    if df_inflam is not None and not df_inflam.empty and "inflacionmom" in df_inflam.columns:
-        # inflamom es hist+proy (combine_first). Filtramos solo fechas <= hoy
-        # y descartamos meses futuros (proyección). El dato BCRA real siempre
-        # tiene fecha = último día del mes observado, anterior al mes en curso.
-        hoy = date.today()
-        primer_dia_mes = hoy.replace(day=1)
-        obs = df_inflam[df_inflam.index < primer_dia_mes]
-        if not obs.empty:
-            f_inf = obs.index[-1]
-            v_inf = obs.iloc[-1]["inflacionmom"]
-            st.sidebar.metric("Inflación MOM (obs.)", f"{v_inf:.1f}%", delta=f"al {f_inf}")
+    # Inflación MOM — último dato BCRA observado (no proyección del usuario).
+    # Usamos 'inflamom_observado' (solo BCRA); 'inflamom' es hist + proy
+    # combinados, donde la proy puede pisar meses que aún no publicó INDEC.
+    df_obs = inp.get("inflamom_observado")
+    if df_obs is None or df_obs.empty:
+        # Fallback: usar inflamom completo pero filtrar meses cuyo dato real
+        # ya debería estar publicado (INDEC publica ~14 días después de fin
+        # de mes). Conservador: exigimos que el último día del mes esté
+        # al menos 15 días atrás.
+        df_obs = inp.get("inflamom")
+        if df_obs is not None and not df_obs.empty and "inflacionmom" in df_obs.columns:
+            cutoff = date.today() - pd.Timedelta(days=15)
+            idx_dates = pd.to_datetime(df_obs.index).date
+            df_obs = df_obs[idx_dates <= cutoff]
+    if df_obs is not None and not df_obs.empty and "inflacionmom" in df_obs.columns:
+        f_inf = df_obs.index[-1]
+        v_inf = df_obs.iloc[-1]["inflacionmom"]
+        try:
+            f_inf_str = f_inf.strftime("%Y-%m")
+        except Exception:
+            f_inf_str = str(f_inf)[:7]
+        st.sidebar.metric("Inflación MOM (obs.)", f"{v_inf:.1f}%", delta=f"mes {f_inf_str}")
 
     # UVA
     f, v = _last_val("UVA", "UVA")
@@ -4380,7 +4648,14 @@ def _render_yas(username, password, plazo, curve_labels):
 
         with col_inp:
             if yas_mode == "Precio":
-                yas_val = st.number_input("Precio (% VN)", value=100.0, step=0.01, format="%.4f", key="yas_val_px")
+                # Auto-populate con el last del bono cuando cambia la selección.
+                _autofill_price_default(
+                    username, password, yas_code, plazo,
+                    widget_key="yas_val_px", tracker_key="_yas_px_bond",
+                )
+                yas_val = st.number_input(
+                    "Precio (% VN)", step=0.01, format="%.4f", key="yas_val_px",
+                )
                 mode_key = "precio"
             elif yas_mode == "TIREA":
                 yas_val = st.number_input("TIREA (decimal, ej 0.42)", value=0.40, step=0.005, format="%.6f", key="yas_val_tir")
@@ -4787,15 +5062,17 @@ def main():
     curve_labels = {c.key: c.label for c in CURVES}
 
     # ── Monitor sidebar: USD / USB del bono más operado (auto-refresh) ──
-    # Streamlit ≥1.37 no permite usar `st.sidebar` dentro de un @st.fragment;
-    # el fragment debe escribir en el contexto activo. Por eso lo envolvemos
-    # afuera con `with st.sidebar:` y el cuerpo del fragment usa st.* directo.
+    # Nota: Streamlit no permite `st.sidebar.*` adentro de @st.fragment.
+    # El fragment debe usar `st.*` plano y ser invocado dentro de un
+    # `with st.sidebar:` afuera.
     @st.fragment(run_every=refresh_interval if refresh_interval else 30)
     def _render_sidebar_dolares_live():
         try:
-            base_codes = sorted(set(
-                (curves.get("globales", []) or []) + (curves.get("bonares", []) or [])
-            ))
+            base_codes = sorted({
+                _normalize_bond_base(c)
+                for c in (curves.get("globales", []) or []) + (curves.get("bonares", []) or [])
+                if c
+            })
             if not base_codes:
                 return
             fx_close = None
@@ -4808,12 +5085,11 @@ def main():
             except Exception:
                 fx_close = None
 
-            # Computamos sobre 24hs (más liquidez)
-            df_usd = _build_implicit_fx_table(
-                username, password, base_codes, "24hs", "USD", fx_close=fx_close
-            )
-            df_usb = _build_implicit_fx_table(
-                username, password, base_codes, "24hs", "USB", fx_close=fx_close
+            # Computamos sobre 24hs (más liquidez). UN solo fetch para
+            # ambas patas — el sidebar se llama en cada refresh, así que
+            # ahorrar la doble vuelta vale.
+            df_usd, df_usb, _ = _build_implicit_fx_both(
+                username, password, base_codes, "24hs"
             )
 
             st.divider()
@@ -4828,7 +5104,7 @@ def main():
                 var = top.get("Var %")
                 delta = None
                 if pd.notna(var):
-                    delta = f"{float(var) * 100:+.2f}% vs A3500 close"
+                    delta = f"{float(var) * 100:+.2f}% vs close"
                 st.metric(
                     f"{label} · {top.get('Bono', '?')}",
                     f"${last:,.2f}",
@@ -4837,6 +5113,30 @@ def main():
 
             _show("USD (cable)", df_usd)
             _show("USB (MEP)", df_usb)
+
+            # Brecha (CCL vs oficial) y Canje (CCL vs MEP)
+            oficial_last = None
+            try:
+                oficial_last = float(get_fx_hoy(session=session))
+            except Exception:
+                oficial_last = None
+            bc = _compute_brecha_canje(df_usd, df_usb, oficial_last, fx_close)
+
+            def _pp(v):
+                return None if v is None else f"{v * 100:+.2f} pp"
+
+            if bc["brecha_hoy"] is not None:
+                st.metric(
+                    "Brecha (CCL/oficial)",
+                    f"{bc['brecha_hoy'] * 100:.2f}%",
+                    delta=_pp(bc["brecha_var_pp"]),
+                )
+            if bc["canje_hoy"] is not None:
+                st.metric(
+                    "Canje (CCL/MEP)",
+                    f"{bc['canje_hoy'] * 100:.2f}%",
+                    delta=_pp(bc["canje_var_pp"]),
+                )
         except Exception as e:
             st.caption(f"⚠️ Monitor dólar: {e}")
 
@@ -5646,7 +5946,8 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
             st.caption(
                 "USD = vía Cable (ticker C). USB = vía MEP/Bolsa (ticker D). "
                 "Bid implícito = ARS bid / USD-leg offer. Offer implícito = ARS offer / USD-leg bid. "
-                "Last implícito = ARS last / USD-leg last."
+                "Last implícito = ARS last / USD-leg last. "
+                "Var % = last hoy / close de ayer del mismo dólar implícito − 1."
             )
 
             # FX close de ayer (referencia para variación)
@@ -5695,15 +5996,25 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     hide_index=True,
                     height=min(420, 50 + 35 * len(mae_view)),
                 )
-                st.caption(f"A3500 close (referencia para variación): **{fx_close:,.2f}**" if fx_close else "")
+                if fx_close:
+                    st.caption(f"A3500 close de ayer (mayorista oficial, referencia): **{fx_close:,.2f}**")
 
             st.divider()
 
             # ── 2. Tablas FX implícito por bono ──────────────────────
-            # Bases: globales (con C y D) + bonares (sólo D, pero igual probamos C)
+            # Bases: globales (cargados como C) + bonares (cargados como D).
+            # Normalizamos a la base (sin sufijo) para que _build_implicit_fx_table
+            # arme las dos patas (ARS + C/D) correctamente.
             globales_codes = curves.get("globales", []) or []
             bonares_codes = curves.get("bonares", []) or []
-            base_codes = sorted(set(list(globales_codes) + list(bonares_codes)))
+            base_codes = sorted({
+                _normalize_bond_base(c)
+                for c in list(globales_codes) + list(bonares_codes)
+                if c
+            })
+
+            # Cache local de fetches (compartido con brecha/canje y calc abajo)
+            fx_by_plazo: Dict[str, Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]] = {}
 
             if not base_codes:
                 st.warning("No hay globales ni bonares en el universo cargado.")
@@ -5726,14 +6037,21 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
                 leg_map = {"USD (cable)": "USD", "USB (MEP)": "USB"}
 
+                # Una sola pasada por plazo (devuelve ambas patas + snap crudo).
+                # Cacheamos en local para reusar en la sección Brecha/Canje y
+                # en la calculadora sin re-fetchear.
+                fx_by_plazo: Dict[str, Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]] = {}
+                for pz in plazos_show:
+                    fx_by_plazo[pz] = _build_implicit_fx_both(
+                        username, password, base_codes, pz,
+                    )
+
                 for leg_lbl in legs_show:
                     leg = leg_map[leg_lbl]
                     for pz in plazos_show:
                         st.markdown(f"##### {leg_lbl} — {pz}")
-                        df_fx = _build_implicit_fx_table(
-                            username, password,
-                            base_codes, pz, leg, fx_close=fx_close,
-                        )
+                        df_usd_pz, df_usb_pz, _snap_pz = fx_by_plazo[pz]
+                        df_fx = df_usd_pz if leg == "USD" else df_usb_pz
                         if df_fx.empty:
                             st.caption(f"Sin datos {leg_lbl} {pz}.")
                             continue
@@ -5751,9 +6069,97 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                             height=min(560, 50 + 35 * len(df_fx)),
                         )
 
+                # ── 2.b Tabla Canje (cable vs MEP, mismo bono) ───────
+                st.markdown("##### 🔁 Canje por bono (C vs D)")
+                st.caption(
+                    "Last = px C last / px D last. "
+                    "Bid = px C offer / px D bid. "
+                    "Offer = px C bid / px D offer. "
+                    "Var % = last hoy / close ayer − 1."
+                )
+                for pz in plazos_show:
+                    _df_usd_pz, _df_usb_pz, _snap_pz_cj = fx_by_plazo.get(pz, (None, None, None))
+                    if _snap_pz_cj is None or _snap_pz_cj.empty:
+                        st.caption(f"Sin snap para canje {pz}.")
+                        continue
+                    df_cj = _canje_rows_from_snap(_snap_pz_cj, base_codes)
+                    if df_cj.empty:
+                        st.caption(f"Sin pares C/D con datos en {pz}.")
+                        continue
+                    try:
+                        df_cj = df_cj.sort_values(
+                            "Vol C (M USD)", ascending=False, na_position="last"
+                        ).reset_index(drop=True)
+                    except Exception:
+                        pass
+                    st.markdown(f"_Plazo: **{pz}**_")
+                    st.dataframe(
+                        _style_canje(df_cj),
+                        width="stretch",
+                        hide_index=True,
+                        height=min(420, 50 + 35 * len(df_cj)),
+                    )
+
             st.divider()
 
-            # ── 3. Mini calculadora FX ───────────────────────────────
+            # ── 3. Brecha y Canje (sobre el bono top-vol de 24hs) ────
+            st.markdown("#### 📐 Brecha y Canje")
+            st.caption(
+                "Brecha = CCL / A3500 oficial − 1. "
+                "Canje = CCL / MEP − 1. "
+                "Var en puntos porcentuales (pp) vs cierre de ayer. "
+                "Se computa con el bono de mayor volumen del día (24hs) en cada leg."
+            )
+            try:
+                # Reusa el fetch 24hs si lo hicimos arriba; sino lo hace ahora.
+                if "24hs" in fx_by_plazo:
+                    df_usd_24, df_usb_24, _ = fx_by_plazo["24hs"]
+                else:
+                    df_usd_24, df_usb_24, _ = _build_implicit_fx_both(
+                        username, password, base_codes, "24hs",
+                    )
+                oficial_last_tab = None
+                try:
+                    oficial_last_tab = float(get_fx_hoy(session=get_session(username, password)))
+                except Exception:
+                    oficial_last_tab = None
+                bc_tab = _compute_brecha_canje(df_usd_24, df_usb_24, oficial_last_tab, fx_close)
+
+                b_c1, b_c2, b_c3, b_c4 = st.columns(4)
+                with b_c1:
+                    if bc_tab["ccl_last"]:
+                        st.metric(f"CCL · {bc_tab['ccl_bono']}", f"${bc_tab['ccl_last']:,.2f}")
+                    if bc_tab["mep_last"]:
+                        st.metric(f"MEP · {bc_tab['mep_bono']}", f"${bc_tab['mep_last']:,.2f}")
+                with b_c2:
+                    if oficial_last_tab:
+                        st.metric("A3500 (last intraday)", f"${oficial_last_tab:,.2f}")
+                    if fx_close:
+                        st.metric("A3500 (close ayer)", f"${fx_close:,.2f}")
+                with b_c3:
+                    if bc_tab["brecha_hoy"] is not None:
+                        delta_b = (f"{bc_tab['brecha_var_pp'] * 100:+.2f} pp"
+                                   if bc_tab["brecha_var_pp"] is not None else None)
+                        st.metric(
+                            "Brecha (CCL/oficial)",
+                            f"{bc_tab['brecha_hoy'] * 100:.2f}%",
+                            delta=delta_b,
+                        )
+                with b_c4:
+                    if bc_tab["canje_hoy"] is not None:
+                        delta_c = (f"{bc_tab['canje_var_pp'] * 100:+.2f} pp"
+                                   if bc_tab["canje_var_pp"] is not None else None)
+                        st.metric(
+                            "Canje (CCL/MEP)",
+                            f"{bc_tab['canje_hoy'] * 100:.2f}%",
+                            delta=delta_c,
+                        )
+            except Exception as e:
+                st.warning(f"No se pudo calcular brecha/canje: {e}")
+
+            st.divider()
+
+            # ── 4. Mini calculadora FX ───────────────────────────────
             st.markdown("#### 🧮 Calculadora de operación FX")
             st.caption(
                 "Estimá la compra/venta cruzada para hacerte de USD o ARS. "
@@ -5785,29 +6191,31 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 )
 
             calc_leg = leg_map[calc_leg_lbl]
-            # Fetch single pair fresh
-            df_one = _build_implicit_fx_table(
-                username, password,
-                [calc_bono], calc_plazo, calc_leg, fx_close=fx_close,
-            )
-            if df_one.empty:
+            suf = _FX_LEG_SUFFIX[calc_leg]
+            usd_code = f"{calc_bono}{suf}"
+
+            # Si ya hicimos el fetch combinado para este plazo arriba, reusamos
+            # el snap. Sino, fetcheamos las 3 patas del MISMO bono de una vez
+            # (base + C + D) para alimentar tanto las puntas como brecha/canje.
+            cached = fx_by_plazo.get(calc_plazo)
+            if cached is not None and cached[2] is not None and not cached[2].empty:
+                _snap = cached[2]
+                # Tablas df ya tienen todas las bases. Tomemos la fila del bono.
+                df_leg = cached[0] if calc_leg == "USD" else cached[1]
+                df_one = df_leg[df_leg["Bono"] == calc_bono] if not df_leg.empty else pd.DataFrame()
+            else:
+                _snap, _bases_local = _fetch_implicit_fx_snap(
+                    username, password, [calc_bono], calc_plazo,
+                )
+                df_one = _fx_rows_from_snap(_snap, _bases_local, suf)
+
+            if df_one is None or df_one.empty:
                 st.warning(f"Sin book para {calc_bono} / {calc_leg_lbl} / {calc_plazo}.")
             else:
                 r = df_one.iloc[0]
                 bid_fx = float(r["Bid"]) if pd.notna(r["Bid"]) else None
                 last_fx = float(r["Last"]) if pd.notna(r["Last"]) else None
                 offer_fx = float(r["Offer"]) if pd.notna(r["Offer"]) else None
-
-                # Levantamos precios brutos del bono ARS y USD-leg para mostrar la ruta
-                suf = _FX_LEG_SUFFIX[calc_leg]
-                usd_code = f"{calc_bono}{suf}"
-                syms = _build_symbols([calc_bono, usd_code], calc_plazo)
-                _raw = fetch_marketdata(username, password, syms,
-                                        market_id=DEFAULT_MARKET_ID,
-                                        entries=cfg.ENTRIES, depth=1)
-                _snap = OMSprices.market_snapshot(_raw) if (_raw is not None and not _raw.empty) else None
-                if _snap is not None and not _snap.empty:
-                    _snap = _ensure_codigo_col(_snap, source="index").set_index("Código", drop=False)
 
                 def _p(code, field):
                     if _snap is None or code not in _snap.index:
@@ -5827,6 +6235,61 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                 m1.metric(f"Bid {calc_leg}", f"{bid_fx:,.2f}" if bid_fx else "—")
                 m2.metric(f"Last {calc_leg}", f"{last_fx:,.2f}" if last_fx else "—")
                 m3.metric(f"Offer {calc_leg}", f"{offer_fx:,.2f}" if offer_fx else "—")
+
+                # Brecha y canje del bono seleccionado (vs A3500 last y vs leg opuesta)
+                try:
+                    oficial_last_calc = float(get_fx_hoy(session=get_session(username, password)))
+                except Exception:
+                    oficial_last_calc = None
+                # Last del leg opuesto sobre el MISMO bono
+                opp_suf = "D" if suf == "C" else "C"
+                opp_code = f"{calc_bono}{opp_suf}"
+                if _snap is None or opp_code not in _snap.index:
+                    _raw_opp = fetch_marketdata(
+                        username, password,
+                        _build_symbols([opp_code], calc_plazo),
+                        market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
+                    )
+                    if _raw_opp is not None and not _raw_opp.empty:
+                        _snap_opp = OMSprices.market_snapshot(_raw_opp)
+                        _snap_opp = _ensure_codigo_col(_snap_opp, source="index").set_index("Código", drop=False)
+                    else:
+                        _snap_opp = None
+                else:
+                    _snap_opp = _snap
+                opp_last = None
+                if _snap_opp is not None and opp_code in _snap_opp.index:
+                    try:
+                        _v = float(_snap_opp.loc[opp_code, "last"])
+                        if np.isfinite(_v) and _v > 0:
+                            # last_fx_opuesto = ars_last / opp_last
+                            ars_last_raw = _p(calc_bono, "last")
+                            if ars_last_raw:
+                                opp_last = ars_last_raw / _v
+                    except Exception:
+                        opp_last = None
+
+                brecha_calc = (last_fx / oficial_last_calc - 1.0
+                               if (last_fx and oficial_last_calc and oficial_last_calc > 0) else None)
+                # Canje siempre se reporta como CCL/MEP (signo positivo si cable > mep)
+                if last_fx and opp_last:
+                    ccl_v = last_fx if calc_leg == "USD" else opp_last
+                    mep_v = opp_last if calc_leg == "USD" else last_fx
+                    canje_calc = ccl_v / mep_v - 1.0 if mep_v > 0 else None
+                else:
+                    canje_calc = None
+
+                bcc1, bcc2 = st.columns(2)
+                with bcc1:
+                    st.metric(
+                        f"Brecha (last {calc_leg} / A3500)",
+                        f"{brecha_calc * 100:.2f}%" if brecha_calc is not None else "—",
+                    )
+                with bcc2:
+                    st.metric(
+                        f"Canje ({calc_bono}: CCL/MEP)",
+                        f"{canje_calc * 100:.2f}%" if canje_calc is not None else "—",
+                    )
 
                 st.markdown("**Cantidad a operar**")
                 qty_c1, qty_c2 = st.columns([1, 1])
@@ -6270,7 +6733,13 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     st.markdown("#### Bono A")
                     code_a = st.selectbox("Bono A", options=all_codes_c, key="comp_a")
                     if comp_mode == "Por Precio":
-                        val_a = st.number_input("Precio A (% VN)", value=100.0, step=0.01, format="%.4f", key="comp_val_a")
+                        _autofill_price_default(
+                            username, password, code_a, plazo,
+                            widget_key="comp_val_a", tracker_key="_comp_px_bond_a",
+                        )
+                        val_a = st.number_input(
+                            "Precio A (% VN)", step=0.01, format="%.4f", key="comp_val_a",
+                        )
                     else:
                         val_a = st.number_input("TNA A (decimal)", value=0.38, step=0.005, format="%.6f", key="comp_val_a")
 
@@ -6278,7 +6747,13 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                     st.markdown("#### Bono B")
                     code_b = st.selectbox("Bono B", options=all_codes_c, key="comp_b")
                     if comp_mode == "Por Precio":
-                        val_b = st.number_input("Precio B (% VN)", value=100.0, step=0.01, format="%.4f", key="comp_val_b")
+                        _autofill_price_default(
+                            username, password, code_b, plazo,
+                            widget_key="comp_val_b", tracker_key="_comp_px_bond_b",
+                        )
+                        val_b = st.number_input(
+                            "Precio B (% VN)", step=0.01, format="%.4f", key="comp_val_b",
+                        )
                     else:
                         val_b = st.number_input("TNA B (decimal)", value=0.38, step=0.005, format="%.6f", key="comp_val_b")
 
