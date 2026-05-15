@@ -6860,6 +6860,54 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                 if np.isfinite(met_a.get("Margen TNA", np.nan)) or np.isfinite(met_b.get("Margen TNA", np.nan)):
                                     _comp_row("Margen TNA", "Margen TNA", "{:.4%}")
 
+                                # ── Forward implícita entre A y B ──
+                                # Identifica corto/largo por Duration y calcula:
+                                #   fwd = ((1+y_l)^d_l / (1+y_s)^d_s)^(1/(d_l-d_s)) - 1
+                                tir_a_f = met_a.get("TIREA", np.nan)
+                                tir_b_f = met_b.get("TIREA", np.nan)
+                                dur_a_f = met_a.get("Duration", np.nan)
+                                dur_b_f = met_b.get("Duration", np.nan)
+                                if (
+                                    np.isfinite(tir_a_f) and np.isfinite(tir_b_f)
+                                    and np.isfinite(dur_a_f) and np.isfinite(dur_b_f)
+                                    and dur_a_f != dur_b_f
+                                ):
+                                    if dur_a_f < dur_b_f:
+                                        code_s, code_l = code_a, code_b
+                                        y_s, y_l = float(tir_a_f), float(tir_b_f)
+                                        d_s, d_l = float(dur_a_f), float(dur_b_f)
+                                    else:
+                                        code_s, code_l = code_b, code_a
+                                        y_s, y_l = float(tir_b_f), float(tir_a_f)
+                                        d_s, d_l = float(dur_b_f), float(dur_a_f)
+
+                                    fwd_val = np.nan
+                                    if (1.0 + y_s) > 0 and (1.0 + y_l) > 0 and (d_l - d_s) > 0:
+                                        try:
+                                            fwd_val = ((1.0 + y_l) ** d_l / (1.0 + y_s) ** d_s) ** (1.0 / (d_l - d_s)) - 1.0
+                                        except (ValueError, ZeroDivisionError, OverflowError):
+                                            fwd_val = np.nan
+
+                                    st.markdown("---")
+                                    st.markdown("#### Forward implícita")
+                                    st.caption(
+                                        f"Bloquea la tasa entre Dur={d_s:.4f} ({code_s}) y Dur={d_l:.4f} ({code_l})."
+                                    )
+                                    fc1, fc2, fc3 = st.columns([2, 2, 2])
+                                    with fc1:
+                                        st.metric(f"{code_s} (corto)", f"{y_s:.4%}", f"Dur {d_s:.4f}",
+                                                  delta_color="off")
+                                    with fc2:
+                                        st.metric(f"{code_l} (largo)", f"{y_l:.4%}", f"Dur {d_l:.4f}",
+                                                  delta_color="off")
+                                    with fc3:
+                                        st.metric(
+                                            f"Fwd {code_s} → {code_l}",
+                                            f"{fwd_val:.4%}" if np.isfinite(fwd_val) else "—",
+                                            f"Δdur {d_l - d_s:.4f}",
+                                            delta_color="off",
+                                        )
+
                             # Tabla completa
                             with st.expander("Ver tabla completa (comparar_precio/tna)", expanded=False):
                                 # Cast columnas object-mixed a str para evitar ArrowTypeError
@@ -8148,89 +8196,6 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                     legend_yanchor="bottom", legend_y=1.02,
                                 )
                                 _st_plotly(fig)
-
-                                # ── Forward implícita entre los bonos comparados ──
-                                # Snapshot más reciente por bono. Cálculo barato (solo aritmética
-                                # sobre el último registro de cada código).
-                                latest_rows = (
-                                    df_f[df_f["Código"].isin(codes_multi)]
-                                    .dropna(subset=["TIREA", "Duration"])
-                                    .sort_values("fecha_hoy")
-                                    .groupby("Código", as_index=False)
-                                    .tail(1)
-                                    [["Código", "fecha_hoy", "TIREA", "Duration"]]
-                                )
-                                latest_rows["TIREA"] = pd.to_numeric(latest_rows["TIREA"], errors="coerce")
-                                latest_rows["Duration"] = pd.to_numeric(latest_rows["Duration"], errors="coerce")
-                                latest_rows = (
-                                    latest_rows.dropna(subset=["TIREA", "Duration"])
-                                    .sort_values("Duration")
-                                    .reset_index(drop=True)
-                                )
-
-                                if len(latest_rows) >= 2:
-                                    codes_o = latest_rows["Código"].tolist()
-                                    durs = latest_rows["Duration"].astype(float).tolist()
-                                    tirs = latest_rows["TIREA"].astype(float).tolist()
-                                    n = len(codes_o)
-
-                                    def _fwd(y_short, d_short, y_long, d_long):
-                                        if d_long <= d_short:
-                                            return None
-                                        if (1.0 + y_short) <= 0 or (1.0 + y_long) <= 0:
-                                            return None
-                                        try:
-                                            return ((1.0 + y_long) ** d_long / (1.0 + y_short) ** d_short) ** (1.0 / (d_long - d_short)) - 1.0
-                                        except (ValueError, ZeroDivisionError, OverflowError):
-                                            return None
-
-                                    snap_date = latest_rows["fecha_hoy"].max()
-                                    snap_date_str = pd.to_datetime(snap_date).strftime("%Y-%m-%d") if pd.notna(snap_date) else "—"
-
-                                    st.markdown(f"**Forward implícita** — snapshot {snap_date_str}")
-
-                                    if n == 2:
-                                        fwd_val = _fwd(tirs[0], durs[0], tirs[1], durs[1])
-                                        col_a, col_b, col_c = st.columns(3)
-                                        col_a.metric(
-                                            f"{codes_o[0]} (corto)",
-                                            f"{tirs[0]*100:.2f}%",
-                                            f"Dur {durs[0]:.2f}",
-                                            delta_color="off",
-                                        )
-                                        col_b.metric(
-                                            f"{codes_o[1]} (largo)",
-                                            f"{tirs[1]*100:.2f}%",
-                                            f"Dur {durs[1]:.2f}",
-                                            delta_color="off",
-                                        )
-                                        col_c.metric(
-                                            f"Fwd {codes_o[0]} → {codes_o[1]}",
-                                            f"{fwd_val*100:.2f}%" if fwd_val is not None else "—",
-                                            f"Δdur {durs[1]-durs[0]:.2f}",
-                                            delta_color="off",
-                                        )
-                                    else:
-                                        # Matriz NxN: filas = bono corto, columnas = bono largo
-                                        mat = [[float("nan")] * n for _ in range(n)]
-                                        for i in range(n):
-                                            for j in range(i + 1, n):
-                                                v = _fwd(tirs[i], durs[i], tirs[j], durs[j])
-                                                if v is not None:
-                                                    mat[i][j] = v
-                                        df_fwd = pd.DataFrame(mat, index=codes_o, columns=codes_o, dtype=float)
-                                        df_fwd.index.name = "Corto \\ Largo"
-                                        caption_parts = [
-                                            f"{c}: TIR={t*100:.2f}%, Dur={d:.2f}"
-                                            for c, t, d in zip(codes_o, tirs, durs)
-                                        ]
-                                        st.caption(" · ".join(caption_parts))
-                                        st.dataframe(
-                                            df_fwd.style.format(
-                                                lambda v: f"{v*100:.2f}%" if pd.notna(v) else "—"
-                                            ),
-                                            use_container_width=True,
-                                        )
 
                         # ── Vista 3: Spread entre bonos ──
                         elif view_mode.startswith("Spread"):
