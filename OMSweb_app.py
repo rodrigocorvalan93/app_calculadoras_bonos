@@ -4787,6 +4787,9 @@ def main():
     curve_labels = {c.key: c.label for c in CURVES}
 
     # ── Monitor sidebar: USD / USB del bono más operado (auto-refresh) ──
+    # Streamlit ≥1.37 no permite usar `st.sidebar` dentro de un @st.fragment;
+    # el fragment debe escribir en el contexto activo. Por eso lo envolvemos
+    # afuera con `with st.sidebar:` y el cuerpo del fragment usa st.* directo.
     @st.fragment(run_every=refresh_interval if refresh_interval else 30)
     def _render_sidebar_dolares_live():
         try:
@@ -4813,33 +4816,32 @@ def main():
                 username, password, base_codes, "24hs", "USB", fx_close=fx_close
             )
 
-            with st.sidebar:
-                st.divider()
-                st.header("💵 Dólar (bono top-vol)")
+            st.divider()
+            st.header("💵 Dólar (bono top-vol)")
 
-                def _show(label: str, df: pd.DataFrame):
-                    top = _top_volume_bond(df)
-                    if top is None or pd.isna(top.get("Last")):
-                        st.metric(label, "—")
-                        return
-                    last = float(top["Last"])
-                    var = top.get("Var %")
-                    delta = None
-                    if pd.notna(var):
-                        delta = f"{float(var) * 100:+.2f}% vs A3500 close"
-                    st.metric(
-                        f"{label} · {top.get('Bono', '?')}",
-                        f"${last:,.2f}",
-                        delta=delta,
-                    )
+            def _show(label: str, df: pd.DataFrame):
+                top = _top_volume_bond(df)
+                if top is None or pd.isna(top.get("Last")):
+                    st.metric(label, "—")
+                    return
+                last = float(top["Last"])
+                var = top.get("Var %")
+                delta = None
+                if pd.notna(var):
+                    delta = f"{float(var) * 100:+.2f}% vs A3500 close"
+                st.metric(
+                    f"{label} · {top.get('Bono', '?')}",
+                    f"${last:,.2f}",
+                    delta=delta,
+                )
 
-                _show("USD (cable)", df_usd)
-                _show("USB (MEP)", df_usb)
+            _show("USD (cable)", df_usd)
+            _show("USB (MEP)", df_usb)
         except Exception as e:
-            with st.sidebar:
-                st.caption(f"⚠️ Monitor dólar: {e}")
+            st.caption(f"⚠️ Monitor dólar: {e}")
 
-    _render_sidebar_dolares_live()
+    with st.sidebar:
+        _render_sidebar_dolares_live()
     _lap("after sidebar dolares live")
 
     # Navegación: pestañas
