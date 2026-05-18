@@ -130,6 +130,58 @@ def _append_parquet(path: Path, rows: List[dict]) -> None:
     df_new.to_parquet(path, index=False)
 
 
+def _humanize(n) -> str:
+    """Formatea sizes grandes (cauciones tradean montos enormes)."""
+    if n is None:
+        return "—"
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return str(n)
+    if n >= 1e9:
+        return f"{n/1e9:.2f}B"
+    if n >= 1e6:
+        return f"{n/1e6:.1f}M"
+    if n >= 1e3:
+        return f"{n/1e3:.0f}k"
+    return f"{n:.0f}"
+
+
+def _fmt_last_ts(raw) -> str:
+    """Primary devuelve last_ts como epoch ms o string ISO/'YYYYMMDD-HH:MM:SS'."""
+    if raw is None:
+        return "—"
+    # epoch en milisegundos
+    if isinstance(raw, (int, float)):
+        try:
+            return datetime.fromtimestamp(raw / 1000).strftime("%H:%M:%S")
+        except (OSError, ValueError, OverflowError):
+            return str(raw)
+    s = str(raw)
+    # Formato Primary: '20260518-12:34:50' o ISO 'YYYY-MM-DDTHH:MM:SS'
+    for fmt in ("%Y%m%d-%H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(s[:19], fmt).strftime("%H:%M:%S")
+        except ValueError:
+            continue
+    return s[-8:] if len(s) >= 8 else s
+
+
+def _print_snapshot_line(row: dict) -> None:
+    """Heartbeat por snapshot: hora local, símbolo, top of book, último trade."""
+    sym = row["symbol"].split(" - ")[-1] if row.get("symbol") else "?"
+    t = row["ts_capture"].strftime("%H:%M:%S") if row.get("ts_capture") else "--:--:--"
+    bid = f"{row['bid']:.3f}" if row.get("bid") is not None else "—"
+    ofr = f"{row['offer']:.3f}" if row.get("offer") is not None else "—"
+    last = f"{row['last']:.3f}" if row.get("last") is not None else "—"
+    print(
+        f"  {t}  {sym:>3}  "
+        f"BI {bid}×{_humanize(row.get('bid_size'))}   "
+        f"OF {ofr}×{_humanize(row.get('offer_size'))}   "
+        f"LAST {last}  @ {_fmt_last_ts(row.get('last_ts'))}"
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Recorder loop
 # ──────────────────────────────────────────────────────────────────────
@@ -179,11 +231,13 @@ def run_recorder(interval: int, until: Optional[str], include_dolar: bool) -> No
                     continue
                 if md is None:
                     continue
-                rows.append(_snap_row(md, sym, t_capture))
+                row = _snap_row(md, sym, t_capture)
+                rows.append(row)
+                _print_snapshot_line(row)
 
             if len(rows) >= flush_every:
                 _append_parquet(outfile, rows)
-                print(f"  flush {len(rows)} filas  ({t_capture:%H:%M:%S})")
+                print(f"  ── flush {len(rows)} filas → parquet  ({t_capture:%H:%M:%S})")
                 rows.clear()
 
             time.sleep(interval)
