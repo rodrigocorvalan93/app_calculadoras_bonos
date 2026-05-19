@@ -37,7 +37,7 @@ import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import pandas as pd
 
@@ -201,14 +201,105 @@ def _append_parquet(path: Path, rows: List[dict]) -> None:
     df_new.to_parquet(path, index=False)
 
 
-def run_record(symbols: List[str], until: Optional[str]) -> None:
+def _short_symbol(s: Any) -> str:
+    """'MERV - XMEV - PESOS - 1D' → 'PESOS 1D'."""
+    if not isinstance(s, str):
+        return str(s)
+    parts = [p.strip() for p in s.split(" - ")]
+    if len(parts) >= 4:
+        return f"{parts[2]} {parts[3]}"
+    return s
+
+
+def _fmt_px(v) -> str:
+    try:
+        f = float(v)
+        if f != f:  # NaN
+            return "—"
+        return f"{f:.3f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _humanize(n) -> str:
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return str(n)
+    if n != n:
+        return "—"
+    if abs(n) >= 1e9:
+        return f"{n/1e9:.2f}B"
+    if abs(n) >= 1e6:
+        return f"{n/1e6:.1f}M"
+    if abs(n) >= 1e3:
+        return f"{n/1e3:.0f}k"
+    return f"{n:.0f}"
+
+
+def _summarize_flush(rows: List[dict]) -> str:
+    """Resumen por símbolo de la ventana de flush.
+
+    Por cada símbolo en `rows`, muestra:
+      - evs:    cantidad de eventos
+      - trades: # de last_ts únicos != None (proxy de trades nuevos en la ventana)
+      - bid/ofr/last: primer → último valor visto
+      - hi/lo:  rango del 'last' (precios efectivamente operados)
+      - Σnom:   suma de last_size de los trades distintos (VWAP-able)
+    """
+    if not rows:
+        return "(vacío)"
+    df = pd.DataFrame(rows)
+    if df.empty or "symbol" not in df.columns:
+        return "(sin symbol)"
+
+    lines = []
+    for sym, g in df.groupby("symbol", sort=False):
+        n = len(g)
+
+        # Trades nuevos = last_ts únicos no nulos.
+        if "last_ts" in g.columns:
+            ts_uniq = g["last_ts"].dropna().drop_duplicates()
+            n_trades = len(ts_uniq)
+            # Σ nominal de un row por trade
+            tr_rows = g.dropna(subset=["last_ts"]).drop_duplicates(subset=["last_ts"], keep="first")
+            sigma_nom = pd.to_numeric(tr_rows.get("last_size"), errors="coerce").sum()
+            last_prices = pd.to_numeric(tr_rows.get("last"), errors="coerce").dropna()
+        else:
+            n_trades = 0
+            sigma_nom = 0
+            last_prices = pd.Series([], dtype="float64")
+
+        def _first_last(col):
+            s = pd.to_numeric(g.get(col), errors="coerce").dropna()
+            if s.empty:
+                return "—", "—"
+            return _fmt_px(s.iloc[0]), _fmt_px(s.iloc[-1])
+
+        bid_a, bid_b = _first_last("bid")
+        ofr_a, ofr_b = _first_last("offer")
+        last_a, last_b = _first_last("last")
+        hi = _fmt_px(last_prices.max()) if not last_prices.empty else "—"
+        lo = _fmt_px(last_prices.min()) if not last_prices.empty else "—"
+
+        lines.append(
+            f"    {_short_symbol(sym):<12s} "
+            f"evs={n:<4d} trades={n_trades:<3d} "
+            f"bid {bid_a}→{bid_b}  ofr {ofr_a}→{ofr_b}  "
+            f"last {last_a}→{last_b}  hi {hi} lo {lo}  Σnom={_humanize(sigma_nom)}"
+        )
+    return "\n".join(lines)
+
+
+def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = False) -> None:
     today = date.today()
     out_md = DATA_DIR / f"ws_md_{today.isoformat()}.parquet"
     raw_log = DATA_DIR / f"ws_raw_{today.isoformat()}.jsonl"
     print(f"WS recorder activo.")
-    print(f"  símbolos = {symbols}")
-    print(f"  out MD   = {out_md}")
-    print(f"  raw log  = {raw_log}")
+    print(f"  símbolos       = {symbols}")
+    print(f"  out MD         = {out_md}")
+    print(f"  raw log        = {raw_log}")
+    print(f"  verbose-flush  = {verbose_flush}")
 
     until_dt: Optional[datetime] = None
     if until:
@@ -261,7 +352,11 @@ def run_record(symbols: List[str], until: Optional[str]) -> None:
 
                     if len(rows) >= flush_every:
                         _append_parquet(out_md, rows)
-                        print(f"  flush {len(rows)} eventos  ({t_capture:%H:%M:%S})")
+                        if verbose_flush:
+                            print(f"  ── flush {len(rows)} eventos @ {t_capture:%H:%M:%S} ──")
+                            print(_summarize_flush(rows))
+                        else:
+                            print(f"  flush {len(rows)} eventos  ({t_capture:%H:%M:%S})")
                         rows.clear()
 
             except (websocket.WebSocketException, ConnectionError, OSError) as e:
@@ -276,7 +371,11 @@ def run_record(symbols: List[str], until: Optional[str]) -> None:
     finally:
         if rows:
             _append_parquet(out_md, rows)
-            print(f"Final flush {len(rows)} eventos → {out_md}")
+            if verbose_flush:
+                print(f"  ── final flush {len(rows)} eventos ──")
+                print(_summarize_flush(rows))
+            else:
+                print(f"Final flush {len(rows)} eventos → {out_md}")
         raw_fh.close()
 
 
@@ -298,6 +397,8 @@ def main() -> None:
     p_test = sub.add_parser("test", parents=[common], help="Handshake + dump raw, 20 msgs ó 30s")
     p_rec = sub.add_parser("record", parents=[common], help="Persiste eventos en parquet")
     p_rec.add_argument("--until", type=str, default=None, help="HH:MM corte (default: Ctrl+C)")
+    p_rec.add_argument("--verbose-flush", action="store_true",
+                       help="En cada flush imprime resumen por símbolo: evs/trades/bid/ofr/last/hi/lo/nominal.")
 
     args = p.parse_args()
 
@@ -312,7 +413,7 @@ def main() -> None:
     if args.cmd == "test":
         run_test(symbols)
     elif args.cmd == "record":
-        run_record(symbols, args.until)
+        run_record(symbols, args.until, verbose_flush=args.verbose_flush)
 
 
 if __name__ == "__main__":
