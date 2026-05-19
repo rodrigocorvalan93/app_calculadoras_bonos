@@ -36,6 +36,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+import delta_especies
+
 # ──────────────────────────────────────────────────────────────────────
 # Constantes
 # ──────────────────────────────────────────────────────────────────────
@@ -349,6 +351,12 @@ def _build_market_metrics_table(
     return out
 
 
+_ESPECIES_EXTRA_COLS: List[str] = [
+    "Ajuste", "Tasa", "Sector Delta", "Califica_Local", "Calificadora",
+    "Emisor / Sponsor", "Clasificacion_especifico",
+]
+
+
 def _enrich_posiciones(
     df_fondo: pd.DataFrame,
     metrics: pd.DataFrame,
@@ -371,6 +379,17 @@ def _enrich_posiciones(
         df["TIR"] = np.nan
         df["Duration"] = np.nan
 
+    # Enriquecimiento con base Delta - Especies (silent fail si no está)
+    esp = delta_especies.load_delta_especies()
+    if esp is not None and not esp.empty:
+        cols_keep = ["BYMA"] + [c for c in _ESPECIES_EXTRA_COLS if c in esp.columns]
+        esp_slim = esp[cols_keep].drop_duplicates("BYMA")
+        df = df.merge(
+            esp_slim.rename(columns={"BYMA": "Cod_Delta"}),
+            on="Cod_Delta", how="left",
+            suffixes=("", "_esp"),
+        )
+
     # % sobre PN
     if pn and pn > 0:
         df["% PN"] = df["Valor"] / pn
@@ -378,6 +397,41 @@ def _enrich_posiciones(
         df["% PN"] = np.nan
 
     return df
+
+
+def _composicion_por_categoria(
+    df_enriched: pd.DataFrame,
+    pn: Optional[float],
+) -> Dict[str, pd.DataFrame]:
+    """Devuelve dict {nombre_categoría → DataFrame [Categoría, Valor, % PN]}.
+
+    Sólo categorías con al menos una asignación. Categorías mostradas:
+      - 'Clase de Activo' (viene de Composición)
+      - 'Ajuste' y 'Tasa' (vienen de Especies)
+    """
+    if df_enriched is None or df_enriched.empty:
+        return {}
+
+    out: Dict[str, pd.DataFrame] = {}
+    total = float(pd.to_numeric(df_enriched["Valor"], errors="coerce").sum())
+    denom = float(pn) if pn and pn > 0 else (total if total > 0 else 1.0)
+
+    for col, label in (
+        ("Clase de Activo", "Clase de Activo"),
+        ("Ajuste", "Ajuste (CER/USD-Linked/ARS/…)"),
+        ("Tasa", "Tasa (Fija / BADLAR / TAMAR / …)"),
+    ):
+        if col not in df_enriched.columns:
+            continue
+        sub = df_enriched[[col, "Valor"]].copy()
+        sub[col] = sub[col].fillna("(sin clasif.)")
+        sub["Valor"] = pd.to_numeric(sub["Valor"], errors="coerce")
+        grp = sub.groupby(col, dropna=False)["Valor"].sum().reset_index()
+        grp = grp.rename(columns={col: "Categoría", "Valor": "Monto"})
+        grp["% sobre PN"] = grp["Monto"] / denom
+        grp = grp.sort_values("Monto", ascending=False).reset_index(drop=True)
+        out[label] = grp
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -557,6 +611,10 @@ def render_tab_posiciones(
         "TIR": "TIR",
         "Duration": "Duration",
         "Vencimiento": "Vto.",
+        "Ajuste": "Ajuste",
+        "Tasa": "Tasa",
+        "Sector Delta": "Sector",
+        "Califica_Local": "Rating",
         "Cantidad": "VN",
         "Valor": "Monto Invertido",
         "% PN": "% sobre PN",
@@ -576,6 +634,26 @@ def render_tab_posiciones(
         width="stretch",
         height=min(650, 50 + 32 * len(tbl)),
     )
+
+    # ── Composición por categoría (Clase / Ajuste / Tasa) ──
+    breakdown = _composicion_por_categoria(df_enriched, pn)
+    if breakdown:
+        with st.expander("📊 Composición por categoría", expanded=False):
+            cols_b = st.columns(len(breakdown))
+            for col_w, (label, df_b) in zip(cols_b, breakdown.items()):
+                with col_w:
+                    st.caption(f"**{label}**")
+                    sty_b = df_b.style.format({
+                        "Monto": lambda v: _fmt_num_ar(v, 0),
+                        "% sobre PN": lambda v: _fmt_pct(v, 2),
+                    }, na_rep="—")
+                    max_pct = df_b["% sobre PN"].abs().max() if not df_b.empty else 0.0
+                    if max_pct and max_pct > 0:
+                        sty_b = sty_b.bar(
+                            subset=["% sobre PN"], color="#2962ff",
+                            vmin=0, vmax=float(max_pct),
+                        )
+                    st.dataframe(sty_b, width="stretch", hide_index=True)
 
     # Export CSV
     csv = tbl.to_csv(index=False).encode("utf-8")
