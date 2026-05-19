@@ -8,7 +8,7 @@ individual — no muestrea como el recorder REST.
 Protocolo: JSON sobre WebSocket. Auth por cookie de sesión Spring
 heredada del login REST de OMSapi.
 
-Dos modos:
+Tres modos:
 
     test     → Conecta y dumpea el primer mensaje que llega a stdout.
                Útil para validar handshake antes de comprometerse a
@@ -19,14 +19,18 @@ Dos modos:
                de caución del día y persiste cada evento en parquet.
                Re-conecta automáticamente si se cae.
 
+    reparse  → Lee un .jsonl crudo y emite un parquet con el parser
+               actual. Útil para recuperar data grabada con parser viejo.
+
 Dependencias:
     pip install websocket-client
 
 Uso:
     python recorder_ws.py test
-    python recorder_ws.py record --until 17:00       # captura PESOS + DOLAR (default)
-    python recorder_ws.py record --no-dolar          # sólo PESOS
-    python recorder_ws.py record --verbose-flush     # imprime resumen por símbolo en cada flush
+    python recorder_ws.py record --until 17:00                  # captura PESOS + DOLAR (default)
+    python recorder_ws.py record --no-dolar                     # sólo PESOS
+    python recorder_ws.py record --verbose-flush                # resumen por símbolo en cada flush
+    python recorder_ws.py reparse data/ws_raw_2026-05-19.jsonl  # re-parsea data vieja
 
 `--verbose-flush` muestra en cada flush (~50 eventos, 10-20 s):
 
@@ -167,6 +171,32 @@ def run_test(symbols: List[str], max_messages: int = 20, timeout_s: int = 30) ->
 # MODO RECORD: persiste cada mensaje
 # ──────────────────────────────────────────────────────────────────────
 
+def _md_value(v: Any, key: str = "price"):
+    """Extrae 'price' o 'size' de un campo de marketData del WS.
+
+    El schema de Primary varía según el entry:
+      - LA / BI / OF / CL  → dict {"price":.., "size":..} o lista de dicts (depth)
+      - OP / HI / LO       → SCALAR (es el precio)
+      - EV / NV / TV       → SCALAR (es el size acumulado)
+      - null               → no hay dato
+
+    Esta función es tolerante a las tres formas: list-of-dict, dict, scalar.
+    """
+    if v is None:
+        return None
+    if isinstance(v, list):
+        if not v:
+            return None
+        v = v[0]
+    if isinstance(v, dict):
+        return v.get(key)
+    if isinstance(v, (int, float)):
+        # Scalar: vale tanto como price (OP/HI/LO) como size (EV/NV/TV).
+        # El llamador sabe qué pidió.
+        return v
+    return None
+
+
 def _flatten_md_event(obj: dict, t_capture: datetime) -> Optional[dict]:
     """Aplana un evento 'Md' de Primary a una fila tabular.
 
@@ -179,32 +209,28 @@ def _flatten_md_event(obj: dict, t_capture: datetime) -> Optional[dict]:
     md = obj.get("marketData") or {}
     inst = obj.get("instrumentId") or {}
 
-    def first(entry, key):
-        v = md.get(entry)
-        if isinstance(v, list) and v:
-            v = v[0]
-        if isinstance(v, dict):
-            return v.get(key)
-        return None
+    # last_ts: fecha del último trade. LA es dict cuando hay trade; si no, None.
+    la_raw = md.get("LA")
+    last_ts = la_raw.get("date") if isinstance(la_raw, dict) else None
 
     return {
         "ts_capture": t_capture,
         "ts_server": obj.get("timestamp"),
         "symbol": inst.get("symbol"),
-        "bid":        first("BI", "price"),
-        "bid_size":   first("BI", "size"),
-        "offer":      first("OF", "price"),
-        "offer_size": first("OF", "size"),
-        "last":       first("LA", "price"),
-        "last_size":  first("LA", "size"),
-        "last_ts":    (md.get("LA") or {}).get("date") if isinstance(md.get("LA"), dict) else None,
-        "open":       first("OP", "price"),
-        "close":      first("CL", "price"),
-        "high":       first("HI", "price"),
-        "low":        first("LO", "price"),
-        "volume":     (md.get("EV") or {}).get("size") if isinstance(md.get("EV"), dict) else None,
-        "trade_vol":  (md.get("TV") or {}).get("size") if isinstance(md.get("TV"), dict) else None,
-        "nominal":    (md.get("NV") or {}).get("size") if isinstance(md.get("NV"), dict) else None,
+        "bid":        _md_value(md.get("BI"), "price"),
+        "bid_size":   _md_value(md.get("BI"), "size"),
+        "offer":      _md_value(md.get("OF"), "price"),
+        "offer_size": _md_value(md.get("OF"), "size"),
+        "last":       _md_value(md.get("LA"), "price"),
+        "last_size":  _md_value(md.get("LA"), "size"),
+        "last_ts":    last_ts,
+        "open":       _md_value(md.get("OP"), "price"),  # scalar
+        "close":      _md_value(md.get("CL"), "price"),
+        "high":       _md_value(md.get("HI"), "price"),  # scalar
+        "low":        _md_value(md.get("LO"), "price"),  # scalar
+        "volume":     _md_value(md.get("EV"), "size"),   # scalar (acumulado $)
+        "trade_vol":  _md_value(md.get("TV"), "size"),   # scalar (#trades del día)
+        "nominal":    _md_value(md.get("NV"), "size"),   # scalar (nominal acum)
     }
 
 
@@ -395,6 +421,41 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Re-parse: lee un .jsonl crudo y emite un parquet con el parser actual.
+# Útil para recuperar data grabada con un parser viejo bugueado.
+# ──────────────────────────────────────────────────────────────────────
+
+def run_reparse(jsonl_path: Path, out_parquet: Path) -> int:
+    """Re-parsea un raw log y escribe un parquet limpio.
+
+    ts_capture se deriva del `timestamp` del payload (ts_server) ya que el
+    original no fue persistido. Es suficiente para todos los análisis
+    intraday — la diferencia con ts_capture real es del orden de ms.
+    """
+    rows: List[dict] = []
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            ts = obj.get("timestamp")
+            t_capture = (
+                datetime.fromtimestamp(ts / 1000) if isinstance(ts, (int, float)) and ts > 0
+                else datetime.now()
+            )
+            row = _flatten_md_event(obj, t_capture)
+            if row:
+                rows.append(row)
+    if rows:
+        pd.DataFrame(rows).to_parquet(out_parquet, index=False)
+    return len(rows)
+
+
+# ──────────────────────────────────────────────────────────────────────
 # CLI
 # ──────────────────────────────────────────────────────────────────────
 
@@ -415,7 +476,27 @@ def main() -> None:
     p_rec.add_argument("--verbose-flush", action="store_true",
                        help="En cada flush imprime resumen por símbolo: evs/trades/bid/ofr/last/hi/lo/nominal.")
 
+    p_rp = sub.add_parser("reparse",
+                          help="Re-parsea un .jsonl crudo con el parser actual (útil cuando el parser tenía bug).")
+    p_rp.add_argument("input", type=str, help="Path al .jsonl crudo (ej. data/ws_raw_2026-05-19.jsonl)")
+    p_rp.add_argument("--out", type=str, default=None,
+                      help="Path del parquet de salida (default: input_dir/ws_md_<date>_reparsed.parquet)")
+
     args = p.parse_args()
+
+    if args.cmd == "reparse":
+        in_path = Path(args.input)
+        if not in_path.exists():
+            raise SystemExit(f"No existe: {in_path}")
+        if args.out:
+            out_path = Path(args.out)
+        else:
+            # data/ws_raw_2026-05-19.jsonl  →  data/ws_md_2026-05-19_reparsed.parquet
+            stem = in_path.stem.replace("ws_raw_", "ws_md_")
+            out_path = in_path.with_name(f"{stem}_reparsed.parquet")
+        n = run_reparse(in_path, out_path)
+        print(f"✔ Re-parseados {n} eventos → {out_path}")
+        return
 
     if args.symbol:
         symbols = args.symbol
