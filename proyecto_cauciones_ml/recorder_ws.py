@@ -26,6 +26,21 @@ Uso:
     python recorder_ws.py test
     python recorder_ws.py record --until 17:00       # captura PESOS + DOLAR (default)
     python recorder_ws.py record --no-dolar          # sólo PESOS
+    python recorder_ws.py record --verbose-flush     # imprime resumen por símbolo en cada flush
+
+`--verbose-flush` muestra en cada flush (~50 eventos, 10-20 s):
+
+    ── flush 50 eventos @ 14:32:18 ──
+      PESOS 1D  evs=42 trades=8  bid 14.20→14.22 ofr 14.45→14.50 last 14.30→14.35 hi 14.40 lo 14.20 Σnom=234M
+      DOLAR 1D  evs=8  trades=1  bid 2.10→2.12   ofr 2.25→2.30   last 2.20→2.20   hi 2.20  lo 2.20  Σnom=1.5M
+
+Métricas por símbolo en la ventana:
+  evs       eventos recibidos (incluye book updates sin trade)
+  trades    # last_ts únicos = cantidad de trades nuevos
+  bid/ofr   evolución del top of book (primer → último de la ventana)
+  last      primer → último precio operado
+  hi / lo   rango de precios efectivamente operados
+  Σnom      nominal total operado (sumado por trades distintos)
 """
 
 from __future__ import annotations
