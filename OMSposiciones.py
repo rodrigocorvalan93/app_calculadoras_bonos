@@ -357,6 +357,55 @@ _ESPECIES_EXTRA_COLS: List[str] = [
 ]
 
 
+def _categoria_bono(ajuste: Any, tasa: Any) -> str:
+    """Categoría combinada para la breakdown de Posiciones.
+
+    Reglas (en orden):
+      - Duales ya vienen en Ajuste como 'Dual (Fija/TAMAR)', 'Dual (CER/TAMAR)',
+        'Dual (USD-Linked/CER)' → se preservan tal cual.
+      - CER / UVA: ajuste de inflación.
+      - USD / USD-Linked / USB: divisa.
+      - ARS: se abre por Tasa → 'ARS Fija', 'ARS TAMAR', 'ARS BADLAR',
+        'ARS Step Up', etc.
+      - Vacío / NC → '(sin clasif.)'.
+    """
+    aj = str(ajuste).strip() if ajuste is not None and not (isinstance(ajuste, float) and pd.isna(ajuste)) else ""
+    ta = str(tasa).strip() if tasa is not None and not (isinstance(tasa, float) and pd.isna(tasa)) else ""
+
+    # Duales: el Ajuste ya describe la combinación; se preserva el string original.
+    if aj.lower().startswith("dual"):
+        return aj
+
+    if aj == "CER":
+        return "CER"
+    if aj == "UVA":
+        return "UVA"
+    if aj in ("USD-Linked", "USD Linked", "DLK"):
+        return "USD-Linked"
+    if aj == "USD":
+        return "USD"
+    if aj == "USB":
+        return "USB"
+
+    # ARS: abrir por Tasa
+    if aj == "ARS" or aj.lower() == "en pesos":
+        if ta == "Fija":
+            return "ARS Fija"
+        if ta == "TAMAR":
+            return "ARS TAMAR"
+        if ta.upper() == "BADLAR":
+            return "ARS BADLAR"
+        if ta == "Step Up":
+            return "ARS Step Up"
+        if not ta or ta.upper() == "NC":
+            return "ARS (s/tasa)"
+        return f"ARS {ta}"
+
+    if not aj or aj.upper() == "NC":
+        return "(sin clasif.)"
+    return aj
+
+
 def _enrich_posiciones(
     df_fondo: pd.DataFrame,
     metrics: pd.DataFrame,
@@ -390,6 +439,12 @@ def _enrich_posiciones(
             suffixes=("", "_esp"),
         )
 
+    # Categoría combinada (Ajuste × Tasa) — sólo si tenemos ambas columnas
+    if "Ajuste" in df.columns and "Tasa" in df.columns:
+        df["Categoría"] = [
+            _categoria_bono(a, t) for a, t in zip(df["Ajuste"], df["Tasa"])
+        ]
+
     # % sobre PN
     if pn and pn > 0:
         df["% PN"] = df["Valor"] / pn
@@ -418,7 +473,7 @@ def _composicion_por_categoria(
 
     for col, label in (
         ("Clase de Activo", "Clase de Activo"),
-        ("Ajuste", "Ajuste (CER/USD-Linked/ARS/…)"),
+        ("Categoría", "Categoría (CER / UVA / ARS Fija / ARS TAMAR / Dual / …)"),
         ("Tasa", "Tasa (Fija / BADLAR / TAMAR / …)"),
     ):
         if col not in df_enriched.columns:
