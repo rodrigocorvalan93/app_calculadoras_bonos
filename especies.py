@@ -25383,6 +25383,7 @@ todos_los_bonos = [
     DICP, PARP, CUAP,
     D30A6, TZV26, TZV27, TZV28,
     TXMJ9, TXMJ9v, TXMJ9j,
+    TXMJ8, TXMJ8v, TXMJ8j,
 
     # GLOBALES (SOBERANOS HARD DÓLAR)
 
