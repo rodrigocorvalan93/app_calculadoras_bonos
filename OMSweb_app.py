@@ -987,7 +987,11 @@ def get_session(username: str, password: str):
 
 
 def _all_curve_symbols(plazo: str) -> List[str]:
-    """Build the FULL list of symbols for ALL curves in one shot (like bymaapi.py)."""
+    """Build the FULL list of symbols for ALL curves in one shot (like bymaapi.py).
+
+    Incluye también las patas C/D de globales + bonares para que el tab Dólares
+    pegue cache hit sobre el bulk en lugar de tirar un fetch separado.
+    """
     curves = build_curve_codes()
     all_md_codes: set = set()
     for curve_key, codes in curves.items():
@@ -995,6 +999,19 @@ def _all_curve_symbols(plazo: str) -> List[str]:
             base = _md_code_from_calc_code(str(c))
             md = _byma_ticker_from_code(base, curve_key)
             all_md_codes.add(md)
+
+    # FX implicit legs: para cada base de globales/bonares, agregar {base}C y
+    # {base}D. Estos códigos cotizan en BYMA. Son ~60 símbolos extra.
+    fx_bases: set = set()
+    for ck in ("globales", "bonares"):
+        for c in curves.get(ck, []) or []:
+            b = _normalize_bond_base(str(c))
+            if b:
+                fx_bases.add(b)
+    for b in fx_bases:
+        all_md_codes.add(f"{b}C")
+        all_md_codes.add(f"{b}D")
+
     return _build_symbols(sorted(all_md_codes), plazo)
 
 
@@ -1135,6 +1152,69 @@ def start_snapshot_background(username: str, password: str, plazo: str, interval
             )
             _snap_thread.start()
         return _snap_thread
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Daemon de pre-warm de curvas: precomputa `load_curve_last_table` para
+# las curvas principales en background, así el primer click en el tab
+# Curvas pega cache hit en lugar de gatillar 7-17s de cálculo de TIRs.
+# ──────────────────────────────────────────────────────────────────────
+
+_curves_thread: Optional["_snap_threading.Thread"] = None
+_curves_thread_lock = _snap_threading.Lock()
+_curves_state = {"username": None, "password": None, "plazo": None, "interval": 30}
+
+# Curvas a precomputar (mismo conjunto que el dropdown del tab Curvas).
+# El daemon recorre la lista una vez por ciclo. La primera pasada calienta
+# todas; las siguientes refrescan cualquier curva cuyo TTL_METRICS expiró.
+_CURVES_WARMUP_KEYS: Tuple[str, ...] = (
+    "cer", "lecap", "tamar", "globales", "bonares",
+    "dolarlinked", "bopreales", "dualfija", "dualcer",
+)
+
+
+def _curves_warmup_loop():
+    while True:
+        try:
+            u = _curves_state["username"]
+            p = _curves_state["password"]
+            pl = _curves_state["plazo"]
+            if u and p and pl:
+                # Importante: NO usar threads dentro de threads acá; la propia
+                # load_curve_last_table ya paraleliza per-bond con ThreadPool.
+                # Recorremos secuencialmente para no saturar CPU.
+                for ck in _CURVES_WARMUP_KEYS:
+                    try:
+                        load_curve_last_table(u, p, ck, pl)
+                    except Exception:
+                        # Curva individual rota no rompe el daemon
+                        pass
+        except Exception as e:
+            _snap_log.warning(f"[curves warmup bg] {type(e).__name__}: {e}")
+        _snap_time.sleep(_curves_state["interval"])
+
+
+def start_curves_warmup_background(username: str, password: str, plazo: str, interval: int = 5):
+    """Daemon idempotente. Pre-calienta `load_curve_last_table` para todas las
+    curvas principales así el tab Curvas siempre pega cache hit (TTL_METRICS=10s).
+
+    Estrategia: el loop recorre todas las curvas y duerme `interval` al final.
+    Con cache hot, cada vuelta es ~0s (cache hits); cuando una entrada expira
+    (>10s desde su último compute), la siguiente vuelta la recomputa (~1s).
+    Interval=5s mantiene el caché siempre fresco con bajo costo CPU promedio.
+    """
+    global _curves_thread
+    with _curves_thread_lock:
+        _curves_state["username"] = username
+        _curves_state["password"] = password
+        _curves_state["plazo"] = plazo
+        _curves_state["interval"] = interval
+        if _curves_thread is None or not _curves_thread.is_alive():
+            _curves_thread = _snap_threading.Thread(
+                target=_curves_warmup_loop, daemon=True, name="curves-warmup-bg",
+            )
+            _curves_thread.start()
+        return _curves_thread
 
 
 @st.cache_data(ttl=TTL_MKT, show_spinner=False)
@@ -1818,19 +1898,22 @@ def _fx_rows_from_snap(snap: pd.DataFrame, bases: List[str], suf: str) -> pd.Dat
     return pd.DataFrame(rows)
 
 
-def _fetch_implicit_fx_snap(
+@st.cache_data(ttl=TTL_MKT, show_spinner=False)
+def _fetch_implicit_fx_snap_cached(
     username: str,
     password: str,
-    bond_codes: List[str],
+    bases_tuple: Tuple[str, ...],
     plazo: str,
-) -> Tuple[pd.DataFrame, List[str]]:
-    """Single fetch para ARS + C + D legs. Devuelve (snap_indexado_por_Código, bases).
+) -> pd.DataFrame:
+    """Cached inner: snapshot ARS + C + D legs para una tupla ordenada de bases.
 
-    El snap es la entrada a `_fx_rows_from_snap` para cualquier leg.
+    Cache compartido (TTL_MKT=7s) entre todas las invocaciones del tab Dólares,
+    del sidebar live y de la sección de brecha/canje — todas hacen la misma
+    query con los mismos bonds.
     """
-    bases = sorted({_normalize_bond_base(c) for c in bond_codes if c})
-    if not bases:
-        return pd.DataFrame(), []
+    if not bases_tuple:
+        return pd.DataFrame()
+    bases = list(bases_tuple)
     c_codes = [f"{b}C" for b in bases]
     d_codes = [f"{b}D" for b in bases]
     all_syms = (
@@ -1843,9 +1926,28 @@ def _fetch_implicit_fx_snap(
         market_id=DEFAULT_MARKET_ID, entries=cfg.ENTRIES, depth=1,
     )
     if raw is None or raw.empty:
-        return pd.DataFrame(), bases
+        return pd.DataFrame()
     snap = OMSprices.market_snapshot(raw)
     snap = _ensure_codigo_col(snap, source="index").set_index("Código", drop=False)
+    return snap
+
+
+def _fetch_implicit_fx_snap(
+    username: str,
+    password: str,
+    bond_codes: List[str],
+    plazo: str,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Single fetch para ARS + C + D legs. Devuelve (snap_indexado_por_Código, bases).
+
+    El snap es la entrada a `_fx_rows_from_snap` para cualquier leg.
+    Cache-hit garantizado dentro de TTL_MKT cuando se llama con el mismo
+    universo de bases (sidebar + tab dólares comparten input).
+    """
+    bases = sorted({_normalize_bond_base(c) for c in bond_codes if c})
+    if not bases:
+        return pd.DataFrame(), []
+    snap = _fetch_implicit_fx_snap_cached(username, password, tuple(bases), plazo)
     return snap, bases
 
 
@@ -5066,12 +5168,23 @@ def main():
     start_snapshot_background(username, password, plazo, interval=5)
     _lap("after start_snapshot_background")
 
+    # Daemon de pre-warm de curvas: precomputa load_curve_last_table para las
+    # curvas principales en background, así el tab Curvas siempre pega cache
+    # hit (sin esto, primera click ~17s; con esto, ~0-1s en caso típico).
+    start_curves_warmup_background(username, password, plazo, interval=5)
+    _lap("after start_curves_warmup_background")
+
     _is_dark = st.session_state.get("bbg_theme", False)
 
     @st.fragment(run_every=15)
     def _render_bars():
-        ticker_data = OMSticker.get_ticker_data(session=session, assets=_ticker_assets)
-        
+        # OPTIMIZACIÓN: lectura cache-only (sin session/assets) — el daemon
+        # ya está corriendo en background (start_ticker_background) y popula
+        # el cache asincrónicamente. En cold start el primer render muestra
+        # marquee vacío; el fragment (run_every=15) lo levanta en el próximo
+        # tick. Antes: 6-10s sincronicos en el cold start.
+        ticker_data = OMSticker.get_ticker_data()
+
         # ── A3500: inyectar desde indices (MAE waterfall) vs BCRA ayer ──
         try:
             fx_hoy = get_fx_hoy(session=session)
