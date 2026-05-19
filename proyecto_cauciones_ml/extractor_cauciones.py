@@ -29,7 +29,8 @@ EOD snapshot:
 Uso:
     python extractor_cauciones.py --interval 5 --until 17:00
     python extractor_cauciones.py --interval 5                # corre hasta Ctrl+C
-    python extractor_cauciones.py --interval 2 --include-dolar
+    python extractor_cauciones.py --interval 2                # 2s, captura PESOS + DOLAR (default)
+    python extractor_cauciones.py --no-dolar --interval 5     # sólo PESOS
     python extractor_cauciones.py --debug-dump --interval 5   # dumpea raw del 1° response
 """
 
@@ -447,7 +448,10 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--interval", type=int, default=5, help="Segundos entre snapshots (default 5)")
     p.add_argument("--until", type=str, default=None, help="HH:MM corte (ej. 17:00). Default: corre hasta Ctrl+C.")
-    p.add_argument("--include-dolar", action="store_true", help="Capturar también caución en dólares.")
+    # Caución PESOS + DOLAR por default; --no-dolar para sólo pesos.
+    p.add_argument("--no-dolar", dest="include_dolar", action="store_false",
+                   help="No capturar caución en dólares (default: capturar ambos).")
+    p.set_defaults(include_dolar=True)
     p.add_argument("--debug-dump", action="store_true", help="Imprime el 1° raw response por símbolo (y el EOD).")
     args = p.parse_args()
     run_recorder(args.interval, args.until, args.include_dolar, debug_dump=args.debug_dump)
