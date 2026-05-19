@@ -375,6 +375,55 @@ def metrics_for_price(code: str, price_pct: Any, bond_type: str, settlement_date
         return dict(_NAN_METRICS)
 
 
+def _compute_margen_tna_series(df: pd.DataFrame, tna_col: str = "TNA", tirea_col: str = "TIREA") -> List[float]:
+    """Margen TNA para bonos a tasa variable, replicando rentafija.genera_ticket:
+      - VARIABLE        → TNA − benchmark/100
+      - VARIABLE_CAP    → ((1+TIREA)^(32/365)−1)·(365/32) − benchmark/100
+    Benchmark: promedio últimos 5 obs de TAMAR o BADLAR según `bono.index`.
+    """
+    inp = rentafija.inputs
+    try:
+        tamar_b = float(inp.get("tamar", pd.DataFrame()).tail(5).get("TAMAR", pd.Series()).mean()) / 100.0
+    except Exception:
+        tamar_b = float("nan")
+    try:
+        badlar_b = float(inp.get("badlar", pd.DataFrame()).tail(5).get("BADLAR", pd.Series()).mean()) / 100.0
+    except Exception:
+        badlar_b = float("nan")
+
+    out: List[float] = []
+    tnas = pd.to_numeric(df.get(tna_col), errors="coerce") if tna_col in df.columns else pd.Series([np.nan] * len(df))
+    tireas = pd.to_numeric(df.get(tirea_col), errors="coerce") if tirea_col in df.columns else pd.Series([np.nan] * len(df))
+    for i, code in enumerate(df["Código"].astype(str).tolist()):
+        obj = _bond_obj(code)
+        idx = getattr(obj, "index", None) if obj else None
+        tipo = getattr(obj, "tipo_tasa_interes", None) if obj else None
+        if not idx or tipo not in ("VARIABLE", "VARIABLE_CAP"):
+            out.append(np.nan)
+            continue
+        if idx == "TAMAR":
+            bench = tamar_b
+        elif idx == "BADLAR":
+            bench = badlar_b
+        else:
+            out.append(np.nan)
+            continue
+        if not np.isfinite(bench):
+            out.append(np.nan)
+            continue
+        if tipo == "VARIABLE_CAP":
+            tirea_f = float(tireas.iloc[i]) if i < len(tireas) else np.nan
+            if not np.isfinite(tirea_f):
+                out.append(np.nan)
+                continue
+            tna_eq = ((1.0 + tirea_f) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
+            out.append(tna_eq - bench)
+        else:  # VARIABLE
+            tna_f = float(tnas.iloc[i]) if i < len(tnas) else np.nan
+            out.append(tna_f - bench if np.isfinite(tna_f) else np.nan)
+    return out
+
+
 def _parallel_metrics(codes: np.ndarray, prices: np.ndarray, bond_type: str, settle: Optional[str]) -> pd.DataFrame:
     """Calcula metrics_for_price en paralelo con ThreadPoolExecutor."""
     n = len(codes)
@@ -1218,29 +1267,7 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
 
     # Margen TNA para curvas con tasa variable (TAMAR/BADLAR)
     if bond_type in ("tamar",):
-        inp = rentafija.inputs
-        # Determinar benchmark según el index de cada bono
-        margen_col = []
-        for code in out["Código"].astype(str).tolist():
-            obj = _bond_obj(code)
-            idx = getattr(obj, "index", None) if obj else None
-            tipo = getattr(obj, "tipo_tasa_interes", None) if obj else None
-            if tipo in ("VARIABLE", "VARIABLE_CAP") and idx:
-                if idx == "TAMAR":
-                    bench = inp.get("tamar", pd.DataFrame()).tail(5).get("TAMAR", pd.Series()).mean() / 100.0
-                elif idx == "BADLAR":
-                    bench = inp.get("badlar", pd.DataFrame()).tail(5).get("BADLAR", pd.Series()).mean() / 100.0
-                else:
-                    bench = 0.0
-                tna_val = out.loc[out["Código"] == code, "TNA"]
-                if not tna_val.empty:
-                    tna_f = pd.to_numeric(tna_val.iloc[0], errors="coerce")
-                    margen_col.append(tna_f - bench if np.isfinite(tna_f) else np.nan)
-                else:
-                    margen_col.append(np.nan)
-            else:
-                margen_col.append(np.nan)
-        out["Margen TNA"] = margen_col
+        out["Margen TNA"] = _compute_margen_tna_series(out, tna_col="TNA", tirea_col="TIREA")
 
     # Renombrar last_source/last_date a "Price Source" / "Price Date" para mostrarlos
     if "last_source" in out.columns:
@@ -1315,6 +1342,10 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
     out["Bid TIREA"] = bid_tir
     out["Offer TIREA"] = off_tir
 
+    # Margen TNA para curvas con tasa variable (TAMAR/BADLAR, incluye corporativos)
+    if bond_type in ("tamar",):
+        out["Margen TNA"] = _compute_margen_tna_series(out, tna_col="TNA", tirea_col="TIREA")
+
     # Renombrar last_source/last_date a "Price Source" / "Price Date" para mostrarlos
     if "last_source" in out.columns:
         out = out.rename(columns={"last_source": "Price Source"})
@@ -1335,6 +1366,7 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
         "Last Price",
         "TIREA",
         "Duration",
+        "Margen TNA",
         "Offer Price",
         "Offer TIREA",
         "Offer Size",
@@ -2023,6 +2055,7 @@ def style_mercado(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "TIREA": "{:.2%}",
         "TEM": "{:.2%}",
         "Duration": "{:.4f}",
+        "Margen TNA": "{:+.2%}",
         "Offer Price": "{:,.4f}",
         "Offer TIREA": "{:.2%}",
         "Offer TEM": "{:.2%}",
