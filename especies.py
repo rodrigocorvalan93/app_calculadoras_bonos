@@ -4871,7 +4871,7 @@ TTD26 = {
 }
 TXMJ8 = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 30 06 2028",
-    "Código": "TXMJ8",
+    "Código": "AR0603123321",
     "ISIN": "TXMJ8",
     "Calificación": "CCC-",
     "País": "Argentina",
@@ -4879,7 +4879,7 @@ TXMJ8 = {
     "Industria": "Soberano ARS Dual CER/Tamar",
     "Moneda": "ARS",
     "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "30/04/2026",
+    "Emisión": "15/05/2026",
     "Vencimiento": "30/06/2028",
     "Fecha Primer Cupón": None,
     "Cupón / Spread": 0, # es un nro flotante
@@ -4898,7 +4898,7 @@ TXMJ8 = {
     "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
     "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": -10,
-    "Fechas de cupón": ['29/06/2029'], # Lista de fechas como ejemplo
+    "Fechas de cupón": ['30/06/2028'], # Lista de fechas como ejemplo
     "Amortización": None,
     "Callable": False , # Es binario True or False
     "Tipo de Call": None,
@@ -4966,7 +4966,7 @@ TXMJ8j = {
     "Días Lag índice desde inc": 0, # enteros negativos
     "Días Lag índice hasta inc": 0, # enteros negativos
     "Valor Nominal": 100.,
-    "Ajuste sobre Capital": "CER", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Ajuste sobre Capital": "CER PROYECTADO", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
     "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
     "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": -10,
@@ -15768,8 +15768,8 @@ AFCNO = {
     "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
     "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": None,
-    "Fechas de cupón": ["17/07/2025",
-                        "17/10/2025",
+    "Fechas de cupón": ["17/07/2026",
+                        "17/10/2026",
                         "17/02/2027",
                         "17/04/2027"], # Lista de fechas como ejemplo
     "Amortización": None,
