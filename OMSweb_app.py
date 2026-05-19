@@ -61,6 +61,7 @@ import OMScredit
 import OMSmktdata
 import OMSnews
 import OMSposiciones
+import delta_especies
 import OMSprices
 import OMSsecrets  # noqa: F401  — auto-carga secrets.txt a os.environ
 import OMSsettings as cfg
@@ -4865,6 +4866,17 @@ def _render_yas(username, password, plazo, curve_labels):
                                 else:
                                     st.info("Sin pagos para mostrar.")
 
+                # Datos Delta (base interna de especies) — lazy, silent fail
+                _delta_info = delta_especies.pretty_info(yas_code)
+                if _delta_info:
+                    with st.expander(f"📋 Datos Delta — {yas_code}", expanded=False):
+                        _half = (len(_delta_info) + 1) // 2
+                        _c1, _c2 = st.columns(2)
+                        for _k, _v in _delta_info[:_half]:
+                            _c1.markdown(f"**{_k}:** {_v}")
+                        for _k, _v in _delta_info[_half:]:
+                            _c2.markdown(f"**{_k}:** {_v}")
+
                 # Gráfico de la curva (lazy - sólo si se abre)
                 with st.expander("📈 Ver en la curva (NSS)", expanded=False):
                     if go is not None and np.isfinite(dur_y) and np.isfinite(tirea_y):
@@ -6859,12 +6871,40 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
 
                             if met_a and met_b:
                                 head_a, head_b = st.columns(2)
+
+                                def _delta_caption(code: str) -> str:
+                                    info = delta_especies.get_especie_info(code)
+                                    if not info:
+                                        return ""
+                                    bits = []
+                                    for k in ("Sector Delta", "Sub Industria",
+                                              "Califica_Local", "Calificadora",
+                                              "Ajuste", "Tasa", "Plazo"):
+                                        v = info.get(k)
+                                        if v is None:
+                                            continue
+                                        try:
+                                            if pd.isna(v):
+                                                continue
+                                        except (TypeError, ValueError):
+                                            pass
+                                        s = str(v).strip()
+                                        if s and s.lower() != "nan":
+                                            bits.append(f"**{k}**: {s}")
+                                    return "  ·  ".join(bits)
+
                                 with head_a:
                                     st.markdown(f"### {met_a.get('Código', '')}")
                                     st.caption(f"{met_a.get('Nombre', '')}")
+                                    _ca = _delta_caption(code_a)
+                                    if _ca:
+                                        st.caption(_ca)
                                 with head_b:
                                     st.markdown(f"### {met_b.get('Código', '')}")
                                     st.caption(f"{met_b.get('Nombre', '')}")
+                                    _cb = _delta_caption(code_b)
+                                    if _cb:
+                                        st.caption(_cb)
 
                                 def _comp_row(label: str, key: str, fmt: str = "{:.4%}"):
                                     c1, c2, c3 = st.columns([2, 2, 1])
