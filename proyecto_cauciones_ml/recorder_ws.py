@@ -24,8 +24,8 @@ Dependencias:
 
 Uso:
     python recorder_ws.py test
-    python recorder_ws.py record --until 17:00
-    python recorder_ws.py record --include-dolar
+    python recorder_ws.py record --until 17:00       # captura PESOS + DOLAR (default)
+    python recorder_ws.py record --no-dolar          # sólo PESOS
 """
 
 from __future__ import annotations
@@ -289,7 +289,10 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--include-dolar", action="store_true")
+    # Caución PESOS + DOLAR por default; --no-dolar para opt-out.
+    common.add_argument("--no-dolar", dest="include_dolar", action="store_false",
+                        help="No capturar caución en dólares (default: capturar ambos).")
+    common.set_defaults(include_dolar=True)
     common.add_argument("--symbol", action="append", help="Override: símbolo manual (repetible)")
 
     p_test = sub.add_parser("test", parents=[common], help="Handshake + dump raw, 20 msgs ó 30s")
