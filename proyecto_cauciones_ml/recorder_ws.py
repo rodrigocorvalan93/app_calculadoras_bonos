@@ -35,16 +35,21 @@ Uso:
 `--verbose-flush` muestra en cada flush (~50 eventos, 10-20 s):
 
     ── flush 50 eventos @ 14:32:18 ──
-      PESOS 1D  evs=42 trades=8  bid 14.20→14.22 ofr 14.45→14.50 last 14.30→14.35 hi 14.40 lo 14.20 Σnom=234M
-      DOLAR 1D  evs=8  trades=1  bid 2.10→2.12   ofr 2.25→2.30   last 2.20→2.20   hi 2.20  lo 2.20  Σnom=1.5M
+      PESOS 1D  evs=42 trades=8  bid 14.20→14.22 ofr 14.45→14.50 last 14.30→14.35 hi 14.40 lo 14.20 Σnom=234M  ‖ acum: ev=1.2k tr=58 nom=1.42B
+      DOLAR 1D  evs=8  trades=1  bid 2.10→2.12   ofr 2.25→2.30   last 2.20→2.20   hi 2.20  lo 2.20  Σnom=1.5M  ‖ acum: ev=210 tr=12 nom=8.4M
 
 Métricas por símbolo en la ventana:
   evs       eventos recibidos (incluye book updates sin trade)
-  trades    # last_ts únicos = cantidad de trades nuevos
+  trades    trades NUEVOS en la ventana (last_ts no vistos antes)
   bid/ofr   evolución del top of book (primer → último de la ventana)
   last      primer → último precio operado
-  hi / lo   rango de precios efectivamente operados
-  Σnom      nominal total operado (sumado por trades distintos)
+  hi / lo   rango de precios efectivamente operados en la ventana
+  Σnom      nominal de los trades nuevos en la ventana
+
+Acumulado de la sesión (= desde que arrancó el script):
+  acum ev   total de eventos recibidos para ese símbolo
+  acum tr   total de trades únicos del día
+  acum nom  Σ nominal operado en la rueda hasta ahora
 """
 
 from __future__ import annotations
@@ -56,7 +61,7 @@ import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -278,15 +283,23 @@ def _humanize(n) -> str:
     return f"{n:.0f}"
 
 
-def _summarize_flush(rows: List[dict]) -> str:
-    """Resumen por símbolo de la ventana de flush.
+def _summarize_flush(rows: List[dict], cum_state: Dict[str, Dict[str, Any]]) -> str:
+    """Resumen por símbolo de la ventana de flush + acumulado de la sesión.
 
     Por cada símbolo en `rows`, muestra:
-      - evs:    cantidad de eventos
-      - trades: # de last_ts únicos != None (proxy de trades nuevos en la ventana)
+      - evs:    eventos recibidos en la ventana
+      - trades: # de trades NUEVOS (last_ts no visto antes en la sesión)
       - bid/ofr/last: primer → último valor visto
-      - hi/lo:  rango del 'last' (precios efectivamente operados)
-      - Σnom:   suma de last_size de los trades distintos (VWAP-able)
+      - hi/lo:  rango del 'last' (precios efectivamente operados, nuevos)
+      - Σnom:   nominal total de los trades nuevos en la ventana
+
+    Y al final de cada línea:
+      - acum:   evs / trades / Σnom acumulados desde el inicio del recorder.
+
+    `cum_state` se muta in-place. Llamadas sucesivas deduplican last_ts
+    correctamente: un trade que aparece reportado en eventos de dos
+    flushes consecutivos se cuenta UNA sola vez (en el flush donde se vió
+    primero).
     """
     if not rows:
         return "(vacío)"
@@ -296,19 +309,32 @@ def _summarize_flush(rows: List[dict]) -> str:
 
     lines = []
     for sym, g in df.groupby("symbol", sort=False):
-        n = len(g)
+        n_evs = len(g)
+        st = cum_state.setdefault(sym, {
+            "evs": 0, "trades": 0, "sigma_nom": 0.0, "seen_ts": set(),
+        })
+        st["evs"] += n_evs
 
-        # Trades nuevos = last_ts únicos no nulos.
+        # NUEVOS trades = last_ts en esta ventana que no estaban en seen_ts.
         if "last_ts" in g.columns:
-            ts_uniq = g["last_ts"].dropna().drop_duplicates()
-            n_trades = len(ts_uniq)
-            # Σ nominal de un row por trade
-            tr_rows = g.dropna(subset=["last_ts"]).drop_duplicates(subset=["last_ts"], keep="first")
-            sigma_nom = pd.to_numeric(tr_rows.get("last_size"), errors="coerce").sum()
-            last_prices = pd.to_numeric(tr_rows.get("last"), errors="coerce").dropna()
+            window_ts = g["last_ts"].dropna().drop_duplicates()
+            new_ts_mask = ~window_ts.isin(st["seen_ts"])
+            new_ts = window_ts[new_ts_mask]
+            new_rows = (
+                g[g["last_ts"].isin(new_ts)]
+                .drop_duplicates(subset=["last_ts"], keep="first")
+            )
+            n_trades_new = len(new_rows)
+            sigma_nom_new = float(
+                pd.to_numeric(new_rows.get("last_size"), errors="coerce").sum()
+            )
+            st["seen_ts"].update(new_ts.tolist())
+            st["trades"] += n_trades_new
+            st["sigma_nom"] += sigma_nom_new
+            last_prices = pd.to_numeric(new_rows.get("last"), errors="coerce").dropna()
         else:
-            n_trades = 0
-            sigma_nom = 0
+            n_trades_new = 0
+            sigma_nom_new = 0.0
             last_prices = pd.Series([], dtype="float64")
 
         def _first_last(col):
@@ -325,9 +351,10 @@ def _summarize_flush(rows: List[dict]) -> str:
 
         lines.append(
             f"    {_short_symbol(sym):<12s} "
-            f"evs={n:<4d} trades={n_trades:<3d} "
+            f"evs={n_evs:<4d} trades={n_trades_new:<3d} "
             f"bid {bid_a}→{bid_b}  ofr {ofr_a}→{ofr_b}  "
-            f"last {last_a}→{last_b}  hi {hi} lo {lo}  Σnom={_humanize(sigma_nom)}"
+            f"last {last_a}→{last_b}  hi {hi} lo {lo}  Σnom={_humanize(sigma_nom_new)}  "
+            f"‖ acum: ev={st['evs']:,} tr={st['trades']:,} nom={_humanize(st['sigma_nom'])}"
         )
     return "\n".join(lines)
 
@@ -351,6 +378,9 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
     rows: List[dict] = []
     reconnects = 0
     raw_fh = open(raw_log, "a", encoding="utf-8")
+    # Acumulado de la sesión (mientras el proceso siga vivo). Se conserva a
+    # través de reconnects del WS — sólo se reinicia si reiniciás el script.
+    cum_state: Dict[str, Dict[str, Any]] = {}
 
     try:
         while True:
@@ -395,7 +425,7 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
                         _append_parquet(out_md, rows)
                         if verbose_flush:
                             print(f"  ── flush {len(rows)} eventos @ {t_capture:%H:%M:%S} ──")
-                            print(_summarize_flush(rows))
+                            print(_summarize_flush(rows, cum_state))
                         else:
                             print(f"  flush {len(rows)} eventos  ({t_capture:%H:%M:%S})")
                         rows.clear()
@@ -414,7 +444,7 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
             _append_parquet(out_md, rows)
             if verbose_flush:
                 print(f"  ── final flush {len(rows)} eventos ──")
-                print(_summarize_flush(rows))
+                print(_summarize_flush(rows, cum_state))
             else:
                 print(f"Final flush {len(rows)} eventos → {out_md}")
         raw_fh.close()
