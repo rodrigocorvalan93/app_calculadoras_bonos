@@ -8,7 +8,7 @@ individual — no muestrea como el recorder REST.
 Protocolo: JSON sobre WebSocket. Auth por cookie de sesión Spring
 heredada del login REST de OMSapi.
 
-Dos modos:
+Tres modos:
 
     test     → Conecta y dumpea el primer mensaje que llega a stdout.
                Útil para validar handshake antes de comprometerse a
@@ -19,28 +19,37 @@ Dos modos:
                de caución del día y persiste cada evento en parquet.
                Re-conecta automáticamente si se cae.
 
+    reparse  → Lee un .jsonl crudo y emite un parquet con el parser
+               actual. Útil para recuperar data grabada con parser viejo.
+
 Dependencias:
     pip install websocket-client
 
 Uso:
     python recorder_ws.py test
-    python recorder_ws.py record --until 17:00       # captura PESOS + DOLAR (default)
-    python recorder_ws.py record --no-dolar          # sólo PESOS
-    python recorder_ws.py record --verbose-flush     # imprime resumen por símbolo en cada flush
+    python recorder_ws.py record --until 17:00                  # captura PESOS + DOLAR (default)
+    python recorder_ws.py record --no-dolar                     # sólo PESOS
+    python recorder_ws.py record --verbose-flush                # resumen por símbolo en cada flush
+    python recorder_ws.py reparse data/ws_raw_2026-05-19.jsonl  # re-parsea data vieja
 
 `--verbose-flush` muestra en cada flush (~50 eventos, 10-20 s):
 
     ── flush 50 eventos @ 14:32:18 ──
-      PESOS 1D  evs=42 trades=8  bid 14.20→14.22 ofr 14.45→14.50 last 14.30→14.35 hi 14.40 lo 14.20 Σnom=234M
-      DOLAR 1D  evs=8  trades=1  bid 2.10→2.12   ofr 2.25→2.30   last 2.20→2.20   hi 2.20  lo 2.20  Σnom=1.5M
+      PESOS 1D  evs=42 trades=8  bid 14.20→14.22 ofr 14.45→14.50 last 14.30→14.35 hi 14.40 lo 14.20 Σnom=234M  ‖ acum: ev=1.2k tr=58 nom=1.42B
+      DOLAR 1D  evs=8  trades=1  bid 2.10→2.12   ofr 2.25→2.30   last 2.20→2.20   hi 2.20  lo 2.20  Σnom=1.5M  ‖ acum: ev=210 tr=12 nom=8.4M
 
 Métricas por símbolo en la ventana:
   evs       eventos recibidos (incluye book updates sin trade)
-  trades    # last_ts únicos = cantidad de trades nuevos
+  trades    trades NUEVOS en la ventana (last_ts no vistos antes)
   bid/ofr   evolución del top of book (primer → último de la ventana)
   last      primer → último precio operado
-  hi / lo   rango de precios efectivamente operados
-  Σnom      nominal total operado (sumado por trades distintos)
+  hi / lo   rango de precios efectivamente operados en la ventana
+  Σnom      nominal de los trades nuevos en la ventana
+
+Acumulado de la sesión (= desde que arrancó el script):
+  acum ev   total de eventos recibidos para ese símbolo
+  acum tr   total de trades únicos del día
+  acum nom  Σ nominal operado en la rueda hasta ahora
 """
 
 from __future__ import annotations
@@ -52,7 +61,7 @@ import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -167,6 +176,32 @@ def run_test(symbols: List[str], max_messages: int = 20, timeout_s: int = 30) ->
 # MODO RECORD: persiste cada mensaje
 # ──────────────────────────────────────────────────────────────────────
 
+def _md_value(v: Any, key: str = "price"):
+    """Extrae 'price' o 'size' de un campo de marketData del WS.
+
+    El schema de Primary varía según el entry:
+      - LA / BI / OF / CL  → dict {"price":.., "size":..} o lista de dicts (depth)
+      - OP / HI / LO       → SCALAR (es el precio)
+      - EV / NV / TV       → SCALAR (es el size acumulado)
+      - null               → no hay dato
+
+    Esta función es tolerante a las tres formas: list-of-dict, dict, scalar.
+    """
+    if v is None:
+        return None
+    if isinstance(v, list):
+        if not v:
+            return None
+        v = v[0]
+    if isinstance(v, dict):
+        return v.get(key)
+    if isinstance(v, (int, float)):
+        # Scalar: vale tanto como price (OP/HI/LO) como size (EV/NV/TV).
+        # El llamador sabe qué pidió.
+        return v
+    return None
+
+
 def _flatten_md_event(obj: dict, t_capture: datetime) -> Optional[dict]:
     """Aplana un evento 'Md' de Primary a una fila tabular.
 
@@ -179,32 +214,28 @@ def _flatten_md_event(obj: dict, t_capture: datetime) -> Optional[dict]:
     md = obj.get("marketData") or {}
     inst = obj.get("instrumentId") or {}
 
-    def first(entry, key):
-        v = md.get(entry)
-        if isinstance(v, list) and v:
-            v = v[0]
-        if isinstance(v, dict):
-            return v.get(key)
-        return None
+    # last_ts: fecha del último trade. LA es dict cuando hay trade; si no, None.
+    la_raw = md.get("LA")
+    last_ts = la_raw.get("date") if isinstance(la_raw, dict) else None
 
     return {
         "ts_capture": t_capture,
         "ts_server": obj.get("timestamp"),
         "symbol": inst.get("symbol"),
-        "bid":        first("BI", "price"),
-        "bid_size":   first("BI", "size"),
-        "offer":      first("OF", "price"),
-        "offer_size": first("OF", "size"),
-        "last":       first("LA", "price"),
-        "last_size":  first("LA", "size"),
-        "last_ts":    (md.get("LA") or {}).get("date") if isinstance(md.get("LA"), dict) else None,
-        "open":       first("OP", "price"),
-        "close":      first("CL", "price"),
-        "high":       first("HI", "price"),
-        "low":        first("LO", "price"),
-        "volume":     (md.get("EV") or {}).get("size") if isinstance(md.get("EV"), dict) else None,
-        "trade_vol":  (md.get("TV") or {}).get("size") if isinstance(md.get("TV"), dict) else None,
-        "nominal":    (md.get("NV") or {}).get("size") if isinstance(md.get("NV"), dict) else None,
+        "bid":        _md_value(md.get("BI"), "price"),
+        "bid_size":   _md_value(md.get("BI"), "size"),
+        "offer":      _md_value(md.get("OF"), "price"),
+        "offer_size": _md_value(md.get("OF"), "size"),
+        "last":       _md_value(md.get("LA"), "price"),
+        "last_size":  _md_value(md.get("LA"), "size"),
+        "last_ts":    last_ts,
+        "open":       _md_value(md.get("OP"), "price"),  # scalar
+        "close":      _md_value(md.get("CL"), "price"),
+        "high":       _md_value(md.get("HI"), "price"),  # scalar
+        "low":        _md_value(md.get("LO"), "price"),  # scalar
+        "volume":     _md_value(md.get("EV"), "size"),   # scalar (acumulado $)
+        "trade_vol":  _md_value(md.get("TV"), "size"),   # scalar (#trades del día)
+        "nominal":    _md_value(md.get("NV"), "size"),   # scalar (nominal acum)
     }
 
 
@@ -252,15 +283,23 @@ def _humanize(n) -> str:
     return f"{n:.0f}"
 
 
-def _summarize_flush(rows: List[dict]) -> str:
-    """Resumen por símbolo de la ventana de flush.
+def _summarize_flush(rows: List[dict], cum_state: Dict[str, Dict[str, Any]]) -> str:
+    """Resumen por símbolo de la ventana de flush + acumulado de la sesión.
 
     Por cada símbolo en `rows`, muestra:
-      - evs:    cantidad de eventos
-      - trades: # de last_ts únicos != None (proxy de trades nuevos en la ventana)
+      - evs:    eventos recibidos en la ventana
+      - trades: # de trades NUEVOS (last_ts no visto antes en la sesión)
       - bid/ofr/last: primer → último valor visto
-      - hi/lo:  rango del 'last' (precios efectivamente operados)
-      - Σnom:   suma de last_size de los trades distintos (VWAP-able)
+      - hi/lo:  rango del 'last' (precios efectivamente operados, nuevos)
+      - Σnom:   nominal total de los trades nuevos en la ventana
+
+    Y al final de cada línea:
+      - acum:   evs / trades / Σnom acumulados desde el inicio del recorder.
+
+    `cum_state` se muta in-place. Llamadas sucesivas deduplican last_ts
+    correctamente: un trade que aparece reportado en eventos de dos
+    flushes consecutivos se cuenta UNA sola vez (en el flush donde se vió
+    primero).
     """
     if not rows:
         return "(vacío)"
@@ -270,19 +309,32 @@ def _summarize_flush(rows: List[dict]) -> str:
 
     lines = []
     for sym, g in df.groupby("symbol", sort=False):
-        n = len(g)
+        n_evs = len(g)
+        st = cum_state.setdefault(sym, {
+            "evs": 0, "trades": 0, "sigma_nom": 0.0, "seen_ts": set(),
+        })
+        st["evs"] += n_evs
 
-        # Trades nuevos = last_ts únicos no nulos.
+        # NUEVOS trades = last_ts en esta ventana que no estaban en seen_ts.
         if "last_ts" in g.columns:
-            ts_uniq = g["last_ts"].dropna().drop_duplicates()
-            n_trades = len(ts_uniq)
-            # Σ nominal de un row por trade
-            tr_rows = g.dropna(subset=["last_ts"]).drop_duplicates(subset=["last_ts"], keep="first")
-            sigma_nom = pd.to_numeric(tr_rows.get("last_size"), errors="coerce").sum()
-            last_prices = pd.to_numeric(tr_rows.get("last"), errors="coerce").dropna()
+            window_ts = g["last_ts"].dropna().drop_duplicates()
+            new_ts_mask = ~window_ts.isin(st["seen_ts"])
+            new_ts = window_ts[new_ts_mask]
+            new_rows = (
+                g[g["last_ts"].isin(new_ts)]
+                .drop_duplicates(subset=["last_ts"], keep="first")
+            )
+            n_trades_new = len(new_rows)
+            sigma_nom_new = float(
+                pd.to_numeric(new_rows.get("last_size"), errors="coerce").sum()
+            )
+            st["seen_ts"].update(new_ts.tolist())
+            st["trades"] += n_trades_new
+            st["sigma_nom"] += sigma_nom_new
+            last_prices = pd.to_numeric(new_rows.get("last"), errors="coerce").dropna()
         else:
-            n_trades = 0
-            sigma_nom = 0
+            n_trades_new = 0
+            sigma_nom_new = 0.0
             last_prices = pd.Series([], dtype="float64")
 
         def _first_last(col):
@@ -299,9 +351,10 @@ def _summarize_flush(rows: List[dict]) -> str:
 
         lines.append(
             f"    {_short_symbol(sym):<12s} "
-            f"evs={n:<4d} trades={n_trades:<3d} "
+            f"evs={n_evs:<4d} trades={n_trades_new:<3d} "
             f"bid {bid_a}→{bid_b}  ofr {ofr_a}→{ofr_b}  "
-            f"last {last_a}→{last_b}  hi {hi} lo {lo}  Σnom={_humanize(sigma_nom)}"
+            f"last {last_a}→{last_b}  hi {hi} lo {lo}  Σnom={_humanize(sigma_nom_new)}  "
+            f"‖ acum: ev={st['evs']:,} tr={st['trades']:,} nom={_humanize(st['sigma_nom'])}"
         )
     return "\n".join(lines)
 
@@ -325,6 +378,9 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
     rows: List[dict] = []
     reconnects = 0
     raw_fh = open(raw_log, "a", encoding="utf-8")
+    # Acumulado de la sesión (mientras el proceso siga vivo). Se conserva a
+    # través de reconnects del WS — sólo se reinicia si reiniciás el script.
+    cum_state: Dict[str, Dict[str, Any]] = {}
 
     try:
         while True:
@@ -369,7 +425,7 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
                         _append_parquet(out_md, rows)
                         if verbose_flush:
                             print(f"  ── flush {len(rows)} eventos @ {t_capture:%H:%M:%S} ──")
-                            print(_summarize_flush(rows))
+                            print(_summarize_flush(rows, cum_state))
                         else:
                             print(f"  flush {len(rows)} eventos  ({t_capture:%H:%M:%S})")
                         rows.clear()
@@ -388,10 +444,45 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
             _append_parquet(out_md, rows)
             if verbose_flush:
                 print(f"  ── final flush {len(rows)} eventos ──")
-                print(_summarize_flush(rows))
+                print(_summarize_flush(rows, cum_state))
             else:
                 print(f"Final flush {len(rows)} eventos → {out_md}")
         raw_fh.close()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Re-parse: lee un .jsonl crudo y emite un parquet con el parser actual.
+# Útil para recuperar data grabada con un parser viejo bugueado.
+# ──────────────────────────────────────────────────────────────────────
+
+def run_reparse(jsonl_path: Path, out_parquet: Path) -> int:
+    """Re-parsea un raw log y escribe un parquet limpio.
+
+    ts_capture se deriva del `timestamp` del payload (ts_server) ya que el
+    original no fue persistido. Es suficiente para todos los análisis
+    intraday — la diferencia con ts_capture real es del orden de ms.
+    """
+    rows: List[dict] = []
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            ts = obj.get("timestamp")
+            t_capture = (
+                datetime.fromtimestamp(ts / 1000) if isinstance(ts, (int, float)) and ts > 0
+                else datetime.now()
+            )
+            row = _flatten_md_event(obj, t_capture)
+            if row:
+                rows.append(row)
+    if rows:
+        pd.DataFrame(rows).to_parquet(out_parquet, index=False)
+    return len(rows)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -415,7 +506,27 @@ def main() -> None:
     p_rec.add_argument("--verbose-flush", action="store_true",
                        help="En cada flush imprime resumen por símbolo: evs/trades/bid/ofr/last/hi/lo/nominal.")
 
+    p_rp = sub.add_parser("reparse",
+                          help="Re-parsea un .jsonl crudo con el parser actual (útil cuando el parser tenía bug).")
+    p_rp.add_argument("input", type=str, help="Path al .jsonl crudo (ej. data/ws_raw_2026-05-19.jsonl)")
+    p_rp.add_argument("--out", type=str, default=None,
+                      help="Path del parquet de salida (default: input_dir/ws_md_<date>_reparsed.parquet)")
+
     args = p.parse_args()
+
+    if args.cmd == "reparse":
+        in_path = Path(args.input)
+        if not in_path.exists():
+            raise SystemExit(f"No existe: {in_path}")
+        if args.out:
+            out_path = Path(args.out)
+        else:
+            # data/ws_raw_2026-05-19.jsonl  →  data/ws_md_2026-05-19_reparsed.parquet
+            stem = in_path.stem.replace("ws_raw_", "ws_md_")
+            out_path = in_path.with_name(f"{stem}_reparsed.parquet")
+        n = run_reparse(in_path, out_path)
+        print(f"✔ Re-parseados {n} eventos → {out_path}")
+        return
 
     if args.symbol:
         symbols = args.symbol
