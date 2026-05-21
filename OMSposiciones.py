@@ -856,6 +856,43 @@ def _matriz_especies_fondos(
     return matriz
 
 
+def tenencias_por_especie(cod_delta: str, only_nonzero: bool = True) -> Optional[pd.DataFrame]:
+    """API pública: dado un Cod_Delta, retorna tenencias agregadas por fondo.
+
+    Pensada para uso externo (YAS / Comparador) con costo bajo: los loaders
+    están cacheados con TTL 3600 y `_agregado_por_especie` cachea por
+    (especie, toggle). Si la base no está disponible, retorna None.
+
+    Returns:
+        DataFrame con columnas ['Fondo', 'VN', 'Valor', '% PN'] ordenado por
+        |Valor| desc, o None si no hay base. attrs['vn_total'] y
+        attrs['valor_total'] con los totales agregados, attrs['vto'] y
+        attrs['denom'] con metadata del bono.
+    """
+    if not cod_delta:
+        return None
+    code = str(cod_delta).strip().upper()
+    if not code:
+        return None
+
+    df_comp = load_delta_composicion()
+    if df_comp is None or df_comp.empty:
+        return None
+
+    df_pn = load_delta_pn()
+    agg = _agregado_por_especie(df_comp, df_pn, code, only_nonzero)
+    if agg is None or agg.empty:
+        return None
+
+    out = agg.sort_values("Valor", key=lambda s: s.abs(), ascending=False).reset_index(drop=True)
+    out = out[["Fondo", "VN", "Valor", "% PN"]]
+    out.attrs["vn_total"] = float(out["VN"].sum(skipna=True))
+    out.attrs["valor_total"] = float(out["Valor"].sum(skipna=True))
+    out.attrs["vto"] = agg.attrs.get("vto", "")
+    out.attrs["denom"] = agg.attrs.get("denom", "")
+    return out
+
+
 def render_tab_matriz() -> None:
     """Pestaña 'Matriz Tenencias' con 2 subsecciones:
     1) Buscador: una especie → en qué fondos está.
