@@ -4744,6 +4744,53 @@ def _apply_custom_inflation_if_needed():
 # YAS — Análisis de Yields (función nivel módulo para estabilidad de fragment)
 # ──────────────────────────────────────────────────────────────────────
 
+def _render_tenencias_delta(code: str) -> None:
+    """Expander colapsado con tenencias de la especie por fondo.
+
+    Lazy: si la base de composición no está disponible (Excel no presente
+    o env no seteada), no muestra nada. Los loaders (load_delta_composicion,
+    load_delta_pn) y _agregado_por_especie están cacheados con TTL 3600,
+    así que el costo es nulo después de la primera carga.
+    """
+    if not code:
+        return
+    try:
+        df = OMSposiciones.tenencias_por_especie(code)
+    except Exception:
+        return
+    if df is None or df.empty:
+        return
+
+    vn_total = df.attrs.get("vn_total", float(df["VN"].sum(skipna=True)))
+    valor_total = df.attrs.get("valor_total", float(df["Valor"].sum(skipna=True)))
+    n_fondos = int((df["VN"].fillna(0) != 0).sum())
+
+    title = (
+        f"💼 Tenencias Delta — {code} · {n_fondos} fondo"
+        f"{'s' if n_fondos != 1 else ''} · VN {vn_total:,.0f}"
+    )
+    with st.expander(title, expanded=False):
+        c1, c2 = st.columns(2)
+        c1.metric("VN total", f"{vn_total:,.0f}")
+        c2.metric("Monto invertido", f"{valor_total:,.0f}")
+
+        tbl = df.copy()
+        # % PN viene como ratio (0.05 = 5%); lo multiplico para mostrar
+        if "% PN" in tbl.columns:
+            tbl["% PN"] = pd.to_numeric(tbl["% PN"], errors="coerce") * 100.0
+        st.dataframe(
+            tbl,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Fondo": st.column_config.TextColumn("Fondo"),
+                "VN": st.column_config.NumberColumn("VN", format="%,.0f"),
+                "Valor": st.column_config.NumberColumn("Monto", format="%,.0f"),
+                "% PN": st.column_config.NumberColumn("% PN", format="%.2f%%"),
+            },
+        )
+
+
 @st.fragment
 def _render_yas(username, password, plazo, curve_labels):
     """Cuerpo del tab YAS decorado como @st.fragment a nivel módulo.
@@ -4978,6 +5025,9 @@ def _render_yas(username, password, plazo, curve_labels):
                             _c1.markdown(f"**{_k}:** {_v}")
                         for _k, _v in _delta_info[_half:]:
                             _c2.markdown(f"**{_k}:** {_v}")
+
+                # Tenencias por fondo (base interna de composición) — lazy, silent fail
+                _render_tenencias_delta(yas_code)
 
                 # Gráfico de la curva (lazy - sólo si se abre)
                 with st.expander("📈 Ver en la curva (NSS)", expanded=False):
@@ -7012,12 +7062,14 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
                                     _ca = _delta_caption(code_a)
                                     if _ca:
                                         st.caption(_ca)
+                                    _render_tenencias_delta(code_a)
                                 with head_b:
                                     st.markdown(f"### {met_b.get('Código', '')}")
                                     st.caption(f"{met_b.get('Nombre', '')}")
                                     _cb = _delta_caption(code_b)
                                     if _cb:
                                         st.caption(_cb)
+                                    _render_tenencias_delta(code_b)
 
                                 def _comp_row(label: str, key: str, fmt: str = "{:.4%}"):
                                     c1, c2, c3 = st.columns([2, 2, 1])
