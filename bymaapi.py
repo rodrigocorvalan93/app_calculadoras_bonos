@@ -648,6 +648,7 @@ def main():
     global cer_ci_prices_df, cer_24hs_prices_df, mkt_data_global_df, cerproyectado_24hs_prices_df
     global fx_resumen, fx_resumen_styled, futuros_minorista, futuros_mayorista, futuros_df
     global dlksob_24hs_prices_df, global_24hs_prices_df, bonar_24hs_prices_df, dual_fija_24hs_prices_df, bopreal_24hs_prices_df
+    global dual_cer_24hs_prices_df, dual_cer_proyectado_24hs_prices_df
     global todos_24hs_df, session
 
     # --- Credenciales por env (NO hardcode) ---
@@ -773,6 +774,13 @@ def main():
     ]
     lista_curva_dual_fija_24hs = [f"MERV - XMEV - {s} - 24hs" for s in lista_curva_dual_fija]
 
+    lista_curva_dual_cer = [
+        b.codigo for b in todos_los_bonos
+        if b.clasificacion == "Soberano"
+        and b.industria == "Soberano ARS Dual CER/Tamar"
+    ]
+    lista_curva_dual_cer_24hs = [f"MERV - XMEV - {s} - 24hs" for s in lista_curva_dual_cer]
+
     lista_curva_bonar = [
         b.codigo for b in todos_los_bonos
         if b.clasificacion == "Soberano"
@@ -794,7 +802,8 @@ def main():
     lista_all = (
         lista_cer_24hs + lista_lecap_24hs + lista_tamar_24hs + lista_global_24hs
         + lista_cer_ci + lista_lecap_ci
-        + lista_dlksob_24hs + lista_curva_dual_fija_24hs + lista_curva_bonar_24hs + lista_curva_bopreal_24hs
+        + lista_dlksob_24hs + lista_curva_dual_fija_24hs + lista_curva_dual_cer_24hs
+        + lista_curva_bonar_24hs + lista_curva_bopreal_24hs
     )
 
     mkt_data_global_df = get_market_data_for_symbols(session, lista_all, market_id="ROFX")
@@ -814,6 +823,7 @@ def main():
     dlksob_24hs_prices_df = create_bond_prices_df(lista_dlksob_24hs, last_px_global_df, suffix=" - 24hs")
     global_24hs_prices_df = create_bond_prices_df(lista_global_24hs, last_px_global_df, suffix=" - 24hs")
     dual_fija_24hs_prices_df = create_bond_prices_df(lista_curva_dual_fija_24hs, last_px_global_df, suffix=" - 24hs")
+    dual_cer_24hs_prices_df = create_bond_prices_df(lista_curva_dual_cer_24hs, last_px_global_df, suffix=" - 24hs")
     bonar_24hs_prices_df = create_bond_prices_df(lista_curva_bonar_24hs, last_px_global_df, suffix=" - 24hs")
     bopreal_24hs_prices_df = create_bond_prices_df(lista_curva_bopreal_24hs, last_px_global_df, suffix=" - 24hs")
 
@@ -824,6 +834,7 @@ def main():
     dlksob_24hs_prices_df = process_bond_dataframe(dlksob_24hs_prices_df, bond_type="dlksob", today_str=None, eval_suffix="")
     global_24hs_prices_df = process_bond_dataframe(global_24hs_prices_df, bond_type="hdsob", today_str=None, eval_suffix="")
     dual_fija_24hs_prices_df = process_bond_dataframe(dual_fija_24hs_prices_df, bond_type="lecap", today_str=None, eval_suffix="")
+    dual_cer_24hs_prices_df = process_bond_dataframe(dual_cer_24hs_prices_df, bond_type="cer", today_str=None, eval_suffix="")
     bonar_24hs_prices_df = process_bond_dataframe(bonar_24hs_prices_df, bond_type="hdsob", today_str=None, eval_suffix="")
     bopreal_24hs_prices_df = process_bond_dataframe(bopreal_24hs_prices_df, bond_type="bopreal", today_str=None, eval_suffix="")
 
@@ -841,8 +852,20 @@ def main():
     )
     cerproyectado_24hs_prices_df["Código"] = cerproyectado_24hs_prices_df["Código"] + "j"
 
-    # --- Dual variable (sufijo v) — FIX: TNA ahora sale del v ---
-    dual_24hs_prices_df = create_bond_prices_df(lista_curva_dual_fija_24hs, last_px_global_df, suffix=" - 24hs")
+    # --- Dual CER proyectado (sufijo j) — análogo a cerproyectado_24hs ---
+    dual_cer_proyectado_24hs_prices_df = create_bond_prices_df(
+        lista_curva_dual_cer_24hs, last_px_global_df, suffix=" - 24hs"
+    )
+    dual_cer_proyectado_24hs_prices_df = process_bond_dataframe(
+        dual_cer_proyectado_24hs_prices_df, bond_type="cer", today_str=None, eval_suffix="j"
+    )
+    dual_cer_proyectado_24hs_prices_df["Código"] = dual_cer_proyectado_24hs_prices_df["Código"] + "j"
+
+    # --- Dual variable (sufijo v) — TAMAR ; cubre Fija/TAMAR y CER/TAMAR ---
+    dual_24hs_prices_df = create_bond_prices_df(
+        lista_curva_dual_fija_24hs + lista_curva_dual_cer_24hs,
+        last_px_global_df, suffix=" - 24hs"
+    )
     dual_24hs_prices_df = process_bond_dataframe(dual_24hs_prices_df, bond_type="dual", today_str=None, eval_suffix="v")
     dual_24hs_prices_df["Código"] = dual_24hs_prices_df["Código"] + "v"
 
@@ -862,7 +885,9 @@ def main():
     # --- Combine / histórico ---
     df_combined = pd.concat(
         [cer_24hs_prices_df, lecap_24hs_prices_df, tamar_24hs_prices_df, global_24hs_prices_df,
-         bonar_24hs_prices_df, cerproyectado_24hs_prices_df, dual_24hs_prices_df, bopreal_24hs_prices_df],
+         bonar_24hs_prices_df, cerproyectado_24hs_prices_df,
+         dual_fija_24hs_prices_df, dual_cer_24hs_prices_df, dual_cer_proyectado_24hs_prices_df,
+         dual_24hs_prices_df, bopreal_24hs_prices_df],
         ignore_index=True
     )
     df_combined["fecha_hoy"] = datetime.today().date()
