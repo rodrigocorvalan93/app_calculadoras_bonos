@@ -9,6 +9,10 @@ vía la variable DELTA_BASES_DIR:
         Delta_PN.xlsx           (patrimonio neto por fondo)
         Delta_Futuros.xlsx      (futuros ROFEX por fondo)
 
+El mapeo CodFondo → Nombre se lee de un .txt exportado del back (Esco),
+configurado vía DELTA_FONDOS_PATH en secrets.txt. Si no está disponible,
+cae a un dict hardcodeado de fallback (ver _FONDO_NOMBRES_FALLBACK).
+
 Expone 3 renders:
     render_tab_posiciones(username, password, plazo)   # 1 fondo → TIR/DUR/VN/%PN + futuros
     render_tab_buscador(username, password, plazo)     # 1 especie → en qué fondos está
@@ -48,8 +52,16 @@ _COMPOSICION_FILE = "Delta_Composicion.xlsx"
 _PN_FILE = "Delta_PN.xlsx"
 _FUTUROS_FILE = "Delta_Futuros.xlsx"
 
-# Mapeo Cod Fondo → Nombre legible (provisto por Rorru)
-FONDO_NOMBRES: Dict[int, str] = {
+# Mapeo de fondos: archivo de texto exportado del back interno (Esco).
+# Se configura vía secrets.txt → DELTA_FONDOS_PATH (ruta completa al .txt),
+# típicamente algo como:
+#   %USERPROFILE%\DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Delta Bases\Text\Esco\Delta_Fondos.txt
+_FONDOS_PATH_ENV = "DELTA_FONDOS_PATH"
+
+# Fallback hardcodeado (provisto por Rorru) — sólo se usa si Delta_Fondos.txt
+# no está disponible. Mantener sincronizado a mano hasta que el archivo esté
+# garantizado en todos los entornos.
+_FONDO_NOMBRES_FALLBACK: Dict[int, str] = {
     1: "Acciones",
     2: "Ahorro",
     13: "Ahorro Plus",
@@ -86,10 +98,6 @@ FONDO_NOMBRES: Dict[int, str] = {
     26: "DOLARES PLUS",
     10: "Select",
     42: "Gestion XIII",
-    # NOTA: RETORNO REAL en la tabla provista aparece con código 25, pero 25 ya está
-    # asignado a Gestion VIII (Cnv 963, confirmado). Los fondos 43, 44, 45 existen en
-    # los Excels (PN + Composición) pero no aparecen en el mapeo; se muestran con
-    # su número hasta que Rorru confirme los nombres.
 }
 
 
@@ -137,6 +145,126 @@ def _resolve_base_path(filename: str, env_override: Optional[str] = None) -> Opt
             return candidate
 
     return None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Mapeo Cod Fondo → Nombre (desde Delta_Fondos.txt)
+# ──────────────────────────────────────────────────────────────────────
+
+def _fondos_file_path() -> Optional[str]:
+    """Resuelve ruta al .txt de mapeo de fondos vía DELTA_FONDOS_PATH."""
+    env = os.getenv(_FONDOS_PATH_ENV)
+    if not env:
+        return None
+    env = os.path.expandvars(os.path.expanduser(env))
+    return env if os.path.isfile(env) else None
+
+
+def _parse_fondos_txt(path: str) -> Dict[int, str]:
+    """Parsea Delta_Fondos.txt → {CodFondo: Nombre}.
+
+    Auto-detecta delimitador (tab, pipe, semicolon, coma) y header. Si la
+    primera línea contiene texto tipo 'cod' y 'nombre/denomina/descrip',
+    usa esos índices; si no, asume col0=código, col1=nombre. Ignora líneas
+    vacías y comentarios ('#'). Lee con encoding tolerante (utf-8 → latin-1).
+    """
+    raw: Optional[str] = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+        try:
+            with open(path, "r", encoding=enc) as f:
+                raw = f.read()
+            break
+        except UnicodeDecodeError:
+            continue
+    if raw is None:
+        return {}
+
+    lines = [ln for ln in raw.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    if not lines:
+        return {}
+
+    # Detectar delimitador: el que más veces aparece consistentemente.
+    candidates = ["\t", "|", ";", ","]
+    delim = max(
+        candidates,
+        key=lambda d: sum(1 for ln in lines[:10] if d in ln),
+    )
+    if not any(delim in ln for ln in lines[:10]):
+        # Sin delimitador claro → probar espacios múltiples.
+        import re as _re
+        rows = [_re.split(r"\s{2,}|\t+", ln.strip()) for ln in lines]
+    else:
+        rows = [[c.strip() for c in ln.split(delim)] for ln in lines]
+
+    if not rows or len(rows[0]) < 2:
+        return {}
+
+    # Detectar header
+    header = [c.strip().lower() for c in rows[0]]
+    is_header = any(
+        any(tok in h for tok in ("cod", "id", "num")) for h in header
+    ) and any(
+        any(tok in h for tok in ("nombre", "denomi", "descri", "fondo")) for h in header
+    )
+
+    col_code = 0
+    col_name = 1
+    if is_header:
+        for i, h in enumerate(header):
+            if any(tok in h for tok in ("codfondo", "cod_fondo", "cod fondo", "id")) or h == "cod":
+                col_code = i
+                break
+        # Para el nombre, preferí NombreCorto > Denominacion > Nombre > Descripcion.
+        # NombreCorto matchea el estilo de display existente ("ACCIONES" vs "DELTA ACCIONES").
+        name_priority = (
+            ("nombrecorto", "nombre_corto", "nombre corto", "corto"),
+            ("denomi",),
+            ("nombre",),
+            ("descri",),
+        )
+        col_name = -1
+        for tokens in name_priority:
+            for i, h in enumerate(header):
+                if i == col_code:
+                    continue
+                if any(tok in h for tok in tokens):
+                    col_name = i
+                    break
+            if col_name >= 0:
+                break
+        if col_name < 0:
+            col_name = 1 if col_code != 1 else (2 if len(header) > 2 else 1)
+        data_rows = rows[1:]
+    else:
+        data_rows = rows
+
+    out: Dict[int, str] = {}
+    for r in data_rows:
+        if len(r) <= max(col_code, col_name):
+            continue
+        code_raw = r[col_code].strip().strip('"').strip("'")
+        name_raw = r[col_name].strip().strip('"').strip("'")
+        if not code_raw or not name_raw:
+            continue
+        try:
+            code = int(float(code_raw))
+        except (TypeError, ValueError):
+            continue
+        out[code] = name_raw
+    return out
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fondo_nombres() -> Dict[int, str]:
+    """Mapeo CodFondo → Nombre. Lee Delta_Fondos.txt si está disponible;
+    cae al fallback hardcodeado si no. Cacheado 1h."""
+    path = _fondos_file_path()
+    if path is None:
+        return dict(_FONDO_NOMBRES_FALLBACK)
+    parsed = _parse_fondos_txt(path)
+    if not parsed:
+        return dict(_FONDO_NOMBRES_FALLBACK)
+    return parsed
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -259,7 +387,7 @@ def _fondo_label(cod: Any) -> str:
         n = int(cod)
     except (TypeError, ValueError):
         return str(cod)
-    nombre = FONDO_NOMBRES.get(n)
+    nombre = _fondo_nombres().get(n)
     return f"{n:>2} — {nombre}" if nombre else f"{n:>2}"
 
 
