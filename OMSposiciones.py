@@ -828,6 +828,36 @@ def render_tab_posiciones(
             ].sum())
             st.metric("% Activos PyME / PN", _fmt_pct(_pyme_val / pn, 2))
 
+    # Federal I (14): breakdown Soberano / Corporativo / Subsoberano
+    if fondo_sel == 14 and "Sector Delta" in df_enriched.columns and pn and pn > 0:
+        _sec = df_enriched[["Sector Delta", "Valor"]].copy()
+        _sec["Valor"] = pd.to_numeric(_sec["Valor"], errors="coerce")
+        _sec_grp = (
+            _sec.groupby("Sector Delta", dropna=False)["Valor"].sum()
+            .sort_values(ascending=False)
+        )
+        _sec_cols = st.columns(len(_sec_grp))
+        for _col, (sector, monto) in zip(_sec_cols, _sec_grp.items()):
+            _label = str(sector) if pd.notna(sector) and str(sector).strip() else "(sin sector)"
+            _col.metric(f"% {_label} / PN", _fmt_pct(monto / pn, 2))
+
+    # Todos los fondos: rating crediticio con Soberano aparte
+    if "Califica_Local" in df_enriched.columns and "Sector Delta" in df_enriched.columns and pn and pn > 0:
+        _rat = df_enriched[["Sector Delta", "Califica_Local", "Valor"]].copy()
+        _rat["Valor"] = pd.to_numeric(_rat["Valor"], errors="coerce")
+        _is_sov = _rat["Sector Delta"].astype(str).str.strip().str.lower() == "soberano"
+        _val_sov = float(_rat.loc[_is_sov, "Valor"].sum())
+        _rat_no_sov = (
+            _rat.loc[~_is_sov]
+            .groupby("Califica_Local", dropna=False)["Valor"].sum()
+            .sort_values(ascending=False)
+        )
+        parts = [f"Soberano {_fmt_pct(_val_sov / pn, 2)}"]
+        for rating, monto in _rat_no_sov.items():
+            _rlabel = str(rating).strip() if pd.notna(rating) and str(rating).strip() else "s/rating"
+            parts.append(f"{_rlabel} {_fmt_pct(monto / pn, 2)}")
+        st.caption("**Rating:** " + " · ".join(parts))
+
     # Columnas de salida — orden explícito solicitado por Rorru:
     # [métricas de mercado y clasificación] … luego [VN | Monto Invertido | % sobre PN]
     rename_out = {
