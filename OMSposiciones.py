@@ -9,9 +9,10 @@ vía la variable DELTA_BASES_DIR:
         Delta_PN.xlsx           (patrimonio neto por fondo)
         Delta_Futuros.xlsx      (futuros ROFEX por fondo)
 
-El mapeo CodFondo → Nombre se lee de un .txt exportado del back (Esco),
-configurado vía DELTA_FONDOS_PATH en secrets.txt. Si no está disponible,
-cae a un dict hardcodeado de fallback (ver _FONDO_NOMBRES_FALLBACK).
+El mapeo CodFondo → Nombre se lee de un .txt exportado del back (Esco).
+Se busca en orden: DELTA_FONDOS_PATH (ruta explícita), luego
+DELTA_BASES_DIR/../Text/Esco/Delta_Fondos.txt (ubicación estándar).
+Si no se encuentra, cae a un dict hardcodeado de fallback.
 
 Expone 3 renders:
     render_tab_posiciones(username, password, plazo)   # 1 fondo → TIR/DUR/VN/%PN + futuros
@@ -151,13 +152,32 @@ def _resolve_base_path(filename: str, env_override: Optional[str] = None) -> Opt
 # Mapeo Cod Fondo → Nombre (desde Delta_Fondos.txt)
 # ──────────────────────────────────────────────────────────────────────
 
+_FONDOS_FILENAME = "Delta_Fondos.txt"
+
 def _fondos_file_path() -> Optional[str]:
-    """Resuelve ruta al .txt de mapeo de fondos vía DELTA_FONDOS_PATH."""
+    """Resuelve ruta al .txt de mapeo de fondos. Prioridad:
+      1. DELTA_FONDOS_PATH (ruta completa al archivo).
+      2. DELTA_BASES_DIR/../Text/Esco/Delta_Fondos.txt (ubicación estándar Esco).
+      3. DELTA_BASES_DIR/../Delta_Fondos.txt (raíz de Delta Bases).
+      4. DELTA_BASES_DIR/Delta_Fondos.txt (por si está junto a los Excel).
+    """
     env = os.getenv(_FONDOS_PATH_ENV)
-    if not env:
-        return None
-    env = os.path.expandvars(os.path.expanduser(env))
-    return env if os.path.isfile(env) else None
+    if env:
+        env = os.path.expandvars(os.path.expanduser(env))
+        if os.path.isfile(env):
+            return env
+
+    base = _bases_dir()
+    if base:
+        parent = os.path.dirname(base.rstrip("\\/"))
+        for candidate in (
+            os.path.join(parent, "Text", "Esco", _FONDOS_FILENAME),
+            os.path.join(parent, _FONDOS_FILENAME),
+            os.path.join(base, _FONDOS_FILENAME),
+        ):
+            if os.path.isfile(candidate):
+                return candidate
+    return None
 
 
 def _parse_fondos_txt(path: str) -> Dict[int, str]:
