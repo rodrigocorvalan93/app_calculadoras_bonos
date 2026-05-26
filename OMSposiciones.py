@@ -804,6 +804,30 @@ def render_tab_posiciones(
 
     df_enriched = _enrich_posiciones(df_fondo, metrics, pn)
 
+    # KPIs regulatorios por fondo (Clasificacion_especifico)
+    if "Clasificacion_especifico" in df_enriched.columns and pn and pn > 0:
+        clas = df_enriched[["Clasificacion_especifico", "Valor"]].copy()
+        clas["Valor"] = pd.to_numeric(clas["Valor"], errors="coerce")
+
+        if fondo_sel == 18:
+            _infra_multi = float(clas.loc[
+                clas["Clasificacion_especifico"] == "Infraestructura Multidestino", "Valor"
+            ].sum())
+            _infra_dest = float(clas.loc[
+                clas["Clasificacion_especifico"] == "Infraestructura Destino Específico", "Valor"
+            ].sum())
+            ki1, ki2 = st.columns(2)
+            ki1.metric("% Infra Multidestino / PN", _fmt_pct(_infra_multi / pn, 2))
+            ki2.metric("% Infra Destino Específico / PN", _fmt_pct(_infra_dest / pn, 2))
+
+        elif fondo_sel == 11:
+            _pyme_cats = ("Pymes", "Pyme Multidestino", "Pyme Destino Específico",
+                          "Pymes e Infraestructura")
+            _pyme_val = float(clas.loc[
+                clas["Clasificacion_especifico"].isin(_pyme_cats), "Valor"
+            ].sum())
+            st.metric("% Activos PyME / PN", _fmt_pct(_pyme_val / pn, 2))
+
     # Columnas de salida — orden explícito solicitado por Rorru:
     # [métricas de mercado y clasificación] … luego [VN | Monto Invertido | % sobre PN]
     rename_out = {
