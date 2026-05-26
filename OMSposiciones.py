@@ -9,9 +9,10 @@ vía la variable DELTA_BASES_DIR:
         Delta_PN.xlsx           (patrimonio neto por fondo)
         Delta_Futuros.xlsx      (futuros ROFEX por fondo)
 
-El mapeo CodFondo → Nombre se lee de un .txt exportado del back (Esco),
-configurado vía DELTA_FONDOS_PATH en secrets.txt. Si no está disponible,
-cae a un dict hardcodeado de fallback (ver _FONDO_NOMBRES_FALLBACK).
+El mapeo CodFondo → Nombre se lee de un .txt exportado del back (Esco).
+Se busca en orden: DELTA_FONDOS_PATH (ruta explícita), luego
+DELTA_BASES_DIR/../Text/Esco/Delta_Fondos.txt (ubicación estándar).
+Si no se encuentra, cae a un dict hardcodeado de fallback.
 
 Expone 3 renders:
     render_tab_posiciones(username, password, plazo)   # 1 fondo → TIR/DUR/VN/%PN + futuros
@@ -151,13 +152,32 @@ def _resolve_base_path(filename: str, env_override: Optional[str] = None) -> Opt
 # Mapeo Cod Fondo → Nombre (desde Delta_Fondos.txt)
 # ──────────────────────────────────────────────────────────────────────
 
+_FONDOS_FILENAME = "Delta_Fondos.txt"
+
 def _fondos_file_path() -> Optional[str]:
-    """Resuelve ruta al .txt de mapeo de fondos vía DELTA_FONDOS_PATH."""
+    """Resuelve ruta al .txt de mapeo de fondos. Prioridad:
+      1. DELTA_FONDOS_PATH (ruta completa al archivo).
+      2. DELTA_BASES_DIR/../Text/Esco/Delta_Fondos.txt (ubicación estándar Esco).
+      3. DELTA_BASES_DIR/../Delta_Fondos.txt (raíz de Delta Bases).
+      4. DELTA_BASES_DIR/Delta_Fondos.txt (por si está junto a los Excel).
+    """
     env = os.getenv(_FONDOS_PATH_ENV)
-    if not env:
-        return None
-    env = os.path.expandvars(os.path.expanduser(env))
-    return env if os.path.isfile(env) else None
+    if env:
+        env = os.path.expandvars(os.path.expanduser(env))
+        if os.path.isfile(env):
+            return env
+
+    base = _bases_dir()
+    if base:
+        parent = os.path.dirname(base.rstrip("\\/"))
+        for candidate in (
+            os.path.join(parent, "Text", "Esco", _FONDOS_FILENAME),
+            os.path.join(parent, _FONDOS_FILENAME),
+            os.path.join(base, _FONDOS_FILENAME),
+        ):
+            if os.path.isfile(candidate):
+                return candidate
+    return None
 
 
 def _parse_fondos_txt(path: str) -> Dict[int, str]:
@@ -783,6 +803,60 @@ def render_tab_posiciones(
     )
 
     df_enriched = _enrich_posiciones(df_fondo, metrics, pn)
+
+    # KPIs regulatorios por fondo (Clasificacion_especifico)
+    if "Clasificacion_especifico" in df_enriched.columns and pn and pn > 0:
+        clas = df_enriched[["Clasificacion_especifico", "Valor"]].copy()
+        clas["Valor"] = pd.to_numeric(clas["Valor"], errors="coerce")
+
+        if fondo_sel == 18:
+            _infra_multi = float(clas.loc[
+                clas["Clasificacion_especifico"] == "Infraestructura Multidestino", "Valor"
+            ].sum())
+            _infra_dest = float(clas.loc[
+                clas["Clasificacion_especifico"] == "Infraestructura Destino Específico", "Valor"
+            ].sum())
+            ki1, ki2 = st.columns(2)
+            ki1.metric("% Infra Multidestino / PN", _fmt_pct(_infra_multi / pn, 2))
+            ki2.metric("% Infra Destino Específico / PN", _fmt_pct(_infra_dest / pn, 2))
+
+        elif fondo_sel == 11:
+            _pyme_cats = ("Pymes", "Pyme Multidestino", "Pyme Destino Específico",
+                          "Pymes e Infraestructura")
+            _pyme_val = float(clas.loc[
+                clas["Clasificacion_especifico"].isin(_pyme_cats), "Valor"
+            ].sum())
+            st.metric("% Activos PyME / PN", _fmt_pct(_pyme_val / pn, 2))
+
+    # Federal I (14): breakdown Soberano / Corporativo / Subsoberano
+    if fondo_sel == 14 and "Sector Delta" in df_enriched.columns and pn and pn > 0:
+        _sec = df_enriched[["Sector Delta", "Valor"]].copy()
+        _sec["Valor"] = pd.to_numeric(_sec["Valor"], errors="coerce")
+        _sec_grp = (
+            _sec.groupby("Sector Delta", dropna=False)["Valor"].sum()
+            .sort_values(ascending=False)
+        )
+        _sec_cols = st.columns(len(_sec_grp))
+        for _col, (sector, monto) in zip(_sec_cols, _sec_grp.items()):
+            _label = str(sector) if pd.notna(sector) and str(sector).strip() else "(sin sector)"
+            _col.metric(f"% {_label} / PN", _fmt_pct(monto / pn, 2))
+
+    # Todos los fondos: rating crediticio con Soberano aparte
+    if "Califica_Local" in df_enriched.columns and "Sector Delta" in df_enriched.columns and pn and pn > 0:
+        _rat = df_enriched[["Sector Delta", "Califica_Local", "Valor"]].copy()
+        _rat["Valor"] = pd.to_numeric(_rat["Valor"], errors="coerce")
+        _is_sov = _rat["Sector Delta"].astype(str).str.strip().str.lower() == "soberano"
+        _val_sov = float(_rat.loc[_is_sov, "Valor"].sum())
+        _rat_no_sov = (
+            _rat.loc[~_is_sov]
+            .groupby("Califica_Local", dropna=False)["Valor"].sum()
+            .sort_values(ascending=False)
+        )
+        parts = [f"Soberano {_fmt_pct(_val_sov / pn, 2)}"]
+        for rating, monto in _rat_no_sov.items():
+            _rlabel = str(rating).strip() if pd.notna(rating) and str(rating).strip() else "s/rating"
+            parts.append(f"{_rlabel} {_fmt_pct(monto / pn, 2)}")
+        st.caption("**Rating:** " + " · ".join(parts))
 
     # Columnas de salida — orden explícito solicitado por Rorru:
     # [métricas de mercado y clasificación] … luego [VN | Monto Invertido | % sobre PN]
