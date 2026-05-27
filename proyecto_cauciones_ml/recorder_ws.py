@@ -359,7 +359,21 @@ def _summarize_flush(rows: List[dict], cum_state: Dict[str, Dict[str, Any]]) -> 
     return "\n".join(lines)
 
 
-def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = False) -> None:
+def _resolve_symbols(include_dolar: bool) -> List[str]:
+    today = date.today()
+    symbols = [simbolo_caucion(today, "PESOS")]
+    if include_dolar:
+        symbols.append(simbolo_caucion(today, "DOLAR"))
+    return symbols
+
+
+def run_record(
+    symbols: List[str],
+    until: Optional[str],
+    verbose_flush: bool = False,
+    include_dolar: bool = True,
+    auto_symbols: bool = True,
+) -> None:
     today = date.today()
     out_md = DATA_DIR / f"ws_md_{today.isoformat()}.parquet"
     raw_log = DATA_DIR / f"ws_raw_{today.isoformat()}.jsonl"
@@ -381,6 +395,7 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
     # Acumulado de la sesión (mientras el proceso siga vivo). Se conserva a
     # través de reconnects del WS — sólo se reinicia si reiniciás el script.
     cum_state: Dict[str, Dict[str, Any]] = {}
+    need_resubscribe = False
 
     try:
         while True:
@@ -401,6 +416,39 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
                 while True:
                     if until_dt and datetime.now() >= until_dt:
                         break
+
+                    new_today = date.today()
+                    if new_today != today:
+                        if rows:
+                            _append_parquet(out_md, rows)
+                            if verbose_flush:
+                                print(f"  ── flush {len(rows)} eventos (cierre día {today}) ──")
+                                print(_summarize_flush(rows, cum_state))
+                            else:
+                                print(f"  flush {len(rows)} eventos (cierre día {today})")
+                            rows.clear()
+                        raw_fh.close()
+
+                        today = new_today
+                        out_md = DATA_DIR / f"ws_md_{today.isoformat()}.parquet"
+                        raw_log = DATA_DIR / f"ws_raw_{today.isoformat()}.jsonl"
+                        raw_fh = open(raw_log, "a", encoding="utf-8")
+                        cum_state.clear()
+
+                        if auto_symbols:
+                            symbols = _resolve_symbols(include_dolar)
+
+                        if until:
+                            hh, mm = (int(x) for x in until.split(":"))
+                            until_dt = datetime.combine(today, datetime.min.time()).replace(hour=hh, minute=mm)
+
+                        print(f"\n╔══ Rotación de día → {today.isoformat()} ══╗")
+                        print(f"  símbolos  = {symbols}")
+                        print(f"  out MD    = {out_md}")
+                        print(f"  raw log   = {raw_log}")
+                        need_resubscribe = True
+                        break
+
                     try:
                         raw = ws.recv()
                     except websocket.WebSocketTimeoutException:
@@ -436,6 +484,10 @@ def run_record(symbols: List[str], until: Optional[str], verbose_flush: bool = F
                 time.sleep(5)
                 continue
             else:
+                if need_resubscribe:
+                    need_resubscribe = False
+                    reconnects += 1
+                    continue
                 break
     except KeyboardInterrupt:
         print("\nInterrumpido por usuario.")
@@ -528,18 +580,22 @@ def main() -> None:
         print(f"✔ Re-parseados {n} eventos → {out_path}")
         return
 
+    auto_symbols = not args.symbol
     if args.symbol:
         symbols = args.symbol
     else:
-        today = date.today()
-        symbols = [simbolo_caucion(today, "PESOS")]
-        if args.include_dolar:
-            symbols.append(simbolo_caucion(today, "DOLAR"))
+        symbols = _resolve_symbols(args.include_dolar)
 
     if args.cmd == "test":
         run_test(symbols)
     elif args.cmd == "record":
-        run_record(symbols, args.until, verbose_flush=args.verbose_flush)
+        run_record(
+            symbols,
+            args.until,
+            verbose_flush=args.verbose_flush,
+            include_dolar=args.include_dolar,
+            auto_symbols=auto_symbols,
+        )
 
 
 if __name__ == "__main__":
