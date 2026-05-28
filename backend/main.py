@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
+from backend.routes.curves import router as curves_router
 from backend.routes.yas import router as yas_router
 from backend.services import bond_universe
 from backend.services.primary_client import get_client
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(yas_router)
+    app.include_router(curves_router)
 
     @app.get("/")
     async def index() -> RedirectResponse:
