@@ -4850,11 +4850,16 @@ def _render_yas(username, password, plazo, curve_labels):
     el @st.fragment está en otra, Streamlit no asocia widgets↔fragment,
     y los cambios NO disparan re-ejecución."""
     # [DIAGNÓSTICO] — este print indica que el fragment se re-ejecutó
+    import time as _tp_y
+    _ty0 = _tp_y.perf_counter()
     print(f"[YAS fragment] re-exec @ {datetime.now().strftime('%H:%M:%S.%f')[:-3]}", flush=True)
     st.subheader("Análisis de Yields (YAS)")
     st.caption("Ingresá Precio, TIR, TNA o Margen → obtenés las métricas del bono.")
 
+    _ty1 = _tp_y.perf_counter()
     _all_codes_yas = _all_bond_codes()
+    _ty2 = _tp_y.perf_counter()
+    print(f"[YAS] _all_bond_codes={1000*(_ty2-_ty1):.0f}ms (n={len(_all_codes_yas)})", flush=True)
     if not _all_codes_yas:
         st.info("No hay bonos disponibles en el universo.")
     else:
@@ -4927,6 +4932,7 @@ def _render_yas(username, password, plazo, curve_labels):
 
             # FX: editable siempre (útil para DLK y en general para sensibilizar TC)
             # Se muestra sugerencia del A3500 hoy si está disponible.
+            _ty_fx0 = _tp_y.perf_counter()
             yas_tc = None
             _fx_default = 1300.0
             try:
@@ -4944,6 +4950,8 @@ def _render_yas(username, password, plazo, curve_labels):
                             _fx_default = _v2
                 except Exception:
                     pass
+            _ty_fx1 = _tp_y.perf_counter()
+            print(f"[YAS] fx-default={1000*(_ty_fx1-_ty_fx0):.0f}ms", flush=True)
             _is_dlk = bool(bond_obj_yas and getattr(bond_obj_yas, "ajuste_sobre_capital", None) == "DLK")
             tc_cols = st.columns(2)
             with tc_cols[0]:
@@ -5084,8 +5092,11 @@ def _render_yas(username, password, plazo, curve_labels):
                     if go is not None and np.isfinite(dur_y) and np.isfinite(tirea_y):
                         curve_key_yas = _find_curve_for_bond(yas_code)
                         if curve_key_yas:
+                            _ty_cv0 = _tp_y.perf_counter()
                             with st.spinner(f"Cargando curva…"):
                                 df_curve_yas = load_curve_last_table(username, password, curve_key_yas, plazo)
+                            _ty_cv1 = _tp_y.perf_counter()
+                            print(f"[YAS] curve-plot load={1000*(_ty_cv1-_ty_cv0):.0f}ms ({curve_key_yas})", flush=True)
                             if df_curve_yas is not None and not df_curve_yas.empty:
                                 fig_yas = go.Figure()
                                 y_pct_y = _yield_pct_points(df_curve_yas["TIREA"])
@@ -5131,6 +5142,9 @@ def _render_yas(username, password, plazo, curve_labels):
                 st.error(f"Error: {type(e).__name__}: {e}")
                 import traceback
                 print(f"[YAS ERROR {yas_code}]\n{traceback.format_exc()}", flush=True)
+
+    _ty_end = _tp_y.perf_counter()
+    print(f"[YAS] fragment-total={1000*(_ty_end-_ty0):.0f}ms", flush=True)
 
 
 
@@ -5309,6 +5323,8 @@ def main():
     # `with st.sidebar:` afuera.
     @st.fragment(run_every=refresh_interval if refresh_interval else 30)
     def _render_sidebar_dolares_live():
+        import time as _tp_s
+        _ts0 = _tp_s.perf_counter()
         try:
             base_codes = sorted({
                 _normalize_bond_base(c)
@@ -5326,6 +5342,7 @@ def main():
                     fx_close = float(_df.iloc[-1]["tca3500"])
             except Exception:
                 fx_close = None
+            _ts1 = _tp_s.perf_counter()
 
             # Computamos sobre 24hs (más liquidez). UN solo fetch para
             # ambas patas — el sidebar se llama en cada refresh, así que
@@ -5333,6 +5350,7 @@ def main():
             df_usd, df_usb, _ = _build_implicit_fx_both(
                 username, password, base_codes, "24hs"
             )
+            _ts2 = _tp_s.perf_counter()
 
             st.divider()
             st.header("💵 Dólar (bono top-vol)")
@@ -5356,6 +5374,7 @@ def main():
             _show("USD (cable)", df_usd)
             _show("USB (MEP)", df_usb)
 
+            _ts3 = _tp_s.perf_counter()
             # Brecha (CCL vs oficial) y Canje (CCL vs MEP)
             oficial_last = None
             try:
@@ -5363,6 +5382,7 @@ def main():
             except Exception:
                 oficial_last = None
             bc = _compute_brecha_canje(df_usd, df_usb, oficial_last, fx_close)
+            _ts4 = _tp_s.perf_counter()
 
             def _pp(v):
                 return None if v is None else f"{v * 100:+.2f} pp"
@@ -5379,8 +5399,19 @@ def main():
                     f"{bc['canje_hoy'] * 100:.2f}%",
                     delta=_pp(bc["canje_var_pp"]),
                 )
+            _ts5 = _tp_s.perf_counter()
+            print(
+                f"[sidebar fx] setup={1000*(_ts1-_ts0):.0f}ms "
+                f"fx-implicit={1000*(_ts2-_ts1):.0f}ms "
+                f"render-usd-usb={1000*(_ts3-_ts2):.0f}ms "
+                f"get-fx-hoy+brecha={1000*(_ts4-_ts3):.0f}ms "
+                f"render-brecha={1000*(_ts5-_ts4):.0f}ms "
+                f"total={1000*(_ts5-_ts0):.0f}ms",
+                flush=True,
+            )
         except Exception as e:
             st.caption(f"⚠️ Monitor dólar: {e}")
+            print(f"[sidebar fx] EXCEPTION {type(e).__name__}: {e}", flush=True)
 
     with st.sidebar:
         _render_sidebar_dolares_live()
@@ -5446,21 +5477,28 @@ def main():
 
         @st.fragment(run_every=refresh_interval)
         def _curvas_live():
+            import time as _tp_c
+            _t0 = _tp_c.perf_counter()
             # Refrescar FX A3500 en cada ciclo live (>>> PATCH FX 04/2026)
             invalidate_fx_cache()
             refresh_a3500_in_rentafija(session=get_session(username, password))
+            _t1 = _tp_c.perf_counter()
+            print(f"[curvas] fx-refresh @ +{1000*(_t1-_t0):.0f}ms", flush=True)
 
             st.caption(market_status_caption(plazo, auto_refresh=auto_refresh))
             if not is_market_open():
                 st.info("⚪ Mercado cerrado — TIREA / TNA / Duration se calculan sobre el **Close** del último cierre. Bid/Offer TIREA usan sus precios si existen.")
 
             aux_frames = []
+            _curve_timings = []
             for c in CURVES:
                 if c.key not in curves:
                     continue
                 title = f"{c.label}"
 
+                _tc0 = _tp_c.perf_counter()
                 df = load_curve_last_table(username, password, c.key, plazo)
+                _tc1 = _tp_c.perf_counter()
                 if df is not None and not df.empty:
                     aux_frames.append(df)
 
@@ -5476,8 +5514,18 @@ def main():
                         st.info("Sin datos (mercado cerrado o sin respuesta de marketdata).")
                     else:
                         st.dataframe(style_curvas(df), width="stretch", height=520)
+                _tc2 = _tp_c.perf_counter()
+                _curve_timings.append(
+                    f"{c.key}=load:{1000*(_tc1-_tc0):.0f}ms+render:{1000*(_tc2-_tc1):.0f}ms"
+                )
 
             _render_price_source_footer(*aux_frames)
+            _t2 = _tp_c.perf_counter()
+            print(
+                f"[curvas] per-curve: {' '.join(_curve_timings)} | "
+                f"total-loop={1000*(_t2-_t1):.0f}ms total={1000*(_t2-_t0):.0f}ms",
+                flush=True,
+            )
 
         _curvas_live()
         _lap("after curvas")
