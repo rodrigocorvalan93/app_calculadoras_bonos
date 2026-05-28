@@ -73,10 +73,14 @@ async def yas_recompute(
     plazo: str = Form("24hs"),
     settle_custom: str = Form(""),
     fx_override: str = Form(""),
+    freq_override: str = Form(""),
+    base_override: str = Form(""),
 ) -> HTMLResponse:
     parsed_value = _parse_ar_number(value)
     parsed_nom = _parse_ar_number(nominales) or 1_000_000.0
     parsed_fx = _parse_ar_number(fx_override)
+    parsed_freq = _parse_ar_number(freq_override)
+    parsed_base = _parse_ar_number(base_override)
 
     if parsed_value is None:
         return _render(
@@ -95,6 +99,8 @@ async def yas_recompute(
         value=parsed_value,
         settle=settle,
         fx_override=parsed_fx,
+        freq_override=int(parsed_freq) if parsed_freq else None,
+        base_override=int(parsed_base) if parsed_base else None,
     )
     ticket = pricing.ticket_rows(metrics, nominales=parsed_nom)
     return _render(

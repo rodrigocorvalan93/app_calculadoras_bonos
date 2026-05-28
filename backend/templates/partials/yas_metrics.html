@@ -1,10 +1,10 @@
-{# Métricas centrales. Lo que cambia en cada recompute. #}
 {% if metrics.get("error") %}
-  <div class="alert alert-error">⚠️ {{ metrics.error }}</div>
+  <div class="alert alert-error">{{ metrics.error }}</div>
 {% else %}
+
 <div class="metrics-grid metrics-primary">
   <div class="metric">
-    <span class="metric-label">Precio (% VN)</span>
+    <span class="metric-label">Precio <span class="conv">% VN</span></span>
     <span class="metric-value">{{ metrics.precio_pct | ar_num(4) }}</span>
   </div>
   <div class="metric">
@@ -12,7 +12,7 @@
     <span class="metric-value">{{ metrics.tirea | ar_pct(4) }}</span>
   </div>
   <div class="metric">
-    <span class="metric-label">TNA</span>
+    <span class="metric-label">TNA <span class="conv">{{ metrics.tna_convention_label }}</span></span>
     <span class="metric-value">{{ metrics.tna | ar_pct(4) }}</span>
   </div>
   <div class="metric">
@@ -47,6 +47,22 @@
     <span class="metric-value">{{ metrics.valor_residual | ar_pct_pp(2) }}</span>
   </div>
 </div>
+
+{% set idx_app = metrics.get("index_applied") %}
+{% if idx_app and idx_app.get("kind") %}
+<div class="index-applied">
+  <span class="index-applied-kind">{{ idx_app.kind }}</span>
+  <span class="index-applied-label">{{ idx_app.label }}</span>
+  <span class="index-applied-value">
+    {% if idx_app.value_fmt_hint == "percent_pp" %}
+      {{ idx_app.value | ar_pct_pp(4) }}
+    {% else %}
+      {{ idx_app.value | ar_num(4) }}
+    {% endif %}
+  </span>
+  <span class="index-applied-date">{{ idx_app.fecha | ar_date if idx_app.fecha else "" }}</span>
+</div>
+{% endif %}
 
 {% if metrics.tipo_tasa_interes in ("VARIABLE", "VARIABLE_CAP") and metrics.index %}
 <div class="metrics-grid metrics-margen">

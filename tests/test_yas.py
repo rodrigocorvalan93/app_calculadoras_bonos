@@ -140,6 +140,56 @@ def test_hard_dollar_runs() -> None:
 
     m = pricing.compute_metrics(code=chosen, mode="precio", value=70.0)
     _expect_calc(m)
+    assert m["tna_convention_label"] == "180/360", m["tna_convention_label"]
+
+
+# ── TNA convention table ─────────────────────────────────────────────────
+
+
+def test_tna_convention_label_per_type() -> None:
+    """Exercises the per-tipo convention table from `tna_convention`."""
+    if "TXMJ9v" in bond_universe.all_codes():
+        m = pricing.compute_metrics("TXMJ9v", "precio", 87.30)
+        assert m["tna_convention_label"] == "32/365 cap"
+
+
+def test_tna_convention_override() -> None:
+    """When freq/base are passed, they win over auto-detection."""
+    if "TXMJ9v" not in bond_universe.all_codes():
+        pytest.skip("TXMJ9v not present")
+    m = pricing.compute_metrics("TXMJ9v", "precio", 87.30, freq_override=180, base_override=365)
+    assert "180/365 custom" in m["tna_convention_label"]
+
+
+def test_cer_bond_shows_cer_aplicable() -> None:
+    """CER / CER PROYECTADO bonds must report the latest CER value."""
+    cer_code = None
+    for c in bond_universe.all_codes():
+        meta = pricing.bond_meta(c)
+        if "CER" in (meta.get("ajuste_sobre_capital") or "").upper():
+            cer_code = c
+            break
+    if cer_code is None:
+        pytest.skip("No CER bond in especies.py")
+    m = pricing.compute_metrics(cer_code, "precio", 95.0)
+    idx = m["index_applied"]
+    assert idx["kind"] == "CER"
+    assert _isfin(idx["value"]), f"CER value should be loaded from rentafija.inputs: {idx}"
+    assert m["tna_convention_label"] == "180/365"
+
+
+def test_variable_uses_90_over_365() -> None:
+    """Per the latest spec: tasa variable pura = 90/365 (no longer days/365)."""
+    target = None
+    for c in bond_universe.all_codes():
+        meta = pricing.bond_meta(c)
+        if meta.get("tipo_tasa_interes") == "VARIABLE":
+            target = c
+            break
+    if target is None:
+        pytest.skip("No VARIABLE-rate bond in especies.py")
+    m = pricing.compute_metrics(target, "precio", 95.0)
+    assert m["tna_convention_label"] == "90/365", m["tna_convention_label"]
 
 
 # ── HTTP layer smoke tests ───────────────────────────────────────────────

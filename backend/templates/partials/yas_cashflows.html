@@ -1,2 +1,28 @@
-{# Placeholder for Phase 1. Cashflows will be wired in a follow-up commit. #}
-<p class="muted">Cashflows estarán disponibles en el siguiente PR.</p>
+{% if metrics.get("cashflows") %}
+<table class="cashflows">
+  <thead>
+    <tr>
+      <th>Fecha cupón</th>
+      <th>Fecha pago</th>
+      <th>Intereses</th>
+      <th>Amortización</th>
+      <th>Ajuste</th>
+      <th>Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for cf in metrics.cashflows %}
+      <tr>
+        <td>{{ cf.fecha_cpn | ar_date }}</td>
+        <td>{{ cf.fecha_pmt | ar_date }}</td>
+        <td>{{ cf.intereses | ar_num(6) }}</td>
+        <td>{{ cf.amortizacion | ar_num(4) }}</td>
+        <td>{{ cf.ajuste | ar_num(6) }}</td>
+        <td class="cf-total">{{ cf.total | ar_num(6) }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Sin cashflows post-settlement.</p>
+{% endif %}
