@@ -4149,7 +4149,12 @@ def _ticket_numeric(code: str, mode: str, value: float,
         dur = obj.calcula_duration(tirea, settle) if np.isfinite(tirea) else np.nan
         paridad = getattr(obj, "paridad", np.nan)
 
-        # Margen sobre índice
+        # Margen sobre índice. Tiene que replicar EXACTAMENTE la fórmula de
+        # rentafija.genera_ticket (líneas ~885-897). Hay 2 fórmulas distintas:
+        #   - VARIABLE       (BADLAR / TAMAR puro): margen = TNA - benchmark/100
+        #   - VARIABLE_CAP   (típico dual TAMAR):   margen = ((1+TIREA)^(32/365)-1)*(365/32) - benchmark/100
+        # Antes este bloque usaba la fórmula simple para los dos casos, lo
+        # que hacía que duales TAMAR (TXMJ9v, etc) reportaran margen mal.
         margen_tna = np.nan
         idx = getattr(obj, "index", None)
         tipo = getattr(obj, "tipo_tasa_interes", None)
@@ -4161,8 +4166,12 @@ def _ticket_numeric(code: str, mode: str, value: float,
                 ajuste = inp.get("tamar", pd.DataFrame()).tail(5).get("TAMAR", pd.Series()).mean()
             else:
                 ajuste = 0.0
-            if np.isfinite(tna) and np.isfinite(ajuste):
-                margen_tna = tna - ajuste / 100.0
+            if np.isfinite(ajuste):
+                if tipo == "VARIABLE_CAP" and np.isfinite(tirea):
+                    tna_eq = ((1.0 + float(tirea)) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
+                    margen_tna = tna_eq - ajuste / 100.0
+                elif tipo == "VARIABLE" and np.isfinite(tna):
+                    margen_tna = tna - ajuste / 100.0
 
         return {
             "Código": code,
@@ -5063,6 +5072,30 @@ def _render_yas(username, password, plazo, curve_labels):
     print(f"[YAS fragment] re-exec @ {datetime.now().strftime('%H:%M:%S.%f')[:-3]}", flush=True)
     st.subheader("Análisis de Yields (YAS)")
     st.caption("Ingresá Precio, TIR, TNA o Margen → obtenés las métricas del bono.")
+    with st.expander("ℹ️ Convención de TNA y Margen según tipo de bono", expanded=False):
+        st.markdown(
+            """
+**Cómo se calcula la TNA a partir de la TIREA** (depende del tipo de bono):
+
+| Tipo de bono | Conversión `TNA` | Base |
+|---|---|---|
+| LECAP / TAMAR puro / DLK soberano | `tir_a_tna(TIREA, días_remanentes, 365)` | TNA al vencimiento |
+| CER / CER proyectado | `tir_a_tna(TIREA, 180, 365)` | TNA semestral |
+| Hard-dollar soberano / BOPREAL | `tir_a_tna(TIREA, 180, 360)` | TNA semestral, 360 |
+| corp DLK | `tir_a_tna(TIREA, 90, 365)` | TNA trimestral |
+| corp Hard-dollar (HD MEP / HD Cable) | `tir_a_tna(TIREA, 180, 365)` | TNA semestral |
+| Dual CER/TAMAR / Dual fija / Dual TAMAR | `tir_a_tna(TIREA, 30, 365)` | TNA mensual (capitaliza c/30 días) |
+
+**Margen TNA sobre benchmark** (solo bonos a tasa variable):
+- `VARIABLE` (BADLAR / TAMAR puro): `Margen TNA = TNA(bono) − benchmark/100`
+- `VARIABLE_CAP` + TAMAR (típico de duales TAMAR): `Margen TNA = ((1 + TIREA)^(32/365) − 1) × (365/32) − TAMAR/100`
+
+**Benchmark TAMAR aplicado**: promedio de los **últimos 5 días** publicados por BCRA.
+La fórmula 32/365 viene de que un bono dual TAMAR capitaliza la tasa cada 32 días.
+Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en:
+(1) el TAMAR aplicable (5d vs 10d vs cierre del día), o (2) la frecuencia de capitalización (32d vs 30d).
+            """
+        )
 
     _ty1 = _tp_y.perf_counter()
     _all_codes_yas = _all_bond_codes()
@@ -7216,6 +7249,24 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         def _comp_live():
             st.subheader("Comparador de Yields")
             st.caption("Compará dos bonos por precio o TNA (equivalente a .comparar_precio() / .comparar_tna()).")
+            with st.expander("ℹ️ Convención de TNA — cómo se compara", expanded=False):
+                st.markdown(
+                    """
+La TNA mostrada para cada bono **no es la misma convención** entre tipos:
+- **LECAP / TAMAR puro / DLK sob**: TNA al vencimiento (días remanentes / 365)
+- **CER**: TNA semestral (180/365)
+- **Hard-dollar sob / BOPREAL**: TNA semestral (180/360)
+- **corp DLK**: TNA trimestral (90/365)
+- **Dual CER/TAMAR / Dual TAMAR**: TNA mensual (30/365)
+
+⚠️ **Cuando comparás "Por TNA" dos bonos de tipos distintos** (ej: LECAP vs Dual TAMAR),
+el número que ves no es directamente comparable. Mejor comparar siempre por **TIREA**
+(que sí es la TEA, equivalente para todos los bonos).
+
+Para **margen sobre TAMAR** en duales VARIABLE_CAP la fórmula es:
+`((1 + TIREA)^(32/365) − 1) × (365/32) − TAMAR/100` — usa TAMAR promedio últimos 5 días.
+                    """
+                )
 
             all_codes_c = _all_bond_codes()
             if not all_codes_c:
