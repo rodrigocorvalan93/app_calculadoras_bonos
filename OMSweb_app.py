@@ -86,8 +86,10 @@ from utils import tir_a_tna, tna_a_tir
 
 try:
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 except Exception:  # pragma: no cover
     go = None
+    make_subplots = None
 
 if TYPE_CHECKING:
     import plotly.graph_objects as go
@@ -1715,6 +1717,194 @@ def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> N
                 width="stretch",
                 hide_index=True,
             )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Panel intraday — OHLC + Volumen + VWAP + velas + últimos trades
+# ──────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _fetch_intraday_trades_cached(
+    username: str, password: str, symbol: str, market_id: str = DEFAULT_MARKET_ID,
+) -> pd.DataFrame:
+    """Cacheado por símbolo. TTL corto para que el panel refresque cerca de live."""
+    session = get_session(username, password)
+    return OMSmktdata.fetch_intraday_trades(session, symbol, market_id=market_id)
+
+
+def _render_intraday_panel(
+    username: str,
+    password: str,
+    calc_code: str,
+    plazo: str,
+) -> None:
+    """Panel de actividad intraday para un bono: OHLC + Vol + VWAP + velas + trades.
+
+    Funciona con datos que la API ya entrega:
+      - OHLC + Vol del día: vienen en el snapshot bulk (OP/HI/LO/CL/TV)
+      - VWAP: del entry WA si la API lo expone, sino calculado desde trades
+      - Velas + trades: del endpoint de trades intradía (probado en runtime)
+    """
+    if not calc_code:
+        return
+
+    session = get_session(username, password)
+    try:
+        full_symbol = _build_symbols([calc_code], plazo)[0]
+    except Exception:
+        return
+
+    # ── 1. Snapshot del día (OHLC + Vol + VWAP si vino en WA) ──
+    try:
+        raw = OMSmktdata.bulk_market_data(
+            session, symbols=[full_symbol],
+            entries=cfg.ENTRIES, depth=1,
+            use_blacklist=False, verbose=False,
+        )
+    except Exception:
+        raw = None
+
+    snap_row = None
+    if raw is not None and not raw.empty and full_symbol in raw.index:
+        snap_df = OMSprices.market_snapshot(raw)
+        if not snap_df.empty:
+            snap_row = snap_df.loc[full_symbol]
+
+    st.markdown(f"#### 📊 Intraday — `{calc_code}`")
+
+    if snap_row is None:
+        st.caption("Sin datos de mercado para el panel intraday.")
+        return
+
+    def _v(col: str):
+        if col not in snap_row.index:
+            return None
+        x = snap_row[col]
+        try:
+            xf = float(x)
+            return xf if np.isfinite(xf) else None
+        except (TypeError, ValueError):
+            return None
+
+    op, hi, lo, cl = _v("open"), _v("high"), _v("low"), _v("close")
+    last, vol, vwap_api, var = _v("last"), _v("volume"), _v("vwap"), _v("variation")
+    trade_count = _v("trade_count")
+
+    # Línea 1: Open / High / Low / Close / Last
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Open", f"{op:,.4f}" if op is not None else "—")
+    c2.metric("High", f"{hi:,.4f}" if hi is not None else "—")
+    c3.metric("Low", f"{lo:,.4f}" if lo is not None else "—")
+    c4.metric("Close", f"{cl:,.4f}" if cl is not None else "—")
+    c5.metric(
+        "Last",
+        f"{last:,.4f}" if last is not None else "—",
+        delta=f"{var*100:+.2f}%" if var is not None else None,
+    )
+
+    # ── 2. Trades intradía (puede no estar disponible) ──
+    try:
+        trades_df = _fetch_intraday_trades_cached(username, password, full_symbol)
+    except Exception as e:
+        print(f"[intraday] fetch trades error {calc_code}: {type(e).__name__}: {e}", flush=True)
+        trades_df = pd.DataFrame(columns=["ts", "price", "size"])
+
+    # VWAP: prefiero el de la API (entry WA) sobre el calculado, pero si no vino,
+    # calculo a partir de trades.
+    vwap_calc = None
+    if (vwap_api is None) and not trades_df.empty:
+        sz = trades_df["size"].fillna(0)
+        notional = trades_df["price"] * sz
+        tot = sz.sum()
+        if tot > 0:
+            vwap_calc = float(notional.sum() / tot)
+    vwap_show = vwap_api if vwap_api is not None else vwap_calc
+
+    # Línea 2: VWAP / Volumen / # Trades / Range del día
+    d1, d2, d3, d4 = st.columns(4)
+    if vwap_show is not None:
+        src = "API" if vwap_api is not None else "calc"
+        d1.metric(f"VWAP ({src})", f"{vwap_show:,.4f}")
+    else:
+        d1.metric("VWAP", "—")
+    d2.metric("Volumen", f"{vol:,.0f}" if vol is not None else "—")
+    n_tr = trade_count if trade_count is not None else (len(trades_df) if not trades_df.empty else None)
+    d3.metric("# Trades", f"{n_tr:,.0f}" if n_tr is not None else "—")
+    if hi is not None and lo is not None:
+        d4.metric("Rango día", f"{hi - lo:,.4f}", delta=f"{(hi/lo - 1)*100:+.2f}%" if lo else None)
+    else:
+        d4.metric("Rango día", "—")
+
+    if trades_df.empty:
+        st.caption(
+            "📭 Trades intradía no disponibles desde el broker (endpoint no detectado o sin operaciones). "
+            "Los datos OHLC/Vol arriba son del snapshot del día."
+        )
+        return
+
+    # ── 3. Velas + volumen ──
+    bucket_col, _ = st.columns([1, 4])
+    with bucket_col:
+        bucket = st.selectbox(
+            "Bucket velas",
+            options=["1min", "5min", "15min", "30min", "1H"],
+            index=1,
+            key=f"intraday_bucket::{calc_code}",
+        )
+
+    bars = OMSmktdata.intraday_bars(trades_df, bucket=bucket)
+
+    if go is None or make_subplots is None:
+        st.caption("⚠️ plotly no disponible; mostrando solo tabla.")
+    elif not bars.empty:
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True,
+            row_heights=[0.72, 0.28], vertical_spacing=0.03,
+        )
+        fig.add_trace(
+            go.Candlestick(
+                x=bars.index,
+                open=bars["open"], high=bars["high"], low=bars["low"], close=bars["close"],
+                name="OHLC", showlegend=False,
+            ),
+            row=1, col=1,
+        )
+        if bars["vwap"].notna().any():
+            fig.add_trace(
+                go.Scatter(
+                    x=bars.index, y=bars["vwap"], mode="lines",
+                    name="VWAP", line=dict(width=1.2, dash="dot"),
+                ),
+                row=1, col=1,
+            )
+        # Volumen barras con color según dirección de la vela
+        colors = np.where(bars["close"] >= bars["open"], "#2e7d32", "#c62828")
+        fig.add_trace(
+            go.Bar(
+                x=bars.index, y=bars["volume"], name="Volumen",
+                marker_color=colors, showlegend=False, opacity=0.7,
+            ),
+            row=2, col=1,
+        )
+        fig.update_layout(
+            height=420, margin=dict(l=10, r=10, t=10, b=10),
+            xaxis_rangeslider_visible=False,
+            hovermode="x unified",
+            showlegend=True, legend=dict(orientation="h", y=1.02, x=1, xanchor="right"),
+        )
+        fig.update_yaxes(title_text="Precio", row=1, col=1)
+        fig.update_yaxes(title_text="Vol", row=2, col=1)
+        st.plotly_chart(fig, use_container_width=True, key=f"intraday_chart::{calc_code}")
+
+    # ── 4. Tabla de últimos trades ──
+    with st.expander(f"📜 Últimos trades ({len(trades_df)})", expanded=False):
+        show = trades_df.copy().tail(200).iloc[::-1].reset_index(drop=True)
+        show["ts"] = show["ts"].dt.strftime("%H:%M:%S")
+        show = show.rename(columns={"ts": "Hora", "price": "Precio", "size": "Tamaño"})
+        st.dataframe(
+            show.style.format({"Precio": "{:,.4f}", "Tamaño": "{:,.0f}"}),
+            width="stretch", hide_index=True, height=320,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -5600,6 +5790,10 @@ def main():
                             plazo,
                             depth=5,
                         )
+                        with st.expander(
+                            f"📊 Actividad intraday — {sel_code}", expanded=True,
+                        ):
+                            _render_intraday_panel(username, password, sel_code, plazo)
 
         _mercado_live()
         _lap("after mercado")
