@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Curvas{% endblock %}
+{% block tab_curves %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Curvas</h1>
+    <p class="muted">Bid / Last / Ask provienen del store en memoria alimentado por el WS al broker. Refresh cada 5 s.</p>
+  </header>
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <label class="field">
+          <span>Curva</span>
+          <select
+            name="curve"
+            hx-get="/curves/table"
+            hx-trigger="change"
+            hx-target="#curve-table"
+            hx-swap="innerHTML"
+            hx-include="[name=plazo], [name=only_quoting]"
+          >
+            {% for c in all_curves %}
+              {% set count = (table.get(c.key) or []) | length %}
+              <option value="{{ c.key }}" {% if c.key == selected_key %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>
+                {{ c.label }} {% if count %}({{ count }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Plazo</span>
+          <select
+            name="plazo"
+            hx-get="/curves/table"
+            hx-trigger="change"
+            hx-target="#curve-table"
+            hx-swap="innerHTML"
+            hx-include="[name=curve], [name=only_quoting]"
+          >
+            <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
+            <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
+          </select>
+        </label>
+
+        <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+          <input
+            type="checkbox"
+            name="only_quoting"
+            value="true"
+            {% if only_quoting %}checked{% endif %}
+            hx-get="/curves/table"
+            hx-trigger="change"
+            hx-target="#curve-table"
+            hx-swap="innerHTML"
+            hx-include="[name=curve], [name=plazo]"
+          >
+          Solo con cotización
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div
+    id="curve-table"
+    hx-get="/curves/table"
+    hx-trigger="every 5s"
+    hx-swap="innerHTML"
+    hx-include="[name=curve], [name=plazo], [name=only_quoting]"
+  >
+    {% include "partials/curve_table.html" %}
+  </div>
+</section>
+{% endblock %}

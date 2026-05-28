@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}YAS · {{ selected or "Análisis de Yields" }}{% endblock %}
+{% block tab_yas %}active{% endblock %}
 
 {% block content %}
 <section class="yas" x-data="yasForm()">
@@ -88,6 +89,15 @@
 
   <div id="yas-header-strip">
     {% include "partials/yas_header.html" %}
+  </div>
+
+  <div
+    id="yas-market-card"
+    hx-get="/yas/market/{{ selected }}"
+    hx-trigger="load, every 3s"
+    hx-swap="innerHTML"
+  >
+    <p class="muted" style="font-size:12px;padding:8px 0">Cargando datos de mercado…</p>
   </div>
 
   <div id="yas-result" aria-live="polite">

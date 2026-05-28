@@ -1,24 +1,45 @@
 <!doctype html>
-<html lang="es-AR">
+<html lang="es-AR" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Calculadora de Bonos{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+  <script>
+    // Tiny pre-paint theme bootstrap. Reads the user's choice from
+    // localStorage and writes data-theme BEFORE the page renders so we
+    // don't flash the default. Keep this inline so it runs sync.
+    (function () {
+      try {
+        var t = localStorage.getItem("yas_theme") || "dark";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
 </head>
-<body hx-boost="false" class="theme-1816">
-  <header class="topbar">
-    <div class="brand">Calculadora de Bonos</div>
+<body hx-boost="false">
+  <header class="topbar" x-data="themeSwitcher()">
+    <a class="brand" href="/yas">
+      <svg class="brand-mark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M12 3.6 L21.2 20.4 L2.8 20.4 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+      <span class="brand-text">Calculadora · Bonos</span>
+    </a>
     <nav class="tabs">
-      <a class="tab active" href="/yas">YAS</a>
-      <a class="tab disabled" title="Próxima fase">Curvas</a>
+      <a class="tab {% block tab_yas %}{% endblock %}" href="/yas">YAS</a>
+      <a class="tab {% block tab_curves %}{% endblock %}" href="/curves">Curvas</a>
       <a class="tab disabled" title="Próxima fase">Mercado</a>
       <a class="tab disabled" title="Próxima fase">Comparador</a>
       <a class="tab disabled" title="Próxima fase">Forwards</a>
     </nav>
     <div class="topbar-meta">
+      <div class="theme-switch" role="tablist" aria-label="Tema">
+        <button type="button" role="tab" :aria-selected="theme==='dark'"  :class="{ active: theme==='dark'  }" @click="set('dark')"  title="Dark (Bloomberg)">Dark</button>
+        <button type="button" role="tab" :aria-selected="theme==='light'" :class="{ active: theme==='light' }" @click="set('light')" title="Light">Light</button>
+        <button type="button" role="tab" :aria-selected="theme==='delta'" :class="{ active: theme==='delta' }" @click="set('delta')" title="Delta">Delta</button>
+      </div>
       <span class="phase-badge">Fase 1 · YAS</span>
     </div>
   </header>
@@ -28,8 +49,24 @@
   </main>
 
   <footer class="footer">
-    <span>FastAPI rewrite — sub-100ms target</span>
+    <span>FastAPI rewrite · sub-50 ms p95 target</span>
   </footer>
+
+  <script>
+    function themeSwitcher() {
+      return {
+        theme: (function () {
+          try { return localStorage.getItem("yas_theme") || "dark"; }
+          catch (e) { return "dark"; }
+        })(),
+        set(name) {
+          this.theme = name;
+          document.documentElement.setAttribute("data-theme", name);
+          try { localStorage.setItem("yas_theme", name); } catch (e) {}
+        },
+      };
+    }
+  </script>
 
   <script src="{{ url_for('static', path='js/app.js') }}" defer></script>
 </body>
