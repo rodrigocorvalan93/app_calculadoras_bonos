@@ -2,9 +2,10 @@
 from pathlib import Path
 
 BASE_URL: str = "https://api.latinsecurities.matrizoms.com.ar/"
-# WA = Weighted Average Price (VWAP intradía si la API lo expone)
-# TC = Trade Count (cantidad de operaciones del día)
-ENTRIES: str = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP,WA,TC"
+# WA / TC se probaron pero matrizoms rechaza la query si los incluís (tira
+# 0 OK / N vacíos para todos los símbolos). El panel intraday calcula VWAP
+# desde los trades del día como fallback.
+ENTRIES: str = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP"
 DEPTH: int = 3
 MAX_THREADS: int = 14
 
