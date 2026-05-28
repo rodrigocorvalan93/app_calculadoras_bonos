@@ -106,12 +106,18 @@ DEFAULT_PLAZO = "24hs"  # "24hs" o "CI"
 # Cache TTL (segundos)
 TTL_MKT = 7
 TTL_METRICS = 10
+# TTL específico del FX implícito vía bonos: con varias pestañas concurrentes
+# y polling cada 30s, un TTL=7s se traduce en thrashing del lock (5 pestañas
+# se serializan en el peor fetch). 20s mata el thrashing manteniendo
+# freshness aceptable para el sidebar de dólares.
+TTL_FX_IMPLICIT = 20
 
 # Auto-refresh interval (seconds) — Bloomberg-style live update
 AUTO_REFRESH_SECS = 15
 
-# Workers para cálculo paralelo de métricas
-_METRICS_WORKERS = 8
+# Workers para cálculo paralelo de métricas. Subido de 8→12 para acelerar
+# el cálculo de TIR de curvas corporativas (hdmep/hdcable) en cold start.
+_METRICS_WORKERS = 12
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1192,12 +1198,22 @@ _curves_thread: Optional["_snap_threading.Thread"] = None
 _curves_thread_lock = _snap_threading.Lock()
 _curves_state = {"username": None, "password": None, "plazo": None, "interval": 30}
 
-# Curvas a precomputar (mismo conjunto que el dropdown del tab Curvas).
-# El daemon recorre la lista una vez por ciclo. La primera pasada calienta
-# todas; las siguientes refrescan cualquier curva cuyo TTL_METRICS expiró.
+# Curvas a precomputar. Ordenadas por prioridad: primero las más usadas y
+# rápidas (cer/lecap/tamar), después soberanas/duales, y al final las
+# corporativas (corp_hdmep / corp_hdcable son las más lentas en cold —
+# cashflows USD complejos). Así cualquier user que abra Curvas dentro de
+# los primeros segundos encuentra al menos cer/lecap calientes.
 _CURVES_WARMUP_KEYS: Tuple[str, ...] = (
-    "cer", "lecap", "tamar", "globales", "bonares",
-    "dolarlinked", "bopreales", "dualfija", "dualcer",
+    # Críticas / rápidas
+    "cer", "lecap", "tamar",
+    # Soberanas USD / duales
+    "globales", "bonares", "dolarlinked", "bopreales",
+    "dualfija", "dualcer", "dualtamar",
+    # Soberanas proyectadas
+    "cerproy", "todos_ars_proyectado",
+    # Corporativas — orden por costo ascendente
+    "corp_badlar", "corp_tasafija", "corp_uva",
+    "corp_tamar", "corp_dlk", "corp_hdmep", "corp_hdcable",
 )
 
 
@@ -1453,6 +1469,7 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
             "offer_price": "Offer Price",
             "offer_size": "Offer Size",
             "volume": "Volumen",
+            "vwap": "VWAP",
         }
     )
 
@@ -1497,6 +1514,7 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
         "Bid Price",
         "Bid TIREA",
         "Last Price",
+        "VWAP",
         "TIREA",
         "Duration",
         "Margen TNA",
@@ -2137,7 +2155,7 @@ def _fx_rows_from_snap(snap: pd.DataFrame, bases: List[str], suf: str) -> pd.Dat
     return pd.DataFrame(rows)
 
 
-@st.cache_data(ttl=TTL_MKT, show_spinner=False)
+@st.cache_data(ttl=TTL_FX_IMPLICIT, show_spinner=False)
 def _fetch_implicit_fx_snap_cached(
     username: str,
     password: str,
@@ -2146,7 +2164,7 @@ def _fetch_implicit_fx_snap_cached(
 ) -> pd.DataFrame:
     """Cached inner: snapshot ARS + C + D legs para una tupla ordenada de bases.
 
-    Cache compartido (TTL_MKT=7s) entre todas las invocaciones del tab Dólares,
+    Cache compartido (TTL_FX_IMPLICIT=20s) entre todas las invocaciones del tab Dólares,
     del sidebar live y de la sección de brecha/canje — todas hacen la misma
     query con los mismos bonds.
     """
@@ -2394,6 +2412,7 @@ def style_mercado(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "Bid TIREA": "{:.2%}",
         "Bid TEM": "{:.2%}",
         "Last Price": "{:,.4f}",
+        "VWAP": "{:,.4f}",
         "TIREA": "{:.2%}",
         "TEM": "{:.2%}",
         "Duration": "{:.4f}",
@@ -5435,6 +5454,15 @@ def main():
     session = get_session(username, password)
     _lap("after get_session")
 
+    # Arrancar daemons de pre-warm ANTES de _ticker_curve_tables_cached.
+    # Así pueden empezar a calentar snapshot/curvas mientras el ticker
+    # carga su primera tabla, ganando segundos en el cold start del tab
+    # Curvas. interval=2 acelera la primera pasada del warmup.
+    start_snapshot_background(username, password, plazo, interval=2)
+    _lap("after start_snapshot_background")
+    start_curves_warmup_background(username, password, plazo, interval=2)
+    _lap("after start_curves_warmup_background")
+
     _ticker_curve_tables = _ticker_curve_tables_cached(username, password, plazo)
     _lap("after _ticker_curve_tables_cached")
 
@@ -5449,17 +5477,6 @@ def main():
     import indices as _indices
     _indices.start_fx_background(session=session, interval=10)
     _lap("after start_fx_background")
-
-    # Daemon de snapshot: pre-calienta _global_snapshot cada 5s para
-    # que el render de Mercado/Curvas no bloquee ~6s en el bulk fetch.
-    start_snapshot_background(username, password, plazo, interval=5)
-    _lap("after start_snapshot_background")
-
-    # Daemon de pre-warm de curvas: precomputa load_curve_last_table para las
-    # curvas principales en background, así el tab Curvas siempre pega cache
-    # hit (sin esto, primera click ~17s; con esto, ~0-1s en caso típico).
-    start_curves_warmup_background(username, password, plazo, interval=5)
-    _lap("after start_curves_warmup_background")
 
     _is_dark = st.session_state.get("bbg_theme", False)
 
