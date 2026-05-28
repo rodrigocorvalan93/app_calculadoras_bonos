@@ -5,7 +5,16 @@
    Light variant available via `<html data-theme="light">`.
    ───────────────────────────────────────────────────────────────────── */
 
-:root {
+/* ─────────────────────────────────────────────────────────────────────
+   Themes — three palettes, swap via `<html data-theme="…">`.
+     dark   (default) Bloomberg-inspired charcoal + amber accent
+     light  clean off-white + amber accent (same family, inverted)
+     delta  Delta Asset Management corporate blue on light surface
+   Typography is the same across all three (Notion/Apple/Linear feel).
+   ───────────────────────────────────────────────────────────────────── */
+
+:root,
+[data-theme="dark"] {
   --bg: #07090d;
   --panel: #0d1117;
   --panel-2: #111722;
@@ -17,20 +26,12 @@
   --text-soft: #c4ccd8;
   --accent: #ff9f00;
   --accent-soft: rgba(255, 159, 0, 0.12);
+  --accent-strong: #ffb84d;
   --cyan: #4cc9f0;
   --cyan-soft: rgba(76, 201, 240, 0.10);
   --green: #22c55e;
   --red: #ef4444;
   --yellow: #facc15;
-
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text",
-          "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  /* Mono kept for very rare cases (e.g. <code> tags). Numeric data
-     uses the same sans + tabular-nums — see `.num`/`.metric-value`. */
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-
-  --radius: 6px;
-  --radius-sm: 4px;
 }
 
 [data-theme="light"] {
@@ -45,11 +46,43 @@
   --text-soft: #374151;
   --accent: #e88900;
   --accent-soft: rgba(232, 137, 0, 0.10);
+  --accent-strong: #b56600;
   --cyan: #0077aa;
   --cyan-soft: rgba(0, 119, 170, 0.08);
   --green: #15803d;
   --red: #b91c1c;
   --yellow: #a16207;
+}
+
+[data-theme="delta"] {
+  --bg: #f4f7fc;
+  --panel: #ffffff;
+  --panel-2: #f7faff;
+  --panel-3: #eaf1ff;
+  --border: #cfdcef;
+  --border-soft: #e2ebf7;
+  --text: #0c1e3f;
+  --text-muted: #5a6b85;
+  --text-soft: #243c66;
+  --accent: #0646b5;            /* Delta blue */
+  --accent-soft: #eaf1ff;       /* Delta blue soft */
+  --accent-strong: #003a91;     /* Delta blue dark */
+  --cyan: #0e6fb2;
+  --cyan-soft: rgba(14, 111, 178, 0.08);
+  --green: #15803d;
+  --red: #b91c1c;
+  --yellow: #b45309;
+}
+
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  /* Mono kept for very rare cases (e.g. <code> tags). Numeric data
+     uses the same sans + tabular-nums. */
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius: 6px;
+  --radius-sm: 4px;
 }
 
 * { box-sizing: border-box; }
@@ -103,11 +136,21 @@ select {
   font-size: 13px;
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   color: var(--accent);
-  font-size: 13px;
+  font-size: 13.5px;
 }
+.brand:hover { text-decoration: none; opacity: 0.85; }
+.brand-mark {
+  flex: 0 0 auto;
+  color: var(--accent);
+  transform: translateY(0.5px);
+}
+.brand-text { color: inherit; }
 .tabs { display: flex; gap: 4px; flex: 1; }
 .tab {
   color: var(--text-muted);
@@ -125,7 +168,7 @@ select {
 .tab.disabled { opacity: 0.35; cursor: not-allowed; }
 .tab.disabled:hover { background: transparent; color: var(--text-muted); }
 
-.topbar-meta { color: var(--text-muted); display: flex; align-items: center; gap: 10px; }
+.topbar-meta { color: var(--text-muted); display: flex; align-items: center; gap: 12px; }
 .phase-badge {
   font-size: 11px;
   background: var(--panel-2);
@@ -135,6 +178,38 @@ select {
   border-radius: 999px;
   letter-spacing: 0.01em;
 }
+
+/* ── Theme switcher (segmented control) ───────────────────────────── */
+.theme-switch {
+  display: inline-flex;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 1px;
+}
+.theme-switch button {
+  appearance: none;
+  background: transparent;
+  color: var(--text-muted);
+  border: 0;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.theme-switch button:hover { color: var(--text); }
+.theme-switch button.active {
+  color: var(--bg);
+  background: var(--accent);
+  font-weight: 600;
+}
+[data-theme="dark"]  .theme-switch button.active { color: #0a0a0a; }
+[data-theme="light"] .theme-switch button.active { color: #ffffff; }
+[data-theme="delta"] .theme-switch button.active { color: #ffffff; }
 
 /* ── Layout ────────────────────────────────────────────────────────── */
 
