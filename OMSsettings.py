@@ -2,7 +2,9 @@
 from pathlib import Path
 
 BASE_URL: str = "https://api.latinsecurities.matrizoms.com.ar/"
-ENTRIES: str = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP"
+# WA = Weighted Average Price (VWAP intradía si la API lo expone)
+# TC = Trade Count (cantidad de operaciones del día)
+ENTRIES: str = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP,WA,TC"
 DEPTH: int = 3
 MAX_THREADS: int = 14
 

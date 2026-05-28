@@ -280,3 +280,186 @@ def bulk_market_data(
         return pd.DataFrame()
 
     return pd.DataFrame(results).set_index("symbol")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Trades intraday — descubrimiento del endpoint correcto en Primary OMS
+# ──────────────────────────────────────────────────────────────────────
+# Primary/Matriz OMS expone trades históricos del día con paths que varían
+# por implementación. Probamos los candidatos más comunes en orden y
+# memoizamos el que funcione para no probar todos en cada llamada.
+
+import OMSsettings as _cfg_trades
+
+_TRADES_ENDPOINT_CACHE: Dict[str, Optional[str]] = {"path": None, "checked": False}
+_TRADES_ENDPOINT_LOCK = threading.Lock()
+
+_TRADE_ENDPOINT_CANDIDATES: Tuple[str, ...] = (
+    "rest/data/getTrades",
+    "rest/data/getHistoricTrades",
+    "rest/marketdata/getTrades",
+    "rest/data/historicalTrades",
+    "rest/marketdata/historicalTrades",
+)
+
+
+def _try_trades_endpoint(
+    session: requests.Session,
+    path: str,
+    symbol: str,
+    market_id: str,
+    date_str: Optional[str] = None,
+) -> Optional[list]:
+    """Llama un endpoint candidato. Devuelve lista de trades si responde con
+    contenido razonable, None en cualquier otro caso (404, body vacío, etc)."""
+    params = {"marketId": market_id, "symbol": symbol}
+    if date_str:
+        params["date"] = date_str
+    try:
+        r = session.get(f"{_cfg_trades.BASE_URL}{path}", params=params, timeout=10)
+    except (requests.ConnectionError, requests.Timeout):
+        return None
+    if r.status_code != 200 or not r.content or not r.content.strip():
+        return None
+    try:
+        body = r.json()
+    except ValueError:
+        return None
+    # Primary suele envolver en {"status": "OK", "trades": [...]} o devolver lista directa
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict):
+        if body.get("status") == "ERROR":
+            return None
+        for key in ("trades", "data", "history", "result"):
+            v = body.get(key)
+            if isinstance(v, list):
+                return v
+    return None
+
+
+def fetch_intraday_trades(
+    session: requests.Session,
+    symbol: str,
+    market_id: str = "ROFX",
+    date_str: Optional[str] = None,
+) -> pd.DataFrame:
+    """Devuelve DataFrame con trades del símbolo. Columnas estandarizadas:
+        - ts (Timestamp tz-aware Argentina)
+        - price (float)
+        - size (float)
+
+    Si la API no expone trades históricos en ningún endpoint conocido, devuelve
+    DataFrame vacío. La primera llamada prueba los candidatos en orden y
+    memoiza el path que funciona.
+    """
+    # Resolver endpoint
+    with _TRADES_ENDPOINT_LOCK:
+        endpoint = _TRADES_ENDPOINT_CACHE.get("path")
+        already_checked = _TRADES_ENDPOINT_CACHE.get("checked", False)
+
+    if endpoint is None and not already_checked:
+        for cand in _TRADE_ENDPOINT_CANDIDATES:
+            trades = _try_trades_endpoint(session, cand, symbol, market_id, date_str)
+            if trades is not None:
+                print(f"[trades] endpoint detectado: {cand}", flush=True)
+                with _TRADES_ENDPOINT_LOCK:
+                    _TRADES_ENDPOINT_CACHE["path"] = cand
+                    _TRADES_ENDPOINT_CACHE["checked"] = True
+                return _trades_to_df(trades)
+        # Ninguno respondió
+        print("[trades] ningún endpoint respondió — trades intradía no disponibles", flush=True)
+        with _TRADES_ENDPOINT_LOCK:
+            _TRADES_ENDPOINT_CACHE["checked"] = True
+        return pd.DataFrame(columns=["ts", "price", "size"])
+
+    if endpoint is None:
+        return pd.DataFrame(columns=["ts", "price", "size"])
+
+    trades = _try_trades_endpoint(session, endpoint, symbol, market_id, date_str)
+    if trades is None:
+        return pd.DataFrame(columns=["ts", "price", "size"])
+    return _trades_to_df(trades)
+
+
+def _trades_to_df(trades: list) -> pd.DataFrame:
+    """Normaliza la lista de trades a (ts, price, size). Tolerante a variantes
+    de naming entre implementaciones de Primary."""
+    if not trades:
+        return pd.DataFrame(columns=["ts", "price", "size"])
+
+    rows = []
+    for t in trades:
+        if not isinstance(t, dict):
+            continue
+        # Precio
+        price = None
+        for k in ("price", "px", "lastPrice", "value"):
+            if k in t and t[k] is not None:
+                try:
+                    price = float(t[k])
+                    break
+                except (TypeError, ValueError):
+                    continue
+        # Tamaño / volumen
+        size = None
+        for k in ("size", "qty", "quantity", "volume", "amount"):
+            if k in t and t[k] is not None:
+                try:
+                    size = float(t[k])
+                    break
+                except (TypeError, ValueError):
+                    continue
+        # Timestamp
+        ts_raw = None
+        for k in ("datetime", "date", "timestamp", "ts", "time"):
+            if k in t and t[k] is not None:
+                ts_raw = t[k]
+                break
+        if ts_raw is None or price is None:
+            continue
+        try:
+            if isinstance(ts_raw, (int, float)):
+                ts = pd.to_datetime(ts_raw, unit="ms" if ts_raw > 1e12 else "s",
+                                    utc=True, errors="coerce")
+            else:
+                ts = pd.to_datetime(ts_raw, utc=True, errors="coerce")
+            if pd.isna(ts):
+                continue
+            try:
+                ts = ts.tz_convert("America/Argentina/Buenos_Aires")
+            except Exception:
+                pass
+        except Exception:
+            continue
+        rows.append({"ts": ts, "price": price, "size": size if size is not None else 0.0})
+
+    if not rows:
+        return pd.DataFrame(columns=["ts", "price", "size"])
+    df = pd.DataFrame(rows).sort_values("ts").reset_index(drop=True)
+    return df
+
+
+def intraday_bars(trades_df: pd.DataFrame, bucket: str = "1min") -> pd.DataFrame:
+    """Bucketea trades a barras OHLCV con vwap. Bucket es alias de pandas
+    (1min, 5min, 15min, 1H, ...)."""
+    if trades_df is None or trades_df.empty:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "vwap", "trades"])
+
+    df = trades_df.set_index("ts").sort_index()
+    px = df["price"]
+    sz = df["size"].fillna(0)
+    notional = px * sz
+
+    grouped = df.resample(bucket)
+    bars = pd.DataFrame({
+        "open": grouped["price"].first(),
+        "high": grouped["price"].max(),
+        "low": grouped["price"].min(),
+        "close": grouped["price"].last(),
+        "volume": grouped["size"].sum(min_count=1),
+        "trades": grouped["price"].count(),
+    })
+    bars["vwap"] = notional.resample(bucket).sum(min_count=1) / sz.resample(bucket).sum(min_count=1)
+    bars = bars.dropna(subset=["open"])
+    return bars

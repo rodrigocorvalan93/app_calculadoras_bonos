@@ -86,8 +86,10 @@ from utils import tir_a_tna, tna_a_tir
 
 try:
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 except Exception:  # pragma: no cover
     go = None
+    make_subplots = None
 
 if TYPE_CHECKING:
     import plotly.graph_objects as go
@@ -1715,6 +1717,194 @@ def _render_book_depth(session, calc_code: str, plazo: str, depth: int = 5) -> N
                 width="stretch",
                 hide_index=True,
             )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Panel intraday — OHLC + Volumen + VWAP + velas + últimos trades
+# ──────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _fetch_intraday_trades_cached(
+    username: str, password: str, symbol: str, market_id: str = DEFAULT_MARKET_ID,
+) -> pd.DataFrame:
+    """Cacheado por símbolo. TTL corto para que el panel refresque cerca de live."""
+    session = get_session(username, password)
+    return OMSmktdata.fetch_intraday_trades(session, symbol, market_id=market_id)
+
+
+def _render_intraday_panel(
+    username: str,
+    password: str,
+    calc_code: str,
+    plazo: str,
+) -> None:
+    """Panel de actividad intraday para un bono: OHLC + Vol + VWAP + velas + trades.
+
+    Funciona con datos que la API ya entrega:
+      - OHLC + Vol del día: vienen en el snapshot bulk (OP/HI/LO/CL/TV)
+      - VWAP: del entry WA si la API lo expone, sino calculado desde trades
+      - Velas + trades: del endpoint de trades intradía (probado en runtime)
+    """
+    if not calc_code:
+        return
+
+    session = get_session(username, password)
+    try:
+        full_symbol = _build_symbols([calc_code], plazo)[0]
+    except Exception:
+        return
+
+    # ── 1. Snapshot del día (OHLC + Vol + VWAP si vino en WA) ──
+    try:
+        raw = OMSmktdata.bulk_market_data(
+            session, symbols=[full_symbol],
+            entries=cfg.ENTRIES, depth=1,
+            use_blacklist=False, verbose=False,
+        )
+    except Exception:
+        raw = None
+
+    snap_row = None
+    if raw is not None and not raw.empty and full_symbol in raw.index:
+        snap_df = OMSprices.market_snapshot(raw)
+        if not snap_df.empty:
+            snap_row = snap_df.loc[full_symbol]
+
+    st.markdown(f"#### 📊 Intraday — `{calc_code}`")
+
+    if snap_row is None:
+        st.caption("Sin datos de mercado para el panel intraday.")
+        return
+
+    def _v(col: str):
+        if col not in snap_row.index:
+            return None
+        x = snap_row[col]
+        try:
+            xf = float(x)
+            return xf if np.isfinite(xf) else None
+        except (TypeError, ValueError):
+            return None
+
+    op, hi, lo, cl = _v("open"), _v("high"), _v("low"), _v("close")
+    last, vol, vwap_api, var = _v("last"), _v("volume"), _v("vwap"), _v("variation")
+    trade_count = _v("trade_count")
+
+    # Línea 1: Open / High / Low / Close / Last
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Open", f"{op:,.4f}" if op is not None else "—")
+    c2.metric("High", f"{hi:,.4f}" if hi is not None else "—")
+    c3.metric("Low", f"{lo:,.4f}" if lo is not None else "—")
+    c4.metric("Close", f"{cl:,.4f}" if cl is not None else "—")
+    c5.metric(
+        "Last",
+        f"{last:,.4f}" if last is not None else "—",
+        delta=f"{var*100:+.2f}%" if var is not None else None,
+    )
+
+    # ── 2. Trades intradía (puede no estar disponible) ──
+    try:
+        trades_df = _fetch_intraday_trades_cached(username, password, full_symbol)
+    except Exception as e:
+        print(f"[intraday] fetch trades error {calc_code}: {type(e).__name__}: {e}", flush=True)
+        trades_df = pd.DataFrame(columns=["ts", "price", "size"])
+
+    # VWAP: prefiero el de la API (entry WA) sobre el calculado, pero si no vino,
+    # calculo a partir de trades.
+    vwap_calc = None
+    if (vwap_api is None) and not trades_df.empty:
+        sz = trades_df["size"].fillna(0)
+        notional = trades_df["price"] * sz
+        tot = sz.sum()
+        if tot > 0:
+            vwap_calc = float(notional.sum() / tot)
+    vwap_show = vwap_api if vwap_api is not None else vwap_calc
+
+    # Línea 2: VWAP / Volumen / # Trades / Range del día
+    d1, d2, d3, d4 = st.columns(4)
+    if vwap_show is not None:
+        src = "API" if vwap_api is not None else "calc"
+        d1.metric(f"VWAP ({src})", f"{vwap_show:,.4f}")
+    else:
+        d1.metric("VWAP", "—")
+    d2.metric("Volumen", f"{vol:,.0f}" if vol is not None else "—")
+    n_tr = trade_count if trade_count is not None else (len(trades_df) if not trades_df.empty else None)
+    d3.metric("# Trades", f"{n_tr:,.0f}" if n_tr is not None else "—")
+    if hi is not None and lo is not None:
+        d4.metric("Rango día", f"{hi - lo:,.4f}", delta=f"{(hi/lo - 1)*100:+.2f}%" if lo else None)
+    else:
+        d4.metric("Rango día", "—")
+
+    if trades_df.empty:
+        st.caption(
+            "📭 Trades intradía no disponibles desde el broker (endpoint no detectado o sin operaciones). "
+            "Los datos OHLC/Vol arriba son del snapshot del día."
+        )
+        return
+
+    # ── 3. Velas + volumen ──
+    bucket_col, _ = st.columns([1, 4])
+    with bucket_col:
+        bucket = st.selectbox(
+            "Bucket velas",
+            options=["1min", "5min", "15min", "30min", "1H"],
+            index=1,
+            key=f"intraday_bucket::{calc_code}",
+        )
+
+    bars = OMSmktdata.intraday_bars(trades_df, bucket=bucket)
+
+    if go is None or make_subplots is None:
+        st.caption("⚠️ plotly no disponible; mostrando solo tabla.")
+    elif not bars.empty:
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True,
+            row_heights=[0.72, 0.28], vertical_spacing=0.03,
+        )
+        fig.add_trace(
+            go.Candlestick(
+                x=bars.index,
+                open=bars["open"], high=bars["high"], low=bars["low"], close=bars["close"],
+                name="OHLC", showlegend=False,
+            ),
+            row=1, col=1,
+        )
+        if bars["vwap"].notna().any():
+            fig.add_trace(
+                go.Scatter(
+                    x=bars.index, y=bars["vwap"], mode="lines",
+                    name="VWAP", line=dict(width=1.2, dash="dot"),
+                ),
+                row=1, col=1,
+            )
+        # Volumen barras con color según dirección de la vela
+        colors = np.where(bars["close"] >= bars["open"], "#2e7d32", "#c62828")
+        fig.add_trace(
+            go.Bar(
+                x=bars.index, y=bars["volume"], name="Volumen",
+                marker_color=colors, showlegend=False, opacity=0.7,
+            ),
+            row=2, col=1,
+        )
+        fig.update_layout(
+            height=420, margin=dict(l=10, r=10, t=10, b=10),
+            xaxis_rangeslider_visible=False,
+            hovermode="x unified",
+            showlegend=True, legend=dict(orientation="h", y=1.02, x=1, xanchor="right"),
+        )
+        fig.update_yaxes(title_text="Precio", row=1, col=1)
+        fig.update_yaxes(title_text="Vol", row=2, col=1)
+        st.plotly_chart(fig, use_container_width=True, key=f"intraday_chart::{calc_code}")
+
+    # ── 4. Tabla de últimos trades ──
+    with st.expander(f"📜 Últimos trades ({len(trades_df)})", expanded=False):
+        show = trades_df.copy().tail(200).iloc[::-1].reset_index(drop=True)
+        show["ts"] = show["ts"].dt.strftime("%H:%M:%S")
+        show = show.rename(columns={"ts": "Hora", "price": "Precio", "size": "Tamaño"})
+        st.dataframe(
+            show.style.format({"Precio": "{:,.4f}", "Tamaño": "{:,.0f}"}),
+            width="stretch", hide_index=True, height=320,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -4850,11 +5040,16 @@ def _render_yas(username, password, plazo, curve_labels):
     el @st.fragment está en otra, Streamlit no asocia widgets↔fragment,
     y los cambios NO disparan re-ejecución."""
     # [DIAGNÓSTICO] — este print indica que el fragment se re-ejecutó
+    import time as _tp_y
+    _ty0 = _tp_y.perf_counter()
     print(f"[YAS fragment] re-exec @ {datetime.now().strftime('%H:%M:%S.%f')[:-3]}", flush=True)
     st.subheader("Análisis de Yields (YAS)")
     st.caption("Ingresá Precio, TIR, TNA o Margen → obtenés las métricas del bono.")
 
+    _ty1 = _tp_y.perf_counter()
     _all_codes_yas = _all_bond_codes()
+    _ty2 = _tp_y.perf_counter()
+    print(f"[YAS] _all_bond_codes={1000*(_ty2-_ty1):.0f}ms (n={len(_all_codes_yas)})", flush=True)
     if not _all_codes_yas:
         st.info("No hay bonos disponibles en el universo.")
     else:
@@ -4927,6 +5122,7 @@ def _render_yas(username, password, plazo, curve_labels):
 
             # FX: editable siempre (útil para DLK y en general para sensibilizar TC)
             # Se muestra sugerencia del A3500 hoy si está disponible.
+            _ty_fx0 = _tp_y.perf_counter()
             yas_tc = None
             _fx_default = 1300.0
             try:
@@ -4944,6 +5140,8 @@ def _render_yas(username, password, plazo, curve_labels):
                             _fx_default = _v2
                 except Exception:
                     pass
+            _ty_fx1 = _tp_y.perf_counter()
+            print(f"[YAS] fx-default={1000*(_ty_fx1-_ty_fx0):.0f}ms", flush=True)
             _is_dlk = bool(bond_obj_yas and getattr(bond_obj_yas, "ajuste_sobre_capital", None) == "DLK")
             tc_cols = st.columns(2)
             with tc_cols[0]:
@@ -5084,8 +5282,11 @@ def _render_yas(username, password, plazo, curve_labels):
                     if go is not None and np.isfinite(dur_y) and np.isfinite(tirea_y):
                         curve_key_yas = _find_curve_for_bond(yas_code)
                         if curve_key_yas:
+                            _ty_cv0 = _tp_y.perf_counter()
                             with st.spinner(f"Cargando curva…"):
                                 df_curve_yas = load_curve_last_table(username, password, curve_key_yas, plazo)
+                            _ty_cv1 = _tp_y.perf_counter()
+                            print(f"[YAS] curve-plot load={1000*(_ty_cv1-_ty_cv0):.0f}ms ({curve_key_yas})", flush=True)
                             if df_curve_yas is not None and not df_curve_yas.empty:
                                 fig_yas = go.Figure()
                                 y_pct_y = _yield_pct_points(df_curve_yas["TIREA"])
@@ -5131,6 +5332,9 @@ def _render_yas(username, password, plazo, curve_labels):
                 st.error(f"Error: {type(e).__name__}: {e}")
                 import traceback
                 print(f"[YAS ERROR {yas_code}]\n{traceback.format_exc()}", flush=True)
+
+    _ty_end = _tp_y.perf_counter()
+    print(f"[YAS] fragment-total={1000*(_ty_end-_ty0):.0f}ms", flush=True)
 
 
 
@@ -5309,6 +5513,8 @@ def main():
     # `with st.sidebar:` afuera.
     @st.fragment(run_every=refresh_interval if refresh_interval else 30)
     def _render_sidebar_dolares_live():
+        import time as _tp_s
+        _ts0 = _tp_s.perf_counter()
         try:
             base_codes = sorted({
                 _normalize_bond_base(c)
@@ -5326,6 +5532,7 @@ def main():
                     fx_close = float(_df.iloc[-1]["tca3500"])
             except Exception:
                 fx_close = None
+            _ts1 = _tp_s.perf_counter()
 
             # Computamos sobre 24hs (más liquidez). UN solo fetch para
             # ambas patas — el sidebar se llama en cada refresh, así que
@@ -5333,6 +5540,7 @@ def main():
             df_usd, df_usb, _ = _build_implicit_fx_both(
                 username, password, base_codes, "24hs"
             )
+            _ts2 = _tp_s.perf_counter()
 
             st.divider()
             st.header("💵 Dólar (bono top-vol)")
@@ -5356,6 +5564,7 @@ def main():
             _show("USD (cable)", df_usd)
             _show("USB (MEP)", df_usb)
 
+            _ts3 = _tp_s.perf_counter()
             # Brecha (CCL vs oficial) y Canje (CCL vs MEP)
             oficial_last = None
             try:
@@ -5363,6 +5572,7 @@ def main():
             except Exception:
                 oficial_last = None
             bc = _compute_brecha_canje(df_usd, df_usb, oficial_last, fx_close)
+            _ts4 = _tp_s.perf_counter()
 
             def _pp(v):
                 return None if v is None else f"{v * 100:+.2f} pp"
@@ -5379,8 +5589,19 @@ def main():
                     f"{bc['canje_hoy'] * 100:.2f}%",
                     delta=_pp(bc["canje_var_pp"]),
                 )
+            _ts5 = _tp_s.perf_counter()
+            print(
+                f"[sidebar fx] setup={1000*(_ts1-_ts0):.0f}ms "
+                f"fx-implicit={1000*(_ts2-_ts1):.0f}ms "
+                f"render-usd-usb={1000*(_ts3-_ts2):.0f}ms "
+                f"get-fx-hoy+brecha={1000*(_ts4-_ts3):.0f}ms "
+                f"render-brecha={1000*(_ts5-_ts4):.0f}ms "
+                f"total={1000*(_ts5-_ts0):.0f}ms",
+                flush=True,
+            )
         except Exception as e:
             st.caption(f"⚠️ Monitor dólar: {e}")
+            print(f"[sidebar fx] EXCEPTION {type(e).__name__}: {e}", flush=True)
 
     with st.sidebar:
         _render_sidebar_dolares_live()
@@ -5446,21 +5667,28 @@ def main():
 
         @st.fragment(run_every=refresh_interval)
         def _curvas_live():
+            import time as _tp_c
+            _t0 = _tp_c.perf_counter()
             # Refrescar FX A3500 en cada ciclo live (>>> PATCH FX 04/2026)
             invalidate_fx_cache()
             refresh_a3500_in_rentafija(session=get_session(username, password))
+            _t1 = _tp_c.perf_counter()
+            print(f"[curvas] fx-refresh @ +{1000*(_t1-_t0):.0f}ms", flush=True)
 
             st.caption(market_status_caption(plazo, auto_refresh=auto_refresh))
             if not is_market_open():
                 st.info("⚪ Mercado cerrado — TIREA / TNA / Duration se calculan sobre el **Close** del último cierre. Bid/Offer TIREA usan sus precios si existen.")
 
             aux_frames = []
+            _curve_timings = []
             for c in CURVES:
                 if c.key not in curves:
                     continue
                 title = f"{c.label}"
 
+                _tc0 = _tp_c.perf_counter()
                 df = load_curve_last_table(username, password, c.key, plazo)
+                _tc1 = _tp_c.perf_counter()
                 if df is not None and not df.empty:
                     aux_frames.append(df)
 
@@ -5476,8 +5704,18 @@ def main():
                         st.info("Sin datos (mercado cerrado o sin respuesta de marketdata).")
                     else:
                         st.dataframe(style_curvas(df), width="stretch", height=520)
+                _tc2 = _tp_c.perf_counter()
+                _curve_timings.append(
+                    f"{c.key}=load:{1000*(_tc1-_tc0):.0f}ms+render:{1000*(_tc2-_tc1):.0f}ms"
+                )
 
             _render_price_source_footer(*aux_frames)
+            _t2 = _tp_c.perf_counter()
+            print(
+                f"[curvas] per-curve: {' '.join(_curve_timings)} | "
+                f"total-loop={1000*(_t2-_t1):.0f}ms total={1000*(_t2-_t0):.0f}ms",
+                flush=True,
+            )
 
         _curvas_live()
         _lap("after curvas")
@@ -5552,6 +5790,10 @@ def main():
                             plazo,
                             depth=5,
                         )
+                        with st.expander(
+                            f"📊 Actividad intraday — {sel_code}", expanded=True,
+                        ):
+                            _render_intraday_panel(username, password, sel_code, plazo)
 
         _mercado_live()
         _lap("after mercado")

@@ -176,6 +176,18 @@ def market_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     vol_nv = df["NV"].map(extract_size) if "NV" in df.columns else pd.Series(np.nan, index=df.index)
     out["volume"] = vol_tv.fillna(vol_nv)
 
+    # VWAP intradía (si la API lo expone como entry WA)
+    if "WA" in df.columns:
+        out["vwap"] = df["WA"].map(extract_price)
+    else:
+        out["vwap"] = np.nan
+
+    # Trade count del día (entry TC, si está)
+    if "TC" in df.columns:
+        out["trade_count"] = df["TC"].map(extract_size)
+    else:
+        out["trade_count"] = np.nan
+
     # Variaciones
     with np.errstate(divide="ignore", invalid="ignore"):
         out["variation"] = out["last"] / out["close"] - 1
