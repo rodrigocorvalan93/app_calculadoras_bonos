@@ -331,12 +331,65 @@ def _tna_from_tirea(bond_obj, tirea: float, bond_type: str) -> Optional[float]:
             return rentafija.tir_a_tna(tirea, 180, 360)
 
         if bt == "dual":
+            # Duales TAMAR (VARIABLE_CAP+TAMAR): la convención de mercado es
+            # TNA con capitalización 32/365 (lo mismo que muestra 1816 y lo
+            # que usa rentafija.genera_ticket para 'Margen TNA').
+            # Duales fija: 30/365 (conservador).
+            tipo = getattr(bond_obj, "tipo_tasa_interes", None)
+            idx = getattr(bond_obj, "index", None)
+            if tipo == "VARIABLE_CAP" and idx == "TAMAR":
+                return rentafija.tir_a_tna(tirea, 32, 365)
             return rentafija.tir_a_tna(tirea, 30, 365)
-        
+
         if bt in ("hdmep", "hdcable"):
             return rentafija.tir_a_tna(tirea, 180, 365)
 
         return getattr(bond_obj, "tna", None)
+    except Exception:
+        return None
+
+
+def _tna_from_obj(bond_obj, tirea: float) -> Optional[float]:
+    """Infiere la convención de TNA correcta desde los atributos del bono.
+
+    Útil cuando no tenés `bond_type` a mano (ej: en el Comparador y YAS,
+    que reciben el objeto bono pero no el bond_type de la curva). Reemplaza
+    el patrón anterior `getattr(obj, 'tna', np.nan)`, que devuelve la TNA
+    "default" del objeto y para bonos bullet sin cupones intermedios cae a
+    `cnv_tna='plazo remanente'` dando valores ridículos (ej TXMJ9v 51% en
+    vez de 31%).
+    """
+    if tirea is None or not np.isfinite(tirea):
+        return None
+    try:
+        tipo = getattr(bond_obj, "tipo_tasa_interes", None)
+        idx = getattr(bond_obj, "index", None)
+        ajuste_cap = (getattr(bond_obj, "ajuste_sobre_capital", None) or "")
+        ajuste_cap_str = str(ajuste_cap).upper()
+        moneda = (getattr(bond_obj, "moneda", "") or "").upper()
+
+        # Dual TAMAR (VARIABLE_CAP+TAMAR) → 32/365
+        if tipo == "VARIABLE_CAP" and idx == "TAMAR":
+            return rentafija.tir_a_tna(tirea, 32, 365)
+
+        # CER / CER proyectado: TNA semestral 180/365
+        if "CER" in ajuste_cap_str:
+            return rentafija.tir_a_tna(tirea, 180, 365)
+
+        # Hard-dollar / USD: TNA semestral 180/360
+        if moneda == "USD":
+            return rentafija.tir_a_tna(tirea, 180, 360)
+
+        # DLK (ajuste por A3500): TNA trimestral 90/365
+        if "A3500" in ajuste_cap_str:
+            return rentafija.tir_a_tna(tirea, 90, 365)
+
+        # Default (LECAP, TAMAR puro, bullets ARS sin ajuste): TNA al
+        # vencimiento basada en días remanentes
+        dias = getattr(bond_obj, "dias_remanentes", None)
+        if dias and dias > 0:
+            return rentafija.tir_a_tna(tirea, dias, 365)
+        return None
     except Exception:
         return None
 
@@ -4144,7 +4197,12 @@ def _ticket_numeric(code: str, mode: str, value: float,
             return {}
 
         tirea = getattr(obj, "tirea", np.nan)
-        tna = getattr(obj, "tna", np.nan)
+        # NO usar obj.tna directo: para bullets sin cupones intermedios el
+        # objeto cae a cnv_tna='plazo remanente' y reporta TNA con días al
+        # vencimiento (ej TXMJ9v dual TAMAR daba 51% en vez de 31%).
+        # _tna_from_obj infiere la convención correcta por tipo de bono.
+        tna_inferred = _tna_from_obj(obj, tirea)
+        tna = tna_inferred if tna_inferred is not None else getattr(obj, "tna", np.nan)
         tem = (1 + tirea) ** (30 / 360) - 1 if np.isfinite(tirea) else np.nan
         dur = obj.calcula_duration(tirea, settle) if np.isfinite(tirea) else np.nan
         paridad = getattr(obj, "paridad", np.nan)
@@ -5220,7 +5278,12 @@ Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en
                 _t_yas_1 = _tp.perf_counter()
 
                 tirea_y = float(getattr(bond_obj_yas, "tirea", np.nan))
-                tna_y = float(getattr(bond_obj_yas, "tna", np.nan))
+                # Inferir TNA con la convención correcta (32/365 para duales
+                # TAMAR, etc) en vez de obj.tna que cae a 'plazo remanente'
+                # para bullets sin cupones intermedios.
+                _tna_inf = _tna_from_obj(bond_obj_yas, tirea_y)
+                tna_y = float(_tna_inf if _tna_inf is not None
+                              else getattr(bond_obj_yas, "tna", np.nan))
                 tem_y = (1 + tirea_y) ** (30 / 360) - 1 if np.isfinite(tirea_y) else np.nan
                 dur_y = bond_obj_yas.calcula_duration(tirea_y, settle_yas) if np.isfinite(tirea_y) else np.nan
                 par_y = float(getattr(bond_obj_yas, "paridad", np.nan))
@@ -5271,6 +5334,7 @@ Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en
                 with s4:
                     st.metric("Val. Residual", f"{vr_y:.2f}%" if np.isfinite(vr_y) else "—")
 
+                _ty_disp0 = _tp_y.perf_counter()
                 _col_ticket, _col_cf = st.columns(2)
                 with _col_ticket:
                     with st.expander("Ver ticket completo (DataFrame)", expanded=False):
@@ -5313,9 +5377,16 @@ Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en
                                     st.dataframe(_pmt_show, width="stretch", hide_index=True)
                                 else:
                                     st.info("Sin pagos para mostrar.")
+                _ty_disp1 = _tp_y.perf_counter()
+                print(
+                    f"[YAS] ticket+cashflows render={1000*(_ty_disp1-_ty_disp0):.0f}ms",
+                    flush=True,
+                )
 
                 # Datos Delta (base interna de especies) — lazy, silent fail
+                _ty_d0 = _tp_y.perf_counter()
                 _delta_info = delta_especies.pretty_info(yas_code)
+                _ty_d1 = _tp_y.perf_counter()
                 if _delta_info:
                     with st.expander(f"📋 Datos Delta — {yas_code}", expanded=False):
                         _half = (len(_delta_info) + 1) // 2
@@ -5324,9 +5395,18 @@ Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en
                             _c1.markdown(f"**{_k}:** {_v}")
                         for _k, _v in _delta_info[_half:]:
                             _c2.markdown(f"**{_k}:** {_v}")
+                _ty_d2 = _tp_y.perf_counter()
+                print(
+                    f"[YAS] delta_info={1000*(_ty_d1-_ty_d0):.0f}ms "
+                    f"delta_render={1000*(_ty_d2-_ty_d1):.0f}ms",
+                    flush=True,
+                )
 
                 # Tenencias por fondo (base interna de composición) — lazy, silent fail
+                _ty_t0 = _tp_y.perf_counter()
                 _render_tenencias_delta(yas_code)
+                _ty_t1 = _tp_y.perf_counter()
+                print(f"[YAS] tenencias={1000*(_ty_t1-_ty_t0):.0f}ms", flush=True)
 
                 # Gráfico de la curva (lazy - sólo si se abre)
                 with st.expander("📈 Ver en la curva (NSS)", expanded=False):
@@ -7341,7 +7421,14 @@ Para **margen sobre TAMAR** en duales VARIABLE_CAP la fórmula es:
                             def _metrics_from_state(obj, code):
                                 """Extrae métricas del estado del bono ya calculado."""
                                 tirea = getattr(obj, "tirea", np.nan)
-                                tna_v = getattr(obj, "tna", np.nan)
+                                # Inferir TNA con la convención correcta por tipo
+                                # (32/365 para dual TAMAR, etc) — obj.tna directo
+                                # cae a 'plazo remanente' para bullets y reporta
+                                # TNA con días al vencimiento, que da números
+                                # absurdos (TXMJ9v daba 51% en vez de 31%).
+                                _tna_inf = _tna_from_obj(obj, tirea)
+                                tna_v = (_tna_inf if _tna_inf is not None
+                                         else getattr(obj, "tna", np.nan))
                                 tem_v = (1 + tirea) ** (30 / 360) - 1 if np.isfinite(tirea) else np.nan
                                 try:
                                     dur_v = obj.calcula_duration(tirea, settle_comp) if np.isfinite(tirea) else np.nan
@@ -7358,8 +7445,14 @@ Para **margen sobre TAMAR** en duales VARIABLE_CAP la fórmula es:
                                         ajuste = inp.get("tamar", pd.DataFrame()).tail(5).get("TAMAR", pd.Series()).mean()
                                     else:
                                         ajuste = 0.0
-                                    if np.isfinite(tna_v) and np.isfinite(ajuste):
-                                        margen_v = tna_v - ajuste / 100.0
+                                    # Margen: misma fórmula que rentafija.genera_ticket.
+                                    # VARIABLE_CAP usa la TNA equivalente 32/365.
+                                    if np.isfinite(ajuste):
+                                        if tipo == "VARIABLE_CAP" and np.isfinite(tirea):
+                                            tna_eq = ((1.0 + float(tirea)) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
+                                            margen_v = tna_eq - ajuste / 100.0
+                                        elif tipo == "VARIABLE" and np.isfinite(tna_v):
+                                            margen_v = tna_v - ajuste / 100.0
                                 return {
                                     "Código": code,
                                     "Nombre": getattr(obj, "nombre_security", code),
