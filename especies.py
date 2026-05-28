@@ -15945,6 +15945,49 @@ BF41O = {
     "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/e1001fa7-ca67-47eb-94cb-c96a21656ca9""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/3419d31c-8795-4252-b565-9a82616564e9""",
 }
+BF46O = {
+    "Nombre Security": "ON Banco BBVA Argentina S.A. Clase 46 Vto. 21 05 2027",
+    "Código": "BF46O",
+    "ISIN": "AR0798003882",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "21/05/2026",
+    "Vencimiento": "21/05/2027",
+    "Fecha Primer Cupón": "21/08/2026",
+    "Cupón / Spread": 3.25, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE", # FIJA o VARIABLE
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -7, # enteros negativos
+    "Días Lag índice hasta inc": -7, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+    "21/08/2026",
+    "21/11/2026",
+    "21/02/2027",
+    "21/05/2027"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": "",  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://lt.mydplr.com/44bb4dfccc0caef6387339a1b436fb0b-fd388f880eeed95f651bb714f572f2c5""",
+    "Suplemento Prospecto": """https://lt.mydplr.com/efbb658f150c77a83a44af716684dd1e-fd388f880eeed95f651bb714f572f2c5""",
+}
 VBC3O = {
     "Nombre Security": "ON Banco de Valores S.A. Clase 3 Vto 24 10 2026",
     "Código": "VBC3O",
