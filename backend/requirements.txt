@@ -6,6 +6,7 @@ pydantic-settings>=2.4,<3.0
 python-multipart>=0.0.9
 httpx>=0.27,<1.0
 cachetools>=5.3,<6.0
+websockets>=12.0,<14.0
 
 # Math / data — same versions the legacy app exercises against
 numpy>=1.26
