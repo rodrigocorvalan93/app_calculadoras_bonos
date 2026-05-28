@@ -1,30 +1,46 @@
-{# Ticket: VN, monto, principal, interés. #}
 {% if not metrics.get("error") %}
 <table class="ticket">
   <tbody>
-    <tr><th>Nombre</th><td>{{ meta.codigo }}</td></tr>
-    <tr><th>Vencimiento</th><td>{{ meta.vencimiento | ar_date }}</td></tr>
-    <tr><th>Fecha liquidación</th><td>{{ metrics.fecha_settlement | ar_date }}</td></tr>
+    <tr class="ticket-section"><th colspan="2">Identificación</th></tr>
+    <tr><th>Código</th><td>{{ meta.codigo }}</td></tr>
+    <tr><th>Vto.</th><td>{{ meta.vencimiento | ar_date }}</td></tr>
+    <tr><th>Fecha liq.</th><td>{{ metrics.fecha_settlement | ar_date }}</td></tr>
+    <tr><th>Moneda</th><td>{{ meta.moneda or "—" }}</td></tr>
+    <tr><th>Calificación</th><td>{{ meta.calificacion or "—" }}</td></tr>
+    <tr><th>Callable</th><td>{{ "Sí" if meta.callable else "No" }}</td></tr>
+
+    <tr class="ticket-section"><th colspan="2">Precio &amp; tasas</th></tr>
     <tr><th>Precio (% VN)</th><td>{{ metrics.precio_pct | ar_num(6) }}</td></tr>
-    <tr><th>Precio clean (% VN)</th><td>{{ metrics.precio_clean_pct | ar_num(6) }}</td></tr>
-    <tr><th>VN ticket</th><td>{{ ticket.vn_ticket | ar_int }}</td></tr>
+    <tr><th>Precio clean</th><td>{{ metrics.precio_clean_pct | ar_num(6) }}</td></tr>
+    <tr><th>TIREA</th><td>{{ metrics.tirea | ar_pct(4) }}</td></tr>
+    <tr><th>TNA · {{ metrics.tna_convention_label }}</th><td>{{ metrics.tna | ar_pct(4) }}</td></tr>
+    <tr><th>TEM</th><td>{{ metrics.tem | ar_pct(4) }}</td></tr>
+    {% if metrics.tipo_tasa_interes in ("VARIABLE", "VARIABLE_CAP") and metrics.index %}
+    <tr><th>Margen TNA</th><td>{{ metrics.margen_tna | ar_pct(2) }}</td></tr>
+    <tr><th>{{ metrics.index }} aplicable</th><td>{{ metrics.benchmark_pct | ar_pct_pp(4) }}</td></tr>
+    {% endif %}
+
+    <tr class="ticket-section"><th colspan="2">Sensibilidad</th></tr>
+    <tr><th>Duration</th><td>{{ metrics.duration | ar_num(4) }}</td></tr>
+    <tr><th>Paridad</th><td>{{ (metrics.paridad * 100) | ar_pct_pp(2) if metrics.paridad == metrics.paridad else "—" }}</td></tr>
+    <tr><th>Val. Técnico</th><td>{{ metrics.valor_tecnico | ar_num(6) }}</td></tr>
+    <tr><th>Val. Residual</th><td>{{ metrics.valor_residual | ar_pct_pp(2) }}</td></tr>
+
+    <tr class="ticket-section"><th colspan="2">Intereses</th></tr>
+    <tr><th>Int. Corridos</th><td>{{ metrics.intereses_corridos | ar_num(6) }}</td></tr>
+    <tr><th>Días Devengados</th><td>{{ metrics.dias_corridos | ar_int }}</td></tr>
+    <tr><th>Días Remanentes</th><td>{{ metrics.dias_remanentes | ar_int }}</td></tr>
+
+    <tr class="ticket-section"><th colspan="2">Liquidación · VN {{ ticket.vn_ticket | ar_int }}</th></tr>
     <tr><th>Monto Total</th><td>{{ ticket.monto_total | ar_money(2) }}</td></tr>
     <tr><th>Principal</th><td>{{ ticket.principal | ar_money(2) }}</td></tr>
     <tr><th>Interés</th><td>{{ ticket.interes | ar_money(2) }}</td></tr>
-    <tr><th>Días Devengados</th><td>{{ metrics.dias_corridos | ar_int }}</td></tr>
-    <tr><th>TIREA</th><td>{{ metrics.tirea | ar_pct(4) }}</td></tr>
-    <tr><th>TNA</th><td>{{ metrics.tna | ar_pct(4) }}</td></tr>
-    <tr><th>TEM</th><td>{{ metrics.tem | ar_pct(4) }}</td></tr>
-    <tr><th>Duration</th><td>{{ metrics.duration | ar_num(4) }}</td></tr>
-    <tr><th>Paridad</th><td>{{ (metrics.paridad * 100) | ar_pct_pp(2) if metrics.paridad == metrics.paridad else "—" }}</td></tr>
-    <tr><th>Valor Residual</th><td>{{ metrics.valor_residual | ar_pct_pp(2) }}</td></tr>
-    <tr><th>Valor Técnico</th><td>{{ metrics.valor_tecnico | ar_num(6) }}</td></tr>
-    <tr><th>Callable</th><td>{{ "Sí" if meta.callable else "No" }}</td></tr>
-    <tr><th>Calificación</th><td>{{ meta.calificacion or "—" }}</td></tr>
-    {% if metrics.tipo_tasa_interes in ("VARIABLE", "VARIABLE_CAP") and metrics.index %}
-    <tr><th>Tasa aplicable</th><td>{{ metrics.index }} {{ metrics.benchmark_pct | ar_pct_pp(4) }}</td></tr>
-    <tr><th>Margen TNA</th><td>{{ metrics.margen_tna | ar_pct(2) }}</td></tr>
-    {% endif %}
+
+    <tr class="ticket-section"><th colspan="2">Convenciones</th></tr>
+    <tr><th>Frec. cupón</th><td>{{ meta.frecuencia or "—" }}</td></tr>
+    <tr><th>Base devengo</th><td>{{ meta.convencion_base or "—" }}</td></tr>
+    <tr><th>Quote price</th><td>{{ meta.quote_price_cnv or "—" }}</td></tr>
+    <tr><th>Amortización</th><td>{{ meta.tipo_amortizacion or "—" }}</td></tr>
   </tbody>
 </table>
 {% endif %}

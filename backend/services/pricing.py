@@ -1,19 +1,38 @@
 """YAS pricing service.
 
-Ported from `OMSweb_app._ticket_numeric` (the legacy Streamlit panel). It
-runs the four input modes (precio / tir / tna / margen) through
-`rentafija.Bono` and returns a dict of raw numerics for the templates.
+Ported from `OMSweb_app._ticket_numeric` and extended with:
+
+- Per-tipo TNA convention table (returned alongside the value so the UI
+  can render it next to the metric, e.g. "TNA (32/365)").
+- Convention override: when the user supplies `freq_days` / `base_days`,
+  those win over the auto-detected pair. Lets you sanity-check a number
+  against a custom convention without touching `rentafija`.
+- Applicable index value: CER / UVA / A3500 / TAMAR / BADLAR — whatever
+  index drives the bond. Shown in a sidebar card so dollar-linked, UVA
+  and dual TAMAR bonds tell you which series they're being scored
+  against.
+- Cashflow table (CPN dates + intereses + amortización + ajuste + total)
+  returned as a list of plain rows so the template can render it 1816-style.
 
 Thread-safety: `rentafija.Bono` instances in `especies` are singletons,
 and `calcula_tirea` mutates `self.tirea`, `self.cashflow_cpn`,
-`self.fecha_settlement`, etc. With 4-5 tabs computing different prices for
-the same code in parallel, they would clobber each other. We follow the
-legacy pattern: a per-code lock + `copy.copy()` of the bond object before
-mutating it (`OMSweb_app._bond_obj_copy`).
+`self.fecha_settlement`, etc. With 4-5 tabs computing different prices
+for the same code in parallel they would clobber each other. We follow
+the legacy pattern: per-code lock + `copy.copy()` of the bond object
+before mutating it.
 
-The Margen TNA formula for VARIABLE_CAP follows the fix in commit 0106d25:
-`((1 + TIREA)^(32/365) - 1) * (365/32) - bench/100` (typical for dual
-TAMAR like TXMJ9v). For VARIABLE it's the simple `TNA - bench/100`.
+Convention table — first match wins. `cap32` is a non-linear formula
+typical of dual TAMAR; the others use the standard `tir_a_tna`.
+
+  VARIABLE_CAP + TAMAR             → 32/365  (cap32)
+  VARIABLE  (BADLAR, TAMAR puro)   → 90/365  (linear)   ← user-requested
+  ajuste contains "CER"            → 180/365 (linear)
+  ajuste contains "A3500" (DLK)    → 90/365  (linear)
+  moneda == USD (hard-dollar)      → 180/360 (linear)
+  default (LECAP / bullets ARS)    → días_remanentes/365 (linear)
+
+Margen TNA: VARIABLE_CAP uses cap32 fórmula, VARIABLE uses TNA − bench/100
+(both ported verbatim from rentafija.genera_ticket / commit 0106d25).
 """
 from __future__ import annotations
 
@@ -22,7 +41,7 @@ import logging
 import threading
 from collections import defaultdict
 from datetime import date, datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -42,6 +61,7 @@ NAN_METRICS: Dict[str, float] = {
     "paridad": float("nan"),
     "margen_tna": float("nan"),
     "precio_pct": float("nan"),
+    "precio_clean_pct": float("nan"),
     "precio": float("nan"),
     "precio_clean": float("nan"),
     "intereses_corridos": float("nan"),
@@ -53,7 +73,6 @@ NAN_METRICS: Dict[str, float] = {
 
 
 def _bond_obj_copy(code: str):
-    """Thread-safe shallow copy of a bond singleton."""
     obj = bond_universe.get(code)
     if obj is None:
         return None
@@ -62,7 +81,6 @@ def _bond_obj_copy(code: str):
 
 
 def _safe_settle(settle: Optional[str]) -> Optional[str]:
-    """Accept '' / None / 'DD/MM/YYYY' / 'YYYY-MM-DD'. Return canonical DD/MM/YYYY or None."""
     if settle is None:
         return None
     s = settle.strip()
@@ -77,12 +95,6 @@ def _safe_settle(settle: Optional[str]) -> Optional[str]:
 
 
 def settlement_date_str(plazo: str) -> Optional[str]:
-    """Default settlement for the chosen plazo (24hs or CI).
-
-    Mirrors `OMSweb_app._settlement_date_str`. For 24hs we return None and
-    let rentafija fall back to its own default (T+plazo_habitual). For CI
-    we explicitly use today's business date.
-    """
     import rentafija
 
     if str(plazo).upper() == "CI":
@@ -91,8 +103,11 @@ def settlement_date_str(plazo: str) -> Optional[str]:
     return None
 
 
+# ── Index applicable values ──────────────────────────────────────────────
+
+
 def _bench_pct(idx_name: Optional[str]) -> float:
-    """Mean of the last 5 BCRA observations for TAMAR / BADLAR (in %)."""
+    """Avg of the last 5 BCRA observations for TAMAR / BADLAR (in %)."""
     if not idx_name:
         return float("nan")
     import rentafija
@@ -100,73 +115,177 @@ def _bench_pct(idx_name: Optional[str]) -> float:
     inp = rentafija.inputs
     try:
         if idx_name == "BADLAR":
-            return float(
-                inp.get("badlar", pd.DataFrame())
-                .tail(5)
-                .get("BADLAR", pd.Series())
-                .mean()
-            )
+            return float(inp.get("badlar", pd.DataFrame()).tail(5).get("BADLAR", pd.Series()).mean())
         if idx_name == "TAMAR":
-            return float(
-                inp.get("tamar", pd.DataFrame())
-                .tail(5)
-                .get("TAMAR", pd.Series())
-                .mean()
-            )
+            return float(inp.get("tamar", pd.DataFrame()).tail(5).get("TAMAR", pd.Series()).mean())
     except Exception:  # noqa: BLE001
         return float("nan")
     return float("nan")
 
 
-def tna_from_obj(obj, tirea: float) -> float:
-    """TNA según la convención que corresponde al tipo de bono.
+def _last_series_value(key: str, colname: str) -> Tuple[Optional[Any], float]:
+    """Return (fecha, valor) of the most recent row of rentafija.inputs[key].
 
-    Reemplaza a `obj.tna` (que rentafija calcula con cnv_tna/convencion_base
-    naturales del bono) cuando esa fórmula no coincide con la convención
-    de mercado. Tabla de detección (en orden, primer match gana):
-
-      VARIABLE_CAP + TAMAR  → cap 32/365 (típico dual TAMAR)
-      CER / CER PROYECTADO  → tir_a_tna(TIREA, 180, 365)
-      A3500 (DLK)           → tir_a_tna(TIREA, 90, 365)
-      moneda == USD         → tir_a_tna(TIREA, 180, 360)
-      default               → tir_a_tna(TIREA, días_remanentes, 365)
-
-    El bug del legacy era reportar `obj.tna` para todos los bonos —
-    para TXMJ9v eso daba ~51% (1127/360) cuando la convención correcta
-    es la cap 32/365 (~31%). El commit 0106d25 arregló el Margen TNA
-    pero no la TNA misma; este helper cierra el círculo.
+    Used to expose the CER, UVA and A3500 daily values right at the top
+    of the YAS panel so the user can see what number is being applied
+    behind a CER/UVA/DLK bond.
     """
-    if not np.isfinite(tirea):
-        return float("nan")
-
     import rentafija
+
+    df = rentafija.inputs.get(key)
+    if df is None or len(df) == 0:
+        return None, float("nan")
+    try:
+        last_idx = df.index[-1]
+        last_val = float(df.iloc[-1][colname])
+        return last_idx, last_val
+    except Exception:  # noqa: BLE001
+        return None, float("nan")
+
+
+def index_applied(obj) -> Dict[str, Any]:
+    """Identifies the index that prices this bond and returns its current value.
+
+    Output schema:
+      kind: "CER" | "UVA" | "FX" | "BENCH" | None
+      label: human-readable label for the value card
+      value: numeric (CER index, UVA, FX in ARS/USD, or rate in %)
+      value_fmt_hint: "decimal" or "percent" (controls template formatter)
+      fecha: date of the observation (None if N/A)
+    """
+    ajuste = (getattr(obj, "ajuste_sobre_capital", "") or "").upper()
+    moneda = (getattr(obj, "moneda", "") or "").upper()
+    tipo = (getattr(obj, "tipo_tasa_interes", "") or "").upper()
+    idx = (getattr(obj, "index", "") or "").upper()
+
+    out = {"kind": None, "label": "", "value": float("nan"), "value_fmt_hint": "decimal", "fecha": None}
+
+    if "CER" in ajuste:
+        fecha, val = _last_series_value("CER", "CER")
+        if not np.isfinite(val) or fecha is None:
+            fecha, val = _last_series_value("cer_proyectado", "CER")
+        out.update({"kind": "CER", "label": "CER aplicable", "value": val, "value_fmt_hint": "decimal", "fecha": fecha})
+        return out
+
+    if "UVA" in ajuste:
+        fecha, val = _last_series_value("UVA", "UVA")
+        if not np.isfinite(val) or fecha is None:
+            fecha, val = _last_series_value("uva_proyectado", "UVA")
+        out.update({"kind": "UVA", "label": "UVA aplicable", "value": val, "value_fmt_hint": "decimal", "fecha": fecha})
+        return out
+
+    if "A3500" in ajuste or moneda == "DLK":
+        fecha, val = _last_series_value("a3500", "tca3500")
+        out.update({"kind": "FX", "label": "FX A3500 aplicable", "value": val, "value_fmt_hint": "decimal", "fecha": fecha})
+        return out
+
+    if tipo in ("VARIABLE", "VARIABLE_CAP") and idx in ("TAMAR", "BADLAR"):
+        bench = _bench_pct(idx)
+        out.update({"kind": "BENCH", "label": f"{idx} aplicable (avg 5d)", "value": bench, "value_fmt_hint": "percent_pp", "fecha": None})
+        return out
+
+    return out
+
+
+# ── TNA convention table ─────────────────────────────────────────────────
+
+
+def tna_convention(
+    obj,
+    freq_override: Optional[int] = None,
+    base_override: Optional[int] = None,
+) -> Tuple[str, Optional[int], Optional[int], str]:
+    """Returns (label, freq_days, base_days, formula).
+
+    `formula` is "cap32" for VARIABLE_CAP+TAMAR (capitalized every 32 days)
+    and "linear" for the regular `tir_a_tna(tirea, freq, base)` family.
+    When the user passes `freq_override` and `base_override` we always
+    use `linear` with those values (lets you sanity-check vs an
+    alternative convention without touching rentafija).
+    """
+    if freq_override and base_override:
+        return f"{int(freq_override)}/{int(base_override)} custom", int(freq_override), int(base_override), "linear"
 
     tipo = (getattr(obj, "tipo_tasa_interes", "") or "").upper()
     idx = (getattr(obj, "index", "") or "").upper()
     ajuste = (getattr(obj, "ajuste_sobre_capital", "") or "").upper()
     moneda = (getattr(obj, "moneda", "") or "").upper()
 
-    try:
-        if tipo == "VARIABLE_CAP" and idx == "TAMAR":
-            return ((1.0 + tirea) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
-        if "CER" in ajuste:
-            return float(rentafija.tir_a_tna(tirea, 180, 365))
-        if "A3500" in ajuste:
-            return float(rentafija.tir_a_tna(tirea, 90, 365))
-        if moneda == "USD":
-            return float(rentafija.tir_a_tna(tirea, 180, 360))
+    if tipo == "VARIABLE_CAP" and idx == "TAMAR":
+        return "32/365 cap", 32, 365, "cap32"
+    if tipo == "VARIABLE":
+        return "90/365", 90, 365, "linear"
+    if "CER" in ajuste:
+        return "180/365", 180, 365, "linear"
+    if "UVA" in ajuste:
+        return "180/365", 180, 365, "linear"
+    if "A3500" in ajuste:
+        return "90/365", 90, 365, "linear"
+    if moneda == "USD":
+        return "180/360", 180, 360, "linear"
 
-        dias = getattr(obj, "dias_remanentes", None)
-        if dias and dias > 0:
-            return float(rentafija.tir_a_tna(tirea, int(dias), 365))
-        # Fallback: lo que rentafija haya dejado en self.tna
-        return float(getattr(obj, "tna", np.nan))
-    except Exception:  # noqa: BLE001
+    dias = getattr(obj, "dias_remanentes", None)
+    if dias and dias > 0:
+        return f"{int(dias)}/365", int(dias), 365, "linear"
+    return "—", None, None, "linear"
+
+
+def tna_from_tirea(
+    obj,
+    tirea: float,
+    freq_override: Optional[int] = None,
+    base_override: Optional[int] = None,
+) -> Tuple[float, str]:
+    """Apply the convention from `tna_convention` to convert TIREA → TNA.
+
+    Returns (tna, label). The label is meant to live next to the metric
+    title in the UI ("TNA (32/365)" etc.).
+    """
+    if not np.isfinite(tirea):
+        return float("nan"), "—"
+    label, freq, base, formula = tna_convention(obj, freq_override, base_override)
+    if formula == "cap32":
+        return ((1.0 + tirea) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0), label
+    if freq and base:
+        try:
+            return ((1.0 + tirea) ** (freq / base) - 1.0) * (base / freq), label
+        except Exception:  # noqa: BLE001
+            return float("nan"), label
+    return float(getattr(obj, "tna", np.nan)), label
+
+
+def tirea_from_tna(
+    obj,
+    tna: float,
+    freq_override: Optional[int] = None,
+    base_override: Optional[int] = None,
+) -> float:
+    """Inverse of `tna_from_tirea` for use in mode=tna / mode=margen."""
+    if not np.isfinite(tna):
         return float("nan")
+    _label, freq, base, formula = tna_convention(obj, freq_override, base_override)
+    if formula == "cap32":
+        return (tna * (32.0 / 365.0) + 1.0) ** (365.0 / 32.0) - 1.0
+    if freq and base:
+        try:
+            return (1.0 + tna / (base / freq)) ** (base / freq) - 1.0
+        except Exception:  # noqa: BLE001
+            return float("nan")
+    # Fall back to rentafija convention if we can't pin freq/base.
+    from utils import tna_a_tir
+
+    cnv = (
+        (obj.vencimiento - obj.fecha_settlement).days
+        if getattr(obj, "cnv_tna", None) == "plazo remanente"
+        else getattr(obj, "cnv_tna", 365)
+    )
+    return float(tna_a_tir(tna, int(cnv), int(getattr(obj, "convencion_base", 365))))
+
+
+# ── Bond meta + cashflows ────────────────────────────────────────────────
 
 
 def bond_meta(code: str) -> Dict[str, Any]:
-    """Static metadata for a bond (no calc — cheap)."""
     obj = bond_universe.get(code)
     if obj is None:
         return {}
@@ -184,7 +303,51 @@ def bond_meta(code: str) -> Dict[str, Any]:
         "frecuencia": getattr(obj, "frecuencia_pago_cupon", ""),
         "convencion_base": getattr(obj, "convencion_base", ""),
         "quote_price_cnv": getattr(obj, "quote_price_cnv", ""),
+        "cupon_spread": getattr(obj, "cupon_spread", ""),
+        "tipo_amortizacion": getattr(obj, "tipo_amortizacion", ""),
+        "legislacion": getattr(obj, "legislacion", ""),
     }
+
+
+def _cashflows_from_obj(obj, limit: int = 40) -> List[Dict[str, Any]]:
+    """Return the per-coupon cashflow as a list of dicts.
+
+    Uses `obj.cashflow_cpn` (post-settlement), capped at `limit` rows so
+    we don't dump 100 lines for high-coupon-count bonds. We also expose
+    the payment date (`cashflow_pmt`) so the template can show both.
+    """
+    cpn = getattr(obj, "cashflow_cpn", None)
+    pmt = getattr(obj, "cashflow_pmt", None)
+    if cpn is None or len(cpn) == 0:
+        return []
+    rows: List[Dict[str, Any]] = []
+    try:
+        cpn_iter = cpn.head(limit).reset_index(drop=True)
+        pmt_iter = pmt.head(limit).reset_index(drop=True) if pmt is not None else None
+        for i, row in cpn_iter.iterrows():
+            pmt_date = None
+            if pmt_iter is not None and i < len(pmt_iter):
+                try:
+                    pmt_date = pmt_iter.iloc[i]["Fechas"]
+                except Exception:  # noqa: BLE001
+                    pmt_date = None
+            rows.append(
+                {
+                    "fecha_cpn": row.get("Fechas"),
+                    "fecha_pmt": pmt_date,
+                    "intereses": float(row.get("Intereses", float("nan"))),
+                    "amortizacion": float(row.get("Amortización", float("nan"))),
+                    "ajuste": float(row.get("Ajuste", float("nan"))),
+                    "total": float(row.get("Total", float("nan"))),
+                }
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("[pricing] cashflow extraction failed")
+        return []
+    return rows
+
+
+# ── Main entry point ─────────────────────────────────────────────────────
 
 
 def compute_metrics(
@@ -193,24 +356,27 @@ def compute_metrics(
     value: float,
     settle: Optional[str] = None,
     fx_override: Optional[float] = None,
+    freq_override: Optional[int] = None,
+    base_override: Optional[int] = None,
+    include_cashflows: bool = True,
 ) -> Dict[str, Any]:
-    """Run a YAS calc and return raw numerics + ticket-ish payload.
+    """Run a YAS calc end-to-end and return numerics + ticket + cashflow.
 
-    mode = 'precio'  → value is price as % of par (e.g. 87.30)
-    mode = 'tir'     → value is TIREA in decimal (e.g. 0.42)
-    mode = 'tna'     → value is TNA in decimal (e.g. 0.38), converted to
-                       TIREA via tna_a_tir(value, cnv, base)
-    mode = 'margen'  → value is spread over benchmark (decimal), summed to
-                       benchmark/100 to obtain TNA, then same as 'tna'
+    Modes:
+      precio  → value is price as % of par (e.g. 87.30)
+      tir     → value is TIREA in decimal (e.g. 0.42)
+      tna     → value is TNA in decimal, inverted with `tirea_from_tna`
+      margen  → spread over benchmark; TNA target = bench/100 + margen
     """
     import rentafija
-    from utils import tna_a_tir
 
     base = dict(NAN_METRICS)
     base["codigo"] = code
     base["mode"] = mode
     base["mode_value"] = value
     base["error"] = None
+    base["freq_override"] = freq_override
+    base["base_override"] = base_override
 
     obj = _bond_obj_copy(code)
     if obj is None:
@@ -235,43 +401,17 @@ def compute_metrics(
             obj.calcula_precio(float(value), canonical_settle)
             obj.calcula_intereses_corridos(canonical_settle)
         elif mode == "tna":
-            # Para VARIABLE_CAP + TAMAR la TNA reportada usa la fórmula cap
-            # 32/365 (no la convencional de rentafija). Invertimos con la
-            # misma fórmula para que ingreso ↔ output sean simétricos.
-            tipo = getattr(obj, "tipo_tasa_interes", None)
-            idx_name = getattr(obj, "index", None)
             obj.generate_cashflows(canonical_settle)
-            if tipo == "VARIABLE_CAP" and idx_name == "TAMAR":
-                tir = (float(value) * (32.0 / 365.0) + 1.0) ** (365.0 / 32.0) - 1.0
-            else:
-                cnv = (
-                    (obj.vencimiento - obj.fecha_settlement).days
-                    if obj.cnv_tna == "plazo remanente"
-                    else obj.cnv_tna
-                )
-                tir = tna_a_tir(float(value), int(cnv), int(obj.convencion_base))
+            tir = tirea_from_tna(obj, float(value), freq_override, base_override)
             obj.calcula_precio(tir, canonical_settle)
             obj.calcula_intereses_corridos(canonical_settle)
         elif mode == "margen":
-            # Invertir la fórmula del Margen TNA para llegar al TIREA.
-            # VARIABLE_CAP + TAMAR: margen + bench/100 = ((1+TIREA)^(32/365)-1)*(365/32)
-            #                       → TIREA = ((tna_cap*32/365)+1)^(365/32) - 1
-            # VARIABLE / VARIABLE_CAP otros: tna = margen + bench/100, luego TIREA via tna_a_tir.
             idx_name = getattr(obj, "index", None)
-            tipo = getattr(obj, "tipo_tasa_interes", None)
             bench_pct = _bench_pct(idx_name)
             ajuste = bench_pct if np.isfinite(bench_pct) else 0.0
             tna_target = (ajuste / 100.0) + float(value)
             obj.generate_cashflows(canonical_settle)
-            if tipo == "VARIABLE_CAP" and idx_name == "TAMAR":
-                tir = (tna_target * (32.0 / 365.0) + 1.0) ** (365.0 / 32.0) - 1.0
-            else:
-                cnv = (
-                    (obj.vencimiento - obj.fecha_settlement).days
-                    if obj.cnv_tna == "plazo remanente"
-                    else obj.cnv_tna
-                )
-                tir = tna_a_tir(tna_target, int(cnv), int(obj.convencion_base))
+            tir = tirea_from_tna(obj, tna_target, freq_override, base_override)
             obj.calcula_precio(tir, canonical_settle)
             obj.calcula_intereses_corridos(canonical_settle)
         else:
@@ -283,18 +423,11 @@ def compute_metrics(
         return base
 
     tirea = float(getattr(obj, "tirea", np.nan))
-    # TNA según la convención del tipo de bono (no la `obj.tna` cruda
-    # de rentafija, que para VARIABLE_CAP TAMAR daba ~51% en lugar de
-    # ~31%). Ver `tna_from_obj` para la tabla de detección.
     tna_raw = float(getattr(obj, "tna", np.nan))
-    tna = tna_from_obj(obj, tirea)
+    tna, tna_label = tna_from_tirea(obj, tirea, freq_override, base_override)
     tem = (1 + tirea) ** (30 / 360) - 1 if np.isfinite(tirea) else float("nan")
     try:
-        duration = (
-            float(obj.calcula_duration(tirea, canonical_settle))
-            if np.isfinite(tirea)
-            else float("nan")
-        )
+        duration = float(obj.calcula_duration(tirea, canonical_settle)) if np.isfinite(tirea) else float("nan")
     except Exception:  # noqa: BLE001
         duration = float("nan")
     paridad = float(getattr(obj, "paridad", np.nan))
@@ -307,7 +440,6 @@ def compute_metrics(
     vt = float(getattr(obj, "valor_tecnico", np.nan))
     fl = getattr(obj, "fecha_settlement", None)
 
-    # Margen TNA — replicates rentafija.genera_ticket / _ticket_numeric
     idx_name = getattr(obj, "index", None)
     tipo = getattr(obj, "tipo_tasa_interes", None)
     margen_tna = float("nan")
@@ -324,11 +456,15 @@ def compute_metrics(
     precio_pct = precio * 100.0 if np.isfinite(precio) else float("nan")
     precio_clean_pct = precio_clean * 100.0 if np.isfinite(precio_clean) else float("nan")
 
+    idx_info = index_applied(obj)
+    cashflows = _cashflows_from_obj(obj) if include_cashflows else []
+
     base.update(
         {
             "tirea": tirea,
             "tna": tna,
-            "tna_raw": tna_raw,  # rentafija crudo (para debug)
+            "tna_raw": tna_raw,
+            "tna_convention_label": tna_label,
             "tem": tem,
             "duration": duration,
             "paridad": paridad,
@@ -346,18 +482,14 @@ def compute_metrics(
             "tipo_tasa_interes": tipo or "",
             "index": idx_name or "",
             "benchmark_pct": bench_pct,
+            "index_applied": idx_info,
+            "cashflows": cashflows,
         }
     )
     return base
 
 
 def ticket_rows(metrics: Dict[str, Any], nominales: float = 1_000_000.0) -> Dict[str, Any]:
-    """Build the ticket rows (Nombre/Vto/Precio/Monto/etc.) from a metrics dict.
-
-    Doesn't touch the bond object — uses values already computed by
-    `compute_metrics`. Returns numerics; formatting is done in the
-    template via the `ar_*` filters.
-    """
     precio = metrics.get("precio", float("nan"))
     precio_clean = metrics.get("precio_clean", float("nan"))
     ic = metrics.get("intereses_corridos", float("nan"))

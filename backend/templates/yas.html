@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}YAS — {{ selected or "Análisis de Yields" }}{% endblock %}
+{% block title %}YAS · {{ selected or "Análisis de Yields" }}{% endblock %}
 
 {% block content %}
 <section class="yas" x-data="yasForm()">
   <header class="yas-header">
     <h1>Análisis de Yields</h1>
-    <p class="muted">Ingresá Precio, TIREA, TNA o Margen → obtenés las métricas del bono.</p>
+    <p class="muted">Ingresá Precio / TIREA / TNA / Margen → métricas, ticket y cashflows del bono.</p>
   </header>
 
   {% if not codes %}
@@ -34,39 +34,23 @@
       </label>
 
       <fieldset class="field field-mode">
-        <legend>Input</legend>
         <label><input type="radio" name="mode" value="precio" checked x-model="mode"> Precio</label>
         <label><input type="radio" name="mode" value="tir" x-model="mode"> TIREA</label>
         <label><input type="radio" name="mode" value="tna" x-model="mode"> TNA</label>
-        <label><input type="radio" name="mode" value="margen" x-model="mode"> Margen TNA</label>
+        <label><input type="radio" name="mode" value="margen" x-model="mode"> Margen</label>
       </fieldset>
 
       <label class="field field-value">
         <span x-text="valueLabel()"></span>
-        <input
-          type="text"
-          inputmode="decimal"
-          name="value"
-          x-model="value"
-          :placeholder="valuePlaceholder()"
-          autocomplete="off"
-        >
+        <input type="text" inputmode="decimal" name="value" x-model="value" :placeholder="valuePlaceholder()" autocomplete="off">
       </label>
 
-      <label class="field field-nominales">
+      <label class="field">
         <span>VN (nominales)</span>
-        <input
-          type="text"
-          inputmode="decimal"
-          name="nominales"
-          x-model="nominales"
-          autocomplete="off"
-        >
+        <input type="text" inputmode="decimal" name="nominales" x-model="nominales" autocomplete="off">
       </label>
-    </div>
 
-    <div class="form-row form-row-overrides">
-      <label class="field field-plazo">
+      <label class="field">
         <span>Plazo</span>
         <select name="plazo" x-model="plazo">
           <option value="24hs">24hs</option>
@@ -74,35 +58,31 @@
         </select>
       </label>
 
-      <label class="field field-toggle">
-        <input type="checkbox" x-model="useCustomSettle"> Settle custom
-      </label>
-      <label class="field field-settle" x-show="useCustomSettle">
-        <span>Fecha liquidación (DD/MM/AAAA)</span>
-        <input
-          type="text"
-          name="settle_custom"
-          x-model="settle"
-          placeholder="DD/MM/AAAA"
-          autocomplete="off"
-        >
-      </label>
-
-      <label class="field field-toggle">
-        <input type="checkbox" x-model="useCustomFx"> TC (A3500) custom
-      </label>
-      <label class="field field-fx" x-show="useCustomFx">
-        <span>TC aplicable</span>
-        <input
-          type="text"
-          inputmode="decimal"
-          name="fx_override"
-          x-model="fx"
-          autocomplete="off"
-        >
-      </label>
-
       <span id="yas-spinner" class="spinner" aria-hidden="true"></span>
+    </div>
+
+    <div class="form-row">
+      <label class="field-toggle"><input type="checkbox" x-model="useCustomSettle"> Settle custom</label>
+      <label class="field" x-show="useCustomSettle">
+        <span>Fecha liq. (DD/MM/AAAA)</span>
+        <input type="text" name="settle_custom" x-model="settle" :disabled="!useCustomSettle" placeholder="DD/MM/AAAA" autocomplete="off">
+      </label>
+
+      <label class="field-toggle"><input type="checkbox" x-model="useCustomFx"> TC (A3500) custom</label>
+      <label class="field" x-show="useCustomFx">
+        <span>TC aplicable</span>
+        <input type="text" inputmode="decimal" name="fx_override" x-model="fx" :disabled="!useCustomFx" autocomplete="off">
+      </label>
+
+      <label class="field-toggle"><input type="checkbox" x-model="useCustomConv"> Convención custom</label>
+      <label class="field" x-show="useCustomConv">
+        <span>Freq (días)</span>
+        <input type="text" inputmode="numeric" name="freq_override" x-model="freq" :disabled="!useCustomConv" placeholder="ej 90" autocomplete="off">
+      </label>
+      <label class="field" x-show="useCustomConv">
+        <span>Base (días)</span>
+        <input type="text" inputmode="numeric" name="base_override" x-model="base_" :disabled="!useCustomConv" placeholder="ej 365" autocomplete="off">
+      </label>
     </div>
   </form>
 
@@ -115,31 +95,32 @@
   </div>
 
   <details class="conv-note">
-    <summary>ℹ️ Convención de TNA y Margen TNA por tipo de bono</summary>
+    <summary>Convención de TNA · tabla de detección</summary>
     <table class="conv-table">
       <thead>
-        <tr><th>Tipo</th><th>Conversión TNA</th><th>Detección</th></tr>
+        <tr><th>Tipo de bono</th><th>Convención TNA</th><th>Detección</th></tr>
       </thead>
       <tbody>
-        <tr><td>LECAP / TAMAR puro / DLK soberano</td><td>tir_a_tna(TIREA, días_remanentes, 365)</td><td>default</td></tr>
-        <tr><td>CER / CER PROYECTADO</td><td>tir_a_tna(TIREA, 180, 365)</td><td>ajuste_sobre_capital contiene "CER"</td></tr>
-        <tr><td>Hard-dollar soberano / BOPREAL</td><td>tir_a_tna(TIREA, 180, 360)</td><td>moneda == USD</td></tr>
-        <tr><td>Dual TAMAR (VARIABLE_CAP + TAMAR)</td><td>cap 32/365</td><td>tipo_tasa_interes == VARIABLE_CAP y index == TAMAR</td></tr>
-        <tr><td>DLK (ajuste A3500)</td><td>tir_a_tna(TIREA, 90, 365)</td><td>ajuste_sobre_capital contiene "A3500"</td></tr>
+        <tr><td>Dual TAMAR</td><td>32/365 cap</td><td>tipo_tasa_interes = VARIABLE_CAP + index = TAMAR</td></tr>
+        <tr><td>Tasa variable pura (BADLAR / TAMAR)</td><td>90/365</td><td>tipo_tasa_interes = VARIABLE</td></tr>
+        <tr><td>CER / CER PROYECTADO</td><td>180/365</td><td>ajuste_sobre_capital contiene "CER"</td></tr>
+        <tr><td>UVA / UVA PROYECTADO</td><td>180/365</td><td>ajuste_sobre_capital contiene "UVA"</td></tr>
+        <tr><td>DLK (ajuste A3500)</td><td>90/365</td><td>ajuste_sobre_capital contiene "A3500"</td></tr>
+        <tr><td>Hard-dollar soberano / corp</td><td>180/360</td><td>moneda = USD</td></tr>
+        <tr><td>LECAP / bullets ARS</td><td>días remanentes / 365</td><td>default</td></tr>
       </tbody>
     </table>
     <p class="muted">
-      Margen TNA — <strong>VARIABLE</strong>: <code>TNA − benchmark/100</code> ·
-      <strong>VARIABLE_CAP</strong>: <code>((1+TIREA)^(32/365)−1) × (365/32) − benchmark/100</code>.
-      Benchmark = promedio últimos 5 obs BCRA.
+      Margen TNA — <strong>VARIABLE</strong>: <code>TNA − bench/100</code> ·
+      <strong>VARIABLE_CAP</strong>: <code>((1+TIREA)^(32/365)−1)·(365/32) − bench/100</code>.
+      Benchmark = avg últimos 5 obs BCRA. Si querés sanity-check contra otra convención,
+      activá <em>Convención custom</em>.
     </p>
   </details>
   {% endif %}
 </section>
 
 <script>
-  // Alpine factory for the YAS form. Defined inline so the templated
-  // initial state (selected code, plazo, etc.) can be injected from Jinja.
   function yasForm() {
     return {
       code: {{ (selected or "") | tojson }},
@@ -151,12 +132,15 @@
       settle: '',
       useCustomFx: false,
       fx: '',
+      useCustomConv: false,
+      freq: '',
+      base_: '',
       valueLabel() {
         return ({
           'precio': 'Precio (% VN)',
-          'tir':    'TIREA (decimal, ej 0,42)',
-          'tna':    'TNA (decimal, ej 0,38)',
-          'margen': 'Margen TNA (decimal, ej 0,02)',
+          'tir':    'TIREA (decimal)',
+          'tna':    'TNA (decimal)',
+          'margen': 'Margen TNA (decimal)',
         })[this.mode] || 'Valor';
       },
       valuePlaceholder() {

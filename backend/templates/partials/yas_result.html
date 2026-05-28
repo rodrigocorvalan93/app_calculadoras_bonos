@@ -1,12 +1,32 @@
-{# Wrapper swapped by hx-post /yas/recompute. Also includes the header
-   strip as an out-of-band swap so one round-trip updates both panels. #}
+{# Swapped by hx-post /yas/recompute. OOB updates the header strip. #}
 <div id="yas-header-strip" hx-swap-oob="true">
   {% include "partials/yas_header.html" %}
 </div>
 
-{% include "partials/yas_metrics.html" %}
+<div class="yas-grid">
+  <aside class="yas-left">
+    <div class="card">
+      <div class="card-title">
+        <span>Ticket</span>
+        <span class="card-title-aux">{{ meta.codigo }}</span>
+      </div>
+      <div class="card-body">
+        {% include "partials/yas_ticket.html" %}
+      </div>
+    </div>
+  </aside>
 
-<details class="ticket-expander">
-  <summary>Ver ticket completo</summary>
-  {% include "partials/yas_ticket.html" %}
-</details>
+  <section class="yas-right">
+    {% include "partials/yas_metrics.html" %}
+
+    <div class="card">
+      <div class="card-title">
+        <span>Cashflows · CPN / PMT</span>
+        <span class="card-title-aux">post-settlement</span>
+      </div>
+      <div class="card-body">
+        {% include "partials/yas_cashflows.html" %}
+      </div>
+    </div>
+  </section>
+</div>
