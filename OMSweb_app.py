@@ -106,12 +106,18 @@ DEFAULT_PLAZO = "24hs"  # "24hs" o "CI"
 # Cache TTL (segundos)
 TTL_MKT = 7
 TTL_METRICS = 10
+# TTL específico del FX implícito vía bonos: con varias pestañas concurrentes
+# y polling cada 30s, un TTL=7s se traduce en thrashing del lock (5 pestañas
+# se serializan en el peor fetch). 20s mata el thrashing manteniendo
+# freshness aceptable para el sidebar de dólares.
+TTL_FX_IMPLICIT = 20
 
 # Auto-refresh interval (seconds) — Bloomberg-style live update
 AUTO_REFRESH_SECS = 15
 
-# Workers para cálculo paralelo de métricas
-_METRICS_WORKERS = 8
+# Workers para cálculo paralelo de métricas. Subido de 8→12 para acelerar
+# el cálculo de TIR de curvas corporativas (hdmep/hdcable) en cold start.
+_METRICS_WORKERS = 12
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1192,12 +1198,22 @@ _curves_thread: Optional["_snap_threading.Thread"] = None
 _curves_thread_lock = _snap_threading.Lock()
 _curves_state = {"username": None, "password": None, "plazo": None, "interval": 30}
 
-# Curvas a precomputar (mismo conjunto que el dropdown del tab Curvas).
-# El daemon recorre la lista una vez por ciclo. La primera pasada calienta
-# todas; las siguientes refrescan cualquier curva cuyo TTL_METRICS expiró.
+# Curvas a precomputar. Ordenadas por prioridad: primero las más usadas y
+# rápidas (cer/lecap/tamar), después soberanas/duales, y al final las
+# corporativas (corp_hdmep / corp_hdcable son las más lentas en cold —
+# cashflows USD complejos). Así cualquier user que abra Curvas dentro de
+# los primeros segundos encuentra al menos cer/lecap calientes.
 _CURVES_WARMUP_KEYS: Tuple[str, ...] = (
-    "cer", "lecap", "tamar", "globales", "bonares",
-    "dolarlinked", "bopreales", "dualfija", "dualcer",
+    # Críticas / rápidas
+    "cer", "lecap", "tamar",
+    # Soberanas USD / duales
+    "globales", "bonares", "dolarlinked", "bopreales",
+    "dualfija", "dualcer", "dualtamar",
+    # Soberanas proyectadas
+    "cerproy", "todos_ars_proyectado",
+    # Corporativas — orden por costo ascendente
+    "corp_badlar", "corp_tasafija", "corp_uva",
+    "corp_tamar", "corp_dlk", "corp_hdmep", "corp_hdcable",
 )
 
 
@@ -1453,6 +1469,7 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
             "offer_price": "Offer Price",
             "offer_size": "Offer Size",
             "volume": "Volumen",
+            "vwap": "VWAP",
         }
     )
 
@@ -1497,6 +1514,7 @@ def load_curve_market_table(username: str, password: str, curve_key: str, plazo:
         "Bid Price",
         "Bid TIREA",
         "Last Price",
+        "VWAP",
         "TIREA",
         "Duration",
         "Margen TNA",
@@ -1788,7 +1806,6 @@ def _render_intraday_panel(
 
     op, hi, lo, cl = _v("open"), _v("high"), _v("low"), _v("close")
     last, vol, vwap_api, var = _v("last"), _v("volume"), _v("vwap"), _v("variation")
-    trade_count = _v("trade_count")
 
     # Línea 1: Open / High / Low / Close / Last
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -1823,12 +1840,12 @@ def _render_intraday_panel(
     # Línea 2: VWAP / Volumen / # Trades / Range del día
     d1, d2, d3, d4 = st.columns(4)
     if vwap_show is not None:
-        src = "API" if vwap_api is not None else "calc"
+        src = "EV/NV" if vwap_api is not None else "trades"
         d1.metric(f"VWAP ({src})", f"{vwap_show:,.4f}")
     else:
         d1.metric("VWAP", "—")
     d2.metric("Volumen", f"{vol:,.0f}" if vol is not None else "—")
-    n_tr = trade_count if trade_count is not None else (len(trades_df) if not trades_df.empty else None)
+    n_tr = len(trades_df) if not trades_df.empty else None
     d3.metric("# Trades", f"{n_tr:,.0f}" if n_tr is not None else "—")
     if hi is not None and lo is not None:
         d4.metric("Rango día", f"{hi - lo:,.4f}", delta=f"{(hi/lo - 1)*100:+.2f}%" if lo else None)
@@ -2138,7 +2155,7 @@ def _fx_rows_from_snap(snap: pd.DataFrame, bases: List[str], suf: str) -> pd.Dat
     return pd.DataFrame(rows)
 
 
-@st.cache_data(ttl=TTL_MKT, show_spinner=False)
+@st.cache_data(ttl=TTL_FX_IMPLICIT, show_spinner=False)
 def _fetch_implicit_fx_snap_cached(
     username: str,
     password: str,
@@ -2147,7 +2164,7 @@ def _fetch_implicit_fx_snap_cached(
 ) -> pd.DataFrame:
     """Cached inner: snapshot ARS + C + D legs para una tupla ordenada de bases.
 
-    Cache compartido (TTL_MKT=7s) entre todas las invocaciones del tab Dólares,
+    Cache compartido (TTL_FX_IMPLICIT=20s) entre todas las invocaciones del tab Dólares,
     del sidebar live y de la sección de brecha/canje — todas hacen la misma
     query con los mismos bonds.
     """
@@ -2395,6 +2412,7 @@ def style_mercado(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         "Bid TIREA": "{:.2%}",
         "Bid TEM": "{:.2%}",
         "Last Price": "{:,.4f}",
+        "VWAP": "{:,.4f}",
         "TIREA": "{:.2%}",
         "TEM": "{:.2%}",
         "Duration": "{:.4f}",
@@ -4131,7 +4149,12 @@ def _ticket_numeric(code: str, mode: str, value: float,
         dur = obj.calcula_duration(tirea, settle) if np.isfinite(tirea) else np.nan
         paridad = getattr(obj, "paridad", np.nan)
 
-        # Margen sobre índice
+        # Margen sobre índice. Tiene que replicar EXACTAMENTE la fórmula de
+        # rentafija.genera_ticket (líneas ~885-897). Hay 2 fórmulas distintas:
+        #   - VARIABLE       (BADLAR / TAMAR puro): margen = TNA - benchmark/100
+        #   - VARIABLE_CAP   (típico dual TAMAR):   margen = ((1+TIREA)^(32/365)-1)*(365/32) - benchmark/100
+        # Antes este bloque usaba la fórmula simple para los dos casos, lo
+        # que hacía que duales TAMAR (TXMJ9v, etc) reportaran margen mal.
         margen_tna = np.nan
         idx = getattr(obj, "index", None)
         tipo = getattr(obj, "tipo_tasa_interes", None)
@@ -4143,8 +4166,12 @@ def _ticket_numeric(code: str, mode: str, value: float,
                 ajuste = inp.get("tamar", pd.DataFrame()).tail(5).get("TAMAR", pd.Series()).mean()
             else:
                 ajuste = 0.0
-            if np.isfinite(tna) and np.isfinite(ajuste):
-                margen_tna = tna - ajuste / 100.0
+            if np.isfinite(ajuste):
+                if tipo == "VARIABLE_CAP" and np.isfinite(tirea):
+                    tna_eq = ((1.0 + float(tirea)) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
+                    margen_tna = tna_eq - ajuste / 100.0
+                elif tipo == "VARIABLE" and np.isfinite(tna):
+                    margen_tna = tna - ajuste / 100.0
 
         return {
             "Código": code,
@@ -5045,6 +5072,30 @@ def _render_yas(username, password, plazo, curve_labels):
     print(f"[YAS fragment] re-exec @ {datetime.now().strftime('%H:%M:%S.%f')[:-3]}", flush=True)
     st.subheader("Análisis de Yields (YAS)")
     st.caption("Ingresá Precio, TIR, TNA o Margen → obtenés las métricas del bono.")
+    with st.expander("ℹ️ Convención de TNA y Margen según tipo de bono", expanded=False):
+        st.markdown(
+            """
+**Cómo se calcula la TNA a partir de la TIREA** (depende del tipo de bono):
+
+| Tipo de bono | Conversión `TNA` | Base |
+|---|---|---|
+| LECAP / TAMAR puro / DLK soberano | `tir_a_tna(TIREA, días_remanentes, 365)` | TNA al vencimiento |
+| CER / CER proyectado | `tir_a_tna(TIREA, 180, 365)` | TNA semestral |
+| Hard-dollar soberano / BOPREAL | `tir_a_tna(TIREA, 180, 360)` | TNA semestral, 360 |
+| corp DLK | `tir_a_tna(TIREA, 90, 365)` | TNA trimestral |
+| corp Hard-dollar (HD MEP / HD Cable) | `tir_a_tna(TIREA, 180, 365)` | TNA semestral |
+| Dual CER/TAMAR / Dual fija / Dual TAMAR | `tir_a_tna(TIREA, 30, 365)` | TNA mensual (capitaliza c/30 días) |
+
+**Margen TNA sobre benchmark** (solo bonos a tasa variable):
+- `VARIABLE` (BADLAR / TAMAR puro): `Margen TNA = TNA(bono) − benchmark/100`
+- `VARIABLE_CAP` + TAMAR (típico de duales TAMAR): `Margen TNA = ((1 + TIREA)^(32/365) − 1) × (365/32) − TAMAR/100`
+
+**Benchmark TAMAR aplicado**: promedio de los **últimos 5 días** publicados por BCRA.
+La fórmula 32/365 viene de que un bono dual TAMAR capitaliza la tasa cada 32 días.
+Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en:
+(1) el TAMAR aplicable (5d vs 10d vs cierre del día), o (2) la frecuencia de capitalización (32d vs 30d).
+            """
+        )
 
     _ty1 = _tp_y.perf_counter()
     _all_codes_yas = _all_bond_codes()
@@ -5436,6 +5487,15 @@ def main():
     session = get_session(username, password)
     _lap("after get_session")
 
+    # Arrancar daemons de pre-warm ANTES de _ticker_curve_tables_cached.
+    # Así pueden empezar a calentar snapshot/curvas mientras el ticker
+    # carga su primera tabla, ganando segundos en el cold start del tab
+    # Curvas. interval=2 acelera la primera pasada del warmup.
+    start_snapshot_background(username, password, plazo, interval=2)
+    _lap("after start_snapshot_background")
+    start_curves_warmup_background(username, password, plazo, interval=2)
+    _lap("after start_curves_warmup_background")
+
     _ticker_curve_tables = _ticker_curve_tables_cached(username, password, plazo)
     _lap("after _ticker_curve_tables_cached")
 
@@ -5450,17 +5510,6 @@ def main():
     import indices as _indices
     _indices.start_fx_background(session=session, interval=10)
     _lap("after start_fx_background")
-
-    # Daemon de snapshot: pre-calienta _global_snapshot cada 5s para
-    # que el render de Mercado/Curvas no bloquee ~6s en el bulk fetch.
-    start_snapshot_background(username, password, plazo, interval=5)
-    _lap("after start_snapshot_background")
-
-    # Daemon de pre-warm de curvas: precomputa load_curve_last_table para las
-    # curvas principales en background, así el tab Curvas siempre pega cache
-    # hit (sin esto, primera click ~17s; con esto, ~0-1s en caso típico).
-    start_curves_warmup_background(username, password, plazo, interval=5)
-    _lap("after start_curves_warmup_background")
 
     _is_dark = st.session_state.get("bbg_theme", False)
 
@@ -7200,6 +7249,24 @@ La función Nelson–Siegel–Svensson (NSS) usada (yield en **%**, i.e. *puntos
         def _comp_live():
             st.subheader("Comparador de Yields")
             st.caption("Compará dos bonos por precio o TNA (equivalente a .comparar_precio() / .comparar_tna()).")
+            with st.expander("ℹ️ Convención de TNA — cómo se compara", expanded=False):
+                st.markdown(
+                    """
+La TNA mostrada para cada bono **no es la misma convención** entre tipos:
+- **LECAP / TAMAR puro / DLK sob**: TNA al vencimiento (días remanentes / 365)
+- **CER**: TNA semestral (180/365)
+- **Hard-dollar sob / BOPREAL**: TNA semestral (180/360)
+- **corp DLK**: TNA trimestral (90/365)
+- **Dual CER/TAMAR / Dual TAMAR**: TNA mensual (30/365)
+
+⚠️ **Cuando comparás "Por TNA" dos bonos de tipos distintos** (ej: LECAP vs Dual TAMAR),
+el número que ves no es directamente comparable. Mejor comparar siempre por **TIREA**
+(que sí es la TEA, equivalente para todos los bonos).
+
+Para **margen sobre TAMAR** en duales VARIABLE_CAP la fórmula es:
+`((1 + TIREA)^(32/365) − 1) × (365/32) − TAMAR/100` — usa TAMAR promedio últimos 5 días.
+                    """
+                )
 
             all_codes_c = _all_bond_codes()
             if not all_codes_c:

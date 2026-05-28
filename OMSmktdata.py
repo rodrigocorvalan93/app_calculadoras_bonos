@@ -283,11 +283,12 @@ def bulk_market_data(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Trades intraday — descubrimiento del endpoint correcto en Primary OMS
+# Trades intraday — Primary REST endpoint `rest/data/getTrades`
 # ──────────────────────────────────────────────────────────────────────
-# Primary/Matriz OMS expone trades históricos del día con paths que varían
-# por implementación. Probamos los candidatos más comunes en orden y
-# memoizamos el que funcione para no probar todos en cada llamada.
+# Doc oficial Primary: el endpoint requiere `external=true` para instrumentos
+# de mercados externos a Matba Rofex (incluye BYMA / MERV). Sin ese flag, los
+# trades de bonos vuelven vacíos. Igual probamos paths alternativos por si
+# alguna instancia los renombra.
 
 import OMSsettings as _cfg_trades
 
@@ -309,10 +310,17 @@ def _try_trades_endpoint(
     symbol: str,
     market_id: str,
     date_str: Optional[str] = None,
+    external: bool = True,
 ) -> Optional[list]:
     """Llama un endpoint candidato. Devuelve lista de trades si responde con
-    contenido razonable, None en cualquier otro caso (404, body vacío, etc)."""
+    contenido razonable, None en cualquier otro caso (404, body vacío, etc).
+
+    `external=True` por default: la doc Primary requiere ese flag para
+    instrumentos fuera de Matba Rofex (BYMA / MERV). Si el símbolo es ROFEX
+    nativo (DLR/DIC25, etc.), pasalo en False."""
     params = {"marketId": market_id, "symbol": symbol}
+    if external:
+        params["external"] = "true"
     if date_str:
         params["date"] = date_str
     try:
@@ -343,11 +351,15 @@ def fetch_intraday_trades(
     symbol: str,
     market_id: str = "ROFX",
     date_str: Optional[str] = None,
+    external: bool = True,
 ) -> pd.DataFrame:
     """Devuelve DataFrame con trades del símbolo. Columnas estandarizadas:
         - ts (Timestamp tz-aware Argentina)
         - price (float)
         - size (float)
+
+    `external=True` (default) es lo correcto para bonos BYMA / MERV. Pasalo
+    en False solo si consultás un instrumento ROFEX nativo (futuros DLR, etc).
 
     Si la API no expone trades históricos en ningún endpoint conocido, devuelve
     DataFrame vacío. La primera llamada prueba los candidatos en orden y
@@ -360,15 +372,15 @@ def fetch_intraday_trades(
 
     if endpoint is None and not already_checked:
         for cand in _TRADE_ENDPOINT_CANDIDATES:
-            trades = _try_trades_endpoint(session, cand, symbol, market_id, date_str)
+            trades = _try_trades_endpoint(session, cand, symbol, market_id, date_str, external)
             if trades is not None:
-                print(f"[trades] endpoint detectado: {cand}", flush=True)
+                print(f"[trades] endpoint detectado: {cand} (external={external})", flush=True)
                 with _TRADES_ENDPOINT_LOCK:
                     _TRADES_ENDPOINT_CACHE["path"] = cand
                     _TRADES_ENDPOINT_CACHE["checked"] = True
                 return _trades_to_df(trades)
         # Ninguno respondió
-        print("[trades] ningún endpoint respondió — trades intradía no disponibles", flush=True)
+        print(f"[trades] ningún endpoint respondió — trades intradía no disponibles (symbol={symbol}, external={external})", flush=True)
         with _TRADES_ENDPOINT_LOCK:
             _TRADES_ENDPOINT_CACHE["checked"] = True
         return pd.DataFrame(columns=["ts", "price", "size"])
@@ -376,7 +388,7 @@ def fetch_intraday_trades(
     if endpoint is None:
         return pd.DataFrame(columns=["ts", "price", "size"])
 
-    trades = _try_trades_endpoint(session, endpoint, symbol, market_id, date_str)
+    trades = _try_trades_endpoint(session, endpoint, symbol, market_id, date_str, external)
     if trades is None:
         return pd.DataFrame(columns=["ts", "price", "size"])
     return _trades_to_df(trades)
@@ -410,9 +422,10 @@ def _trades_to_df(trades: list) -> pd.DataFrame:
                     break
                 except (TypeError, ValueError):
                     continue
-        # Timestamp
+        # Timestamp — preferir servertime (millis epoch, unívoco) sobre
+        # datetime (string sin timezone, ambiguo entre UTC y local)
         ts_raw = None
-        for k in ("datetime", "date", "timestamp", "ts", "time"):
+        for k in ("servertime", "datetime", "date", "timestamp", "ts", "time"):
             if k in t and t[k] is not None:
                 ts_raw = t[k]
                 break
