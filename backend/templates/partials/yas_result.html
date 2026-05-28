@@ -1,0 +1,12 @@
+{# Wrapper swapped by hx-post /yas/recompute. Also includes the header
+   strip as an out-of-band swap so one round-trip updates both panels. #}
+<div id="yas-header-strip" hx-swap-oob="true">
+  {% include "partials/yas_header.html" %}
+</div>
+
+{% include "partials/yas_metrics.html" %}
+
+<details class="ticket-expander">
+  <summary>Ver ticket completo</summary>
+  {% include "partials/yas_ticket.html" %}
+</details>

@@ -1,0 +1,26 @@
+# Phase 1 backend — FastAPI + Jinja2 + HTMX. No WebSocket / charts yet.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+jinja2>=3.1,<4.0
+pydantic-settings>=2.4,<3.0
+python-multipart>=0.0.9
+httpx>=0.27,<1.0
+cachetools>=5.3,<6.0
+
+# Math / data — same versions the legacy app exercises against
+numpy>=1.26
+pandas>=2.0
+scipy>=1.11
+python-dateutil>=2.9
+holidays>=0.50
+
+# requests is still used by indices.py (BCRA backup fetch) and OMSapi.py
+requests>=2.32
+
+# utils.py imports matplotlib at module load. Until we untangle that import,
+# the backend needs it on the path even though we don't render any plots.
+matplotlib>=3.8
+
+# Tests
+pytest>=8.3
+pytest-asyncio>=0.24

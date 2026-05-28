@@ -1,0 +1,94 @@
+"""FastAPI entry point.
+
+Run with:
+    uvicorn backend.main:app --reload
+
+Lifespan:
+- imports `especies` (which lazily fires `indices.main()` on first attribute
+  access from `rentafija.inputs`)
+- optionally logs into the broker if PRIMARY_USER / PRIMARY_PASS are set
+- closes the httpx client on shutdown
+"""
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from backend.config import settings
+from backend.locale_ar import JINJA_FILTERS
+from backend.routes.yas import router as yas_router
+from backend.services import bond_universe
+from backend.services.primary_client import get_client
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("backend.main")
+
+BACKEND_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = BACKEND_DIR / "templates"
+STATIC_DIR = BACKEND_DIR / "static"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("[main] starting up")
+    try:
+        bond_universe.ensure_loaded()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] bond universe load failed (calculator will return errors)")
+
+    if settings.primary_user and settings.primary_pass:
+        try:
+            await get_client().login(settings.primary_user, settings.primary_pass)
+        except Exception:  # noqa: BLE001
+            logger.exception("[main] broker login raised; continuing without live data")
+    else:
+        logger.info("[main] PRIMARY_USER/PRIMARY_PASS not set; skipping broker login")
+
+    yield
+
+    logger.info("[main] shutting down")
+    try:
+        await get_client().close()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] primary client close failed")
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="Calculadora de Bonos — FastAPI rewrite",
+        lifespan=lifespan,
+    )
+
+    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    for name, fn in JINJA_FILTERS.items():
+        templates.env.filters[name] = fn
+    app.state.templates = templates
+
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.include_router(yas_router)
+
+    @app.get("/")
+    async def index() -> RedirectResponse:
+        return RedirectResponse(url="/yas", status_code=302)
+
+    @app.get("/healthz")
+    async def healthz(request: Request) -> dict:
+        return {
+            "status": "ok",
+            "bonds_loaded": len(bond_universe.all_codes()),
+            "broker_authenticated": get_client().authenticated,
+        }
+
+    return app
+
+
+app = create_app()

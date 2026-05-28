@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}YAS — {{ selected or "Análisis de Yields" }}{% endblock %}
+
+{% block content %}
+<section class="yas" x-data="yasForm()">
+  <header class="yas-header">
+    <h1>Análisis de Yields</h1>
+    <p class="muted">Ingresá Precio, TIREA, TNA o Margen → obtenés las métricas del bono.</p>
+  </header>
+
+  {% if not codes %}
+    <div class="alert">
+      No hay bonos cargados. Verificá que <code>especies.py</code> esté disponible y que
+      <code>indices.main()</code> haya podido leer el backup BCRA.
+    </div>
+  {% else %}
+  <form
+    id="yas-form"
+    class="yas-form"
+    hx-post="/yas/recompute"
+    hx-target="#yas-result"
+    hx-swap="innerHTML"
+    hx-trigger="change, keyup changed delay:80ms from:input[name=value], load"
+    hx-indicator="#yas-spinner"
+  >
+    <div class="form-row">
+      <label class="field field-bond">
+        <span>Bono</span>
+        <select name="code" x-model="code">
+          {% for c in codes %}
+            <option value="{{ c }}" {% if c == selected %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <fieldset class="field field-mode">
+        <legend>Input</legend>
+        <label><input type="radio" name="mode" value="precio" checked x-model="mode"> Precio</label>
+        <label><input type="radio" name="mode" value="tir" x-model="mode"> TIREA</label>
+        <label><input type="radio" name="mode" value="tna" x-model="mode"> TNA</label>
+        <label><input type="radio" name="mode" value="margen" x-model="mode"> Margen TNA</label>
+      </fieldset>
+
+      <label class="field field-value">
+        <span x-text="valueLabel()"></span>
+        <input
+          type="text"
+          inputmode="decimal"
+          name="value"
+          x-model="value"
+          :placeholder="valuePlaceholder()"
+          autocomplete="off"
+        >
+      </label>
+
+      <label class="field field-nominales">
+        <span>VN (nominales)</span>
+        <input
+          type="text"
+          inputmode="decimal"
+          name="nominales"
+          x-model="nominales"
+          autocomplete="off"
+        >
+      </label>
+    </div>
+
+    <div class="form-row form-row-overrides">
+      <label class="field field-plazo">
+        <span>Plazo</span>
+        <select name="plazo" x-model="plazo">
+          <option value="24hs">24hs</option>
+          <option value="CI">CI</option>
+        </select>
+      </label>
+
+      <label class="field field-toggle">
+        <input type="checkbox" x-model="useCustomSettle"> Settle custom
+      </label>
+      <label class="field field-settle" x-show="useCustomSettle">
+        <span>Fecha liquidación (DD/MM/AAAA)</span>
+        <input
+          type="text"
+          name="settle_custom"
+          x-model="settle"
+          placeholder="DD/MM/AAAA"
+          autocomplete="off"
+        >
+      </label>
+
+      <label class="field field-toggle">
+        <input type="checkbox" x-model="useCustomFx"> TC (A3500) custom
+      </label>
+      <label class="field field-fx" x-show="useCustomFx">
+        <span>TC aplicable</span>
+        <input
+          type="text"
+          inputmode="decimal"
+          name="fx_override"
+          x-model="fx"
+          autocomplete="off"
+        >
+      </label>
+
+      <span id="yas-spinner" class="spinner" aria-hidden="true"></span>
+    </div>
+  </form>
+
+  <div id="yas-header-strip">
+    {% include "partials/yas_header.html" %}
+  </div>
+
+  <div id="yas-result" aria-live="polite">
+    <!-- partials/yas_result.html populated by htmx -->
+  </div>
+
+  <details class="conv-note">
+    <summary>ℹ️ Convención de TNA y Margen TNA por tipo de bono</summary>
+    <table class="conv-table">
+      <thead>
+        <tr><th>Tipo</th><th>Conversión TNA</th><th>Detección</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>LECAP / TAMAR puro / DLK soberano</td><td>tir_a_tna(TIREA, días_remanentes, 365)</td><td>default</td></tr>
+        <tr><td>CER / CER PROYECTADO</td><td>tir_a_tna(TIREA, 180, 365)</td><td>ajuste_sobre_capital contiene "CER"</td></tr>
+        <tr><td>Hard-dollar soberano / BOPREAL</td><td>tir_a_tna(TIREA, 180, 360)</td><td>moneda == USD</td></tr>
+        <tr><td>Dual TAMAR (VARIABLE_CAP + TAMAR)</td><td>cap 32/365</td><td>tipo_tasa_interes == VARIABLE_CAP y index == TAMAR</td></tr>
+        <tr><td>DLK (ajuste A3500)</td><td>tir_a_tna(TIREA, 90, 365)</td><td>ajuste_sobre_capital contiene "A3500"</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">
+      Margen TNA — <strong>VARIABLE</strong>: <code>TNA − benchmark/100</code> ·
+      <strong>VARIABLE_CAP</strong>: <code>((1+TIREA)^(32/365)−1) × (365/32) − benchmark/100</code>.
+      Benchmark = promedio últimos 5 obs BCRA.
+    </p>
+  </details>
+  {% endif %}
+</section>
+
+<script>
+  // Alpine factory for the YAS form. Defined inline so the templated
+  // initial state (selected code, plazo, etc.) can be injected from Jinja.
+  function yasForm() {
+    return {
+      code: {{ (selected or "") | tojson }},
+      mode: 'precio',
+      value: '',
+      nominales: '1.000.000',
+      plazo: {{ plazo | tojson }},
+      useCustomSettle: false,
+      settle: '',
+      useCustomFx: false,
+      fx: '',
+      valueLabel() {
+        return ({
+          'precio': 'Precio (% VN)',
+          'tir':    'TIREA (decimal, ej 0,42)',
+          'tna':    'TNA (decimal, ej 0,38)',
+          'margen': 'Margen TNA (decimal, ej 0,02)',
+        })[this.mode] || 'Valor';
+      },
+      valuePlaceholder() {
+        return ({
+          'precio': '87,30',
+          'tir':    '0,40',
+          'tna':    '0,38',
+          'margen': '0,02',
+        })[this.mode] || '';
+      },
+    };
+  }
+</script>
+{% endblock %}

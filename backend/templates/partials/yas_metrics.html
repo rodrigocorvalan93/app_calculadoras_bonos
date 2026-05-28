@@ -1,0 +1,67 @@
+{# Métricas centrales. Lo que cambia en cada recompute. #}
+{% if metrics.get("error") %}
+  <div class="alert alert-error">⚠️ {{ metrics.error }}</div>
+{% else %}
+<div class="metrics-grid metrics-primary">
+  <div class="metric">
+    <span class="metric-label">Precio (% VN)</span>
+    <span class="metric-value">{{ metrics.precio_pct | ar_num(4) }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">TIREA</span>
+    <span class="metric-value">{{ metrics.tirea | ar_pct(4) }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">TNA</span>
+    <span class="metric-value">{{ metrics.tna | ar_pct(4) }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">TEM</span>
+    <span class="metric-value">{{ metrics.tem | ar_pct(4) }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Duration</span>
+    <span class="metric-value">{{ metrics.duration | ar_num(4) }}</span>
+  </div>
+</div>
+
+<div class="metrics-grid metrics-secondary">
+  <div class="metric">
+    <span class="metric-label">Paridad</span>
+    <span class="metric-value">{{ (metrics.paridad * 100) | ar_pct_pp(2) if metrics.paridad == metrics.paridad else "—" }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Int. Corridos</span>
+    <span class="metric-value">{{ metrics.intereses_corridos | ar_num(6) }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Días Devengados</span>
+    <span class="metric-value">{{ metrics.dias_corridos | ar_int }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Días Remanentes</span>
+    <span class="metric-value">{{ metrics.dias_remanentes | ar_int }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Val. Residual</span>
+    <span class="metric-value">{{ metrics.valor_residual | ar_pct_pp(2) }}</span>
+  </div>
+</div>
+
+{% if metrics.tipo_tasa_interes in ("VARIABLE", "VARIABLE_CAP") and metrics.index %}
+<div class="metrics-grid metrics-margen">
+  <div class="metric metric-highlight">
+    <span class="metric-label">Margen TNA vs {{ metrics.index }}</span>
+    <span class="metric-value">{{ metrics.margen_tna | ar_pct(2) }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">{{ metrics.index }} aplicable (avg 5d)</span>
+    <span class="metric-value">{{ metrics.benchmark_pct | ar_pct_pp(4) }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Tipo tasa</span>
+    <span class="metric-value">{{ metrics.tipo_tasa_interes }}</span>
+  </div>
+</div>
+{% endif %}
+{% endif %}
