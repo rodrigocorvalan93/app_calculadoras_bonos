@@ -6,10 +6,19 @@ the TIREA column land in step 2, once the broker session is in place.
 """
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.services import bond_universe, curves, pricing
+from backend.services import bond_universe, curves, marketdata_store, pricing, symbols as syms
+
+# Shared pool — the per-bond TIR compute is CPU-bound and the cache
+# hits keep the work small, but the first poll after a price tick still
+# benefits from fan-out across cores.
+_row_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="curve-rows")
 
 router = APIRouter(prefix="/curves", tags=["curves"])
 
@@ -18,25 +27,64 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
 
 
-def _rows_for(curve_key: str) -> list[dict]:
-    """One row per bond code in the curve — metadata only for now."""
+def _row_for_code(code: str, plazo: str) -> dict | None:
+    meta = pricing.bond_meta(code)
+    if not meta:
+        return None
+    store = marketdata_store.get_store()
+    symbol = syms.md_symbol(code, plazo)
+    snap = store.get(symbol)
+    last_pct = snap.last if snap else None
+    bid_pct = snap.bid if snap else None
+    offer_pct = snap.offer if snap else None
+    last_ts = snap.last_ts if snap else None
+    metrics = pricing.metrics_for_market_price(code, last_pct)
+    row = dict(meta)
+    row.update(
+        {
+            "symbol": symbol,
+            "last": last_pct,
+            "bid": bid_pct,
+            "offer": offer_pct,
+            "last_ts": last_ts,
+            "tirea": (metrics or {}).get("tirea") if metrics else None,
+            "tna": (metrics or {}).get("tna") if metrics else None,
+            "tna_convention_label": (metrics or {}).get("tna_convention_label") if metrics else None,
+            "duration": (metrics or {}).get("duration") if metrics else None,
+            "paridad": (metrics or {}).get("paridad") if metrics else None,
+            "margen_tna": (metrics or {}).get("margen_tna") if metrics else None,
+        }
+    )
+    return row
+
+
+async def _rows_for(curve_key: str, plazo: str = "24hs") -> list[dict]:
+    """One row per bond. Live columns come from the in-process store;
+    TIREA / Duration are cached (10 s TTL) so a 5 s poll hits the cache
+    nearly always. Parallelized across `_row_pool` so the cold path
+    (cache miss on a wide curve) stays under the 50 ms p95 target."""
     codes = curves.build_curve_codes().get(curve_key, [])
-    out = []
-    for code in codes:
-        meta = pricing.bond_meta(code)
-        if not meta:
-            continue
-        out.append(meta)
-    return out
+    if not codes:
+        return []
+    loop = asyncio.get_running_loop()
+    rows: list[dict | None] = await asyncio.gather(
+        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo) for code in codes)
+    )
+    return [r for r in rows if r is not None]
 
 
 @router.get("", response_class=HTMLResponse)
-async def curves_page(request: Request, curve: str | None = None) -> HTMLResponse:
+async def curves_page(
+    request: Request,
+    curve: str | None = None,
+    plazo: str = "24hs",
+) -> HTMLResponse:
     bond_universe.ensure_loaded()
     all_curves = curves.list_curves()
     table = curves.build_curve_codes()
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
     selected_key = curve if (curve and curve in table) else default_key
+    rows = await _rows_for(selected_key, plazo) if selected_key else []
     return _render(
         request,
         "curves.html",
@@ -44,16 +92,23 @@ async def curves_page(request: Request, curve: str | None = None) -> HTMLRespons
         table=table,
         selected_key=selected_key,
         selected_def=curves.curve_def(selected_key) if selected_key else None,
-        rows=_rows_for(selected_key) if selected_key else [],
+        rows=rows,
+        plazo=plazo,
     )
 
 
 @router.get("/table", response_class=HTMLResponse)
-async def curve_table_partial(request: Request, curve: str = "") -> HTMLResponse:
+async def curve_table_partial(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+) -> HTMLResponse:
     """HTMX partial: table body only for the requested curve."""
+    rows = await _rows_for(curve, plazo)
     return _render(
         request,
         "partials/curve_table.html",
         selected_def=curves.curve_def(curve),
-        rows=_rows_for(curve),
+        rows=rows,
+        plazo=plazo,
     )

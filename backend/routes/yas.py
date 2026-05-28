@@ -13,7 +13,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from backend.config import settings
-from backend.services import bond_universe, pricing
+from backend.services import bond_universe, marketdata_store, pricing, symbols as syms
 
 router = APIRouter(prefix="/yas", tags=["yas"])
 
@@ -120,4 +120,24 @@ async def yas_meta(request: Request, code: str) -> HTMLResponse:
         request,
         "partials/yas_header.html",
         meta=pricing.bond_meta(code),
+    )
+
+
+@router.get("/market/{code}", response_class=HTMLResponse)
+async def yas_market_card(
+    request: Request,
+    code: str,
+    plazo: str = "24hs",
+) -> HTMLResponse:
+    """HTMX partial — bid / offer / last / OHLC for a bond from the store."""
+    store = marketdata_store.get_store()
+    symbol = syms.md_symbol(code, plazo)
+    snap = store.get(symbol)
+    return _render(
+        request,
+        "partials/yas_market_card.html",
+        snap=snap.to_dict() if snap else None,
+        symbol=symbol,
+        code=code,
+        plazo=plazo,
     )

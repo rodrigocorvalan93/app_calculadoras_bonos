@@ -418,7 +418,10 @@ def compute_metrics(
             base["error"] = f"Modo desconocido: {mode!r}"
             return base
     except Exception as exc:  # noqa: BLE001
-        logger.exception("[pricing] %s mode=%s value=%s failed", code, mode, value)
+        # debug-level: a single matured or quirky bond on a 100+ row
+        # curve must not flood the logs with stack traces every poll.
+        # YAS callers that need the full trace can re-enable DEBUG.
+        logger.debug("[pricing] %s mode=%s value=%s failed: %s", code, mode, value, exc)
         base["error"] = f"{type(exc).__name__}: {exc}"
         return base
 
@@ -487,6 +490,62 @@ def compute_metrics(
         }
     )
     return base
+
+
+# ── Curve-row helper (cached) ────────────────────────────────────────────
+
+from backend.cache import LockedTTLCache  # noqa: E402  (avoid top circular)
+
+# Curve rows poll every 5 s. We bucket the price (rounded to 2 decimals)
+# and TTL at 20 s so steady polling NEVER hits a cold cache mid-session
+# — only the very first request for a curve pays the compute cost. The
+# background warmup daemon (next step) will keep the cache hot ahead of
+# the first user click too.
+_curve_metrics_cache = LockedTTLCache(maxsize=8192, ttl=20)
+
+
+def metrics_for_market_price(
+    code: str,
+    last_price_pct: Optional[float],
+    settle: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Cheap variant for curve tables: returns the same shape as
+    `compute_metrics` for a market price, cached with a short TTL.
+
+    Returns None when there's no usable price (no live data, broker
+    offline, etc.) or when the calc raised — the template renders
+    dashes. A matured / non-quoted bond should never bring the page
+    down because of one bad row.
+    """
+    if last_price_pct is None:
+        return None
+    try:
+        v = float(last_price_pct)
+    except (TypeError, ValueError):
+        return None
+    if not (v > 0 and v < 1000):  # sanity: bond prices live in 5-500 %
+        return None
+
+    bucket = round(v, 2)
+    key = (code, bucket, settle or "")
+
+    def _factory() -> Dict[str, Any]:
+        try:
+            return compute_metrics(
+                code=code,
+                mode="precio",
+                value=bucket,
+                settle=settle,
+                include_cashflows=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[pricing] metrics_for_market_price(%s, %s) failed: %s", code, bucket, exc)
+            return {"error": str(exc)}
+
+    res = _curve_metrics_cache.get_or_compute(key, _factory)
+    if res.get("error"):
+        return None
+    return res
 
 
 def ticket_rows(metrics: Dict[str, Any], nominales: float = 1_000_000.0) -> Dict[str, Any]:

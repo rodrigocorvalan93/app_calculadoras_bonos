@@ -154,3 +154,160 @@ async def test_market_snapshot_handles_empty_store() -> None:
     assert payload["symbol"] == "MERV - XMEV - GD30 - 24hs"
     # No live data in the test process — snapshot is None and that's fine.
     assert payload["snapshot"] is None or isinstance(payload["snapshot"], dict)
+
+
+# ── YAS market card ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_yas_market_card_empty_store() -> None:
+    """With no store data the card renders dashes but doesn't crash."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get("/yas/market/GD30")
+    assert r.status_code == 200
+    assert "MERV - XMEV - GD30 - 24hs" in r.text
+    assert "sin data en el store" in r.text
+
+
+@pytest.mark.asyncio
+async def test_yas_market_card_with_injected_snapshot() -> None:
+    """Inject a snapshot into the singleton store and verify the partial picks it up."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import marketdata_store as mds_
+
+    store = mds_.get_store()
+    store.update_from_md(
+        "MERV - XMEV - GD30 - 24hs",
+        {
+            "BI": [{"price": 69.95, "size": 5000}],
+            "OF": [{"price": 70.05, "size": 3000}],
+            "LA": {"price": 70.00, "size": 1500, "date": "2026-05-28T15:30:00"},
+            "HI": 70.20,
+            "LO": 69.50,
+        },
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get("/yas/market/GD30")
+    assert r.status_code == 200
+    # es-AR formatting: comma decimal, period thousands.
+    assert "69,9500" in r.text  # bid
+    assert "70,0500" in r.text  # offer
+    assert "70,0000" in r.text  # last
+    assert "2026-05-28T15:30:00" in r.text
+
+
+# ── Curves table with live store ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_curves_table_with_live_store() -> None:
+    """A code with a snapshot must show its last + a computed TIREA in the row."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, curves, marketdata_store as mds_, symbols as syms_
+
+    bond_universe.ensure_loaded()
+    # Pick a non-empty curve, then pick its first code with a known price ceiling.
+    table = curves.build_curve_codes()
+    chosen_curve = None
+    chosen_code = None
+    for c in curves.list_curves():
+        codes = table.get(c.key) or []
+        if codes:
+            chosen_curve = c.key
+            chosen_code = codes[0]
+            break
+    assert chosen_curve and chosen_code
+
+    store = mds_.get_store()
+    symbol = syms_.md_symbol(chosen_code, "24hs")
+    store.update_from_md(symbol, {"LA": {"price": 87.30, "size": 1000}})
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get(f"/curves/table?curve={chosen_curve}&plazo=24hs")
+    assert r.status_code == 200
+    # Should report at least one bond with live data and render a TIREA % column.
+    assert "con last live" in r.text
+    assert "87,3000" in r.text
+
+
+def test_metrics_for_market_price_cached() -> None:
+    """Second call with same bucket must hit the cache (object identity)."""
+    from backend.services import bond_universe, pricing
+
+    bond_universe.ensure_loaded()
+    if "TXMJ9v" not in bond_universe.all_codes():
+        pytest.skip("TXMJ9v missing")
+
+    a = pricing.metrics_for_market_price("TXMJ9v", 87.30)
+    b = pricing.metrics_for_market_price("TXMJ9v", 87.30)
+    assert a is b, "TTL cache should return the same dict identity for the same bucket"
+
+
+def test_metrics_for_market_price_handles_garbage() -> None:
+    from backend.services import pricing
+
+    assert pricing.metrics_for_market_price("TXMJ9v", None) is None
+    assert pricing.metrics_for_market_price("TXMJ9v", "foo") is None
+    assert pricing.metrics_for_market_price("TXMJ9v", -5) is None
+
+
+# ── Performance gate: a curve with many live prices must stay sub-50ms ──
+
+
+@pytest.mark.asyncio
+async def test_curve_table_latency_with_live_prices() -> None:
+    """Inject prices for every code in the widest curve and verify the
+    HTTP /curves/table call (with TIREA computed per row) clears the
+    50 ms p95 target on the warm path.
+    """
+    import statistics
+    import time
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, curves, marketdata_store as mds_, symbols as syms_
+
+    bond_universe.ensure_loaded()
+    table = curves.build_curve_codes()
+    chosen = max(table.items(), key=lambda kv: len(kv[1]))
+    curve_key, codes = chosen
+    if len(codes) < 20:
+        pytest.skip("No wide curve to stress the row pipeline")
+
+    store = mds_.get_store()
+    # Plausible price per bond — same number is fine, we just need the
+    # store entries to exist so the row picks the metrics path.
+    for code in codes:
+        store.update_from_md(
+            syms_.md_symbol(code, "24hs"),
+            {"LA": {"price": 90.0, "size": 100}},
+        )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # Two warm-up calls so the TTL cache + error-bucket entries are
+        # fully populated (matured bonds throw on first touch; we want
+        # those cached too before measuring).
+        await ac.get(f"/curves/table?curve={curve_key}&plazo=24hs")
+        await ac.get(f"/curves/table?curve={curve_key}&plazo=24hs")
+
+        times = []
+        for _ in range(30):
+            t0 = time.perf_counter()
+            r = await ac.get(f"/curves/table?curve={curve_key}&plazo=24hs")
+            times.append(time.perf_counter() - t0)
+            assert r.status_code == 200
+
+    p50 = statistics.median(times)
+    p95 = sorted(times)[int(len(times) * 0.95)]
+    # CLAUDE.md target: < 50 ms p95 on the warm-cache path.
+    assert p95 < 0.050, f"{curve_key} ({len(codes)} bonds) p50={p50*1000:.1f}ms p95={p95*1000:.1f}ms"

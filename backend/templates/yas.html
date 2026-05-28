@@ -91,6 +91,15 @@
     {% include "partials/yas_header.html" %}
   </div>
 
+  <div
+    id="yas-market-card"
+    hx-get="/yas/market/{{ selected }}"
+    hx-trigger="load, every 3s"
+    hx-swap="innerHTML"
+  >
+    <p class="muted" style="font-size:12px;padding:8px 0">Cargando datos de mercado…</p>
+  </div>
+
   <div id="yas-result" aria-live="polite">
     <!-- partials/yas_result.html populated by htmx -->
   </div>

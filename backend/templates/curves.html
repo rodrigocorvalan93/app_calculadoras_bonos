@@ -6,33 +6,55 @@
 <section class="curves">
   <header class="yas-header">
     <h1>Curvas</h1>
-    <p class="muted">Universo de bonos agrupado por curva. Live prices y TIREA por bono llegan en el próximo paso.</p>
+    <p class="muted">Bid / Last / Ask provienen del store en memoria alimentado por el WS al broker. Refresh cada 5 s.</p>
   </header>
 
   <div class="curve-picker card">
     <div class="card-body">
-      <label class="field">
-        <span>Curva</span>
-        <select
-          name="curve"
-          hx-get="/curves/table"
-          hx-trigger="change"
-          hx-target="#curve-table"
-          hx-swap="innerHTML"
-          hx-include="this"
-        >
-          {% for c in all_curves %}
-            {% set count = (table.get(c.key) or []) | length %}
-            <option value="{{ c.key }}" {% if c.key == selected_key %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>
-              {{ c.label }} {% if count %}({{ count }}){% endif %}
-            </option>
-          {% endfor %}
-        </select>
-      </label>
+      <div class="row-fields">
+        <label class="field">
+          <span>Curva</span>
+          <select
+            name="curve"
+            hx-get="/curves/table"
+            hx-trigger="change"
+            hx-target="#curve-table"
+            hx-swap="innerHTML"
+            hx-include="[name=plazo]"
+          >
+            {% for c in all_curves %}
+              {% set count = (table.get(c.key) or []) | length %}
+              <option value="{{ c.key }}" {% if c.key == selected_key %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>
+                {{ c.label }} {% if count %}({{ count }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Plazo</span>
+          <select
+            name="plazo"
+            hx-get="/curves/table"
+            hx-trigger="change"
+            hx-target="#curve-table"
+            hx-swap="innerHTML"
+            hx-include="[name=curve]"
+          >
+            <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
+            <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
+          </select>
+        </label>
+      </div>
     </div>
   </div>
 
-  <div id="curve-table">
+  <div
+    id="curve-table"
+    hx-get="/curves/table"
+    hx-trigger="every 5s"
+    hx-swap="innerHTML"
+    hx-include="[name=curve], [name=plazo]"
+  >
     {% include "partials/curve_table.html" %}
   </div>
 </section>
