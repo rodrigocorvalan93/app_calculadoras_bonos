@@ -116,7 +116,11 @@ def fetch_variable_data_api_v4(id_variable, fecha_desde, fecha_hasta,
         params["limit"] = limit
 
     try:
-        resp = requests.get(url, params=params, verify=False, timeout=20)
+        # Timeout 8s: si BCRA no responde en 8s no va a responder en 20.
+        # Lo importante es no bloquear el boot completo: como las series se
+        # piden en paralelo (ver _fetch_bcra_series_paralelo), peor caso son
+        # 8s en vez de 6×20=120s.
+        resp = requests.get(url, params=params, verify=False, timeout=8)
         resp.raise_for_status()
         data = resp.json()
 
@@ -786,41 +790,48 @@ def main():
         uva_new_df = _df_vacio_bcra()
         # POMO no lo usamos más abajo, lo ignoramos
     else:
-        # A3500
-        a3500_new_df = fetch_variable_data_api_v4(5, start_date, end_date)
-        if a3500_new_df is None:
-            print("ERROR: No se pudieron obtener los datos A3500. Usando solo backup.")
-            a3500_new_df = _df_vacio_bcra()
+        # Las 6 series se piden EN PARALELO. Antes era secuencial: con BCRA
+        # caído eran 6 × timeout = ~2 minutos bloqueando el boot. Ahora todas
+        # arrancan al mismo tiempo y el peor caso es 1 × timeout (~8s).
+        # Si alguna falla, fallback al DataFrame vacío para que el resto
+        # combine con backup.
+        from concurrent.futures import ThreadPoolExecutor as _BcraPool
+        _bcra_series = [
+            ("A3500",    5),
+            ("BADLAR",   7),
+            ("TAMAR",   44),
+            ("CER",     30),
+            ("INFLAMOM", 27),
+            ("UVA",     31),
+        ]
+        _results: dict = {}
+        with _BcraPool(max_workers=len(_bcra_series)) as _ex:
+            _futures = {
+                _ex.submit(fetch_variable_data_api_v4, _vid, start_date, end_date): _name
+                for _name, _vid in _bcra_series
+            }
+            for _f in _futures:
+                _name = _futures[_f]
+                try:
+                    _results[_name] = _f.result()
+                except Exception:
+                    _results[_name] = None
 
-        # BADLAR
-        badlar_new_df = fetch_variable_data_api_v4(7, start_date, end_date)
-        if badlar_new_df is None:
-            print("ERROR: No se pudieron obtener los datos BADLAR. Usando solo backup.")
-            badlar_new_df = _df_vacio_bcra()
+        # Lista única consolidada de fallos en lugar de 6 ERRORs separados
+        _failed = [n for n, df in _results.items() if df is None]
+        if _failed:
+            print(f"ERROR: BCRA no respondió para {', '.join(_failed)} — usando backup para esas series.")
 
-        # TAMAR
-        tamar_new_df = fetch_variable_data_api_v4(44, start_date, end_date)
-        if tamar_new_df is None:
-            print("ERROR: No se pudieron obtener los datos TAMAR. Usando solo backup.")
-            tamar_new_df = _df_vacio_bcra()
+        def _r(name: str):
+            df = _results.get(name)
+            return _df_vacio_bcra() if df is None else df
 
-        # CER
-        cer_new_df = fetch_variable_data_api_v4(30, start_date, end_date)
-        if cer_new_df is None:
-            print("ERROR: No se pudieron obtener los datos CER. Usando solo backup.")
-            cer_new_df = _df_vacio_bcra()
-
-        # INFLAMOM
-        inflamom_new_df = fetch_variable_data_api_v4(27, start_date, end_date)
-        if inflamom_new_df is None:
-            print("ERROR: No se pudieron obtener los datos INFLAMOM. Usando solo backup.")
-            inflamom_new_df = _df_vacio_bcra()
-
-        # UVA
-        uva_new_df = fetch_variable_data_api_v4(31, start_date, end_date)
-        if uva_new_df is None:
-            print("ERROR: No se pudieron obtener los datos UVA. Usando solo backup.")
-            uva_new_df = _df_vacio_bcra()
+        a3500_new_df    = _r("A3500")
+        badlar_new_df   = _r("BADLAR")
+        tamar_new_df    = _r("TAMAR")
+        cer_new_df      = _r("CER")
+        inflamom_new_df = _r("INFLAMOM")
+        uva_new_df      = _r("UVA")
 
     # 3) Unificamos cada serie (histórico + nuevos)
 

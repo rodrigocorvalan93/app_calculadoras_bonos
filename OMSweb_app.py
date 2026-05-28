@@ -5271,6 +5271,7 @@ Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en
                 with s4:
                     st.metric("Val. Residual", f"{vr_y:.2f}%" if np.isfinite(vr_y) else "—")
 
+                _ty_disp0 = _tp_y.perf_counter()
                 _col_ticket, _col_cf = st.columns(2)
                 with _col_ticket:
                     with st.expander("Ver ticket completo (DataFrame)", expanded=False):
@@ -5313,9 +5314,16 @@ Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en
                                     st.dataframe(_pmt_show, width="stretch", hide_index=True)
                                 else:
                                     st.info("Sin pagos para mostrar.")
+                _ty_disp1 = _tp_y.perf_counter()
+                print(
+                    f"[YAS] ticket+cashflows render={1000*(_ty_disp1-_ty_disp0):.0f}ms",
+                    flush=True,
+                )
 
                 # Datos Delta (base interna de especies) — lazy, silent fail
+                _ty_d0 = _tp_y.perf_counter()
                 _delta_info = delta_especies.pretty_info(yas_code)
+                _ty_d1 = _tp_y.perf_counter()
                 if _delta_info:
                     with st.expander(f"📋 Datos Delta — {yas_code}", expanded=False):
                         _half = (len(_delta_info) + 1) // 2
@@ -5324,9 +5332,18 @@ Si comparás contra otra fuente y no cierra, lo más probable es discrepancia en
                             _c1.markdown(f"**{_k}:** {_v}")
                         for _k, _v in _delta_info[_half:]:
                             _c2.markdown(f"**{_k}:** {_v}")
+                _ty_d2 = _tp_y.perf_counter()
+                print(
+                    f"[YAS] delta_info={1000*(_ty_d1-_ty_d0):.0f}ms "
+                    f"delta_render={1000*(_ty_d2-_ty_d1):.0f}ms",
+                    flush=True,
+                )
 
                 # Tenencias por fondo (base interna de composición) — lazy, silent fail
+                _ty_t0 = _tp_y.perf_counter()
                 _render_tenencias_delta(yas_code)
+                _ty_t1 = _tp_y.perf_counter()
+                print(f"[YAS] tenencias={1000*(_ty_t1-_ty_t0):.0f}ms", flush=True)
 
                 # Gráfico de la curva (lazy - sólo si se abre)
                 with st.expander("📈 Ver en la curva (NSS)", expanded=False):
