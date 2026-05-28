@@ -176,17 +176,19 @@ def market_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     vol_nv = df["NV"].map(extract_size) if "NV" in df.columns else pd.Series(np.nan, index=df.index)
     out["volume"] = vol_tv.fillna(vol_nv)
 
-    # VWAP intradía (si la API lo expone como entry WA)
-    if "WA" in df.columns:
-        out["vwap"] = df["WA"].map(extract_price)
+    # VWAP intradía vía EV (Trade Effective Volume) / NV (Nominal Volume).
+    # En BYMA: EV = monto efectivo total (price% × size × VN_unit/100), NV =
+    # nominales totales. EV/NV da el precio promedio ponderado por volumen
+    # operado en el día. Para futuros ROFEX usar TV (no calcular VWAP así).
+    # Doc Primary: "Tanto el Entry EV como NV solo van a devolver información
+    # en el caso de que se utilice para un instrumento de ByMA".
+    if "EV" in df.columns and "NV" in df.columns:
+        ev_val = df["EV"].map(extract_size)
+        nv_val = df["NV"].map(extract_size)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out["vwap"] = ev_val / nv_val
     else:
         out["vwap"] = np.nan
-
-    # Trade count del día (entry TC, si está)
-    if "TC" in df.columns:
-        out["trade_count"] = df["TC"].map(extract_size)
-    else:
-        out["trade_count"] = np.nan
 
     # Variaciones
     with np.errstate(divide="ignore", invalid="ignore"):

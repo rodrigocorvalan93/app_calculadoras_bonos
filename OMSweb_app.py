@@ -1788,7 +1788,6 @@ def _render_intraday_panel(
 
     op, hi, lo, cl = _v("open"), _v("high"), _v("low"), _v("close")
     last, vol, vwap_api, var = _v("last"), _v("volume"), _v("vwap"), _v("variation")
-    trade_count = _v("trade_count")
 
     # Línea 1: Open / High / Low / Close / Last
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -1823,12 +1822,12 @@ def _render_intraday_panel(
     # Línea 2: VWAP / Volumen / # Trades / Range del día
     d1, d2, d3, d4 = st.columns(4)
     if vwap_show is not None:
-        src = "API" if vwap_api is not None else "calc"
+        src = "EV/NV" if vwap_api is not None else "trades"
         d1.metric(f"VWAP ({src})", f"{vwap_show:,.4f}")
     else:
         d1.metric("VWAP", "—")
     d2.metric("Volumen", f"{vol:,.0f}" if vol is not None else "—")
-    n_tr = trade_count if trade_count is not None else (len(trades_df) if not trades_df.empty else None)
+    n_tr = len(trades_df) if not trades_df.empty else None
     d3.metric("# Trades", f"{n_tr:,.0f}" if n_tr is not None else "—")
     if hi is not None and lo is not None:
         d4.metric("Rango día", f"{hi - lo:,.4f}", delta=f"{(hi/lo - 1)*100:+.2f}%" if lo else None)
