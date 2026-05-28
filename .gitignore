@@ -81,6 +81,23 @@ generar_fondos.py
 !proyecto_cauciones_ml/*.py
 proyecto_cauciones_ml/data/
 
+# ── FastAPI rewrite (Fase 1+) ──────────────────────────────
+# Backend Python + templates + static files. Solo código + assets fuente.
+!backend/
+!backend/**
+backend/.env
+backend/.env.*
+backend/__pycache__/
+backend/**/__pycache__/
+
+# Tests pytest del nuevo backend
+!tests/
+!tests/**
+tests/__pycache__/
+
+# Config raíz para el harness de tests
+!pytest.ini
+
 
 # ======================================================================
 # RECORDATORIOS DE SEGURIDAD (lo que queda ignorado por el `*`)

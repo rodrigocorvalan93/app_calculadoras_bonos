@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Calculadora de Bonos{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+</head>
+<body hx-boost="false" class="theme-1816">
+  <header class="topbar">
+    <div class="brand">Calculadora de Bonos</div>
+    <nav class="tabs">
+      <a class="tab active" href="/yas">YAS</a>
+      <a class="tab disabled" title="Próxima fase">Curvas</a>
+      <a class="tab disabled" title="Próxima fase">Mercado</a>
+      <a class="tab disabled" title="Próxima fase">Comparador</a>
+      <a class="tab disabled" title="Próxima fase">Forwards</a>
+    </nav>
+    <div class="topbar-meta">
+      <span class="phase-badge">Fase 1 · YAS</span>
+    </div>
+  </header>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <span>FastAPI rewrite — sub-100ms target</span>
+  </footer>
+
+  <script src="{{ url_for('static', path='js/app.js') }}" defer></script>
+</body>
+</html>

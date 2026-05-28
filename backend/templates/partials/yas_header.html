@@ -1,0 +1,18 @@
+{# Header strip: code · name · type · vto · moneda. Swapped on code change. #}
+{% if meta %}
+<div class="bond-strip">
+  <div class="bond-strip-id">
+    <span class="bond-code">{{ meta.codigo }}</span>
+    <span class="bond-name">{{ meta.nombre }}</span>
+  </div>
+  <ul class="bond-strip-meta">
+    <li><strong>Vto.</strong> {{ meta.vencimiento | ar_date }}</li>
+    <li><strong>Moneda</strong> {{ meta.moneda or "—" }}</li>
+    <li><strong>Tipo tasa</strong> {{ meta.tipo_tasa_interes or "—" }}</li>
+    {% if meta.index %}<li><strong>Índice</strong> {{ meta.index }}</li>{% endif %}
+    {% if meta.ajuste_sobre_capital %}<li><strong>Ajuste</strong> {{ meta.ajuste_sobre_capital }}</li>{% endif %}
+    <li><strong>Frec.</strong> {{ meta.frecuencia or "—" }}</li>
+    <li><strong>Base</strong> {{ meta.convencion_base or "—" }}</li>
+  </ul>
+</div>
+{% endif %}
