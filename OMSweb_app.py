@@ -1378,6 +1378,24 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
     return out[cols].copy()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _ticker_curve_tables_cached(username: str, password: str, plazo: str):
+    """Curvas para el ticker (selección parametrizable por duration).
+
+    NOTA: `load_curve_last_table` tiene TTL=TTL_METRICS (corto). El ticker se
+    refresca cada 15s vía su propio fragment y no necesita datos frescos en
+    cada rerun de main(), así que usamos un cache más longevo (5 min) acá.
+    Definida a nivel módulo para que el cache persista entre reruns.
+    """
+    out = {}
+    for ck in ("cer", "lecap"):
+        try:
+            out[ck] = load_curve_last_table(username, password, ck, plazo)
+        except Exception:
+            pass
+    return out
+
+
 @st.cache_data(ttl=TTL_METRICS, show_spinner=False)
 def load_curve_market_table(username: str, password: str, curve_key: str, plazo: str) -> pd.DataFrame:
     """Tabla Mercado: incluye OLH + book + TIRs."""
@@ -5181,22 +5199,6 @@ def main():
 
     session = get_session(username, password)
     _lap("after get_session")
-
-    # Curvas para el ticker (selección parametrizable por duration).
-    # NOTA CRÍTICA: `load_curve_last_table` tiene TTL=15s, que expira muy
-    # rápido y hace que cada rerun de main() recompute las curvas completas
-    # (4-8 min con mercado cerrado). Acá usamos un cache más longevo
-    # específico para el ticker — el ticker se refresca cada 15s via su
-    # propio fragment, no necesita datos frescos en cada rerun de main().
-    @st.cache_data(ttl=300, show_spinner=False)  # 5 minutos
-    def _ticker_curve_tables_cached(_username: str, _password: str, _plazo: str):
-        out = {}
-        for _ck in ("cer", "lecap"):
-            try:
-                out[_ck] = load_curve_last_table(_username, _password, _ck, _plazo)
-            except Exception:
-                pass
-        return out
 
     _ticker_curve_tables = _ticker_curve_tables_cached(username, password, plazo)
     _lap("after _ticker_curve_tables_cached")
