@@ -1033,6 +1033,27 @@ def _fetch_all_marketdata_bulk(
                                        entries=entries, depth=depth)
 
 
+@st.cache_data(ttl=TTL_MKT, show_spinner=False)
+def _fetch_marketdata_subset_cached(
+    username: str,
+    password: str,
+    symbols_tuple: Tuple[str, ...],
+    market_id: str,
+    entries: str,
+    depth: int,
+) -> pd.DataFrame:
+    """Cached fetch para subsets de símbolos que no están en el bulk global
+    (típicamente futuros). TTL_MKT alineado con el bulk para que el path
+    'missing symbols' no haga un fetch no-cacheado en cada rerun."""
+    if not symbols_tuple:
+        return pd.DataFrame()
+    session = get_session(username, password)
+    return OMSmktdata.bulk_market_data(
+        session, list(symbols_tuple),
+        market_id=market_id, entries=entries, depth=depth,
+    )
+
+
 def fetch_marketdata(
     username: str,
     password: str,
@@ -1058,19 +1079,21 @@ def fetch_marketdata(
             filtered = all_raw.loc[all_raw.index.isin(found)]
             missing = requested - found
             if missing:
-                # Fetch missing symbols directly (e.g. futures)
-                session = get_session(username, password)
-                extra = OMSmktdata.bulk_market_data(session, list(missing),
-                                                    market_id=market_id,
-                                                    entries=entries, depth=depth)
+                # Fetch missing symbols (e.g. futures) — cacheado por TTL_MKT
+                # para evitar pegarle a la API en cada rerun.
+                extra = _fetch_marketdata_subset_cached(
+                    username, password, tuple(sorted(missing)),
+                    market_id, entries, depth,
+                )
                 if extra is not None and not extra.empty:
                     return pd.concat([filtered, extra])
             return filtered
 
-    # Fallback: direct fetch (for futures or when bulk is empty)
-    session = get_session(username, password)
-    return OMSmktdata.bulk_market_data(session, symbols, market_id=market_id,
-                                       entries=entries, depth=depth)
+    # Fallback: direct fetch cacheado (cuando el bulk vino vacío)
+    return _fetch_marketdata_subset_cached(
+        username, password, tuple(sorted(symbols)),
+        market_id, entries, depth,
+    )
 
 
 def _ensure_codigo_col(df: pd.DataFrame, source: str = "index") -> pd.DataFrame:
@@ -1128,14 +1151,17 @@ _snap_state = {"username": None, "password": None, "plazo": None, "interval": 5}
 def _snapshot_loop():
     while True:
         try:
-            u = _snap_state["username"]
-            p = _snap_state["password"]
-            pl = _snap_state["plazo"]
+            with _snap_thread_lock:
+                u = _snap_state["username"]
+                p = _snap_state["password"]
+                pl = _snap_state["plazo"]
+                interval = _snap_state["interval"]
             if u and p and pl:
                 _global_snapshot(u, p, pl)
         except Exception as e:
             _snap_log.warning(f"[snapshot bg] {type(e).__name__}: {e}")
-        _snap_time.sleep(_snap_state["interval"])
+            interval = _snap_state.get("interval", 5)
+        _snap_time.sleep(max(interval or 1, 1))
 
 
 def start_snapshot_background(username: str, password: str, plazo: str, interval: int = 5):
@@ -1176,9 +1202,11 @@ _CURVES_WARMUP_KEYS: Tuple[str, ...] = (
 def _curves_warmup_loop():
     while True:
         try:
-            u = _curves_state["username"]
-            p = _curves_state["password"]
-            pl = _curves_state["plazo"]
+            with _curves_thread_lock:
+                u = _curves_state["username"]
+                p = _curves_state["password"]
+                pl = _curves_state["plazo"]
+                interval = _curves_state["interval"]
             if u and p and pl:
                 # Importante: NO usar threads dentro de threads acá; la propia
                 # load_curve_last_table ya paraleliza per-bond con ThreadPool.
@@ -1186,12 +1214,16 @@ def _curves_warmup_loop():
                 for ck in _CURVES_WARMUP_KEYS:
                     try:
                         load_curve_last_table(u, p, ck, pl)
-                    except Exception:
-                        # Curva individual rota no rompe el daemon
-                        pass
+                    except Exception as e:
+                        # Curva individual rota no rompe el daemon, pero la
+                        # logueamos para poder diagnosticar staleness.
+                        _snap_log.warning(
+                            f"[curves warmup bg] {ck}: {type(e).__name__}: {e}"
+                        )
         except Exception as e:
             _snap_log.warning(f"[curves warmup bg] {type(e).__name__}: {e}")
-        _snap_time.sleep(_curves_state["interval"])
+            interval = _curves_state.get("interval", 5)
+        _snap_time.sleep(max(interval or 1, 1))
 
 
 def start_curves_warmup_background(username: str, password: str, plazo: str, interval: int = 5):
@@ -1376,6 +1408,24 @@ def load_curve_last_table(username: str, password: str, curve_key: str, plazo: s
     ]
     cols = [c for c in cols if c in out.columns]
     return out[cols].copy()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _ticker_curve_tables_cached(username: str, password: str, plazo: str):
+    """Curvas para el ticker (selección parametrizable por duration).
+
+    NOTA: `load_curve_last_table` tiene TTL=TTL_METRICS (corto). El ticker se
+    refresca cada 15s vía su propio fragment y no necesita datos frescos en
+    cada rerun de main(), así que usamos un cache más longevo (5 min) acá.
+    Definida a nivel módulo para que el cache persista entre reruns.
+    """
+    out = {}
+    for ck in ("cer", "lecap"):
+        try:
+            out[ck] = load_curve_last_table(username, password, ck, plazo)
+        except Exception:
+            pass
+    return out
 
 
 @st.cache_data(ttl=TTL_METRICS, show_spinner=False)
@@ -5181,22 +5231,6 @@ def main():
 
     session = get_session(username, password)
     _lap("after get_session")
-
-    # Curvas para el ticker (selección parametrizable por duration).
-    # NOTA CRÍTICA: `load_curve_last_table` tiene TTL=15s, que expira muy
-    # rápido y hace que cada rerun de main() recompute las curvas completas
-    # (4-8 min con mercado cerrado). Acá usamos un cache más longevo
-    # específico para el ticker — el ticker se refresca cada 15s via su
-    # propio fragment, no necesita datos frescos en cada rerun de main().
-    @st.cache_data(ttl=300, show_spinner=False)  # 5 minutos
-    def _ticker_curve_tables_cached(_username: str, _password: str, _plazo: str):
-        out = {}
-        for _ck in ("cer", "lecap"):
-            try:
-                out[_ck] = load_curve_last_table(_username, _password, _ck, _plazo)
-            except Exception:
-                pass
-        return out
 
     _ticker_curve_tables = _ticker_curve_tables_cached(username, password, plazo)
     _lap("after _ticker_curve_tables_cached")
