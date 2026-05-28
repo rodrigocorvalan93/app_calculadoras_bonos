@@ -58,19 +58,52 @@ def _row_for_code(code: str, plazo: str) -> dict | None:
     return row
 
 
-async def _rows_for(curve_key: str, plazo: str = "24hs") -> list[dict]:
+def _has_quote(row: dict) -> bool:
+    """True if the store gave us any tradeable price for this row."""
+    return any(row.get(k) is not None for k in ("last", "bid", "offer"))
+
+
+async def _rows_for(
+    curve_key: str,
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+) -> tuple[list[dict], dict]:
     """One row per bond. Live columns come from the in-process store;
-    TIREA / Duration are cached (10 s TTL) so a 5 s poll hits the cache
-    nearly always. Parallelized across `_row_pool` so the cold path
-    (cache miss on a wide curve) stays under the 50 ms p95 target."""
+    TIREA / Duration are cached so a 5 s poll hits the cache nearly
+    always. Parallelized across `_row_pool` so the cold path (cache
+    miss on a wide curve) stays under the 50 ms p95 target.
+
+    `only_quoting` replaces the legacy `has(code)` BONDS guard: when the
+    store has live data, hide rows with no bid/last/offer (the same
+    "only what actually trades" filter, sourced from the WS instead of
+    a REST ticker set). If the store is completely empty (broker
+    offline / dev), we DON'T filter — otherwise the table would be
+    blank and useless. Returns (rows, meta) where meta carries counts
+    for the UI badge.
+    """
     codes = curves.build_curve_codes().get(curve_key, [])
     if not codes:
-        return []
+        return [], {"total": 0, "quoting": 0, "filtered": False, "store_empty": True}
+
     loop = asyncio.get_running_loop()
-    rows: list[dict | None] = await asyncio.gather(
+    raw: list[dict | None] = await asyncio.gather(
         *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo) for code in codes)
     )
-    return [r for r in rows if r is not None]
+    rows = [r for r in raw if r is not None]
+    quoting = sum(1 for r in rows if _has_quote(r))
+    store_empty = quoting == 0
+
+    # Filter only when the user asked AND there's at least one live
+    # quote to filter against (avoid blanking the table in dev).
+    do_filter = only_quoting and not store_empty
+    visible = [r for r in rows if _has_quote(r)] if do_filter else rows
+    meta = {
+        "total": len(rows),
+        "quoting": quoting,
+        "filtered": do_filter,
+        "store_empty": store_empty,
+    }
+    return visible, meta
 
 
 @router.get("", response_class=HTMLResponse)
@@ -78,13 +111,14 @@ async def curves_page(
     request: Request,
     curve: str | None = None,
     plazo: str = "24hs",
+    only_quoting: bool = True,
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     all_curves = curves.list_curves()
     table = curves.build_curve_codes()
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
     selected_key = curve if (curve and curve in table) else default_key
-    rows = await _rows_for(selected_key, plazo) if selected_key else []
+    rows, row_meta = await _rows_for(selected_key, plazo, only_quoting) if selected_key else ([], {})
     return _render(
         request,
         "curves.html",
@@ -93,7 +127,9 @@ async def curves_page(
         selected_key=selected_key,
         selected_def=curves.curve_def(selected_key) if selected_key else None,
         rows=rows,
+        row_meta=row_meta,
         plazo=plazo,
+        only_quoting=only_quoting,
     )
 
 
@@ -102,13 +138,16 @@ async def curve_table_partial(
     request: Request,
     curve: str = "",
     plazo: str = "24hs",
+    only_quoting: bool = True,
 ) -> HTMLResponse:
     """HTMX partial: table body only for the requested curve."""
-    rows = await _rows_for(curve, plazo)
+    rows, row_meta = await _rows_for(curve, plazo, only_quoting)
     return _render(
         request,
         "partials/curve_table.html",
         selected_def=curves.curve_def(curve),
         rows=rows,
+        row_meta=row_meta,
         plazo=plazo,
+        only_quoting=only_quoting,
     )

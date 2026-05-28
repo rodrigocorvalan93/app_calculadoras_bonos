@@ -8,8 +8,13 @@
     <span>{{ selected_def.label }}</span>
     <span class="card-title-aux">
       {{ rows | length }} bonos · plazo {{ plazo }}
-      {% set live = rows | selectattr("last") | list | length %}
-      {% if live %}· {{ live }} con last live{% else %}· sin data live (broker offline){% endif %}
+      {% if row_meta and row_meta.store_empty %}
+        · sin data live (broker offline)
+      {% elif row_meta and row_meta.filtered %}
+        · {{ row_meta.quoting }}/{{ row_meta.total }} con cotización
+      {% elif row_meta %}
+        · {{ row_meta.quoting }} con last live · mostrando universo completo
+      {% endif %}
     </span>
   </div>
   <div class="card-body" style="padding:0">

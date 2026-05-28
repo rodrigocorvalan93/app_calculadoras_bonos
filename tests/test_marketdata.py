@@ -232,11 +232,40 @@ async def test_curves_table_with_live_store() -> None:
     store.update_from_md(symbol, {"LA": {"price": 87.30, "size": 1000}})
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # only_quoting defaults True → table filters to the bond we fed.
         r = await ac.get(f"/curves/table?curve={chosen_curve}&plazo=24hs")
     assert r.status_code == 200
-    # Should report at least one bond with live data and render a TIREA % column.
-    assert "con last live" in r.text
+    # Badge reports the cotización count and the live price renders.
+    assert "con cotización" in r.text
     assert "87,3000" in r.text
+
+
+@pytest.mark.asyncio
+async def test_curves_only_quoting_toggle_off_shows_universe() -> None:
+    """With only_quoting=false the full static universe renders, even
+    rows with no live quote."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, curves
+
+    bond_universe.ensure_loaded()
+    table = curves.build_curve_codes()
+    # Use a curve that's unlikely to have any injected snapshot.
+    target = None
+    for c in curves.list_curves():
+        if len(table.get(c.key) or []) >= 5:
+            target = c.key
+            break
+    assert target
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        on = await ac.get(f"/curves/table?curve={target}&plazo=CI&only_quoting=true")
+        off = await ac.get(f"/curves/table?curve={target}&plazo=CI&only_quoting=false")
+    assert on.status_code == 200 and off.status_code == 200
+    # With the toggle off we render the full universe → more <tr> rows
+    # (or equal, if the store happens to quote everything — never fewer).
+    assert off.text.count("/yas?code=") >= on.text.count("/yas?code=")
 
 
 def test_metrics_for_market_price_cached() -> None:

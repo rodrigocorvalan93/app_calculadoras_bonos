@@ -20,7 +20,7 @@
             hx-trigger="change"
             hx-target="#curve-table"
             hx-swap="innerHTML"
-            hx-include="[name=plazo]"
+            hx-include="[name=plazo], [name=only_quoting]"
           >
             {% for c in all_curves %}
               {% set count = (table.get(c.key) or []) | length %}
@@ -38,11 +38,26 @@
             hx-trigger="change"
             hx-target="#curve-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve]"
+            hx-include="[name=curve], [name=only_quoting]"
           >
             <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
           </select>
+        </label>
+
+        <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+          <input
+            type="checkbox"
+            name="only_quoting"
+            value="true"
+            {% if only_quoting %}checked{% endif %}
+            hx-get="/curves/table"
+            hx-trigger="change"
+            hx-target="#curve-table"
+            hx-swap="innerHTML"
+            hx-include="[name=curve], [name=plazo]"
+          >
+          Solo con cotización
         </label>
       </div>
     </div>
@@ -53,7 +68,7 @@
     hx-get="/curves/table"
     hx-trigger="every 5s"
     hx-swap="innerHTML"
-    hx-include="[name=curve], [name=plazo]"
+    hx-include="[name=curve], [name=plazo], [name=only_quoting]"
   >
     {% include "partials/curve_table.html" %}
   </div>
