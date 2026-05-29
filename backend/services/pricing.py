@@ -190,6 +190,25 @@ def index_applied(obj) -> Dict[str, Any]:
 # ── TNA convention table ─────────────────────────────────────────────────
 
 
+def _is_hard_dollar(obj) -> bool:
+    """A bond whose cashflows are in hard USD → 180/360 TNA, *regardless of
+    which dollar leg it's quoted/settled in*.
+
+    `Moneda` now encodes the FX quote leg (USD = cable, USB = MEP), so we
+    can't key hard-dollar off `moneda == "USD"` alone — a USB (MEP) bond,
+    or a hard-dollar bond quoted in pesos, is still USD-cashflow and must
+    keep 180/360. Detect from the leg currency OR the classification /
+    industria. Safe to be broad: the CER / UVA / A3500 / VARIABLE branches
+    run *before* this one, so DLK and ARS-rate bonds never reach it.
+    """
+    moneda = (getattr(obj, "moneda", "") or "").upper()
+    if moneda in ("USD", "USB"):
+        return True
+    clas = (getattr(obj, "clasificacion", "") or "").upper()
+    ind = (getattr(obj, "industria", "") or "").upper()
+    return "HARD DOLAR" in clas or "USD" in ind
+
+
 def tna_convention(
     obj,
     freq_override: Optional[int] = None,
@@ -209,7 +228,6 @@ def tna_convention(
     tipo = (getattr(obj, "tipo_tasa_interes", "") or "").upper()
     idx = (getattr(obj, "index", "") or "").upper()
     ajuste = (getattr(obj, "ajuste_sobre_capital", "") or "").upper()
-    moneda = (getattr(obj, "moneda", "") or "").upper()
 
     if tipo == "VARIABLE_CAP" and idx == "TAMAR":
         return "32/365 cap", 32, 365, "cap32"
@@ -221,7 +239,7 @@ def tna_convention(
         return "180/365", 180, 365, "linear"
     if "A3500" in ajuste:
         return "90/365", 90, 365, "linear"
-    if moneda == "USD":
+    if _is_hard_dollar(obj):
         return "180/360", 180, 360, "linear"
 
     dias = getattr(obj, "dias_remanentes", None)
