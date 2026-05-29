@@ -28,6 +28,20 @@ logger = logging.getLogger("backend.positions")
 _COMPOSICION_FILE = "Delta_Composicion.xlsx"
 _PN_FILE = "Delta_PN.xlsx"
 
+# Fallback CodFondo → Nombre (de OMSposiciones). Se usa si Delta_Fondos.txt
+# no está disponible / no parsea, así nunca se muestran sólo números.
+_FONDO_NOMBRES_FALLBACK: Dict[int, str] = {
+    1: "Acciones", 2: "Ahorro", 13: "Ahorro Plus", 39: "Cohen Pesos",
+    18: "Crecimiento", 37: "CRF DOL", 14: "FEDERAL I", 15: "Gestion I",
+    16: "Gestion II", 19: "Gestion III", 9: "Gestion IV", 28: "Gestion IX",
+    41: "Gestion Pyme", 21: "Gestion V", 23: "Gestión VI", 24: "Gestion VII",
+    25: "Gestion VIII", 34: "Gestion X", 40: "Gestion XI", 8: "Internacional",
+    3: "Latinoamerica", 7: "Moneda", 12: "Multimercado I", 35: "MULTIMERCADO II",
+    27: "Patrimonio I", 20: "Performance", 5: "Pesos", 36: "PLUS", 11: "Pyme",
+    38: "PYMES", 6: "Recursos", 4: "Renta", 22: "Renta Dolares",
+    26: "DOLARES PLUS", 10: "Select", 42: "Gestion XIII",
+}
+
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
 
@@ -126,10 +140,12 @@ def _fondo_names() -> Dict[int, str]:
     path = _fondos_path()
     if path:
         try:
-            return _parse_fondos(path)
+            parsed = _parse_fondos(path)
+            if parsed:
+                return parsed
         except Exception as exc:  # noqa: BLE001
             logger.warning("[positions] fondos parse failed: %s", exc)
-    return {}
+    return dict(_FONDO_NOMBRES_FALLBACK)
 
 
 # ── carga ──────────────────────────────────────────────────────────────────
@@ -241,7 +257,8 @@ def status() -> Dict[str, Any]:
 
 def fondo_label(cod: int) -> str:
     c = ensure_loaded()
-    return c["fondos"].get(cod) or f"Fondo {cod}"
+    nombre = c["fondos"].get(cod)
+    return f"{cod} — {nombre}" if nombre else f"Fondo {cod}"
 
 
 def fondos() -> List[Dict[str, Any]]:
