@@ -34,6 +34,8 @@ class MarketSnapshot:
     volume: Optional[float] = None       # EV — accumulated $ traded
     trade_count: Optional[float] = None  # TV — # of trades today
     nominal: Optional[float] = None      # NV — accumulated nominal
+    bids: Optional[List[Dict[str, Any]]] = None    # profundidad BI (hasta 5 niveles)
+    offers: Optional[List[Dict[str, Any]]] = None  # profundidad OF (hasta 5 niveles)
     updated_at: float = field(default_factory=time.time)
 
     def vwap(self) -> Optional[float]:
@@ -71,6 +73,38 @@ def _md_value(v: Any, key: str = "price") -> Optional[float]:
     return None
 
 
+def _depth_levels(raw: Any) -> Optional[List[Dict[str, Any]]]:
+    """Normaliza el array BI/OF de Primary a [{price, size}, ...] (book).
+
+    BI/OF llegan como lista de dicts (un dict por nivel) o, a veces, un
+    solo dict. Devolvemos None si no hay nada usable para no pisar el book
+    sticky con vacío.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return None
+    out: List[Dict[str, Any]] = []
+    for lvl in raw:
+        if not isinstance(lvl, dict):
+            continue
+        p = lvl.get("price")
+        s = lvl.get("size")
+        try:
+            p = float(p) if p is not None else None
+        except (TypeError, ValueError):
+            p = None
+        try:
+            s = float(s) if s is not None else None
+        except (TypeError, ValueError):
+            s = None
+        if p is not None:
+            out.append({"price": p, "size": s})
+    return out or None
+
+
 class MarketDataStore:
     def __init__(self) -> None:
         self._data: Dict[str, MarketSnapshot] = {}
@@ -106,6 +140,14 @@ class MarketDataStore:
                     ts = raw.get("date")
                     if ts:
                         snap.last_ts = str(ts)
+                if entry == "BI":
+                    levels = _depth_levels(raw)
+                    if levels:
+                        snap.bids = levels
+                elif entry == "OF":
+                    levels = _depth_levels(raw)
+                    if levels:
+                        snap.offers = levels
 
             for entry, attr in (
                 ("OP", "open"),

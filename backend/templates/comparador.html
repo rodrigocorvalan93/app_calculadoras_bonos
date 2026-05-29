@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Comparador{% endblock %}
+{% block tab_comparador %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Comparador</h1>
+    <p class="muted">Compará dos bonos por precio o por TNA. Si dejás el precio vacío se toma el last del mercado. Las métricas usan el mismo motor que YAS.</p>
+  </header>
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <datalist id="codes-list">
+        {% for c in codes %}<option value="{{ c }}"></option>{% endfor %}
+      </datalist>
+
+      <div class="row-fields">
+        <label class="field">
+          <span>Modo</span>
+          <select name="mode">
+            <option value="precio" {% if mode == "precio" %}selected{% endif %}>Por Precio</option>
+            <option value="tna"    {% if mode == "tna"    %}selected{% endif %}>Por TNA</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Plazo</span>
+          <select name="plazo">
+            <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
+            <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>VN (nominales)</span>
+          <input type="number" name="vn" value="1000000" step="100000">
+        </label>
+      </div>
+
+      <div class="row-fields" style="margin-top:10px">
+        <label class="field">
+          <span>Bono A</span>
+          <input type="text" name="a" list="codes-list" value="{{ a }}" placeholder="ej. AL30" autocomplete="off"
+                 hx-get="/comparador/valfield?which=a" hx-trigger="change"
+                 hx-target="#valfield-a" hx-swap="innerHTML"
+                 hx-include="[name=a],[name=mode],[name=plazo]">
+        </label>
+        <label class="field">
+          <span>Valor A <small class="muted">(precio % VN o TNA decimal)</small></span>
+          <span id="valfield-a"><input type="number" name="val_a" step="0.0001" placeholder="vacío = last de mercado" autocomplete="off"></span>
+        </label>
+        <label class="field">
+          <span>Bono B</span>
+          <input type="text" name="b" list="codes-list" value="{{ b }}" placeholder="ej. GD30" autocomplete="off"
+                 hx-get="/comparador/valfield?which=b" hx-trigger="change"
+                 hx-target="#valfield-b" hx-swap="innerHTML"
+                 hx-include="[name=b],[name=mode],[name=plazo]">
+        </label>
+        <label class="field">
+          <span>Valor B <small class="muted">(precio % VN o TNA decimal)</small></span>
+          <span id="valfield-b"><input type="number" name="val_b" step="0.0001" placeholder="vacío = last de mercado" autocomplete="off"></span>
+        </label>
+        <button
+          class="btn-primary"
+          style="align-self:flex-end"
+          hx-get="/comparador/result"
+          hx-target="#comp-result"
+          hx-swap="innerHTML"
+          hx-include="[name=a],[name=b],[name=mode],[name=val_a],[name=val_b],[name=vn],[name=plazo]"
+        >Comparar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="comp-result">
+    {% include "partials/comparador_result.html" %}
+  </div>
+</section>
+{% endblock %}

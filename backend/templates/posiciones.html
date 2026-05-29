@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Posiciones{% endblock %}
+{% block tab_posiciones %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Posiciones</h1>
+    <p class="muted">Tenencias por fondo (Delta). Se leen una vez al inicio y quedan en cache — tocá <strong>Actualizar</strong> para releer los Excel.</p>
+  </header>
+
+  {% if status and not status.loaded %}
+    <div class="alert">No se cargaron las posiciones: {{ status.error or "archivo no encontrado" }}</div>
+  {% endif %}
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <label class="field">
+          <span>Fondo</span>
+          <select name="fondo" hx-get="/posiciones/table" hx-trigger="change"
+                  hx-target="#pos-table" hx-swap="innerHTML" hx-include="[name=plazo]">
+            {% for f in fondos %}
+              <option value="{{ f.cod }}" {% if f.cod == selected %}selected{% endif %}>
+                {{ f.nombre }}{% if f.pn %} · PN {{ f.pn | ar_hum }}{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Plazo</span>
+          <select name="plazo" hx-get="/posiciones/table" hx-trigger="change"
+                  hx-target="#pos-table" hx-swap="innerHTML" hx-include="[name=fondo]">
+            <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
+            <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
+          </select>
+        </label>
+        <a class="btn-primary" style="align-self:flex-end"
+           href="/posiciones?refresh=1{% if selected is not none %}&fondo={{ selected }}{% endif %}&plazo={{ plazo }}">↻ Actualizar</a>
+        <button class="tab" style="align-self:flex-end;cursor:pointer"
+                hx-get="/posiciones/matriz" hx-target="#pos-table" hx-swap="innerHTML">Ver matriz</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pos-table">
+    {% include "partials/posiciones_table.html" %}
+  </div>
+</section>
+{% endblock %}

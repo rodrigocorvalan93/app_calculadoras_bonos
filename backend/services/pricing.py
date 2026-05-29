@@ -541,7 +541,10 @@ def metrics_for_market_price(
         v = float(last_price_pct)
     except (TypeError, ValueError):
         return None
-    if not (v > 0 and v < 1000):  # sanity: bond prices live in 5-500 %
+    # Sanity: descarta sizes/garbage, pero los CER viejos (DICP/PARP/CUAP)
+    # cotizan en decenas de miles de pesos por lámina, así que el techo
+    # tiene que ser alto. Solo filtramos no-positivos y valores absurdos.
+    if not (v > 0 and v < 10_000_000):
         return None
 
     bucket = round(v, 2)

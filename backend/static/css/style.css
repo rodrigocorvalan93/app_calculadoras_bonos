@@ -670,5 +670,21 @@ select {
 /* Curvas / Mercado: variación con color + scroll horizontal para tablas anchas */
 .var-up   { color: var(--green); }
 .var-down { color: var(--red); }
+/* Color de letra por punta (precio vs cierre previo). */
+.px-up    { color: var(--green); }
+.px-down  { color: var(--red); }
+.px-flat  { color: var(--text-muted); }
 .table-scroll { overflow-x: auto; max-width: 100%; }
 .mercado-table th, .mercado-table td { white-space: nowrap; }
+.mercado-table tbody tr:hover { background: var(--accent-soft); }
+/* Libro (profundidad) en Mercado */
+.book-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 8px; }
+.mercado-book { margin-top: 4px; }
+
+/* Botón primario (Comparador, etc.) */
+.btn-primary {
+  background: var(--accent); color: #0a0a0a; border: none; border-radius: 8px;
+  padding: 9px 18px; font-weight: 600; font-size: 13px; cursor: pointer;
+}
+.btn-primary:hover { background: var(--accent-strong); }
+[data-theme="delta"] .btn-primary, [data-theme="light"] .btn-primary { color: #ffffff; }

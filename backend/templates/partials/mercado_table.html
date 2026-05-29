@@ -46,24 +46,26 @@
       <tbody>
         {% for r in rows %}
           {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
-          <tr>
-            <td style="text-align:left;color:var(--accent);font-weight:600">
-              <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a>
-            </td>
+          <tr style="cursor:pointer"
+              hx-get="/mercado/book/{{ r.code }}?plazo={{ plazo }}&leg={{ leg }}"
+              hx-target="#mercado-book"
+              hx-swap="innerHTML"
+              title="Ver libro de {{ r.code }}">
+            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
             <td>{{ r.duration | ar_num(2) }}</td>
             <td>{{ r.open | ar_num(2) }}</td>
             <td>{{ r.close | ar_num(2) }}</td>
             <td>{{ r.low | ar_num(2) }}</td>
             <td>{{ r.high | ar_num(2) }}</td>
-            <td class="{{ vcls }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
+            <td style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td class="{{ vcls }}">{{ r.var_px | ar_num(2) }}</td>
             <td style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
-            <td>{{ r.bid | ar_num(2) }}</td>
+            <td class="{{ r.bid_cls }}">{{ r.bid | ar_num(2) }}</td>
             <td style="color:var(--cyan)">{{ r.tirea_bid | ar_pct(2) }}</td>
-            <td class="{{ vcls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
+            <td class="{{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
             <td>{{ r.vwap | ar_num(2) }}</td>
             <td style="color:var(--accent);font-weight:600">{{ r.tirea_last | ar_pct(2) }}</td>
-            <td>{{ r.offer | ar_num(2) }}</td>
+            <td class="{{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>
             <td style="color:var(--cyan)">{{ r.tirea_offer | ar_pct(2) }}</td>
             <td style="color:var(--text-muted)">{{ r.offer_size | ar_int }}</td>
             <td>{{ r.nominal | ar_hum }}</td>

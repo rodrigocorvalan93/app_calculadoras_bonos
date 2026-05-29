@@ -58,6 +58,29 @@ def _tirea_at(code: str, price_pct, settle=None):
     return (m or {}).get("tirea") if m else None
 
 
+def _px_cls(px, close) -> str:
+    """Color de letra de un precio vs el cierre previo: verde si sube, rojo
+    si baja, gris si el movimiento es < 2 bps (o no hay cierre)."""
+    if px is None or close in (None, 0):
+        return ""
+    try:
+        bps = (px / close - 1.0) * 10000.0
+    except (TypeError, ZeroDivisionError):
+        return ""
+    if bps > 2:
+        return "px-up"
+    if bps < -2:
+        return "px-down"
+    return "px-flat"
+
+
+def _dur_sort_key(r: dict):
+    """Orden por duration ascendente; los sin duration (None/NaN) al final."""
+    d = r.get("duration")
+    bad = d is None or d != d
+    return (bad, d if not bad else 0.0)
+
+
 def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: bool = False) -> dict | None:
     meta = pricing.bond_meta(code)
     if not meta:
@@ -128,6 +151,17 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         if ty_last is not None and ty_close is not None and ty_last == ty_last and ty_close == ty_close:
             delta_yield_bps = (ty_last - ty_close) * 10000.0
 
+    # Color por punta (vs cierre) + fondo de la celda de variación (heatmap
+    # cuya intensidad escala con |var%|, tope ±2%).
+    last_cls = _px_cls(last, close)
+    bid_cls = _px_cls(bid, close)
+    offer_cls = _px_cls(offer, close)
+    var_bg = ""
+    if var_pct is not None:
+        alpha = min(abs(var_pct) / 2.0, 1.0) * 0.38
+        rgb = "34,197,94" if var_pct >= 0 else "239,68,68"
+        var_bg = f"background-color: rgba({rgb},{alpha:.2f})"
+
     row = dict(meta)
     row.update(
         {
@@ -138,7 +172,8 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             "close": close, "open": open_, "high": high, "low": low,
             "bid_size": bid_size, "offer_size": offer_size, "last_size": last_size,
             "volume": volume, "nominal": nominal, "vwap": vwap,
-            "var_pct": var_pct, "var_px": var_px,
+            "var_pct": var_pct, "var_px": var_px, "var_bg": var_bg,
+            "last_cls": last_cls, "bid_cls": bid_cls, "offer_cls": offer_cls,
             "last_ts": last_ts, "close_ts": close_ts,
             "price_source": price_source, "price_date": price_date,
             "delta_yield_bps": delta_yield_bps,
@@ -202,6 +237,9 @@ async def _rows_for(
     # quote to filter against (avoid blanking the table in dev).
     do_filter = only_quoting and not store_empty
     visible = [r for r in rows if _has_quote(r)] if do_filter else rows
+    # Orden por defecto: por duration (los sin duration al final). La duration
+    # ya se calcula sobre el precio de referencia (last si operó, si no cierre).
+    visible.sort(key=_dur_sort_key)
     meta = {
         "total": len(rows),
         "quoting": quoting,
@@ -320,4 +358,46 @@ async def mercado_table_partial(
         plazo=plazo,
         only_quoting=only_quoting,
         leg=leg,
+    )
+
+
+@mercado_router.get("/mercado/book/{code}", response_class=HTMLResponse)
+async def mercado_book(
+    request: Request,
+    code: str,
+    plazo: str = "24hs",
+    leg: str = "native",
+) -> HTMLResponse:
+    """Libro (profundidad) de un instrumento — se carga al clickear su fila."""
+    bond_universe.ensure_loaded()
+    store = marketdata_store.get_store()
+    symbol, leg_basis = _leg_symbol(code, plazo, leg, store)
+    snap = store.get(symbol)
+    meta = pricing.bond_meta(code) or {}
+    native = meta.get("moneda") or "USD"
+    fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+
+    def cp(px):
+        if px is None:
+            return None
+        return fx_svc.normalize_price(px, "ARS", native, fx) if leg_basis == "ARS" else px
+
+    def with_yield(levels):
+        out = []
+        cum = 0.0
+        for lvl in (levels or []):
+            px, sz = lvl.get("price"), lvl.get("size")
+            cum += (sz or 0.0)
+            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px))})
+        return out
+
+    return _render(
+        request,
+        "partials/mercado_book.html",
+        code=code,
+        nombre=meta.get("nombre") or code,
+        symbol=symbol,
+        snap=snap,
+        bids=with_yield(snap.bids if snap else None),
+        offers=with_yield(snap.offers if snap else None),
     )

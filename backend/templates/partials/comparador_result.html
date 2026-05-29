@@ -1,0 +1,103 @@
+{% if not ma and not mb %}
+  <div class="alert">
+    Elegí dos bonos y tocá <strong>Comparar</strong>.
+    {% if mode == 'precio' %}Si dejás el valor vacío, se usa el last del mercado.{% else %}Ingresá la TNA en decimal (ej. 0,38).{% endif %}
+  </div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ a or "A" }} vs {{ b or "B" }}</span>
+    <span class="card-title-aux">modo {{ mode }} · plazo {{ plazo }}</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <table class="cashflows comp-table">
+      <thead>
+        <tr>
+          <th style="text-align:left">Métrica</th>
+          <th>{{ a or "A" }}</th>
+          <th>{{ b or "B" }}</th>
+          <th>Δ (A−B)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td style="text-align:left">Nombre</td>
+            <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ ma.nombre if ma else "—" }}</td>
+            <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ mb.nombre if mb else "—" }}</td>
+            <td>—</td></tr>
+        <tr><td style="text-align:left">Moneda</td>
+            <td>{{ ma.moneda if ma else "—" }}</td>
+            <td>{{ mb.moneda if mb else "—" }}</td><td>—</td></tr>
+        <tr><td style="text-align:left">Vto.</td>
+            <td>{{ ma.vencimiento | ar_date if ma else "—" }}</td>
+            <td>{{ mb.vencimiento | ar_date if mb else "—" }}</td><td>—</td></tr>
+        <tr><td style="text-align:left">Precio (% VN)</td>
+            <td>{{ ma.precio_pct | ar_num(4) if ma else "—" }}</td>
+            <td>{{ mb.precio_pct | ar_num(4) if mb else "—" }}</td><td>—</td></tr>
+        <tr><td style="text-align:left">Precio clean</td>
+            <td>{{ ma.precio_clean_pct | ar_num(4) if ma else "—" }}</td>
+            <td>{{ mb.precio_clean_pct | ar_num(4) if mb else "—" }}</td><td>—</td></tr>
+        <tr><td style="text-align:left;font-weight:600">TIREA</td>
+            <td style="color:var(--accent);font-weight:600">{{ ma.tirea | ar_pct(2) if ma else "—" }}</td>
+            <td style="color:var(--accent);font-weight:600">{{ mb.tirea | ar_pct(2) if mb else "—" }}</td>
+            <td>{{ deltas.tirea | ar_pct(2) if 'tirea' in deltas else "—" }}</td></tr>
+        <tr><td style="text-align:left">TNA</td>
+            <td>{{ ma.tna | ar_pct(2) if ma else "—" }}{% if ma and ma.tna_convention_label and ma.tirea == ma.tirea %}<span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ ma.tna_convention_label }}</span>{% endif %}</td>
+            <td>{{ mb.tna | ar_pct(2) if mb else "—" }}{% if mb and mb.tna_convention_label and mb.tirea == mb.tirea %}<span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ mb.tna_convention_label }}</span>{% endif %}</td>
+            <td>{{ deltas.tna | ar_pct(2) if 'tna' in deltas else "—" }}</td></tr>
+        <tr><td style="text-align:left">TEM</td>
+            <td>{{ ma.tem | ar_pct(2) if ma else "—" }}</td>
+            <td>{{ mb.tem | ar_pct(2) if mb else "—" }}</td>
+            <td>{{ deltas.tem | ar_pct(2) if 'tem' in deltas else "—" }}</td></tr>
+        <tr><td style="text-align:left">Duration</td>
+            <td>{{ ma.duration | ar_num(2) if ma else "—" }}</td>
+            <td>{{ mb.duration | ar_num(2) if mb else "—" }}</td>
+            <td>{{ deltas.duration | ar_num(2) if 'duration' in deltas else "—" }}</td></tr>
+        <tr><td style="text-align:left">Paridad</td>
+            <td>{{ (ma.paridad * 100) | ar_pct_pp(1) if (ma and ma.paridad == ma.paridad) else "—" }}</td>
+            <td>{{ (mb.paridad * 100) | ar_pct_pp(1) if (mb and mb.paridad == mb.paridad) else "—" }}</td>
+            <td>{{ (deltas.paridad * 100) | ar_pct_pp(1) if 'paridad' in deltas else "—" }}</td></tr>
+        <tr><td style="text-align:left">Margen TNA</td>
+            <td>{{ ma.margen_tna | ar_pct(2) if ma else "—" }}</td>
+            <td>{{ mb.margen_tna | ar_pct(2) if mb else "—" }}</td><td>—</td></tr>
+        <tr><td style="text-align:left">Int. corridos</td>
+            <td>{{ ma.intereses_corridos | ar_num(4) if ma else "—" }}</td>
+            <td>{{ mb.intereses_corridos | ar_num(4) if mb else "—" }}</td><td>—</td></tr>
+        <tr><td style="text-align:left">Días rem.</td>
+            <td>{{ ma.dias_remanentes | ar_int if ma else "—" }}</td>
+            <td>{{ mb.dias_remanentes | ar_int if mb else "—" }}</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% if fwd %}
+  <div style="padding:11px 14px;border-top:1px solid var(--border)">
+    <strong>Forward implícita (TIR)</strong> ·
+    {{ fwd.short }} → {{ fwd.long }}
+    <span class="muted">({{ fwd.t1 | ar_num(2) }}a → {{ fwd.t2 | ar_num(2) }}a)</span>
+    = <span style="color:var(--accent);font-weight:600">{{ fwd.fwd | ar_pct(2) }}</span>
+    <span class="muted">— tasa fwd entre el corto y el largo (EA, eje Duration)</span>
+  </div>
+  {% endif %}
+  {% if swap %}
+  <div style="padding:11px 14px;border-top:1px solid var(--border)">
+    <strong>Mismo efectivo</strong> ·
+    {{ swap.vn_a | ar_hum }} VN de {{ a }}
+    ≈ <span style="color:var(--accent);font-weight:600">{{ swap.vn_b | ar_hum }} VN</span> de {{ b }}
+    <span class="muted">(monto ≈ {{ swap.monto_a | ar_hum }}{% if swap.moneda_a %} {{ swap.moneda_a }}{% endif %})</span>
+  </div>
+  {% endif %}
+  {% if pos_a or pos_b %}
+  <div style="padding:11px 14px;border-top:1px solid var(--border)">
+    <strong>Mi posición</strong> ·
+    {{ a }}: {% if pos_a %}<span style="color:var(--accent);font-weight:600">{{ pos_a.total_cantidad | ar_hum }} VN</span> · {{ pos_a.total_valor | ar_hum }} <span class="muted">({{ pos_a.n_fondos }} fondo{{ "s" if pos_a.n_fondos != 1 else "" }})</span>{% else %}<span class="muted">sin posición</span>{% endif %}
+    &nbsp;·&nbsp;
+    {{ b }}: {% if pos_b %}<span style="color:var(--accent);font-weight:600">{{ pos_b.total_cantidad | ar_hum }} VN</span> · {{ pos_b.total_valor | ar_hum }} <span class="muted">({{ pos_b.n_fondos }} fondo{{ "s" if pos_b.n_fondos != 1 else "" }})</span>{% else %}<span class="muted">sin posición</span>{% endif %}
+  </div>
+  {% endif %}
+  {% if (ma and ma.error) or (mb and mb.error) %}
+    <div class="alert" style="margin:10px">
+      {% if ma and ma.error %}A ({{ a }}): {{ ma.error }}<br>{% endif %}
+      {% if mb and mb.error %}B ({{ b }}): {{ mb.error }}{% endif %}
+    </div>
+  {% endif %}
+</div>
+{% endif %}

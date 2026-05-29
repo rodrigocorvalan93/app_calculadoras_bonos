@@ -43,7 +43,7 @@
 
       <label class="field field-value">
         <span x-text="valueLabel()"></span>
-        <input type="text" inputmode="decimal" name="value" x-model="value" :placeholder="valuePlaceholder()" autocomplete="off">
+        <input type="text" inputmode="decimal" name="value" x-model="value" x-ref="valueInput" :placeholder="valuePlaceholder()" autocomplete="off">
       </label>
 
       <label class="field">
@@ -135,7 +135,7 @@
     return {
       code: {{ (selected or "") | tojson }},
       mode: 'precio',
-      value: '',
+      value: {{ default_value | tojson }},
       nominales: '1.000.000',
       plazo: {{ plazo | tojson }},
       useCustomSettle: false,
@@ -145,6 +145,26 @@
       useCustomConv: false,
       freq: '',
       base_: '',
+      init() {
+        // Autofill del último precio al cambiar de bono (o al pasar a modo
+        // precio). El valor inicial ya viene del server (default_value).
+        this.$watch('code', () => this.autofillLast());
+        this.$watch('mode', () => { if (this.mode === 'precio') this.autofillLast(); });
+      },
+      async autofillLast() {
+        if (this.mode !== 'precio' || !this.code) return;
+        try {
+          const r = await fetch(`/market/snapshot/${encodeURIComponent(this.code)}?plazo=${encodeURIComponent(this.plazo)}`);
+          if (!r.ok) return;
+          const j = await r.json();
+          const last = (j && j.snapshot) ? j.snapshot.last : null;
+          this.value = (last === null || last === undefined) ? '' : String(last).replace('.', ',');
+          this.$nextTick(() => {
+            const el = this.$refs.valueInput;
+            if (el) el.dispatchEvent(new Event('keyup', { bubbles: true }));
+          });
+        } catch (e) { /* sin data → el usuario tipea */ }
+      },
       valueLabel() {
         return ({
           'precio': 'Precio (% VN)',

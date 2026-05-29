@@ -13,7 +13,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from backend.config import settings
-from backend.services import bond_universe, marketdata_store, pricing, symbols as syms
+from backend.services import bond_universe, marketdata_store, positions, pricing, symbols as syms
 
 router = APIRouter(prefix="/yas", tags=["yas"])
 
@@ -50,9 +50,14 @@ async def yas_page(request: Request, code: Optional[str] = None) -> HTMLResponse
             selected=None,
             meta={},
             plazo=settings.default_plazo,
+            default_value="",
         )
 
     selected = code if code in codes else codes[0]
+    # Autofill por defecto: último precio del activo seleccionado (modo precio).
+    snap = marketdata_store.get_store().get(syms.md_symbol(selected, settings.default_plazo))
+    last = snap.last if snap else None
+    default_value = "" if last is None else str(last).replace(".", ",")
     return _render(
         request,
         "yas.html",
@@ -60,6 +65,7 @@ async def yas_page(request: Request, code: Optional[str] = None) -> HTMLResponse
         selected=selected,
         meta=pricing.bond_meta(selected),
         plazo=settings.default_plazo,
+        default_value=default_value,
     )
 
 
@@ -110,6 +116,7 @@ async def yas_recompute(
         ticket=ticket,
         meta=pricing.bond_meta(code),
         mode=mode,
+        position=positions.position_for(code),
     )
 
 
