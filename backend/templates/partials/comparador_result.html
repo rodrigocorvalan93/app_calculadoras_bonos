@@ -68,6 +68,23 @@
       </tbody>
     </table>
   </div>
+  {% if fwd %}
+  <div style="padding:11px 14px;border-top:1px solid var(--border)">
+    <strong>Forward implícita (TIR)</strong> ·
+    {{ fwd.short }} → {{ fwd.long }}
+    <span class="muted">({{ fwd.t1 | ar_num(2) }}a → {{ fwd.t2 | ar_num(2) }}a)</span>
+    = <span style="color:var(--accent);font-weight:600">{{ fwd.fwd | ar_pct(2) }}</span>
+    <span class="muted">— tasa fwd entre el corto y el largo (EA, eje Duration)</span>
+  </div>
+  {% endif %}
+  {% if swap %}
+  <div style="padding:11px 14px;border-top:1px solid var(--border)">
+    <strong>Mismo efectivo</strong> ·
+    {{ swap.vn_a | ar_hum }} VN de {{ a }}
+    ≈ <span style="color:var(--accent);font-weight:600">{{ swap.vn_b | ar_hum }} VN</span> de {{ b }}
+    <span class="muted">(monto ≈ {{ swap.monto_a | ar_hum }}{% if swap.moneda_a %} {{ swap.moneda_a }}{% endif %})</span>
+  </div>
+  {% endif %}
   {% if (ma and ma.error) or (mb and mb.error) %}
     <div class="alert" style="margin:10px">
       {% if ma and ma.error %}A ({{ a }}): {{ ma.error }}<br>{% endif %}

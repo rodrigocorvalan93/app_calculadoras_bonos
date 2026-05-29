@@ -39,19 +39,25 @@
       <div class="row-fields" style="margin-top:10px">
         <label class="field">
           <span>Bono A</span>
-          <input type="text" name="a" list="codes-list" value="{{ a }}" placeholder="ej. AL30" autocomplete="off">
+          <input type="text" name="a" list="codes-list" value="{{ a }}" placeholder="ej. AL30" autocomplete="off"
+                 hx-get="/comparador/valfield?which=a" hx-trigger="change"
+                 hx-target="#valfield-a" hx-swap="innerHTML"
+                 hx-include="[name=a],[name=mode],[name=plazo]">
         </label>
         <label class="field">
           <span>Valor A <small class="muted">(precio % VN o TNA decimal)</small></span>
-          <input type="number" name="val_a" step="0.0001" placeholder="vacío = last de mercado">
+          <span id="valfield-a"><input type="number" name="val_a" step="0.0001" placeholder="vacío = last de mercado" autocomplete="off"></span>
         </label>
         <label class="field">
           <span>Bono B</span>
-          <input type="text" name="b" list="codes-list" value="{{ b }}" placeholder="ej. GD30" autocomplete="off">
+          <input type="text" name="b" list="codes-list" value="{{ b }}" placeholder="ej. GD30" autocomplete="off"
+                 hx-get="/comparador/valfield?which=b" hx-trigger="change"
+                 hx-target="#valfield-b" hx-swap="innerHTML"
+                 hx-include="[name=b],[name=mode],[name=plazo]">
         </label>
         <label class="field">
           <span>Valor B <small class="muted">(precio % VN o TNA decimal)</small></span>
-          <input type="number" name="val_b" step="0.0001" placeholder="vacío = last de mercado">
+          <span id="valfield-b"><input type="number" name="val_b" step="0.0001" placeholder="vacío = last de mercado" autocomplete="off"></span>
         </label>
         <button
           class="btn-primary"

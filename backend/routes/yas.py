@@ -50,9 +50,14 @@ async def yas_page(request: Request, code: Optional[str] = None) -> HTMLResponse
             selected=None,
             meta={},
             plazo=settings.default_plazo,
+            default_value="",
         )
 
     selected = code if code in codes else codes[0]
+    # Autofill por defecto: último precio del activo seleccionado (modo precio).
+    snap = marketdata_store.get_store().get(syms.md_symbol(selected, settings.default_plazo))
+    last = snap.last if snap else None
+    default_value = "" if last is None else str(last).replace(".", ",")
     return _render(
         request,
         "yas.html",
@@ -60,6 +65,7 @@ async def yas_page(request: Request, code: Optional[str] = None) -> HTMLResponse
         selected=selected,
         meta=pricing.bond_meta(selected),
         plazo=settings.default_plazo,
+        default_value=default_value,
     )
 
 
