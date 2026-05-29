@@ -39,6 +39,12 @@ KEEPALIVE_SECS = 25
 BACKOFF_INITIAL = 2.0
 BACKOFF_MAX = 30.0
 
+# matrizoms ignora un 'smd' con demasiados productos (probado: 1 símbolo ->
+# llega book; ~238 de una -> 0 mensajes). Suscribimos en lotes de este tamaño;
+# las suscripciones se ACUMULAN entre mensajes 'smd' sucesivos sobre la misma
+# conexión, así que varios lotes chicos == un universo grande suscripto.
+SUBSCRIBE_CHUNK = 20
+
 # Entries Primary will accept. Confirmed: WA / TC are rejected and make
 # the whole query return empty. Same list the legacy app uses.
 ENTRIES = ["BI", "OF", "LA", "OP", "CL", "HI", "LO", "EV", "TV", "NV"]
@@ -197,13 +203,32 @@ class PrimaryWS:
             self._stats["subscriptions"] = len(self._subscriptions)
             if self._ws is not None and self._connected:
                 try:
-                    await self._ws.send(_subscribe_payload(self._subscriptions))
+                    # Solo los nuevos (las suscripciones se acumulan), en lotes.
+                    await self._send_in_chunks(self._ws, new)
                     logger.info(
                         "[primary_ws] subscribed %d new (total %d)",
                         len(new), len(self._subscriptions),
                     )
                 except (ConnectionClosed, WebSocketException) as exc:
                     logger.warning("[primary_ws] resubscribe failed: %s", exc)
+
+    async def _send_in_chunks(self, ws, symbols: Iterable[str]) -> None:
+        """Envía la suscripción 'smd' en lotes de SUBSCRIBE_CHUNK.
+
+        matrizoms ignora un subscribe con demasiados productos; mandar de a
+        pocos (acumulan entre mensajes) sí funciona. Un pequeño sleep entre
+        lotes evita saturar el socket.
+        """
+        syms = sorted(symbols)
+        total = len(syms)
+        for i in range(0, total, SUBSCRIBE_CHUNK):
+            chunk = syms[i:i + SUBSCRIBE_CHUNK]
+            await ws.send(_subscribe_payload(chunk))
+            await asyncio.sleep(0.05)
+        if total:
+            n_lotes = (total + SUBSCRIBE_CHUNK - 1) // SUBSCRIBE_CHUNK
+            logger.info("[primary_ws] subscribe en %d lotes de <=%d (%d símbolos)",
+                        n_lotes, SUBSCRIBE_CHUNK, total)
 
     def stats(self) -> Dict[str, Any]:
         s = dict(self._stats)
@@ -263,8 +288,7 @@ class PrimaryWS:
             logger.info("[primary_ws] connected to %s", self.ws_url)
 
             if self._subscriptions:
-                await ws.send(_subscribe_payload(self._subscriptions))
-                logger.info("[primary_ws] subscribed to %d symbols", len(self._subscriptions))
+                await self._send_in_chunks(ws, self._subscriptions)
 
             try:
                 async for raw in ws:
