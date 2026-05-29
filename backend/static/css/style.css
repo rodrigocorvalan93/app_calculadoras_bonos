@@ -666,3 +666,9 @@ select {
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 *::-webkit-scrollbar-thumb:hover { background: var(--border-soft); }
+
+/* Curvas / Mercado: variación con color + scroll horizontal para tablas anchas */
+.var-up   { color: var(--green); }
+.var-down { color: var(--red); }
+.table-scroll { overflow-x: auto; max-width: 100%; }
+.mercado-table th, .mercado-table td { white-space: nowrap; }

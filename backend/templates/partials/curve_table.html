@@ -14,39 +14,52 @@
       {% elif row_meta and row_meta.filtered %}
         · {{ row_meta.quoting }}/{{ row_meta.total }} con cotización
       {% elif row_meta %}
-        · {{ row_meta.quoting }} con last live · mostrando universo completo
+        · {{ row_meta.quoting }} con last live · universo completo
       {% endif %}
     </span>
   </div>
   <div class="card-body" style="padding:0">
+    <div class="table-scroll">
     <table class="cashflows curve-table">
       <thead>
         <tr>
           <th>Código</th>
           <th>Vto.</th>
           <th>Mon</th>
-          <th>Bid</th>
+          <th>Close</th>
           <th>Last</th>
+          <th>Var %</th>
+          <th>Δyield</th>
+          <th>Bid</th>
           <th>Ask</th>
+          <th>Dur</th>
           <th>TIREA</th>
           <th>TNA</th>
-          <th>Dur</th>
+          <th>TEM</th>
           <th>Paridad</th>
           <th>Margen</th>
+          <th>Volumen</th>
+          <th>P.Src</th>
+          <th>P.Date</th>
           <th>Tipo</th>
         </tr>
       </thead>
       <tbody>
         {% for r in rows %}
+          {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
           <tr>
             <td style="text-align:left;color:var(--accent);font-weight:600">
-              <a href="/yas?code={{ r.codigo }}" title="Abrir en YAS">{{ r.codigo }}</a>
+              <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a>
             </td>
             <td>{{ r.vencimiento | ar_date }}</td>
             <td>{{ r.moneda or "—" }}</td>
-            <td>{{ r.bid | ar_num(4) }}</td>
-            <td style="color:var(--accent);font-weight:600">{{ r.last | ar_num(4) }}</td>
-            <td>{{ r.offer | ar_num(4) }}</td>
+            <td>{{ r.close | ar_num(2) }}</td>
+            <td style="color:var(--accent);font-weight:600">{{ r.last | ar_num(2) }}</td>
+            <td class="{{ vcls }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
+            <td>{{ r.delta_yield_bps | ar_num(1) }}</td>
+            <td>{{ r.bid | ar_num(2) }}</td>
+            <td>{{ r.offer | ar_num(2) }}</td>
+            <td>{{ r.duration | ar_num(2) }}</td>
             <td>{{ r.tirea | ar_pct(2) }}</td>
             <td>
               {{ r.tna | ar_pct(2) }}
@@ -54,9 +67,12 @@
                 <span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ r.tna_convention_label }}</span>
               {% endif %}
             </td>
-            <td>{{ r.duration | ar_num(2) }}</td>
-            <td>{{ (r.paridad * 100) | ar_pct_pp(1) if r.paridad == r.paridad and r.paridad is not none else "—" }}</td>
+            <td>{{ r.tem | ar_pct(2) }}</td>
+            <td>{{ (r.paridad * 100) | ar_pct_pp(1) if (r.paridad is not none and r.paridad == r.paridad) else "—" }}</td>
             <td>{{ r.margen_tna | ar_pct(2) }}</td>
+            <td>{{ r.volume | ar_hum }}</td>
+            <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
+            <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_date | ar_ts }}</td>
             <td style="text-align:left;font-size:11px;color:var(--text-muted)">
               {{ r.tipo_tasa_interes or "—" }}{% if r.index %} · {{ r.index }}{% endif %}
             </td>
@@ -64,6 +80,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
 </div>
 {% endif %}

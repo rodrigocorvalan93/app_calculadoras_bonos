@@ -50,45 +50,111 @@ def _leg_symbol(code: str, plazo: str, leg: str, store) -> tuple[str, str]:
     return syms.md_symbol(code, plazo), ""  # native
 
 
-def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None) -> dict | None:
+def _tirea_at(code: str, price_pct, settle=None):
+    """TIREA at an arbitrary price (cached). None if no/invalid price."""
+    if price_pct is None:
+        return None
+    m = pricing.metrics_for_market_price(code, price_pct, settle)
+    return (m or {}).get("tirea") if m else None
+
+
+def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: bool = False) -> dict | None:
     meta = pricing.bond_meta(code)
     if not meta:
         return None
     store = marketdata_store.get_store()
     symbol, leg_basis = _leg_symbol(code, plazo, leg, store)
     snap = store.get(symbol)
-    last_pct = snap.last if snap else None
-    bid_pct = snap.bid if snap else None
-    offer_pct = snap.offer if snap else None
+
+    last = snap.last if snap else None
+    bid = snap.bid if snap else None
+    offer = snap.offer if snap else None
+    close = snap.close if snap else None
+    open_ = snap.open if snap else None
+    high = snap.high if snap else None
+    low = snap.low if snap else None
+    volume = snap.volume if snap else None       # EV — $ efectivo operado
+    nominal = snap.nominal if snap else None      # NV — nominales operados
+    bid_size = snap.bid_size if snap else None
+    offer_size = snap.offer_size if snap else None
+    last_size = snap.last_size if snap else None
     last_ts = snap.last_ts if snap else None
+    close_ts = snap.close_ts if snap else None
 
-    # Price the bond off this leg. USD / USB feed the native ficha directly
-    # (fx-free → that venue's cable / MEP yield). ARS is the only leg that
-    # needs the FX: pesos ÷ the bond's native rate (CCL for cable-native,
-    # MEP for MEP-native) → the bond's own basis.
-    price_for_calc = last_pct
-    if last_pct is not None and leg_basis == "ARS":
-        native = (meta.get("moneda") or "USD")
-        price_for_calc = fx_svc.normalize_price(last_pct, "ARS", native, fx)
+    # The ARS leg is the only one that needs the FX (pesos ÷ the bond's
+    # native rate → its own basis). USD/USB/native price straight off the
+    # ticker. `cp()` normalizes any price quoted on this leg before calc.
+    native = (meta.get("moneda") or "USD")
 
-    metrics = pricing.metrics_for_market_price(code, price_for_calc)
+    def cp(px):
+        if px is None:
+            return None
+        if leg_basis == "ARS":
+            return fx_svc.normalize_price(px, "ARS", native, fx)
+        return px
+
+    # Precio de referencia: last (LA) si operó hoy; si no, cierre previo (CL).
+    if last is not None:
+        ref_px, price_source, price_date = last, "LA", last_ts
+    elif close is not None:
+        ref_px, price_source, price_date = close, "CL", close_ts
+    else:
+        ref_px, price_source, price_date = None, None, None
+
+    m = (pricing.metrics_for_market_price(code, cp(ref_px)) or {}) if ref_px is not None else {}
+
+    # VWAP = efectivo / nominales * 100 (misma escala que el precio cotizado).
+    vwap = None
+    try:
+        if volume and nominal:
+            vwap = volume / nominal * 100.0
+    except (TypeError, ZeroDivisionError):
+        vwap = None
+
+    # Variación vs cierre previo.
+    var_pct = var_px = None
+    try:
+        if last is not None and close not in (None, 0):
+            var_px = last - close
+            var_pct = (last / close - 1.0) * 100.0
+    except (TypeError, ZeroDivisionError):
+        var_pct = var_px = None
+
+    # Δ yield (bps) = TIREA(last) − TIREA(close).
+    delta_yield_bps = None
+    if last is not None and close is not None and last != close:
+        ty_last = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
+        ty_close = _tirea_at(code, cp(close))
+        if ty_last is not None and ty_close is not None and ty_last == ty_last and ty_close == ty_close:
+            delta_yield_bps = (ty_last - ty_close) * 10000.0
+
     row = dict(meta)
     row.update(
         {
+            "code": code,                # ticker BYMA = nombre de variable
             "symbol": symbol,
             "leg": leg,
-            "last": last_pct,
-            "bid": bid_pct,
-            "offer": offer_pct,
-            "last_ts": last_ts,
-            "tirea": (metrics or {}).get("tirea") if metrics else None,
-            "tna": (metrics or {}).get("tna") if metrics else None,
-            "tna_convention_label": (metrics or {}).get("tna_convention_label") if metrics else None,
-            "duration": (metrics or {}).get("duration") if metrics else None,
-            "paridad": (metrics or {}).get("paridad") if metrics else None,
-            "margen_tna": (metrics or {}).get("margen_tna") if metrics else None,
+            "last": last, "bid": bid, "offer": offer,
+            "close": close, "open": open_, "high": high, "low": low,
+            "bid_size": bid_size, "offer_size": offer_size, "last_size": last_size,
+            "volume": volume, "nominal": nominal, "vwap": vwap,
+            "var_pct": var_pct, "var_px": var_px,
+            "last_ts": last_ts, "close_ts": close_ts,
+            "price_source": price_source, "price_date": price_date,
+            "delta_yield_bps": delta_yield_bps,
+            "tirea": m.get("tirea"),
+            "tna": m.get("tna"),
+            "tna_convention_label": m.get("tna_convention_label"),
+            "tem": m.get("tem"),
+            "duration": m.get("duration"),
+            "paridad": m.get("paridad"),
+            "margen_tna": m.get("margen_tna"),
         }
     )
+    if book:
+        row["tirea_bid"] = _tirea_at(code, cp(bid))
+        row["tirea_offer"] = _tirea_at(code, cp(offer))
+        row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
     return row
 
 
@@ -102,6 +168,7 @@ async def _rows_for(
     plazo: str = "24hs",
     only_quoting: bool = True,
     leg: str = "native",
+    book: bool = False,
 ) -> tuple[list[dict], dict]:
     """One row per bond. Live columns come from the in-process store;
     TIREA / Duration are cached so a 5 s poll hits the cache nearly
@@ -125,7 +192,7 @@ async def _rows_for(
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
     loop = asyncio.get_running_loop()
     raw: list[dict | None] = await asyncio.gather(
-        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo, leg, fx) for code in codes)
+        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo, leg, fx, book) for code in codes)
     )
     rows = [r for r in raw if r is not None]
     quoting = sum(1 for r in rows if _has_quote(r))
@@ -186,6 +253,67 @@ async def curve_table_partial(
     return _render(
         request,
         "partials/curve_table.html",
+        selected_def=curves.curve_def(curve),
+        rows=rows,
+        row_meta=row_meta,
+        plazo=plazo,
+        only_quoting=only_quoting,
+        leg=leg,
+    )
+
+
+# ── Mercado (monitor de book / blotter) ───────────────────────────────────
+# Reusa la partición de curvas y el motor de filas, pero con columnas de
+# mercado (book + sizes + VWAP + TIREA por punta + variación) y book=True
+# para calcular las TIREA de bid/last/offer.
+mercado_router = APIRouter(tags=["mercado"])
+
+
+@mercado_router.get("/mercado", response_class=HTMLResponse)
+async def mercado_page(
+    request: Request,
+    curve: str | None = None,
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+) -> HTMLResponse:
+    bond_universe.ensure_loaded()
+    all_curves = curves.list_curves()
+    table = curves.build_curve_codes()
+    default_key = next((c.key for c in all_curves if table.get(c.key)), None)
+    selected_key = curve if (curve and curve in table) else default_key
+    rows, row_meta = (
+        await _rows_for(selected_key, plazo, only_quoting, leg, book=True)
+        if selected_key else ([], {})
+    )
+    return _render(
+        request,
+        "mercado.html",
+        all_curves=all_curves,
+        table=table,
+        selected_key=selected_key,
+        selected_def=curves.curve_def(selected_key) if selected_key else None,
+        rows=rows,
+        row_meta=row_meta,
+        plazo=plazo,
+        only_quoting=only_quoting,
+        leg=leg,
+    )
+
+
+@mercado_router.get("/mercado/table", response_class=HTMLResponse)
+async def mercado_table_partial(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+) -> HTMLResponse:
+    """HTMX partial: blotter body for the requested curve."""
+    rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True)
+    return _render(
+        request,
+        "partials/mercado_table.html",
         selected_def=curves.curve_def(curve),
         rows=rows,
         row_meta=row_meta,

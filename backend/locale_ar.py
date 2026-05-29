@@ -93,6 +93,37 @@ def fmt_date(d: Any) -> str:
     return str(d)
 
 
+def fmt_ts(ts: Any) -> str:
+    """Epoch-ms (o string) → 'DD/MM HH:MM:SS'. Para Price Date (LA/CL)."""
+    if ts is None or ts == "":
+        return DASH
+    try:
+        ms = float(ts)
+    except (TypeError, ValueError):
+        return str(ts)
+    if ms <= 0:
+        return DASH
+    try:
+        return datetime.fromtimestamp(ms / 1000.0).strftime("%d/%m %H:%M:%S")
+    except (OverflowError, OSError, ValueError):
+        return DASH
+
+
+def fmt_hum(x: Any) -> str:
+    """1234567 → '1,2M'. Para volúmenes ($ efectivo / nominales)."""
+    if _is_nan(x):
+        return DASH
+    try:
+        n = float(x)
+    except (TypeError, ValueError):
+        return DASH
+    a = abs(n)
+    for div, suf in ((1e12, "B"), (1e9, "MM"), (1e6, "M"), (1e3, "k")):
+        if a >= div:
+            return _swap_sep(f"{n / div:,.1f}") + suf
+    return _swap_sep(f"{n:,.0f}")
+
+
 JINJA_FILTERS = {
     "ar_pct": fmt_pct,
     "ar_pct_pp": fmt_pct_pp,
@@ -100,4 +131,6 @@ JINJA_FILTERS = {
     "ar_int": fmt_int,
     "ar_money": fmt_money,
     "ar_date": fmt_date,
+    "ar_ts": fmt_ts,
+    "ar_hum": fmt_hum,
 }
