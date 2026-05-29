@@ -24,7 +24,7 @@ import inspect
 import json
 import logging
 import time
-from typing import Any, Dict, Iterable, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import httpx
 import websockets
@@ -136,6 +136,10 @@ class PrimaryWS:
             "non_md_messages": 0,
             "last_non_md": None,
         }
+        # Símbolos rechazados por el broker (no reintentar) y los que ya
+        # reintentamos de a uno (evita loops de re-subscripción).
+        self._rejected: Set[str] = set()
+        self._retried_individually: Set[str] = set()
 
     # ── API ─────────────────────────────────────────────────────────
 
@@ -219,7 +223,7 @@ class PrimaryWS:
         pocos (acumulan entre mensajes) sí funciona. Un pequeño sleep entre
         lotes evita saturar el socket.
         """
-        syms = sorted(symbols)
+        syms = sorted(s for s in symbols if s not in self._rejected)
         total = len(syms)
         for i in range(0, total, SUBSCRIBE_CHUNK):
             chunk = syms[i:i + SUBSCRIBE_CHUNK]
@@ -230,9 +234,64 @@ class PrimaryWS:
             logger.info("[primary_ws] subscribe en %d lotes de <=%d (%d símbolos)",
                         n_lotes, SUBSCRIBE_CHUNK, total)
 
+    @staticmethod
+    def _symbols_from_error(message: Any) -> List[str]:
+        """Extrae los símbolos del payload 'smd' que el server eco-devuelve
+        dentro de la respuesta ERROR (campo 'message', es JSON string)."""
+        if not isinstance(message, str):
+            return []
+        try:
+            payload = json.loads(message)
+        except (ValueError, TypeError):
+            return []
+        out: List[str] = []
+        for p in payload.get("products", []) or []:
+            sym = p.get("symbol") if isinstance(p, dict) else None
+            if sym:
+                out.append(sym)
+        return out
+
+    def _recover_from_error(self, message: Any) -> None:
+        syms = self._symbols_from_error(message)
+        if not syms:
+            return
+        if len(syms) == 1:
+            # rechazo de un único símbolo -> es inválido, lo descartamos.
+            bad = syms[0]
+            if bad not in self._rejected:
+                self._rejected.add(bad)
+                logger.warning("[primary_ws] símbolo inválido descartado: %s", bad)
+            return
+        # lote rechazado: reintentar de a uno los que aún no probamos solos.
+        pending = [s for s in syms
+                   if s not in self._rejected and s not in self._retried_individually]
+        if not pending:
+            return
+        self._retried_individually.update(pending)
+        logger.info("[primary_ws] lote rechazado (%d símbolos); reintentando %d de a uno",
+                    len(syms), len(pending))
+        try:
+            asyncio.create_task(self._resubscribe_individually(pending))
+        except RuntimeError:
+            pass  # sin loop corriendo
+
+    async def _resubscribe_individually(self, symbols: List[str]) -> None:
+        ws = self._ws
+        if ws is None:
+            return
+        for s in symbols:
+            if s in self._rejected:
+                continue
+            try:
+                await ws.send(_subscribe_payload([s]))
+                await asyncio.sleep(0.02)
+            except (ConnectionClosed, WebSocketException):
+                return
+
     def stats(self) -> Dict[str, Any]:
         s = dict(self._stats)
         s["subscriptions"] = len(self._subscriptions)
+        s["rejected"] = len(self._rejected)
         return s
 
     @property
@@ -308,14 +367,17 @@ class PrimaryWS:
         if not isinstance(obj, dict):
             return
         if obj.get("type") not in ("Md", "md"):
-            # No es MarketData: lo más probable es la respuesta del server al
-            # 'smd' (confirmación o error). Lo guardamos/logueamos para poder
-            # diagnosticar por qué no llegan precios.
             snippet = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
             self._stats["non_md_messages"] = self._stats.get("non_md_messages", 0) + 1
             self._stats["last_non_md"] = snippet[:600]
-            logger.warning("[primary_ws] mensaje no-Md (type=%r): %s",
-                           obj.get("type"), snippet[:600])
+            # matrizoms rechaza el 'smd' ENTERO si un símbolo del lote es
+            # inválido. Reintentamos el lote de a uno para conservar los
+            # válidos y descartar solo el/los inválido(s).
+            if obj.get("status") == "ERROR":
+                self._recover_from_error(obj.get("message"))
+            else:
+                logger.warning("[primary_ws] mensaje no-Md (type=%r): %s",
+                               obj.get("type"), snippet[:300])
             return
         symbol = (obj.get("instrumentId") or {}).get("symbol")
         market_data = obj.get("marketData") or {}
