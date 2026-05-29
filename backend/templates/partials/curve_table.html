@@ -54,11 +54,11 @@
             <td>{{ r.vencimiento | ar_date }}</td>
             <td>{{ r.moneda or "—" }}</td>
             <td>{{ r.close | ar_num(2) }}</td>
-            <td style="color:var(--accent);font-weight:600">{{ r.last | ar_num(2) }}</td>
-            <td class="{{ vcls }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
+            <td class="{{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
+            <td style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td>{{ r.delta_yield_bps | ar_num(1) }}</td>
-            <td>{{ r.bid | ar_num(2) }}</td>
-            <td>{{ r.offer | ar_num(2) }}</td>
+            <td class="{{ r.bid_cls }}">{{ r.bid | ar_num(2) }}</td>
+            <td class="{{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>
             <td>{{ r.duration | ar_num(2) }}</td>
             <td>{{ r.tirea | ar_pct(2) }}</td>
             <td>

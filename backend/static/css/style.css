@@ -670,5 +670,9 @@ select {
 /* Curvas / Mercado: variación con color + scroll horizontal para tablas anchas */
 .var-up   { color: var(--green); }
 .var-down { color: var(--red); }
+/* Color de letra por punta (precio vs cierre previo). */
+.px-up    { color: var(--green); }
+.px-down  { color: var(--red); }
+.px-flat  { color: var(--text-muted); }
 .table-scroll { overflow-x: auto; max-width: 100%; }
 .mercado-table th, .mercado-table td { white-space: nowrap; }
