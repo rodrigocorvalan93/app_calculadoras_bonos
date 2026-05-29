@@ -1,27 +1,12 @@
 <div class="card">
   <div class="card-title">
-    <span>{{ code }}</span>
+    <span>Libro · {{ code }}</span>
     <span class="card-title-aux">{{ nombre }} · {{ symbol }}</span>
   </div>
   <div class="card-body">
-
-    {# ── Header tipo panel BYMA + TIR ───────────────────────────────── #}
-    <div class="market-grid" style="margin-bottom:12px">
-      <div class="mc-cell"><span class="mc-lbl">Cierre</span><span class="mc-val">{{ row.close | ar_num(2) }}</span></div>
-      <div class="mc-cell mc-cell-last"><span class="mc-lbl">Último</span><span class="mc-val {{ row.last_cls }}">{{ row.last | ar_num(2) }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">Var %</span><span class="mc-val {{ row.last_cls }}">{{ row.var_pct | ar_pct_pp(2) }}</span><span class="mc-sub {{ row.last_cls }}">{{ row.var_px | ar_num(2) }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">VWAP</span><span class="mc-val">{{ row.vwap | ar_num(2) }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">Open</span><span class="mc-val">{{ row.open | ar_num(2) }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">High</span><span class="mc-val">{{ row.high | ar_num(2) }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">Low</span><span class="mc-val">{{ row.low | ar_num(2) }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">TIREA</span><span class="mc-val" style="color:var(--accent)">{{ row.tirea | ar_pct(2) }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">Dur</span><span class="mc-val">{{ row.duration | ar_num(2) }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">Vol ($)</span><span class="mc-val">{{ row.volume | ar_hum }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">Vol (VN)</span><span class="mc-val">{{ row.nominal | ar_hum }}</span></div>
-      <div class="mc-cell"><span class="mc-lbl">L. mínima</span><span class="mc-val" title="No viene en el stream de marketData; requiere el endpoint de instrumentos de Primary">—</span></div>
-    </div>
-
-    {# ── Libro ───────────────────────────────────────────────────────── #}
+    {# O/H/L/C, Last, VWAP, Var, TIREA, Dur, Vol ya están en la fila de la
+       tabla de arriba — acá no los repetimos. El libro aporta la
+       profundidad con la TIR por nivel; abajo, la tenencia. #}
     {% if not bids and not offers %}
       <div class="alert">Sin profundidad en el store para este instrumento (¿no operó / broker offline?).</div>
     {% else %}
@@ -55,7 +40,6 @@
     </div>
     {% endif %}
 
-    {# ── Tenencia (desplegable) ──────────────────────────────────────── #}
     {% if position %}
     <details style="margin-top:14px" open>
       <summary style="cursor:pointer;color:var(--cyan)">Mi posición · {{ position.total_cantidad | ar_int }} VN en {{ position.n_fondos }} fondo{{ "s" if position.n_fondos != 1 else "" }}</summary>

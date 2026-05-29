@@ -398,7 +398,6 @@ async def mercado_book(
         nombre=meta.get("nombre") or code,
         symbol=symbol,
         snap=snap,
-        row=_row_for_code(code, plazo, leg, book=True) or {},   # header: OHLC/Last/VWAP/Var/TIR
         position=positions.position_for(code),                  # tenencia (desplegable)
         bids=with_yield(snap.bids if snap else None),
         offers=with_yield(snap.offers if snap else None),
