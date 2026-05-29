@@ -101,9 +101,30 @@ def _parse_fondos(path: str) -> Dict[int, str]:
     return out
 
 
+def _fondos_path() -> Optional[str]:
+    """Resuelve Delta_Fondos.txt como OMSposiciones: DELTA_FONDOS_PATH, luego
+    DELTA_BASES_DIR/../Text/Esco/, ../, y junto a los Excel."""
+    env = os.getenv("DELTA_FONDOS_PATH")
+    if env:
+        env = os.path.expandvars(os.path.expanduser(env))
+        if os.path.isfile(env):
+            return env
+    base = os.getenv("DELTA_BASES_DIR")
+    if base:
+        parent = os.path.dirname(base.rstrip("\\/"))
+        for cand in (
+            os.path.join(parent, "Text", "Esco", "Delta_Fondos.txt"),
+            os.path.join(parent, "Delta_Fondos.txt"),
+            os.path.join(base, "Delta_Fondos.txt"),
+        ):
+            if os.path.isfile(cand):
+                return cand
+    return None
+
+
 def _fondo_names() -> Dict[int, str]:
-    path = os.getenv("DELTA_FONDOS_PATH")
-    if path and os.path.isfile(path):
+    path = _fondos_path()
+    if path:
         try:
             return _parse_fondos(path)
         except Exception as exc:  # noqa: BLE001
