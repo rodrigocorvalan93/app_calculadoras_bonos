@@ -35,6 +35,27 @@ def test_to_cable_usd_three_legs() -> None:
     assert fx_svc.to_cable_usd(70.0, "???", fx) is None
 
 
+def test_normalize_price_matrix() -> None:
+    """The full leg→native matrix: cable-native (globales / cable-corps)
+    and MEP-native (bonares / MEP-corps). CCL = 1000 ARS/USD, MEP = 950."""
+    fx = fx_svc.FxSnapshot(ccl=1000.0, usb=950.0)
+
+    # ── native = cable (USD) ───────────────────────────────────────────
+    assert fx_svc.normalize_price(70.0, "C", "USD", fx) == 70.0            # cable: as-is
+    assert fx_svc.normalize_price(70000.0, "O", "USD", fx) == 70.0         # ARS: /CCL
+    assert fx_svc.normalize_price(70.0, "D", "USD", fx) == pytest.approx(70.0 * 950 / 1000)  # MEP: ×MEP/CCL
+
+    # ── native = MEP (USB) ─────────────────────────────────────────────
+    assert fx_svc.normalize_price(70.0, "D", "USB", fx) == 70.0           # MEP: as-is
+    assert fx_svc.normalize_price(70000.0, "O", "USB", fx) == pytest.approx(70000.0 / 950)   # ARS: /MEP
+    assert fx_svc.normalize_price(70.0, "C", "USB", fx) == pytest.approx(70.0 * 1000 / 950)  # cable: ×CCL/MEP
+
+    # Missing rate / bad input → None.
+    assert fx_svc.normalize_price(70.0, "O", "USB", fx_svc.FxSnapshot(ccl=1000.0)) is None  # no USB
+    assert fx_svc.normalize_price(None, "C", "USD", fx) is None
+    assert fx_svc.normalize_price(70.0, "C", "???", fx) is None
+
+
 def test_fx_leg_symbols_include_c_and_d() -> None:
     bond_universe.ensure_loaded()
     bases = fx_svc.fx_bases()

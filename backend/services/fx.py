@@ -187,20 +187,63 @@ def invalidate() -> None:
     _fx_cache.clear()
 
 
-def to_cable_usd(price: object, leg: str, fx: Optional[FxSnapshot] = None) -> Optional[float]:
-    """Normalize a quoted `price` to the cable-USD (CCL) basis given its
-    quote `leg` ("ARS"/"O", "USB"/"D", "USD"/"C"). Returns None when the
-    needed reference rate is missing. Pass `fx` to reuse a snapshot across
-    a batch; otherwise the cached reference is fetched."""
+def _leg_code(x: object) -> Optional[str]:
+    """Normalize a leg/native alias to one of ARS / USD (cable) / USB (MEP)."""
+    c = str(x or "").strip().upper()
+    if c in ("ARS", "O", "PESOS"):
+        return "ARS"
+    if c in ("USD", "C", "CABLE"):
+        return "USD"
+    if c in ("USB", "D", "MEP"):
+        return "USB"
+    return None
+
+
+def normalize_price(
+    price: object,
+    leg: str,
+    native: str = "USD",
+    fx: Optional[FxSnapshot] = None,
+) -> Optional[float]:
+    """Convert a quoted `price` from its BYMA `leg` currency to the bond's
+    `native`-dollar basis, two-step (leg → ARS → native), using the implicit
+    rates CCL (USD/ARS) and MEP (USB/ARS).
+
+        leg / native ∈ {"ARS"/"O", "USB"/"D"/"MEP", "USD"/"C"/"CABLE"}
+
+    `native` is the Moneda of the bond's DIRTY ficha (USD = cable, USB =
+    MEP). The native leg is a no-op, so the basic curve (native ficha +
+    native ticker) needs no FX; this only powers the cross-leg O/D/C view
+    and price fallbacks. Returns None when a needed rate is missing or the
+    price is invalid.
+    """
     p = _pos(price)
     if p is None:
         return None
-    fx = fx or get_fx()
-    code = (leg or "").strip().upper()
-    if code in ("USD", "C", "CABLE"):
+    L, N = _leg_code(leg), _leg_code(native)
+    if L is None or N is None:
+        return None
+    if L == N:
         return p
-    if code in ("USB", "D", "MEP"):
-        return (p * fx.usb / fx.ccl) if (fx.usb and fx.ccl) else None
-    if code in ("ARS", "O", "PESOS"):
-        return (p / fx.ccl) if fx.ccl else None
-    return None
+    fx = fx or get_fx()
+    # step 1: leg → ARS
+    if L == "ARS":
+        ars: Optional[float] = p
+    elif L == "USD":
+        ars = (p * fx.ccl) if fx.ccl else None
+    else:  # USB / MEP
+        ars = (p * fx.usb) if fx.usb else None
+    if ars is None:
+        return None
+    # step 2: ARS → native
+    if N == "ARS":
+        return ars
+    if N == "USD":
+        return (ars / fx.ccl) if fx.ccl else None
+    return (ars / fx.usb) if fx.usb else None  # USB / MEP
+
+
+def to_cable_usd(price: object, leg: str, fx: Optional[FxSnapshot] = None) -> Optional[float]:
+    """Normalize a quote to the cable-USD (CCL) basis — `normalize_price`
+    with native=USD. Kept for the globales/cable curves."""
+    return normalize_price(price, leg, native="USD", fx=fx)
