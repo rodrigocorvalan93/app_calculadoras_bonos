@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.services import bond_universe, curves, fx as fx_svc, marketdata_store, pricing, symbols as syms
+from backend.services import bond_universe, curves, fx as fx_svc, marketdata_store, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
 # hits keep the work small, but the first poll after a price tick still
@@ -398,6 +398,8 @@ async def mercado_book(
         nombre=meta.get("nombre") or code,
         symbol=symbol,
         snap=snap,
+        row=_row_for_code(code, plazo, leg, book=True) or {},   # header: OHLC/Last/VWAP/Var/TIR
+        position=positions.position_for(code),                  # tenencia (desplegable)
         bids=with_yield(snap.bids if snap else None),
         offers=with_yield(snap.offers if snap else None),
     )
