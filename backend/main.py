@@ -25,7 +25,7 @@ from backend.locale_ar import JINJA_FILTERS
 from backend.routes.curves import router as curves_router
 from backend.routes.market import router as market_router
 from backend.routes.yas import router as yas_router
-from backend.services import bond_universe, curves as curves_svc, symbols as syms
+from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, symbols as syms
 from backend.services.primary_client import get_client
 from backend.services.primary_ws import get_ws_client
 from backend.services.warmup import get_daemon as get_warmup_daemon
@@ -56,6 +56,13 @@ def _initial_symbols() -> list[str]:
         for code in codes_by_curve.get(key, []) or []:
             seed.update(syms.md_symbols([code], plazo="24hs"))
             seed.update(syms.md_symbols([code], plazo="CI"))
+    # Implicit-FX legs: the C (cable) and D (MEP) tickers of the liquid
+    # sovereigns, needed to derive the CCL / USB reference rates.
+    try:
+        for pl in ("24hs", "CI"):
+            seed.update(fx_svc.fx_leg_symbols(pl))
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] fx leg seed failed")
     return sorted(seed)
 
 

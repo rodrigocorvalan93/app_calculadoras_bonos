@@ -16,7 +16,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Query
 
-from backend.services import marketdata_store as mds, primary_ws, symbols as syms
+from backend.services import fx as fx_svc, marketdata_store as mds, primary_ws, symbols as syms
 
 router = APIRouter(prefix="/market", tags=["market"])
 
@@ -30,6 +30,13 @@ async def diag() -> Dict[str, Any]:
         "store": store.stats(),
         "authenticated": ws.authenticated,
     }
+
+
+@router.get("/fx")
+async def fx(plazo: str = Query("24hs")) -> Dict[str, Any]:
+    """Implicit FX reference: CCL (USD/cable) + USB (MEP) from the
+    top-volume liquid sovereign, computed off the in-process store."""
+    return fx_svc.get_fx(plazo).to_dict()
 
 
 @router.get("/snapshot/{code}")
