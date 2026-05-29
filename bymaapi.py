@@ -5,6 +5,7 @@
 
 # %% Imports
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 
@@ -79,14 +80,55 @@ def get_instruments(session: requests.Session) -> tuple[pd.DataFrame, pd.DataFra
     return instruments_df, instruments_df2
 
 
-def get_instruments_details(session: requests.Session) -> pd.DataFrame:
+def get_instruments_details(session: requests.Session, retries: int = 3) -> pd.DataFrame:
     """
     Obtiene los instrumentos detallados y retorna un DataFrame.
+
+    Endurecido: chequea el status HTTP, reintenta ante respuestas vacías
+    (el endpoint a veces devuelve 0 instrumentos de forma transitoria justo
+    después del login) y, si igual falla, levanta un error claro con el
+    status y las claves de la respuesta. Así evitamos devolver un DataFrame
+    vacío en silencio que después revienta con un críptico
+    `KeyError: 'underlying'` 200 líneas más abajo.
     """
     url = BASE_URL + "rest/instruments/details"
-    response = session.get(url)
-    detalles_dict = response.json()
-    return pd.DataFrame(detalles_dict.get("instruments", []))
+
+    last_payload: dict = {}
+    for intento in range(1, retries + 1):
+        response = session.get(url)
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"instruments/details devolvió HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+
+        try:
+            detalles_dict = response.json()
+        except ValueError as e:
+            raise RuntimeError(
+                "instruments/details no devolvió JSON válido "
+                f"(HTTP {response.status_code}): {response.text[:300]}"
+            ) from e
+
+        last_payload = detalles_dict
+        df = pd.DataFrame(detalles_dict.get("instruments", []))
+        if not df.empty:
+            return df
+
+        print(
+            f"[instruments/details] respuesta vacía "
+            f"(intento {intento}/{retries}, status={detalles_dict.get('status')!r})"
+        )
+        if intento < retries:
+            time.sleep(intento)  # backoff lineal: 1s, 2s, ...
+
+    raise RuntimeError(
+        f"instruments/details devolvió 0 instrumentos tras {retries} intentos. "
+        f"status={last_payload.get('status')!r}, claves={list(last_payload.keys())}. "
+        "Suele indicar sesión expirada/rechazada o rate-limit; volvé a loguear "
+        "y reintentá."
+    )
 
 
 def get_instrument_detail(session: requests.Session, symbol: str) -> pd.DataFrame:
@@ -680,6 +722,12 @@ def main():
 
     # --- Market Data para Futuros ---
     futuros_market_data = []
+    if "underlying" not in instrumentos_detallados_df.columns:
+        raise RuntimeError(
+            "instruments/details no trae la columna 'underlying' "
+            f"(columnas: {list(instrumentos_detallados_df.columns)[:20]}). "
+            "Cambió el esquema del endpoint."
+        )
     df_filtrado = instrumentos_detallados_df[instrumentos_detallados_df["underlying"] == "Dólar USA A3500"]
     instrumentos_ids = pd.json_normalize(df_filtrado["instrumentId"])
 
