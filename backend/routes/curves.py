@@ -402,3 +402,99 @@ async def mercado_book(
         bids=with_yield(snap.bids if snap else None),
         offers=with_yield(snap.offers if snap else None),
     )
+
+
+# ── Forwards implícitos (matriz triangular por curva) ─────────────────────
+# Fila = bono corto (t1), columna = bono largo (t2). Celda = forward EA entre
+# ambos usando Duration como eje temporal y TIREA como spot:
+#   fwd = [(1+y2)^t2 / (1+y1)^t1]^(1/(t2−t1)) − 1   (igual que plotter).
+forwards_router = APIRouter(tags=["forwards"])
+
+
+def _forwards_matrix(rows: list[dict]) -> dict:
+    pts = [
+        (r["code"], r["tirea"], r["duration"])
+        for r in rows
+        if r.get("tirea") is not None and r["tirea"] == r["tirea"]
+        and r.get("duration") is not None and r["duration"] == r["duration"] and r["duration"] > 0
+    ]
+    pts.sort(key=lambda p: p[2])  # por Duration ascendente
+    n = len(pts)
+    codes = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    ts = [p[2] for p in pts]
+    dfact = [(1.0 + ys[i]) ** (-ts[i]) for i in range(n)]
+
+    raw: list[list[float | None]] = [[None] * n for _ in range(n)]
+    finite: list[float] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if ts[j] <= ts[i]:
+                continue
+            try:
+                f = (dfact[i] / dfact[j]) ** (1.0 / (ts[j] - ts[i])) - 1.0
+            except (ValueError, ZeroDivisionError, OverflowError):
+                f = None
+            if f is not None and f == f:
+                raw[i][j] = f
+                finite.append(f)
+    vmin = min(finite) if finite else 0.0
+    vmax = max(finite) if finite else 1.0
+
+    out_rows = []
+    for i in range(n):
+        cells = []
+        for j in range(n):
+            f = raw[i][j]
+            if f is None:
+                cells.append({"fwd": None, "bg": ""})
+            else:
+                norm = (f - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+                norm = max(0.0, min(1.0, norm))
+                alpha = 0.08 + norm * 0.42
+                cells.append({"fwd": f, "bg": f"background-color: rgba(76,201,240,{alpha:.2f})"})
+        out_rows.append({"code": codes[i], "t": ts[i], "tirea": ys[i], "cells": cells})
+    return {"header": [{"code": codes[j], "t": ts[j]} for j in range(n)], "rows": out_rows, "n": n}
+
+
+async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str) -> dict:
+    rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
+    return _forwards_matrix(rows)
+
+
+@forwards_router.get("/forwards", response_class=HTMLResponse)
+async def forwards_page(
+    request: Request,
+    curve: str | None = None,
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+) -> HTMLResponse:
+    bond_universe.ensure_loaded()
+    all_curves = curves.list_curves()
+    table = curves.build_curve_codes()
+    default_key = next((c.key for c in all_curves if table.get(c.key)), None)
+    selected_key = curve if (curve and curve in table) else default_key
+    fwd = await _forwards_for(selected_key, plazo, only_quoting, leg) if selected_key else {"header": [], "rows": [], "n": 0}
+    return _render(
+        request, "forwards.html",
+        all_curves=all_curves, table=table, selected_key=selected_key,
+        selected_def=curves.curve_def(selected_key) if selected_key else None,
+        fwd=fwd, plazo=plazo, only_quoting=only_quoting, leg=leg,
+    )
+
+
+@forwards_router.get("/forwards/table", response_class=HTMLResponse)
+async def forwards_table_partial(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+) -> HTMLResponse:
+    fwd = await _forwards_for(curve, plazo, only_quoting, leg)
+    return _render(
+        request, "partials/forwards_table.html",
+        fwd=fwd, selected_def=curves.curve_def(curve),
+        plazo=plazo, only_quoting=only_quoting, leg=leg,
+    )

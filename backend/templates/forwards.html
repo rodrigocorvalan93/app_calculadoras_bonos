@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Forwards{% endblock %}
+{% block tab_forwards %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Forwards implícitos (TIR)</h1>
+    <p class="muted">Matriz triangular por curva: <strong>fila = bono corto</strong>, <strong>columna = bono largo</strong>, celda = forward anualizado (EA) entre ambos, eje Duration. Aproximado (TIR como spot). Refresh 5 s.</p>
+  </header>
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <label class="field">
+          <span>Curva</span>
+          <select name="curve" hx-get="/forwards/table" hx-trigger="change"
+                  hx-target="#forwards-table" hx-swap="innerHTML"
+                  hx-include="[name=plazo], [name=only_quoting], [name=leg]">
+            {% for c in all_curves %}
+              {% set count = (table.get(c.key) or []) | length %}
+              <option value="{{ c.key }}" {% if c.key == selected_key %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>
+                {{ c.label }} {% if count %}({{ count }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Plazo</span>
+          <select name="plazo" hx-get="/forwards/table" hx-trigger="change"
+                  hx-target="#forwards-table" hx-swap="innerHTML"
+                  hx-include="[name=curve], [name=only_quoting], [name=leg]">
+            <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
+            <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Leg (FX)</span>
+          <select name="leg" hx-get="/forwards/table" hx-trigger="change"
+                  hx-target="#forwards-table" hx-swap="innerHTML"
+                  hx-include="[name=curve], [name=plazo], [name=only_quoting]">
+            <option value="native" {% if leg == "native" %}selected{% endif %}>Nativa</option>
+            <option value="USD"    {% if leg == "USD"    %}selected{% endif %}>USD (cable)</option>
+            <option value="USB"    {% if leg == "USB"    %}selected{% endif %}>USB (MEP)</option>
+            <option value="ARS"    {% if leg == "ARS"    %}selected{% endif %}>ARS (pesos)</option>
+          </select>
+        </label>
+        <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+          <input type="checkbox" name="only_quoting" value="true" {% if only_quoting %}checked{% endif %}
+                 hx-get="/forwards/table" hx-trigger="change" hx-target="#forwards-table" hx-swap="innerHTML"
+                 hx-include="[name=curve], [name=plazo], [name=leg]">
+          Solo con cotización
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div id="forwards-table"
+       hx-get="/forwards/table" hx-trigger="every 5s" hx-swap="innerHTML"
+       hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]">
+    {% include "partials/forwards_table.html" %}
+  </div>
+</section>
+{% endblock %}
