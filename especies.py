@@ -11154,6 +11154,51 @@ MR35D = {
     "Aviso Resultados": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9258%2FMPMAE%2DRES%2DON%20COEMISION%20GEMSA%20Y%20CTR%20CLASES%2035%2036%2037%20Y%2038%2DAviso%20de%20Resultados%2026%2D08%2D24%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9258&p=true&ga=1""",
     "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9258%2FMPMAE%2DANU%2DON%20COEMISION%20GEMSA%20Y%20CTR%20CLASES%2035%2036%2037%20Y%2038%20%2D%20Suplemento%2009%2D08%2D24%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9258&p=true&ga=1"""
 }
+MRCUD = {
+    "Nombre Security": "ON GEM S.A.  y CTR S.A. Clase XXVIII Vto. 08 03 2026",
+    "Código": "MRCUD",
+    "ISIN": "AR0336525404",
+    "Calificación": "A(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Energy",
+    "Legislación": "Argentina",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "08/03/2024",
+    "Vencimiento": "08/03/2026",
+    "Fecha Primer Cupón": "08/09/2024",
+    "Cupón / Spread": 9.50, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
+    "Convención Base": 365., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -3, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": -3,
+    "Fechas de cupón": [
+    "08/09/2024",
+    "08/03/2025",
+    "08/09/2025",
+    "08/03/2026"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Quote Price Convention": "DIRTY",
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,  # Precio Call
+    "Comentarios": "",
+    "Aviso Resultados": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9100%2FMPMAE%2DRES%2DON%20COEMISION%20GEMSA%2DCTR%20Clase%2032%20y%2033%2DAviso%20de%20Resultado%2028%2D05%2D24%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9100&p=true&ga=1""",
+    "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9100%2FMPMAE%2DANU%2DON%20COEMISION%20GEMSA%2DCTR%20Clases%2032%20y%2033%2DSuplemento%2022%2D05%2D24%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9100&p=true&ga=1"""
+}
 MRCYD = {
     "Nombre Security": "ON GEM S.A.  y CTR S.A. Clase XXXII Vto. 30 05 2026",
     "Código": "MRCYD",
@@ -26113,6 +26158,7 @@ DNC5D = rentafija.Bono(DNC5D)
 PZCGD = rentafija.Bono(PZCGD)
 HJCHD = rentafija.Bono(HJCHD)
 HJCKD = rentafija.Bono(HJCKD)
+MRCUD = rentafija.Bono(MRCUD)
 MRCYD = rentafija.Bono(MRCYD)
 CRCJD = rentafija.Bono(CRCJD)
 RZABD = rentafija.Bono(RZABD)
@@ -26441,7 +26487,7 @@ todos_los_bonos = [
     MCC1D, MCC2D, MSSGD, ZZC1O, GYC5O, CS47D, CS48D, CICBD,
     CS49D, CS50D, PN37D, CIC8D, CIC9D, CICAD, HJCKD, CP40D, TLCUD,
     PECGD, NBS1D, PQCRD, PQCTD, HJCGD, HBCAD, HBCDD, YMCYD, LUC5D,
-    YMCZD, MGCND, MGCQD, OLC5D, OLC6D, DNC5D, PZCGD, HJCHD, MRCYD,
+    YMCZD, MGCND, MGCQD, OLC5D, OLC6D, DNC5D, PZCGD, HJCHD, MRCUD, MRCYD,
     CRCJD, RZABD, RZ9BD, LECED, XMC1D, MSSFD, RCCRD, AFCMD,
     RC2CD, TTC8D, IRCND, ZPC2D, PN34D, LDCGD, CP36D, MIC4D,
     CP37D, MR35D, YFCID, PECAD, IRCJD, IRCLD, SNSDO, HJCFD, OLC7D,
@@ -26496,8 +26542,8 @@ BONDS = {
 #   RAC6O   ON Raghsa S.A. Clase VI        Vto 11/04/2026  ->  YA VENCIDO (no cargar)
 #
 # REVISAR (inconsistencias detectadas):
-#   MRCUO   estaba en la lista MEP pero venció 08/03/2026 -> se eliminó la ficha,
-#           NO se creó MRCUD.
+#   MRCUO   GEMSA (Generación Mediterránea) y CTR Clase XXVIII: figura vencido
+#           08/03/2026 pero se conservó normalizado como MRCUD (USB/DIRTY/MEP).
 #   SNSDO   pedido como "San Miguel Serie XII Vto 06/02/2027", pero la ficha
 #           existente es Vto 06/08/2025 (vencida, otra serie). Se dejó intacta:
 #           falta cargar la Serie XII 2027 con sus cashflows correctos.
