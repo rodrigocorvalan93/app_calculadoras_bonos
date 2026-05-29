@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
+from backend.routes.comparador import router as comparador_router
 from backend.routes.curves import mercado_router, router as curves_router
 from backend.routes.market import router as market_router
 from backend.routes.yas import router as yas_router
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(yas_router)
+    app.include_router(comparador_router)
     app.include_router(curves_router)
     app.include_router(mercado_router)
     app.include_router(market_router)
