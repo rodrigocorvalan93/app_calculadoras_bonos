@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Calculadora de Bonos{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ asset_v }}">
   <script>
     // Tiny pre-paint theme bootstrap. Reads the user's choice from
     // localStorage and writes data-theme BEFORE the page renders so we
@@ -68,6 +68,6 @@
     }
   </script>
 
-  <script src="{{ url_for('static', path='js/app.js') }}" defer></script>
+  <script src="{{ url_for('static', path='js/app.js') }}?v={{ asset_v }}" defer></script>
 </body>
 </html>

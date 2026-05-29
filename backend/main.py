@@ -126,6 +126,13 @@ def create_app() -> FastAPI:
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     for name, fn in JINJA_FILTERS.items():
         templates.env.filters[name] = fn
+    # Cache-busting de estáticos: versión = mtime del CSS, así el browser
+    # re-baja style.css/app.js cuando cambian (evita ver estilos viejos).
+    try:
+        _asset_v = int((STATIC_DIR / "css" / "style.css").stat().st_mtime)
+    except OSError:
+        _asset_v = 1
+    templates.env.globals["asset_v"] = _asset_v
     app.state.templates = templates
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
