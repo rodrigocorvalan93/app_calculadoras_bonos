@@ -20,7 +20,7 @@
             hx-trigger="change"
             hx-target="#curve-table"
             hx-swap="innerHTML"
-            hx-include="[name=plazo], [name=only_quoting]"
+            hx-include="[name=plazo], [name=only_quoting], [name=leg]"
           >
             {% for c in all_curves %}
               {% set count = (table.get(c.key) or []) | length %}
@@ -38,10 +38,27 @@
             hx-trigger="change"
             hx-target="#curve-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=only_quoting]"
+            hx-include="[name=curve], [name=only_quoting], [name=leg]"
           >
             <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Leg (FX)</span>
+          <select
+            name="leg"
+            hx-get="/curves/table"
+            hx-trigger="change"
+            hx-target="#curve-table"
+            hx-swap="innerHTML"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting]"
+            title="Nativa: precio del ticker propio (fx-free). USD/USB: precio cable/MEP directo. ARS: precio pesos ÷ FX nativo."
+          >
+            <option value="native" {% if leg == "native" %}selected{% endif %}>Nativa</option>
+            <option value="USD"    {% if leg == "USD"    %}selected{% endif %}>USD (cable)</option>
+            <option value="USB"    {% if leg == "USB"    %}selected{% endif %}>USB (MEP)</option>
+            <option value="ARS"    {% if leg == "ARS"    %}selected{% endif %}>ARS (pesos)</option>
           </select>
         </label>
 
@@ -55,7 +72,7 @@
             hx-trigger="change"
             hx-target="#curve-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo]"
+            hx-include="[name=curve], [name=plazo], [name=leg]"
           >
           Solo con cotización
         </label>
@@ -68,7 +85,7 @@
     hx-get="/curves/table"
     hx-trigger="every 5s"
     hx-swap="innerHTML"
-    hx-include="[name=curve], [name=plazo], [name=only_quoting]"
+    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]"
   >
     {% include "partials/curve_table.html" %}
   </div>

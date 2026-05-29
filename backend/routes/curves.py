@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.services import bond_universe, curves, marketdata_store, pricing, symbols as syms
+from backend.services import bond_universe, curves, fx as fx_svc, marketdata_store, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
 # hits keep the work small, but the first poll after a price tick still
@@ -27,22 +27,56 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
 
 
-def _row_for_code(code: str, plazo: str) -> dict | None:
+# Leg → cable/MEP ticker suffix. ARS (pesos) is resolved separately because
+# its ticker is base+"O" (corporates) or base (globales).
+_LEG_SUFFIX = {"USD": "C", "USB": "D"}
+
+
+def _leg_symbol(code: str, plazo: str, leg: str, store) -> tuple[str, str]:
+    """(BYMA symbol, leg_basis) for the requested `leg` of a bond whose
+    native ficha is `code` (`…C` cable / `…D` MEP).
+
+    leg="native" (default) uses the code's own ticker — the FX-free path.
+    "USD"/"USB" point at the cable/MEP ticker; "ARS" at the pesos ticker
+    (base+"O" for corps, base for globales — whichever the store knows).
+    """
+    base = code[:-1] if code[-1:] in ("C", "D") else code
+    if leg in _LEG_SUFFIX:
+        return syms.md_symbol(base + _LEG_SUFFIX[leg], plazo), leg
+    if leg == "ARS":
+        sym_o = syms.md_symbol(base + "O", plazo)
+        sym_b = syms.md_symbol(base, plazo)
+        return (sym_o if store.get(sym_o) is not None else sym_b), "ARS"
+    return syms.md_symbol(code, plazo), ""  # native
+
+
+def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None) -> dict | None:
     meta = pricing.bond_meta(code)
     if not meta:
         return None
     store = marketdata_store.get_store()
-    symbol = syms.md_symbol(code, plazo)
+    symbol, leg_basis = _leg_symbol(code, plazo, leg, store)
     snap = store.get(symbol)
     last_pct = snap.last if snap else None
     bid_pct = snap.bid if snap else None
     offer_pct = snap.offer if snap else None
     last_ts = snap.last_ts if snap else None
-    metrics = pricing.metrics_for_market_price(code, last_pct)
+
+    # Price the bond off this leg. USD / USB feed the native ficha directly
+    # (fx-free → that venue's cable / MEP yield). ARS is the only leg that
+    # needs the FX: pesos ÷ the bond's native rate (CCL for cable-native,
+    # MEP for MEP-native) → the bond's own basis.
+    price_for_calc = last_pct
+    if last_pct is not None and leg_basis == "ARS":
+        native = (meta.get("moneda") or "USD")
+        price_for_calc = fx_svc.normalize_price(last_pct, "ARS", native, fx)
+
+    metrics = pricing.metrics_for_market_price(code, price_for_calc)
     row = dict(meta)
     row.update(
         {
             "symbol": symbol,
+            "leg": leg,
             "last": last_pct,
             "bid": bid_pct,
             "offer": offer_pct,
@@ -67,6 +101,7 @@ async def _rows_for(
     curve_key: str,
     plazo: str = "24hs",
     only_quoting: bool = True,
+    leg: str = "native",
 ) -> tuple[list[dict], dict]:
     """One row per bond. Live columns come from the in-process store;
     TIREA / Duration are cached so a 5 s poll hits the cache nearly
@@ -85,9 +120,12 @@ async def _rows_for(
     if not codes:
         return [], {"total": 0, "quoting": 0, "filtered": False, "store_empty": True}
 
+    # Only the ARS leg needs the FX reference (pesos → native basis); the
+    # native / USD / USB legs price straight off their own ticker.
+    fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
     loop = asyncio.get_running_loop()
     raw: list[dict | None] = await asyncio.gather(
-        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo) for code in codes)
+        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo, leg, fx) for code in codes)
     )
     rows = [r for r in raw if r is not None]
     quoting = sum(1 for r in rows if _has_quote(r))
@@ -112,13 +150,14 @@ async def curves_page(
     curve: str | None = None,
     plazo: str = "24hs",
     only_quoting: bool = True,
+    leg: str = "native",
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     all_curves = curves.list_curves()
     table = curves.build_curve_codes()
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
     selected_key = curve if (curve and curve in table) else default_key
-    rows, row_meta = await _rows_for(selected_key, plazo, only_quoting) if selected_key else ([], {})
+    rows, row_meta = await _rows_for(selected_key, plazo, only_quoting, leg) if selected_key else ([], {})
     return _render(
         request,
         "curves.html",
@@ -130,6 +169,7 @@ async def curves_page(
         row_meta=row_meta,
         plazo=plazo,
         only_quoting=only_quoting,
+        leg=leg,
     )
 
 
@@ -139,9 +179,10 @@ async def curve_table_partial(
     curve: str = "",
     plazo: str = "24hs",
     only_quoting: bool = True,
+    leg: str = "native",
 ) -> HTMLResponse:
     """HTMX partial: table body only for the requested curve."""
-    rows, row_meta = await _rows_for(curve, plazo, only_quoting)
+    rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg)
     return _render(
         request,
         "partials/curve_table.html",
@@ -150,4 +191,5 @@ async def curve_table_partial(
         row_meta=row_meta,
         plazo=plazo,
         only_quoting=only_quoting,
+        leg=leg,
     )
