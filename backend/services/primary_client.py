@@ -34,10 +34,14 @@ class PrimaryClient:
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None:
+            # follow_redirects=True: el login (j_spring_security_check) OK
+            # devuelve 302 -> /marketdata.html; sin seguir el redirect,
+            # raise_for_status() lo toma como error y se pierde la sesión.
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=httpx.Timeout(10.0, connect=5.0),
                 limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                follow_redirects=True,
             )
         return self._client
 

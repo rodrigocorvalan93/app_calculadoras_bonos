@@ -26,6 +26,7 @@ class MarketSnapshot:
     last: Optional[float] = None
     last_size: Optional[float] = None
     last_ts: Optional[str] = None
+    close_ts: Optional[str] = None       # CL.date — fecha del cierre previo
     open: Optional[float] = None
     close: Optional[float] = None
     high: Optional[float] = None
@@ -121,6 +122,8 @@ class MarketDataStore:
                 v = _md_value(raw, "price") if entry in ("OP", "CL", "HI", "LO") else _md_value(raw, "size")
                 if v is not None:
                     setattr(snap, attr, v)
+                if entry == "CL" and isinstance(raw, dict) and raw.get("date"):
+                    snap.close_ts = str(raw.get("date"))
 
             snap.updated_at = now
             self._data[symbol] = snap

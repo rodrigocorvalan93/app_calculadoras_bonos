@@ -20,10 +20,11 @@ live market data.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import time
-from typing import Any, Dict, Iterable, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import httpx
 import websockets
@@ -38,9 +39,43 @@ KEEPALIVE_SECS = 25
 BACKOFF_INITIAL = 2.0
 BACKOFF_MAX = 30.0
 
+# matrizoms ignora un 'smd' con demasiados productos (probado: 1 símbolo ->
+# llega book; ~238 de una -> 0 mensajes). Suscribimos en lotes de este tamaño;
+# las suscripciones se ACUMULAN entre mensajes 'smd' sucesivos sobre la misma
+# conexión, así que varios lotes chicos == un universo grande suscripto.
+SUBSCRIBE_CHUNK = 20
+
 # Entries Primary will accept. Confirmed: WA / TC are rejected and make
 # the whole query return empty. Same list the legacy app uses.
 ENTRIES = ["BI", "OF", "LA", "OP", "CL", "HI", "LO", "EV", "TV", "NV"]
+
+
+def _ws_header_kwarg() -> str:
+    """Nombre del kwarg de headers en `websockets.connect`.
+
+    websockets >= 14 (nuevo cliente asyncio) usa `additional_headers`; las
+    versiones previas (cliente legacy) usan `extra_headers`. Detectamos cuál
+    acepta la versión instalada para soportar ambas y no atar el backend a una
+    versión puntual de la librería.
+    """
+    try:
+        params = inspect.signature(websockets.connect).parameters
+        if "additional_headers" in params:
+            return "additional_headers"
+        if "extra_headers" in params:
+            return "extra_headers"
+    except (ValueError, TypeError):
+        pass
+    # Fallback por número de versión si la firma no es introspectable.
+    ver = getattr(websockets, "__version__", "") or ""
+    try:
+        major = int(ver.split(".")[0])
+    except (ValueError, IndexError):
+        major = 0
+    return "additional_headers" if major >= 14 else "extra_headers"
+
+
+_WS_HEADER_KW = _ws_header_kwarg()
 
 
 def _ws_url_from_base(base_url: str) -> str:
@@ -94,7 +129,17 @@ class PrimaryWS:
             "last_message_at": 0.0,
             "last_error": None,
             "subscriptions": 0,
+            # Visibilidad de respuestas que NO son MarketData (Md): el server
+            # puede contestar al 'smd' con un error / confirmación de otro type
+            # (ej. símbolo inválido, demasiados productos). Antes los tirábamos
+            # en silencio y quedábamos "connected con 0 mensajes".
+            "non_md_messages": 0,
+            "last_non_md": None,
         }
+        # Símbolos rechazados por el broker (no reintentar) y los que ya
+        # reintentamos de a uno (evita loops de re-subscripción).
+        self._rejected: Set[str] = set()
+        self._retried_individually: Set[str] = set()
 
     # ── API ─────────────────────────────────────────────────────────
 
@@ -103,9 +148,14 @@ class PrimaryWS:
         if not username or not password:
             logger.info("[primary_ws] no credentials provided, skipping login")
             return False
+        # follow_redirects=True: el login OK de Spring Security responde 302
+        # -> /marketdata.html. requests (legacy) seguía el redirect por
+        # defecto; httpx no. Sin esto, raise_for_status() trata el 302 como
+        # error y descartamos las cookies de sesión válidas.
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=httpx.Timeout(10.0, connect=5.0),
+            follow_redirects=True,
         )
         try:
             r = await self._http.post(
@@ -157,7 +207,8 @@ class PrimaryWS:
             self._stats["subscriptions"] = len(self._subscriptions)
             if self._ws is not None and self._connected:
                 try:
-                    await self._ws.send(_subscribe_payload(self._subscriptions))
+                    # Solo los nuevos (las suscripciones se acumulan), en lotes.
+                    await self._send_in_chunks(self._ws, new)
                     logger.info(
                         "[primary_ws] subscribed %d new (total %d)",
                         len(new), len(self._subscriptions),
@@ -165,9 +216,82 @@ class PrimaryWS:
                 except (ConnectionClosed, WebSocketException) as exc:
                     logger.warning("[primary_ws] resubscribe failed: %s", exc)
 
+    async def _send_in_chunks(self, ws, symbols: Iterable[str]) -> None:
+        """Envía la suscripción 'smd' en lotes de SUBSCRIBE_CHUNK.
+
+        matrizoms ignora un subscribe con demasiados productos; mandar de a
+        pocos (acumulan entre mensajes) sí funciona. Un pequeño sleep entre
+        lotes evita saturar el socket.
+        """
+        syms = sorted(s for s in symbols if s not in self._rejected)
+        total = len(syms)
+        for i in range(0, total, SUBSCRIBE_CHUNK):
+            chunk = syms[i:i + SUBSCRIBE_CHUNK]
+            await ws.send(_subscribe_payload(chunk))
+            await asyncio.sleep(0.05)
+        if total:
+            n_lotes = (total + SUBSCRIBE_CHUNK - 1) // SUBSCRIBE_CHUNK
+            logger.info("[primary_ws] subscribe en %d lotes de <=%d (%d símbolos)",
+                        n_lotes, SUBSCRIBE_CHUNK, total)
+
+    @staticmethod
+    def _symbols_from_error(message: Any) -> List[str]:
+        """Extrae los símbolos del payload 'smd' que el server eco-devuelve
+        dentro de la respuesta ERROR (campo 'message', es JSON string)."""
+        if not isinstance(message, str):
+            return []
+        try:
+            payload = json.loads(message)
+        except (ValueError, TypeError):
+            return []
+        out: List[str] = []
+        for p in payload.get("products", []) or []:
+            sym = p.get("symbol") if isinstance(p, dict) else None
+            if sym:
+                out.append(sym)
+        return out
+
+    def _recover_from_error(self, message: Any) -> None:
+        syms = self._symbols_from_error(message)
+        if not syms:
+            return
+        if len(syms) == 1:
+            # rechazo de un único símbolo -> es inválido, lo descartamos.
+            bad = syms[0]
+            if bad not in self._rejected:
+                self._rejected.add(bad)
+                logger.warning("[primary_ws] símbolo inválido descartado: %s", bad)
+            return
+        # lote rechazado: reintentar de a uno los que aún no probamos solos.
+        pending = [s for s in syms
+                   if s not in self._rejected and s not in self._retried_individually]
+        if not pending:
+            return
+        self._retried_individually.update(pending)
+        logger.info("[primary_ws] lote rechazado (%d símbolos); reintentando %d de a uno",
+                    len(syms), len(pending))
+        try:
+            asyncio.create_task(self._resubscribe_individually(pending))
+        except RuntimeError:
+            pass  # sin loop corriendo
+
+    async def _resubscribe_individually(self, symbols: List[str]) -> None:
+        ws = self._ws
+        if ws is None:
+            return
+        for s in symbols:
+            if s in self._rejected:
+                continue
+            try:
+                await ws.send(_subscribe_payload([s]))
+                await asyncio.sleep(0.02)
+            except (ConnectionClosed, WebSocketException):
+                return
+
     def stats(self) -> Dict[str, Any]:
         s = dict(self._stats)
         s["subscriptions"] = len(self._subscriptions)
+        s["rejected"] = len(self._rejected)
         return s
 
     @property
@@ -205,22 +329,25 @@ class PrimaryWS:
     async def _connect_and_read(self) -> None:
         cookie_hdr = _cookie_header(self._cookies)
         headers = {"Cookie": cookie_hdr} if cookie_hdr else None
-        async with websockets.connect(
-            self.ws_url,
-            additional_headers=headers,
-            ping_interval=KEEPALIVE_SECS,
-            ping_timeout=KEEPALIVE_SECS,
-            max_size=4 * 1024 * 1024,
-            close_timeout=2.0,
-        ) as ws:
+        # El nombre del kwarg de headers cambió entre versiones de websockets
+        # (extra_headers < v14, additional_headers >= v14). Usamos el que
+        # corresponda a la versión instalada (ver _WS_HEADER_KW).
+        connect_kwargs = {
+            "ping_interval": KEEPALIVE_SECS,
+            "ping_timeout": KEEPALIVE_SECS,
+            "max_size": 4 * 1024 * 1024,
+            "close_timeout": 2.0,
+        }
+        if headers:
+            connect_kwargs[_WS_HEADER_KW] = headers
+        async with websockets.connect(self.ws_url, **connect_kwargs) as ws:
             self._ws = ws
             self._connected = True
             self._stats["connected"] = True
             logger.info("[primary_ws] connected to %s", self.ws_url)
 
             if self._subscriptions:
-                await ws.send(_subscribe_payload(self._subscriptions))
-                logger.info("[primary_ws] subscribed to %d symbols", len(self._subscriptions))
+                await self._send_in_chunks(ws, self._subscriptions)
 
             try:
                 async for raw in ws:
@@ -240,6 +367,17 @@ class PrimaryWS:
         if not isinstance(obj, dict):
             return
         if obj.get("type") not in ("Md", "md"):
+            snippet = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
+            self._stats["non_md_messages"] = self._stats.get("non_md_messages", 0) + 1
+            self._stats["last_non_md"] = snippet[:600]
+            # matrizoms rechaza el 'smd' ENTERO si un símbolo del lote es
+            # inválido. Reintentamos el lote de a uno para conservar los
+            # válidos y descartar solo el/los inválido(s).
+            if obj.get("status") == "ERROR":
+                self._recover_from_error(obj.get("message"))
+            else:
+                logger.warning("[primary_ws] mensaje no-Md (type=%r): %s",
+                               obj.get("type"), snippet[:300])
             return
         symbol = (obj.get("instrumentId") or {}).get("symbol")
         market_data = obj.get("marketData") or {}
