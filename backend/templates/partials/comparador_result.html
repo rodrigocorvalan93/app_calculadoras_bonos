@@ -79,10 +79,11 @@
   {% endif %}
   {% if swap %}
   <div style="padding:11px 14px;border-top:1px solid var(--border)">
-    <strong>Mismo efectivo</strong> ·
-    {{ swap.vn_a | ar_hum }} VN de {{ a }}
-    ≈ <span style="color:var(--accent);font-weight:600">{{ swap.vn_b | ar_hum }} VN</span> de {{ b }}
-    <span class="muted">(monto ≈ {{ swap.monto_a | ar_hum }}{% if swap.moneda_a %} {{ swap.moneda_a }}{% endif %})</span>
+    <strong>Cash neutral</strong> ·
+    {{ a }}: <span style="color:var(--accent);font-weight:600">{{ swap.vn_a | ar_int }}</span> VN
+    &nbsp;vs&nbsp;
+    {{ b }}: <span style="color:var(--accent);font-weight:600">{{ swap.vn_b | ar_int }}</span> VN
+    <span class="muted">(mismo monto ≈ {{ swap.monto_a | ar_hum }}{% if swap.moneda_a %} {{ swap.moneda_a }}{% endif %})</span>
   </div>
   {% endif %}
   {% if pos_a or pos_b %}
