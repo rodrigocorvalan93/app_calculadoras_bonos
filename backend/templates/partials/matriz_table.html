@@ -1,0 +1,35 @@
+{% if not rows %}
+  <div class="alert">No hay posiciones para armar la matriz.</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>Matriz de tenencias</span>
+    <span class="card-title-aux">{{ rows | length }} especies × {{ fondos | length }} fondos · {{ "VN" if view == "vn" else "% sobre PN" }}</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+    <table class="cashflows curve-table mercado-table">
+      <thead>
+        <tr>
+          <th style="text-align:left">Especie</th>
+          {% for f in fondos %}<th>{{ f.nombre }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.especie }}</td>
+            {% for c in r.cells %}
+              <td>
+                {% if view == "pct" %}{{ (c.pct * 100) | ar_pct_pp(1) if c.pct is not none else "·" }}
+                {% else %}{{ c.vn | ar_int if c.vn else "·" }}{% endif %}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}

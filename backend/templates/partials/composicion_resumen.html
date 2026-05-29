@@ -1,0 +1,29 @@
+{% if summary %}
+<div class="card">
+  <div class="card-title">
+    <span>Composición por categoría</span>
+    {% if pn %}<span class="card-title-aux">PN {{ pn | ar_int }}</span>{% endif %}
+  </div>
+  <div class="card-body">
+    <div class="resumen-grid">
+      {% for label in ["Clase de Activo", "Categoría", "Tasa", "Calificación"] %}
+      <div>
+        <div class="resumen-h">{{ label }}</div>
+        <table class="cashflows">
+          <thead><tr><th style="text-align:left">Categoría</th><th>Monto</th><th>% PN</th></tr></thead>
+          <tbody>
+            {% for r in summary[label] %}
+            <tr>
+              <td style="text-align:left">{{ r.cat }}</td>
+              <td>{{ r.monto | ar_int }}</td>
+              <td>{{ (r.pct * 100) | ar_pct_pp(2) if r.pct is not none else "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}

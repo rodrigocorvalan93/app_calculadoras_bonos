@@ -4,6 +4,9 @@
     <span class="card-title-aux">{{ nombre }} · {{ symbol }}</span>
   </div>
   <div class="card-body">
+    {# O/H/L/C, Last, VWAP, Var, TIREA, Dur, Vol ya están en la fila de la
+       tabla de arriba — acá no los repetimos. El libro aporta la
+       profundidad con la TIR por nivel; abajo, la tenencia. #}
     {% if not bids and not offers %}
       <div class="alert">Sin profundidad en el store para este instrumento (¿no operó / broker offline?).</div>
     {% else %}
@@ -18,9 +21,7 @@
             <td>{{ l.size | ar_int }}</td>
             <td class="px-up" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
           </tr>
-          {% else %}
-          <tr><td colspan="4" style="color:var(--text-muted)">— sin bids —</td></tr>
-          {% endfor %}
+          {% else %}<tr><td colspan="4" style="color:var(--text-muted)">— sin bids —</td></tr>{% endfor %}
         </tbody>
       </table>
       <table class="cashflows">
@@ -33,12 +34,30 @@
             <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
             <td style="color:var(--cyan)">{{ l.tirea | ar_pct(2) }}</td>
           </tr>
-          {% else %}
-          <tr><td colspan="4" style="color:var(--text-muted)">— sin offers —</td></tr>
-          {% endfor %}
+          {% else %}<tr><td colspan="4" style="color:var(--text-muted)">— sin offers —</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
     {% endif %}
+
+    {% if position %}
+    <details style="margin-top:14px" open>
+      <summary style="cursor:pointer;color:var(--cyan)">Mi posición · {{ position.total_cantidad | ar_int }} VN en {{ position.n_fondos }} fondo{{ "s" if position.n_fondos != 1 else "" }}</summary>
+      <table class="cashflows" style="margin-top:6px">
+        <thead><tr><th style="text-align:left">Fondo</th><th>VN</th><th>Valor</th><th>% PN</th></tr></thead>
+        <tbody>
+          {% for f in position.funds %}
+          <tr>
+            <td style="text-align:left;font-size:11.5px">{{ f.nombre }}</td>
+            <td>{{ f.cantidad | ar_int }}</td>
+            <td>{{ f.valor | ar_int }}</td>
+            <td class="muted" style="font-size:10.5px">{{ (f.pct_pn * 100) | ar_pct_pp(2) if f.pct_pn is not none else "" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+
   </div>
 </div>

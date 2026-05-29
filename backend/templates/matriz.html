@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Matriz{% endblock %}
+{% block tab_matriz %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Matriz de tenencias</h1>
+    <p class="muted">Especies × fondos. Por defecto en VN (nominales); podés cambiar a % sobre PN.</p>
+  </header>
+
+  {% if status and not status.loaded %}
+    <div class="alert">No se cargaron las posiciones: {{ status.error or "archivo no encontrado" }}</div>
+  {% endif %}
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <label class="field">
+          <span>Ver</span>
+          <select name="view" hx-get="/matriz/table" hx-trigger="change" hx-target="#matriz-table" hx-swap="innerHTML">
+            <option value="vn"  {% if view == "vn"  %}selected{% endif %}>VN (nominales)</option>
+            <option value="pct" {% if view == "pct" %}selected{% endif %}>% sobre PN</option>
+          </select>
+        </label>
+        <a class="btn-primary" style="align-self:flex-end" href="/matriz?refresh=1&view={{ view }}">↻ Actualizar</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="matriz-table">
+    {% include "partials/matriz_table.html" %}
+  </div>
+</section>
+{% endblock %}
