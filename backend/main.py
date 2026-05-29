@@ -25,6 +25,7 @@ from backend.locale_ar import JINJA_FILTERS
 from backend.routes.comparador import router as comparador_router
 from backend.routes.curves import mercado_router, router as curves_router
 from backend.routes.market import router as market_router
+from backend.routes.posiciones import router as posiciones_router
 from backend.routes.yas import router as yas_router
 from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, symbols as syms
 from backend.services.primary_client import get_client
@@ -74,6 +75,15 @@ async def lifespan(app: FastAPI):
         bond_universe.ensure_loaded()
     except Exception:  # noqa: BLE001
         logger.exception("[main] bond universe load failed (calculator will return errors)")
+
+    # Posiciones Delta: lectura ÚNICA de los Excel al arranque (cache en
+    # memoria). Failure-silent: si faltan los archivos, la pestaña lo avisa.
+    try:
+        from backend.services import positions
+        st = positions.ensure_loaded()
+        logger.info("[main] positions: loaded=%s holdings=%s", st["loaded"], len(st["holdings"]))
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] positions load failed")
 
     ws = get_ws_client()
     if settings.primary_user and settings.primary_pass:
@@ -140,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(comparador_router)
     app.include_router(curves_router)
     app.include_router(mercado_router)
+    app.include_router(posiciones_router)
     app.include_router(market_router)
 
     @app.get("/")

@@ -1,0 +1,54 @@
+{% if not rows %}
+  <div class="alert">{% if fondo %}Sin tenencias en {{ nombre }}.{% else %}Elegí un fondo (o no hay posiciones cargadas).{% endif %}</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ nombre }}</span>
+    <span class="card-title-aux">
+      {{ rows | length }} especies · Valor {{ total_valor | ar_hum }}
+      {% if pn %} · PN {{ pn | ar_hum }} · {{ (total_valor / pn * 100) | ar_pct_pp(1) }} invertido{% endif %}
+    </span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+    <table class="cashflows curve-table">
+      <thead>
+        <tr>
+          <th>Especie</th>
+          <th>Clase</th>
+          <th>Cantidad</th>
+          <th>Valor</th>
+          <th>% PN</th>
+          <th>Last</th>
+          <th>TIREA</th>
+          <th>TNA</th>
+          <th>Dur</th>
+          <th>P.Src</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td style="text-align:left;color:var(--accent);font-weight:600">
+              {% if r.in_universe %}<a href="/yas?code={{ r.cod_delta }}" title="Abrir en YAS">{{ r.especie }}</a>{% else %}{{ r.especie }}{% endif %}
+            </td>
+            <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ r.clase or "—" }}</td>
+            <td>{{ r.cantidad | ar_int }}</td>
+            <td>{{ r.valor | ar_hum }}</td>
+            <td>{{ (r.pct_pn * 100) | ar_pct_pp(2) if r.pct_pn is not none else "—" }}</td>
+            <td>{{ r.last | ar_num(2) }}</td>
+            <td>{{ r.tirea | ar_pct(2) }}</td>
+            <td>
+              {{ r.tna | ar_pct(2) }}
+              {% if r.tna_convention_label and r.tirea is not none %}<span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ r.tna_convention_label }}</span>{% endif %}
+            </td>
+            <td>{{ r.duration | ar_num(2) }}</td>
+            <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}
