@@ -123,6 +123,12 @@ class PrimaryWS:
             "last_message_at": 0.0,
             "last_error": None,
             "subscriptions": 0,
+            # Visibilidad de respuestas que NO son MarketData (Md): el server
+            # puede contestar al 'smd' con un error / confirmación de otro type
+            # (ej. símbolo inválido, demasiados productos). Antes los tirábamos
+            # en silencio y quedábamos "connected con 0 mensajes".
+            "non_md_messages": 0,
+            "last_non_md": None,
         }
 
     # ── API ─────────────────────────────────────────────────────────
@@ -278,6 +284,14 @@ class PrimaryWS:
         if not isinstance(obj, dict):
             return
         if obj.get("type") not in ("Md", "md"):
+            # No es MarketData: lo más probable es la respuesta del server al
+            # 'smd' (confirmación o error). Lo guardamos/logueamos para poder
+            # diagnosticar por qué no llegan precios.
+            snippet = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
+            self._stats["non_md_messages"] = self._stats.get("non_md_messages", 0) + 1
+            self._stats["last_non_md"] = snippet[:600]
+            logger.warning("[primary_ws] mensaje no-Md (type=%r): %s",
+                           obj.get("type"), snippet[:600])
             return
         symbol = (obj.get("instrumentId") or {}).get("symbol")
         market_data = obj.get("marketData") or {}
