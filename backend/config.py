@@ -9,18 +9,18 @@ Credenciales del broker (market data) — reutiliza tu secrets.txt:
   vars reales del sistema. Así el backend FastAPI levanta exactamente las
   mismas credenciales que ya tenés, sin duplicarlas en un `.env`.
 
-  Además, `primary_user`/`primary_pass` aceptan dos juegos de nombres (ver
-  AliasChoices más abajo):
-    - PRIMARY_USER / PRIMARY_PASS  (nombres "nuevos" del backend)
-    - OMS_USER     / OMS_PASS      (los que ya usás en secrets.txt / legacy)
-
-  Prioridad de resolución: env var real del sistema > secrets.txt > "".
+  Tu secrets.txt define el usuario/clave del broker como OMS_USER / OMS_PASS.
+  Después de instanciar Settings() resolvemos `primary_user`/`primary_pass`
+  directo de os.environ (ver bloque al final del módulo), aceptando ambos
+  juegos de nombres y sin depender de cómo pydantic resuelva alias entre
+  versiones. Prioridad:
+    PRIMARY_USER / PRIMARY_PASS (env real)  >  OMS_USER / OMS_PASS (secrets)  >  ""
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,15 +28,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ── Reutilizar secrets.txt (mismo loader que la app legacy) ───────────────
 # `import OMSsecrets` auto-carga secrets.txt -> os.environ en el momento del
-# import (no pisa env vars ya definidas). Lo hacemos ACÁ, antes de instanciar
-# Settings() al final del módulo, para que las variables ya estén en el
-# entorno cuando pydantic las lea. Falla en silencio si OMSsecrets o
-# secrets.txt no están (las env vars del sistema siguen funcionando igual).
+# import (no pisa env vars ya definidas). Se hace ANTES de instanciar
+# Settings() (al final del módulo) para que las variables ya estén en el
+# entorno. Falla en silencio si OMSsecrets o secrets.txt no están (las env
+# vars del sistema siguen funcionando igual).
 try:
     import OMSsecrets  # noqa: F401  (efecto colateral: auto-load de secrets.txt)
 except Exception:  # noqa: BLE001  — nunca romper el arranque por esto
     pass
-
 
 
 class Settings(BaseSettings):
@@ -47,17 +46,11 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Credenciales del broker. Aceptan los nombres nuevos (PRIMARY_USER /
-    # PRIMARY_PASS) y los del secrets.txt legacy (OMS_USER / OMS_PASS), en ese
-    # orden de preferencia. Con case_sensitive=False el match no distingue
-    # mayúsculas. Si querés forzar otras credenciales solo para el backend,
-    # seteá PRIMARY_USER/PRIMARY_PASS (env real) y ganan sobre el secrets.txt.
-    primary_user: str = Field(
-        "", validation_alias=AliasChoices("PRIMARY_USER", "OMS_USER")
-    )
-    primary_pass: str = Field(
-        "", validation_alias=AliasChoices("PRIMARY_PASS", "OMS_PASS")
-    )
+    # Credenciales del broker. Se completan de forma robusta luego de
+    # instanciar Settings() (ver bloque al final), aceptando tanto
+    # PRIMARY_USER/PRIMARY_PASS como los OMS_USER/OMS_PASS de tu secrets.txt.
+    primary_user: str = ""
+    primary_pass: str = ""
 
     # Broker
     primary_base_url: str = "https://api.latinsecurities.matrizoms.com.ar/"
@@ -77,3 +70,15 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ── Fallback robusto de credenciales del broker ───────────────────────────
+# Tu secrets.txt define las credenciales como OMS_USER / OMS_PASS (no
+# PRIMARY_USER / PRIMARY_PASS). OMSsecrets ya las volcó a os.environ arriba;
+# acá las inyectamos en `settings` directamente, sin depender de cómo pydantic
+# resuelva los alias entre versiones. Prioridad:
+#   1) PRIMARY_USER / PRIMARY_PASS  (env real explícita, si la seteaste)
+#   2) OMS_USER     / OMS_PASS      (secrets.txt / legacy)
+if not settings.primary_user:
+    settings.primary_user = os.environ.get("PRIMARY_USER") or os.environ.get("OMS_USER") or ""
+if not settings.primary_pass:
+    settings.primary_pass = os.environ.get("PRIMARY_PASS") or os.environ.get("OMS_PASS") or ""
