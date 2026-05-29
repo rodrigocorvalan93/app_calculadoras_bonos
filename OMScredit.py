@@ -37,16 +37,29 @@ import pandas as pd
 
 BOND_OVERRIDES: Dict[str, str] = {
     # YPF: en el Excel "ypf" tiene compania="edsh" (error de datos)
-    "YCAMO": "ypf", "YMCJO": "ypf", "YMCVO": "ypf", "YMCXO": "ypf",
-    "YMCUO": "ypf", "YMC1O": "ypf", "YMCHO": "ypf", "YMCTO": "ypf",
-    "YMCRO": "ypf", "YMCWO": "ypf", "YMCYO": "ypf", "YMCZO": "ypf",
-    "YM34O": "ypf", "YM35O": "ypf", "YM37O": "ypf", "YM38O": "ypf",
-    "YM39O": "ypf", "YM40O": "ypf", "YM41O": "ypf", "YM42O": "ypf",
-    "YMCIO": "ypf", "YFCJO": "ypf", "YFCAO": "ypf", "YFCFO": "ypf",
-    "YFCDO": "ypf", "YFCIO": "ypf", "YFCKO": "ypf", "YFCLO": "ypf",
-    "YFCMO": "ypf", "YFCNO": "ypf", "YFCOO": "ypf",
-    # Capex: duplicado en Excel (capx y capex)
-    "CP38O": "capx",
+    # Armonizado con especies.py: cable = referencia ...O (CLEAN) + pata ...C
+    # (DIRTY); MEP = ficha nativa ...D (USB).
+    # --- YPF cable (referencia ...O + pata BYMA ...C) ---
+    "YCAMO": "ypf", "YCAMC": "ypf",
+    "YMCXO": "ypf", "YMCXC": "ypf",
+    "YMCUO": "ypf", "YMCUC": "ypf",
+    "YMC1O": "ypf", "YMC1C": "ypf",
+    "YM34O": "ypf", "YM34C": "ypf",
+    "YM39O": "ypf", "YM39C": "ypf",
+    "YMCIO": "ypf", "YMCIC": "ypf",
+    "YFCJO": "ypf", "YFCJC": "ypf",
+    # --- YPF MEP (ficha nativa ...D) ---
+    "YMCYD": "ypf", "YMCZD": "ypf",
+    "YM35D": "ypf", "YM37D": "ypf", "YM38D": "ypf",
+    "YM40D": "ypf", "YM41D": "ypf", "YM42D": "ypf",
+    "YFCID": "ypf", "YFCKD": "ypf", "YFCLD": "ypf",
+    "YFCMD": "ypf", "YFCND": "ypf", "YFCOD": "ypf",
+    # --- YPF sin cambios (no estaban en las listas cable/MEP) ---
+    "YMCJO": "ypf", "YMCVO": "ypf", "YMCHO": "ypf", "YMCTO": "ypf",
+    "YMCRO": "ypf", "YMCWO": "ypf",
+    "YFCAO": "ypf", "YFCFO": "ypf", "YFCDO": "ypf",
+    # Capex: duplicado en Excel (capx y capex). Cable: referencia ...O + pata ...C
+    "CP38O": "capx", "CP38C": "capx",
 }
 
 
