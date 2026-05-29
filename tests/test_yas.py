@@ -206,6 +206,46 @@ async def test_yas_page_renders() -> None:
 
 
 @pytest.mark.asyncio
+async def test_curves_page_renders() -> None:
+    from httpx import ASGITransport, AsyncClient
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get("/curves")
+    assert r.status_code == 200
+    assert "Curvas" in r.text
+
+
+@pytest.mark.asyncio
+async def test_curve_table_partial() -> None:
+    from httpx import ASGITransport, AsyncClient
+    from backend.main import app
+    from backend.services import curves
+
+    target_key = None
+    for c in curves.list_curves():
+        if curves.build_curve_codes().get(c.key):
+            target_key = c.key
+            break
+    if target_key is None:
+        pytest.skip("No non-empty curve available")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get(f"/curves/table?curve={target_key}")
+    assert r.status_code == 200
+    # Should link back to YAS for each row.
+    assert "/yas?code=" in r.text
+
+
+def test_curves_partition_is_nonempty() -> None:
+    from backend.services import curves
+
+    table = curves.build_curve_codes()
+    # At least LECAP and globales should populate from the live universe.
+    assert any(table.get(k) for k in ("lecap", "cer", "globales"))
+
+
+@pytest.mark.asyncio
 async def test_yas_recompute_partial() -> None:
     from httpx import ASGITransport, AsyncClient
     from backend.main import app

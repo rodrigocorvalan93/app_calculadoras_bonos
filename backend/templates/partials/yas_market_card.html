@@ -1,0 +1,50 @@
+{# Live market card. Polled every 3 s from yas.html. Renders dashes when
+   the store has no snapshot for the symbol (broker offline / not yet
+   subscribed). #}
+<div class="market-card">
+  <div class="market-card-head">
+    <span class="market-card-sym">{{ symbol }}</span>
+    {% if snap and snap.last_ts %}
+      <span class="market-card-ts">last @ {{ snap.last_ts }}</span>
+    {% elif not snap %}
+      <span class="market-card-ts muted">sin data en el store</span>
+    {% endif %}
+  </div>
+  <div class="market-grid">
+    <div class="mc-cell">
+      <span class="mc-lbl">Bid</span>
+      <span class="mc-val">{{ snap.bid | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-sub">{{ snap.bid_size | ar_int if (snap and snap.bid_size) else "" }}</span>
+    </div>
+    <div class="mc-cell mc-cell-last">
+      <span class="mc-lbl">Last</span>
+      <span class="mc-val">{{ snap.last | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-sub">{{ snap.last_size | ar_int if (snap and snap.last_size) else "" }}</span>
+    </div>
+    <div class="mc-cell">
+      <span class="mc-lbl">Offer</span>
+      <span class="mc-val">{{ snap.offer | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-sub">{{ snap.offer_size | ar_int if (snap and snap.offer_size) else "" }}</span>
+    </div>
+    <div class="mc-cell">
+      <span class="mc-lbl">VWAP</span>
+      <span class="mc-val">{{ snap.vwap | ar_num(4) if (snap and snap.vwap) else "—" }}</span>
+    </div>
+    <div class="mc-cell">
+      <span class="mc-lbl">Open</span>
+      <span class="mc-val">{{ snap.open | ar_num(4) if snap else "—" }}</span>
+    </div>
+    <div class="mc-cell">
+      <span class="mc-lbl">High</span>
+      <span class="mc-val">{{ snap.high | ar_num(4) if snap else "—" }}</span>
+    </div>
+    <div class="mc-cell">
+      <span class="mc-lbl">Low</span>
+      <span class="mc-val">{{ snap.low | ar_num(4) if snap else "—" }}</span>
+    </div>
+    <div class="mc-cell">
+      <span class="mc-lbl">Close</span>
+      <span class="mc-val">{{ snap.close | ar_num(4) if snap else "—" }}</span>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,69 @@
+{% if not selected_def %}
+  <div class="alert">Curva no encontrada.</div>
+{% elif not rows %}
+  <div class="alert">No hay bonos en <strong>{{ selected_def.label }}</strong>.</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ selected_def.label }}</span>
+    <span class="card-title-aux">
+      {{ rows | length }} bonos · plazo {{ plazo }}
+      {% if leg and leg != "native" %} · leg {{ leg }}{% endif %}
+      {% if row_meta and row_meta.store_empty %}
+        · sin data live (broker offline)
+      {% elif row_meta and row_meta.filtered %}
+        · {{ row_meta.quoting }}/{{ row_meta.total }} con cotización
+      {% elif row_meta %}
+        · {{ row_meta.quoting }} con last live · mostrando universo completo
+      {% endif %}
+    </span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <table class="cashflows curve-table">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Vto.</th>
+          <th>Mon</th>
+          <th>Bid</th>
+          <th>Last</th>
+          <th>Ask</th>
+          <th>TIREA</th>
+          <th>TNA</th>
+          <th>Dur</th>
+          <th>Paridad</th>
+          <th>Margen</th>
+          <th>Tipo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td style="text-align:left;color:var(--accent);font-weight:600">
+              <a href="/yas?code={{ r.codigo }}" title="Abrir en YAS">{{ r.codigo }}</a>
+            </td>
+            <td>{{ r.vencimiento | ar_date }}</td>
+            <td>{{ r.moneda or "—" }}</td>
+            <td>{{ r.bid | ar_num(4) }}</td>
+            <td style="color:var(--accent);font-weight:600">{{ r.last | ar_num(4) }}</td>
+            <td>{{ r.offer | ar_num(4) }}</td>
+            <td>{{ r.tirea | ar_pct(2) }}</td>
+            <td>
+              {{ r.tna | ar_pct(2) }}
+              {% if r.tna_convention_label and r.tirea is not none %}
+                <span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ r.tna_convention_label }}</span>
+              {% endif %}
+            </td>
+            <td>{{ r.duration | ar_num(2) }}</td>
+            <td>{{ (r.paridad * 100) | ar_pct_pp(1) if r.paridad == r.paridad and r.paridad is not none else "—" }}</td>
+            <td>{{ r.margen_tna | ar_pct(2) }}</td>
+            <td style="text-align:left;font-size:11px;color:var(--text-muted)">
+              {{ r.tipo_tasa_interes or "—" }}{% if r.index %} · {{ r.index }}{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
