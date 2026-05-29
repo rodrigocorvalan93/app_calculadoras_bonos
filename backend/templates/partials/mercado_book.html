@@ -1,0 +1,44 @@
+<div class="card">
+  <div class="card-title">
+    <span>Libro · {{ code }}</span>
+    <span class="card-title-aux">{{ nombre }} · {{ symbol }}</span>
+  </div>
+  <div class="card-body">
+    {% if not bids and not offers %}
+      <div class="alert">Sin profundidad en el store para este instrumento (¿no operó / broker offline?).</div>
+    {% else %}
+    <div class="book-grid">
+      <table class="cashflows">
+        <thead><tr><th>Bid TIREA</th><th>Acum</th><th>Cant</th><th>Bid</th></tr></thead>
+        <tbody>
+          {% for l in bids %}
+          <tr>
+            <td style="color:var(--cyan)">{{ l.tirea | ar_pct(2) }}</td>
+            <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
+            <td>{{ l.size | ar_int }}</td>
+            <td class="px-up" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" style="color:var(--text-muted)">— sin bids —</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <table class="cashflows">
+        <thead><tr><th>Offer</th><th>Cant</th><th>Acum</th><th>Offer TIREA</th></tr></thead>
+        <tbody>
+          {% for l in offers %}
+          <tr>
+            <td class="px-down" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
+            <td>{{ l.size | ar_int }}</td>
+            <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
+            <td style="color:var(--cyan)">{{ l.tirea | ar_pct(2) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" style="color:var(--text-muted)">— sin offers —</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>

@@ -359,3 +359,45 @@ async def mercado_table_partial(
         only_quoting=only_quoting,
         leg=leg,
     )
+
+
+@mercado_router.get("/mercado/book/{code}", response_class=HTMLResponse)
+async def mercado_book(
+    request: Request,
+    code: str,
+    plazo: str = "24hs",
+    leg: str = "native",
+) -> HTMLResponse:
+    """Libro (profundidad) de un instrumento — se carga al clickear su fila."""
+    bond_universe.ensure_loaded()
+    store = marketdata_store.get_store()
+    symbol, leg_basis = _leg_symbol(code, plazo, leg, store)
+    snap = store.get(symbol)
+    meta = pricing.bond_meta(code) or {}
+    native = meta.get("moneda") or "USD"
+    fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+
+    def cp(px):
+        if px is None:
+            return None
+        return fx_svc.normalize_price(px, "ARS", native, fx) if leg_basis == "ARS" else px
+
+    def with_yield(levels):
+        out = []
+        cum = 0.0
+        for lvl in (levels or []):
+            px, sz = lvl.get("price"), lvl.get("size")
+            cum += (sz or 0.0)
+            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px))})
+        return out
+
+    return _render(
+        request,
+        "partials/mercado_book.html",
+        code=code,
+        nombre=meta.get("nombre") or code,
+        symbol=symbol,
+        snap=snap,
+        bids=with_yield(snap.bids if snap else None),
+        offers=with_yield(snap.offers if snap else None),
+    )

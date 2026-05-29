@@ -676,3 +676,7 @@ select {
 .px-flat  { color: var(--text-muted); }
 .table-scroll { overflow-x: auto; max-width: 100%; }
 .mercado-table th, .mercado-table td { white-space: nowrap; }
+.mercado-table tbody tr:hover { background: var(--accent-soft); }
+/* Libro (profundidad) en Mercado */
+.book-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 8px; }
+.mercado-book { margin-top: 4px; }
