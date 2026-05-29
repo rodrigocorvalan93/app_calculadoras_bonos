@@ -10429,7 +10429,7 @@ Desde el 31/03/2029, la Emisora podrá efectuar rescates opcionales programados 
 }
 VSCOD = {
     "Nombre Security": "ON Vista Oil & Gas Argentina S.A.U. Clase XXIII Vto 06 03 2027",
-    "Código": "VISTAA 27",
+    "Código": "VSCOD",
     "ISIN": "AR0399155156",
     "Calificación": "AAA(arg)",
     "País": "Argentina",
@@ -10916,7 +10916,7 @@ intereses devengados e impagos y cualesquiera Montos Adicionales ante el acaecim
 }
 LMS8D = {
     "Nombre Security": "ON Aluar Aluminio Argentino S.A.I.C Serie 8 Vto 21 03 2027",
-    "Código": "ALUAR 27",
+    "Código": "LMS8D",
     "ISIN": "AR0787528089",
     "Calificación": "AAA(arg)",
     "País": "Argentina",
@@ -10970,7 +10970,7 @@ LMS8D = {
 }
 LMS9D = {
     "Nombre Security": "ON Aluar Aluminio Argentino S.A.I.C Serie 9 Vto 13 06 2026",
-    "Código": "ALUAR 26",
+    "Código": "LMS9D",
     "ISIN": "AR0226237573",
     "Calificación": "AAA(arg)",
     "País": "Argentina",

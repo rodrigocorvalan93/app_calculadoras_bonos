@@ -247,10 +247,10 @@ CURVE_EVAL_SUFFIX: Dict[str, str] = {
 }
 
 # ── NUEVO: Curvas donde ticker BYMA ≠ código Python del objeto bono ──
-# Para corp_hdmep: PECIO (objeto Python) → PECIOD (ticker BYMA para marketdata)
+# Para corp_hdmep: ON MEP, el ticker BYMA termina en ...D (ej. PECID)
 # Para corp_hdcable: los códigos ya son los tickers C (BYCHC etc.) que existen en BONDS
 CURVE_BYMA_REMAP: Dict[str, str] = {
-    "corp_hdmep": "mep",    # PECIO -> PECIOD (O->D)
+    "corp_hdmep": "mep",    # ...O -> ...D (ej. PECIO -> PECID)
     "corp_hdcable": "cable", # BYCHO -> BYCHC (ya son los tickers C en la lista)
 }
 
