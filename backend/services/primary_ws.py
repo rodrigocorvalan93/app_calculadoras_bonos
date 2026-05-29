@@ -20,6 +20,7 @@ live market data.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -41,6 +42,34 @@ BACKOFF_MAX = 30.0
 # Entries Primary will accept. Confirmed: WA / TC are rejected and make
 # the whole query return empty. Same list the legacy app uses.
 ENTRIES = ["BI", "OF", "LA", "OP", "CL", "HI", "LO", "EV", "TV", "NV"]
+
+
+def _ws_header_kwarg() -> str:
+    """Nombre del kwarg de headers en `websockets.connect`.
+
+    websockets >= 14 (nuevo cliente asyncio) usa `additional_headers`; las
+    versiones previas (cliente legacy) usan `extra_headers`. Detectamos cuál
+    acepta la versión instalada para soportar ambas y no atar el backend a una
+    versión puntual de la librería.
+    """
+    try:
+        params = inspect.signature(websockets.connect).parameters
+        if "additional_headers" in params:
+            return "additional_headers"
+        if "extra_headers" in params:
+            return "extra_headers"
+    except (ValueError, TypeError):
+        pass
+    # Fallback por número de versión si la firma no es introspectable.
+    ver = getattr(websockets, "__version__", "") or ""
+    try:
+        major = int(ver.split(".")[0])
+    except (ValueError, IndexError):
+        major = 0
+    return "additional_headers" if major >= 14 else "extra_headers"
+
+
+_WS_HEADER_KW = _ws_header_kwarg()
 
 
 def _ws_url_from_base(base_url: str) -> str:
@@ -210,14 +239,18 @@ class PrimaryWS:
     async def _connect_and_read(self) -> None:
         cookie_hdr = _cookie_header(self._cookies)
         headers = {"Cookie": cookie_hdr} if cookie_hdr else None
-        async with websockets.connect(
-            self.ws_url,
-            additional_headers=headers,
-            ping_interval=KEEPALIVE_SECS,
-            ping_timeout=KEEPALIVE_SECS,
-            max_size=4 * 1024 * 1024,
-            close_timeout=2.0,
-        ) as ws:
+        # El nombre del kwarg de headers cambió entre versiones de websockets
+        # (extra_headers < v14, additional_headers >= v14). Usamos el que
+        # corresponda a la versión instalada (ver _WS_HEADER_KW).
+        connect_kwargs = {
+            "ping_interval": KEEPALIVE_SECS,
+            "ping_timeout": KEEPALIVE_SECS,
+            "max_size": 4 * 1024 * 1024,
+            "close_timeout": 2.0,
+        }
+        if headers:
+            connect_kwargs[_WS_HEADER_KW] = headers
+        async with websockets.connect(self.ws_url, **connect_kwargs) as ws:
             self._ws = ws
             self._connected = True
             self._stats["connected"] = True
