@@ -14,6 +14,35 @@
         {% include "partials/yas_ticket.html" %}
       </div>
     </div>
+
+    {% if position %}
+    <div class="card">
+      <div class="card-title">
+        <span>Mi posición</span>
+        <span class="card-title-aux">{{ position.n_fondos }} fondo{{ "s" if position.n_fondos != 1 else "" }}</span>
+      </div>
+      <div class="card-body">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span class="muted">VN total</span><strong>{{ position.total_cantidad | ar_hum }}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+          <span class="muted">Valor</span><strong>{{ position.total_valor | ar_hum }}</strong>
+        </div>
+        <table class="cashflows">
+          <thead><tr><th style="text-align:left">Fondo</th><th>VN</th><th>% PN</th></tr></thead>
+          <tbody>
+            {% for f in position.funds %}
+            <tr>
+              <td style="text-align:left;font-size:11px">{{ f.nombre }}</td>
+              <td>{{ f.cantidad | ar_hum }}</td>
+              <td>{{ (f.pct_pn * 100) | ar_pct_pp(2) if f.pct_pn is not none else "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
   </aside>
 
   <section class="yas-right">

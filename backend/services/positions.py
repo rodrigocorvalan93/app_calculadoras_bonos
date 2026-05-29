@@ -177,6 +177,19 @@ def _load() -> Dict[str, Any]:
     out["holdings"] = holdings
     out["pn"] = pn
     out["fondos"] = _fondo_names()
+    # Índice por Cod_Delta → posición agregada (O(1) en position_for).
+    by_code: Dict[str, Dict[str, Any]] = {}
+    for h in holdings:
+        code = h["cod_delta"]
+        if not code:
+            continue
+        agg = by_code.setdefault(code, {
+            "especie": h["especie"], "total_cantidad": 0.0, "total_valor": 0.0, "funds": [],
+        })
+        agg["total_cantidad"] += (h["cantidad"] or 0.0)
+        agg["total_valor"] += (h["valor"] or 0.0)
+        agg["funds"].append({"cod_fondo": h["cod_fondo"], "cantidad": h["cantidad"], "valor": h["valor"]})
+    out["by_code"] = by_code
     out["loaded"] = True
     logger.info("[positions] cargado: %d holdings, %d fondos con PN", len(holdings), len(pn))
     return out
@@ -230,3 +243,35 @@ def especies_universe() -> List[str]:
     """Cod_Delta únicos (para la matriz especies×fondos)."""
     c = ensure_loaded()
     return sorted({h["cod_delta"] for h in c["holdings"] if h["cod_delta"]})
+
+
+def position_for(code: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Posición agregada en un instrumento (suma de todos los fondos).
+
+    `code` matchea Cod_Delta (upper). None si no se tiene el papel. Incluye
+    el detalle por fondo (nombre + % PN) ordenado por valor.
+    """
+    if not code:
+        return None
+    c = ensure_loaded()
+    agg = c.get("by_code", {}).get(str(code).strip().upper())
+    if not agg:
+        return None
+    funds = []
+    for f in agg["funds"]:
+        pn = c["pn"].get(f["cod_fondo"])
+        funds.append({
+            "cod_fondo": f["cod_fondo"],
+            "nombre": fondo_label(f["cod_fondo"]),
+            "cantidad": f["cantidad"],
+            "valor": f["valor"],
+            "pct_pn": (f["valor"] / pn) if (f["valor"] and pn and pn > 0) else None,
+        })
+    funds.sort(key=lambda x: (x["valor"] or 0.0), reverse=True)
+    return {
+        "code": str(code).strip().upper(),
+        "total_cantidad": agg["total_cantidad"],
+        "total_valor": agg["total_valor"],
+        "n_fondos": len(funds),
+        "funds": funds,
+    }

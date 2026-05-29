@@ -13,7 +13,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from backend.config import settings
-from backend.services import bond_universe, marketdata_store, pricing, symbols as syms
+from backend.services import bond_universe, marketdata_store, positions, pricing, symbols as syms
 
 router = APIRouter(prefix="/yas", tags=["yas"])
 
@@ -116,6 +116,7 @@ async def yas_recompute(
         ticket=ticket,
         meta=pricing.bond_meta(code),
         mode=mode,
+        position=positions.position_for(code),
     )
 
 

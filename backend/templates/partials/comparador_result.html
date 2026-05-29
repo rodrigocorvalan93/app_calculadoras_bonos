@@ -85,6 +85,14 @@
     <span class="muted">(monto ≈ {{ swap.monto_a | ar_hum }}{% if swap.moneda_a %} {{ swap.moneda_a }}{% endif %})</span>
   </div>
   {% endif %}
+  {% if pos_a or pos_b %}
+  <div style="padding:11px 14px;border-top:1px solid var(--border)">
+    <strong>Mi posición</strong> ·
+    {{ a }}: {% if pos_a %}<span style="color:var(--accent);font-weight:600">{{ pos_a.total_cantidad | ar_hum }} VN</span> · {{ pos_a.total_valor | ar_hum }} <span class="muted">({{ pos_a.n_fondos }} fondo{{ "s" if pos_a.n_fondos != 1 else "" }})</span>{% else %}<span class="muted">sin posición</span>{% endif %}
+    &nbsp;·&nbsp;
+    {{ b }}: {% if pos_b %}<span style="color:var(--accent);font-weight:600">{{ pos_b.total_cantidad | ar_hum }} VN</span> · {{ pos_b.total_valor | ar_hum }} <span class="muted">({{ pos_b.n_fondos }} fondo{{ "s" if pos_b.n_fondos != 1 else "" }})</span>{% else %}<span class="muted">sin posición</span>{% endif %}
+  </div>
+  {% endif %}
   {% if (ma and ma.error) or (mb and mb.error) %}
     <div class="alert" style="margin:10px">
       {% if ma and ma.error %}A ({{ a }}): {{ ma.error }}<br>{% endif %}
