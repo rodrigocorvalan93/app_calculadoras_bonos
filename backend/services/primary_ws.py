@@ -103,9 +103,14 @@ class PrimaryWS:
         if not username or not password:
             logger.info("[primary_ws] no credentials provided, skipping login")
             return False
+        # follow_redirects=True: el login OK de Spring Security responde 302
+        # -> /marketdata.html. requests (legacy) seguía el redirect por
+        # defecto; httpx no. Sin esto, raise_for_status() trata el 302 como
+        # error y descartamos las cookies de sesión válidas.
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=httpx.Timeout(10.0, connect=5.0),
+            follow_redirects=True,
         )
         try:
             r = await self._http.post(
