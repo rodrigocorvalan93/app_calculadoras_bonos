@@ -28,6 +28,7 @@ from backend.routes.yas import router as yas_router
 from backend.services import bond_universe, curves as curves_svc, symbols as syms
 from backend.services.primary_client import get_client
 from backend.services.primary_ws import get_ws_client
+from backend.services.warmup import get_daemon as get_warmup_daemon
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,9 +83,22 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("[main] PRIMARY_USER/PRIMARY_PASS not set; skipping broker login")
 
+    # Warmup daemon: primes the calc engine (kills the cold lazy-load) and
+    # keeps the curve metrics cache hot. Runs regardless of the broker —
+    # the prime step benefits YAS even with no live data.
+    warmup = None
+    if settings.warmup_enabled:
+        warmup = get_warmup_daemon()
+        await warmup.start()
+
     yield
 
     logger.info("[main] shutting down")
+    if warmup is not None:
+        try:
+            await warmup.stop()
+        except Exception:  # noqa: BLE001
+            logger.exception("[main] warmup stop failed")
     try:
         await ws.stop()
     except Exception:  # noqa: BLE001
@@ -123,6 +137,7 @@ def create_app() -> FastAPI:
             "bonds_loaded": len(bond_universe.all_codes()),
             "broker_authenticated": ws.authenticated,
             "ws": ws.stats(),
+            "warmup": get_warmup_daemon().stats(),
         }
 
     return app

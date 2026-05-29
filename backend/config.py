@@ -34,5 +34,11 @@ class Settings(BaseSettings):
     metrics_ttl_seconds: int = 5
     metrics_cache_max: int = 4096
 
+    # Phase 2 warmup daemon. Interval must stay under the curve metrics
+    # cache TTL (20 s) so a sweep refreshes every bucket before it expires
+    # and the curves table never hits a cold cache mid-session.
+    warmup_enabled: bool = True
+    warmup_interval_seconds: int = 8
+
 
 settings = Settings()
