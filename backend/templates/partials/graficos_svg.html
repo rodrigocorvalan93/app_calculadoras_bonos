@@ -1,0 +1,35 @@
+{% if not selected_def %}
+  <div class="alert">Curva no encontrada.</div>
+{% elif not chart or chart.n < 1 %}
+  <div class="alert">Sin bonos con TIREA y Duration en <strong>{{ selected_def.label }}</strong> (¿hay cotización?).</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ selected_def.label }} · TIREA vs Duration</span>
+    <span class="card-title-aux">{{ chart.n }} bonos · plazo {{ plazo }}{% if leg and leg != "native" %} · leg {{ leg }}{% endif %}</span>
+  </div>
+  <div class="card-body">
+    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" width="100%" style="max-width:100%;height:auto;font-family:inherit">
+      {# grid + ejes #}
+      {% for t in chart.yticks %}
+        <line x1="{{ chart.x0 }}" y1="{{ t.y }}" x2="{{ chart.x1 }}" y2="{{ t.y }}" stroke="var(--border)" stroke-width="1" opacity="0.5"/>
+        <text x="{{ chart.x0 - 8 }}" y="{{ t.y + 4 }}" text-anchor="end" font-size="11" fill="var(--text-muted)">{{ t.v }}%</text>
+      {% endfor %}
+      {% for t in chart.xticks %}
+        <line x1="{{ t.x }}" y1="{{ chart.y0 }}" x2="{{ t.x }}" y2="{{ chart.y1 }}" stroke="var(--border)" stroke-width="1" opacity="0.3"/>
+        <text x="{{ t.x }}" y="{{ chart.y1 + 18 }}" text-anchor="middle" font-size="11" fill="var(--text-muted)">{{ t.v }}</text>
+      {% endfor %}
+      <text x="{{ (chart.x0 + chart.x1) / 2 }}" y="{{ chart.height - 6 }}" text-anchor="middle" font-size="12" fill="var(--text-muted)">Duration (años)</text>
+      <text x="16" y="{{ (chart.y0 + chart.y1) / 2 }}" text-anchor="middle" font-size="12" fill="var(--text-muted)"
+            transform="rotate(-90 16 {{ (chart.y0 + chart.y1) / 2 }})">TIREA (%)</text>
+      {# puntos #}
+      {% for p in chart.points %}
+        <circle cx="{{ p.cx }}" cy="{{ p.cy }}" r="4.5" fill="{{ p.color }}" opacity="0.92">
+          <title>{{ p.code }} · Dur {{ p.dur | ar_num(2) }} · TIREA {{ p.tirea | ar_num(2) }}%</title>
+        </circle>
+        <text x="{{ p.cx + 6 }}" y="{{ p.cy - 6 }}" font-size="9.5" fill="var(--text-muted)">{{ p.code }}</text>
+      {% endfor %}
+    </svg>
+  </div>
+</div>
+{% endif %}

@@ -498,3 +498,93 @@ async def forwards_table_partial(
         fwd=fwd, selected_def=curves.curve_def(curve),
         plazo=plazo, only_quoting=only_quoting, leg=leg,
     )
+
+
+# ── Gráficos (scatter TIREA vs Duration, SVG server-side) ──────────────────
+graficos_router = APIRouter(tags=["graficos"])
+
+
+def _chart_data(rows: list[dict], width: int = 940, height: int = 480) -> dict:
+    pts = [
+        (r["code"], r["duration"], r["tirea"] * 100.0, (r.get("moneda") or ""))
+        for r in rows
+        if r.get("duration") is not None and r["duration"] == r["duration"]
+        and r.get("tirea") is not None and r["tirea"] == r["tirea"]
+    ]
+    if not pts:
+        return {"points": [], "n": 0}
+    xs = [p[1] for p in pts]
+    ys = [p[2] for p in pts]
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    if xmax == xmin:
+        xmax = xmin + 1.0
+    if ymax == ymin:
+        ymax = ymin + 1.0
+    padx, pady = (xmax - xmin) * 0.08, (ymax - ymin) * 0.10
+    xmin -= padx; xmax += padx; ymin -= pady; ymax += pady
+    ml, mr, mt, mb = 56, 16, 14, 42
+    pw, ph = width - ml - mr, height - mt - mb
+
+    def sx(x): return round(ml + (x - xmin) / (xmax - xmin) * pw, 1)
+    def sy(y): return round(mt + (1 - (y - ymin) / (ymax - ymin)) * ph, 1)
+
+    points = []
+    for code, d, t, mon in pts:
+        color = "var(--cyan)" if mon.upper() in ("USD", "USB") else "var(--accent)"
+        points.append({"code": code, "cx": sx(d), "cy": sy(t), "dur": d, "tirea": t, "color": color})
+    points.sort(key=lambda p: p["cx"])
+
+    def ticks(lo, hi, n=5):
+        return [lo + (hi - lo) / n * i for i in range(n + 1)]
+
+    xticks = [{"x": sx(v), "v": round(v, 1)} for v in ticks(xmin, xmax)]
+    yticks = [{"y": sy(v), "v": round(v, 1)} for v in ticks(ymin, ymax)]
+    return {
+        "points": points, "xticks": xticks, "yticks": yticks,
+        "width": width, "height": height, "ml": ml, "mt": mt, "pw": pw, "ph": ph,
+        "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph, "n": len(pts),
+    }
+
+
+async def _chart_for(curve_key: str, plazo: str, only_quoting: bool, leg: str) -> dict:
+    rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
+    return _chart_data(rows)
+
+
+@graficos_router.get("/graficos", response_class=HTMLResponse)
+async def graficos_page(
+    request: Request,
+    curve: str | None = None,
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+) -> HTMLResponse:
+    bond_universe.ensure_loaded()
+    all_curves = curves.list_curves()
+    table = curves.build_curve_codes()
+    default_key = next((c.key for c in all_curves if table.get(c.key)), None)
+    selected_key = curve if (curve and curve in table) else default_key
+    chart = await _chart_for(selected_key, plazo, only_quoting, leg) if selected_key else {"points": [], "n": 0}
+    return _render(
+        request, "graficos.html",
+        all_curves=all_curves, table=table, selected_key=selected_key,
+        selected_def=curves.curve_def(selected_key) if selected_key else None,
+        chart=chart, plazo=plazo, only_quoting=only_quoting, leg=leg,
+    )
+
+
+@graficos_router.get("/graficos/svg", response_class=HTMLResponse)
+async def graficos_svg(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+) -> HTMLResponse:
+    chart = await _chart_for(curve, plazo, only_quoting, leg)
+    return _render(
+        request, "partials/graficos_svg.html",
+        chart=chart, selected_def=curves.curve_def(curve),
+        plazo=plazo, only_quoting=only_quoting, leg=leg,
+    )
