@@ -7,6 +7,14 @@
     {# O/H/L/C, Last, VWAP, Var, TIREA, Dur, Vol ya están en la fila de la
        tabla de arriba — acá no los repetimos. El libro aporta la
        profundidad con la TIR por nivel; abajo, la tenencia. #}
+    {% if instr and (instr.lamina is not none or instr.tick is not none or instr.low_limit is not none) %}
+    <div class="muted" style="margin-bottom:8px;font-size:12px">
+      {% if instr.lamina is not none %}<strong>Lámina mínima:</strong> {{ instr.lamina | ar_num(0) }}{% endif %}
+      {% if instr.tick is not none %} · Tick: {{ instr.tick | ar_num(4) }}{% endif %}
+      {% if instr.low_limit is not none or instr.high_limit is not none %} · Límites: {{ instr.low_limit | ar_num(2) }} – {{ instr.high_limit | ar_num(2) }}{% endif %}
+      {% if instr.currency %} · {{ instr.currency }}{% endif %}
+    </div>
+    {% endif %}
     {% if not bids and not offers %}
       <div class="alert">Sin profundidad en el store para este instrumento (¿no operó / broker offline?).</div>
     {% else %}
