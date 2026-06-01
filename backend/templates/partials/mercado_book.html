@@ -24,6 +24,17 @@
       <div><span>Máx op.</span><b>{{ row.high | ar_num(2) }} <small class="muted">· {{ row.tirea_high | ar_pct(2) }}</small></b></div>
     </div>
     {% endif %}
+    {% if row and row.mae %}
+    <div class="mae-strip">
+      <span class="mae-tag">MAE · OTC</span>
+      <span>Últ <b>{{ row.mae.last | ar_num(2) }}</b></span>
+      <span>Var <b class="{{ 'px-up' if (row.mae.var_pct or 0) > 0 else ('px-down' if (row.mae.var_pct or 0) < 0 else '') }}">{{ row.mae.var_pct | ar_num(2) if row.mae.var_pct is not none else "—" }}</b></span>
+      <span>Mín/Máx <b>{{ row.mae.min | ar_num(2) }} / {{ row.mae.max | ar_num(2) }}</b></span>
+      <span>Vol <b>{{ row.mae.volumen | ar_hum }}</b> VN</span>
+      <span>Monto <b>{{ row.mae.monto | ar_hum }}</b></span>
+      {% if row.mae.segmento %}<span class="muted">{{ row.mae.segmento }}{% if row.mae.moneda %} · {{ row.mae.moneda }}{% endif %}{% if row.mae.plazo %} · {{ row.mae.plazo }}{% endif %}</span>{% endif %}
+    </div>
+    {% endif %}
     {% if instr and (instr.lamina is not none or instr.tick is not none or instr.low_limit is not none) %}
     <div class="muted" style="margin-bottom:8px;font-size:12px">
       {% if instr.lamina is not none %}<strong>Lámina mínima:</strong> {{ instr.lamina | ar_num(0) }}{% endif %}

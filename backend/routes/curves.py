@@ -14,7 +14,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from backend.locale_ar import fmt_pct
-from backend.services import bond_universe, curves, fx as fx_svc, instruments, marketdata_store, positions, pricing, symbols as syms
+from backend.services import bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
 # hits keep the work small, but the first poll after a price tick still
@@ -194,6 +194,12 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
         # tirea_low/high/close son sólo para el panel del libro (un bono), NO
         # para cada fila de la tabla — se calculan en la route /mercado/book.
+        # Cross-venue MAE (OTC): último/volumen del mismo bono en MAE (cache).
+        mae_q = mae_svc.match(code, leg)
+        row["mae"] = mae_q
+        # Volumen total nominal = BYMA (NV) + MAE (volumenAcumulado VN).
+        vols = [v for v in (nominal, (mae_q or {}).get("volumen")) if v is not None]
+        row["vol_total"] = sum(vols) if vols else None
     return row
 
 

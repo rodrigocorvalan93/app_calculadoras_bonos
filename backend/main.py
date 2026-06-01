@@ -25,6 +25,7 @@ from backend.locale_ar import JINJA_FILTERS
 from backend.routes.comparador import router as comparador_router
 from backend.routes.curves import forwards_router, graficos_router, mercado_router, router as curves_router
 from backend.routes.dolares import router as dolares_router
+from backend.routes.mae import router as tasas_router
 from backend.routes.historico import router as historico_router
 from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
@@ -140,6 +141,15 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] SIOPEL poller start failed")
 
+    # Poller MAE Market Data (renta fija / cauciones / repo): snapshot OTC en
+    # background, sólo si hay MAE_API_KEY. Alimenta la pestaña Tasas y el
+    # cross-venue de Mercado; el path de request sólo lee cache.
+    from backend.services import mae as mae_svc
+    try:
+        await mae_svc.get_poller().start()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] MAE poller start failed")
+
     yield
 
     logger.info("[main] shutting down")
@@ -147,6 +157,10 @@ async def lifespan(app: FastAPI):
         await dolares_svc.get_poller().stop()
     except Exception:  # noqa: BLE001
         logger.exception("[main] SIOPEL poller stop failed")
+    try:
+        await mae_svc.get_poller().stop()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] MAE poller stop failed")
     if warmup is not None:
         try:
             await warmup.stop()
@@ -188,6 +202,7 @@ def create_app() -> FastAPI:
     app.include_router(forwards_router)
     app.include_router(graficos_router)
     app.include_router(dolares_router)
+    app.include_router(tasas_router)
     app.include_router(historico_router)
     app.include_router(posiciones_router)
     app.include_router(market_router)
