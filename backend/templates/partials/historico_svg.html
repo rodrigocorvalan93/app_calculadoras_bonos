@@ -1,0 +1,23 @@
+{% if not chart or chart.n < 2 %}
+  <div class="alert">Sin datos suficientes para esta serie.</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ chart.label }}</span>
+    <span class="card-title-aux">{{ chart.n }} obs · último {{ chart.last | ar_num(2) }} ({{ chart.last_date }})</span>
+  </div>
+  <div class="card-body">
+    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" width="100%" style="max-width:100%;height:auto;font-family:inherit">
+      {% for t in chart.yticks %}
+        <line x1="{{ chart.x0 }}" y1="{{ t.y }}" x2="{{ chart.x1 }}" y2="{{ t.y }}" stroke="var(--border)" stroke-width="1" opacity="0.5"/>
+        <text x="{{ chart.x0 - 8 }}" y="{{ t.y + 4 }}" text-anchor="end" font-size="11" fill="var(--text-muted)">{{ t.v }}</text>
+      {% endfor %}
+      {% for t in chart.xticks %}
+        <line x1="{{ t.x }}" y1="{{ chart.y0 }}" x2="{{ t.x }}" y2="{{ chart.y1 }}" stroke="var(--border)" stroke-width="1" opacity="0.25"/>
+        <text x="{{ t.x }}" y="{{ chart.y1 + 16 }}" text-anchor="middle" font-size="10" fill="var(--text-muted)">{{ t.v }}</text>
+      {% endfor %}
+      <path d="{{ chart.path }}" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+    </svg>
+  </div>
+</div>
+{% endif %}

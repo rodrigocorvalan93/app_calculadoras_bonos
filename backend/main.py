@@ -24,6 +24,7 @@ from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
 from backend.routes.comparador import router as comparador_router
 from backend.routes.curves import forwards_router, graficos_router, mercado_router, router as curves_router
+from backend.routes.historico import router as historico_router
 from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
 from backend.routes.yas import router as yas_router
@@ -93,6 +94,14 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] delta_especies load failed")
 
+    # Históricos macro (BCRA): lectura única del json (en el repo).
+    try:
+        from backend.services import historico
+        h = historico.ensure_loaded()
+        logger.info("[main] historico: loaded=%s series=%s", h["loaded"], len(h["series"]))
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] historico load failed")
+
     ws = get_ws_client()
     if settings.primary_user and settings.primary_pass:
         try:
@@ -160,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(mercado_router)
     app.include_router(forwards_router)
     app.include_router(graficos_router)
+    app.include_router(historico_router)
     app.include_router(posiciones_router)
     app.include_router(market_router)
 
