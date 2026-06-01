@@ -23,6 +23,11 @@
             <option value="pct" {% if view == "pct" %}selected{% endif %}>% sobre PN</option>
           </select>
         </label>
+        <label class="field field-bond">
+          <span>Buscar especie <small id="matriz-count" class="muted"></small></span>
+          <input id="matriz-q" type="search" placeholder="ej. TX26 — filtra al instante"
+                 autocomplete="off" oninput="matrizFilter()">
+        </label>
         <a class="btn-primary" style="align-self:flex-end" href="/matriz?refresh=1&view={{ view }}">↻ Actualizar</a>
       </div>
     </div>
@@ -32,4 +37,27 @@
     {% include "partials/matriz_table.html" %}
   </div>
 </section>
+
+<script>
+  // Filtro de especie 100% client-side (instantáneo, sin pegarle al server).
+  // Oculta las filas cuya especie no matchea; re-aplica tras cada swap de htmx.
+  function matrizFilter(){
+    var box = document.getElementById('matriz-q');
+    var q = (box ? box.value : '').trim().toLowerCase();
+    var rows = document.querySelectorAll('#matriz-table tbody tr');
+    var shown = 0;
+    rows.forEach(function(tr){
+      var cell = tr.querySelector('td');
+      var name = cell ? cell.textContent.trim().toLowerCase() : '';
+      var ok = !q || name.indexOf(q) !== -1;
+      tr.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    var c = document.getElementById('matriz-count');
+    if (c) c.textContent = q ? (shown + ' coincidencia' + (shown === 1 ? '' : 's')) : '';
+  }
+  document.body.addEventListener('htmx:afterSwap', function(e){
+    if (e.target && e.target.id === 'matriz-table') matrizFilter();
+  });
+</script>
 {% endblock %}

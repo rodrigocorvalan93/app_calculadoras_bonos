@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Tasas{% endblock %}
+{% block tab_tasas %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>📊 Tasas · money-market (MAE)</h1>
+    <p class="muted">
+      Cauciones y repo desde <strong>MAE Market Data</strong> (SIOPEL), ordenadas por plazo.
+      Tasas como las informa MAE. Snapshot en memoria (refresca cada 20 s); sin <code>MAE_API_KEY</code> no hay datos.
+    </p>
+  </header>
+
+  <div id="tasas-table" hx-get="/tasas/table" hx-trigger="every 20s" hx-swap="innerHTML">
+    {% include "partials/tasas_table.html" %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% if not status.enabled %}
+  <div class="alert">MAE no configurado (falta <code>MAE_API_KEY</code>). Cauciones / repo no disponibles; el resto de la app funciona igual.</div>
+{% elif not status.fresh and not cauciones and not repo %}
+  <div class="alert">Sin snapshot de MAE todavía (¿poller arrancando o API caída?).</div>
+{% endif %}
+
+<div class="dolar-tables">
+  <div class="dolar-tbl">
+    <div class="dolar-tbl-h">🔁 Cauciones · por plazo</div>
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr><th style="text-align:left">Plazo</th><th>Tasa</th><th>Var</th><th>Mín</th><th>Máx</th><th>Volumen</th></tr>
+        </thead>
+        <tbody>
+          {% for r in cauciones %}
+            <tr>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}{% if r.moneda and r.moneda not in ("$", None) %} <span class="muted">{{ r.moneda }}</span>{% endif %}</td>
+              <td style="font-weight:600">{{ r.tasa | ar_num(2) }}</td>
+              <td>{{ r.var_pct | ar_num(2) }}</td>
+              <td>{{ r.min | ar_num(2) }}</td>
+              <td>{{ r.max | ar_num(2) }}</td>
+              <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="muted" style="text-align:center">Sin cauciones operadas.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="dolar-tbl">
+    <div class="dolar-tbl-h">🏦 Repo · ruedas</div>
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr><th style="text-align:left">Plazo</th><th>Tasa PP</th><th>Última</th><th>Apertura</th><th>Mín</th><th>Máx</th><th>Volumen</th><th>Op.</th></tr>
+        </thead>
+        <tbody>
+          {% for r in repo %}
+            <tr>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}</td>
+              <td style="font-weight:600">{{ r.tasa_pp | ar_num(2) }}</td>
+              <td>{{ r.tasa_ult | ar_num(2) }}</td>
+              <td>{{ r.tasa_apertura | ar_num(2) }}</td>
+              <td>{{ r.tasa_min | ar_num(2) }}</td>
+              <td>{{ r.tasa_max | ar_num(2) }}</td>
+              <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
+              <td style="color:var(--text-muted)">{{ r.cant_op }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8" class="muted" style="text-align:center">Sin ruedas de repo.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

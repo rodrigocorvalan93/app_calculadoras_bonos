@@ -3,7 +3,7 @@
 <div class="card">
   <div class="card-title">
     <span>What-if · precio editable</span>
-    <span class="card-title-aux">editá un precio → recalcula TIR y todas las forwards</span>
+    <span class="card-title-aux">editá un precio → recalcula TIR y todas las forwards{% if wi_fwd.truncated %} · top {{ wi_fwd.n }} de {{ wi_fwd.total }} por volumen{% endif %}</span>
   </div>
   <div class="card-body">
     {% if not wi_rows %}

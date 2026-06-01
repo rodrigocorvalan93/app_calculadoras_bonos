@@ -39,6 +39,10 @@
           <th>Offer TIREA</th>
           <th>Offer sz</th>
           <th>Vol (VN)</th>
+          <th title="Último operado en MAE (OTC)">MAE últ</th>
+          <th title="Variación MAE">MAE var</th>
+          <th title="Volumen operado en MAE (VN)">Vol MAE</th>
+          <th title="Volumen total VN: BYMA + MAE">Vol tot</th>
           <th>P.Src</th>
           <th>P.Date</th>
         </tr>
@@ -69,6 +73,10 @@
             <td style="color:var(--cyan)">{{ r.tirea_offer | ar_pct(2) }}</td>
             <td style="color:var(--text-muted)">{{ r.offer_size | ar_int }}</td>
             <td>{{ r.nominal | ar_hum }}</td>
+            <td class="{{ 'var-up' if (r.mae and r.mae.var_pct is not none and r.mae.var_pct >= 0) else ('var-down' if (r.mae and r.mae.var_pct is not none) else '') }}">{{ r.mae.last | ar_num(2) if r.mae else "·" }}</td>
+            <td>{{ r.mae.var_pct | ar_num(2) if (r.mae and r.mae.var_pct is not none) else "·" }}</td>
+            <td style="color:var(--text-muted)">{{ r.mae.volumen | ar_hum if (r.mae and r.mae.volumen is not none) else "·" }}</td>
+            <td style="color:var(--text-soft)">{{ r.vol_total | ar_hum if r.vol_total is not none else "·" }}</td>
             <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
             <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_date | ar_ts }}</td>
           </tr>
