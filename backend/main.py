@@ -24,6 +24,7 @@ from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
 from backend.routes.comparador import router as comparador_router
 from backend.routes.curves import forwards_router, graficos_router, mercado_router, router as curves_router
+from backend.routes.dolares import router as dolares_router
 from backend.routes.historico import router as historico_router
 from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
@@ -66,6 +67,10 @@ def _initial_symbols() -> list[str]:
             seed.update(fx_svc.fx_leg_symbols(pl))
     except Exception:  # noqa: BLE001
         logger.exception("[main] fx leg seed failed")
+    # Spot mayorista ROFEX (símbolo crudo): da el dólar oficial intradía para
+    # la pestaña Dólares / el riel. Si el broker no lo sirve, degrada al A3500.
+    from backend.services.dolares import SPOT_SYMBOL
+    seed.add(SPOT_SYMBOL)
     return sorted(seed)
 
 
@@ -126,9 +131,22 @@ async def lifespan(app: FastAPI):
         warmup = get_warmup_daemon()
         await warmup.start()
 
+    # Poller SIOPEL (MAE): mantiene caliente el snapshot del dólar oficial en
+    # background, sólo si hay MAE_API_KEY. Sin key, la pestaña Dólares usa el
+    # A3500 de la serie macro (en memoria); el path de request nunca hace I/O.
+    from backend.services import dolares as dolares_svc
+    try:
+        await dolares_svc.get_poller().start()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] SIOPEL poller start failed")
+
     yield
 
     logger.info("[main] shutting down")
+    try:
+        await dolares_svc.get_poller().stop()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] SIOPEL poller stop failed")
     if warmup is not None:
         try:
             await warmup.stop()
@@ -169,6 +187,7 @@ def create_app() -> FastAPI:
     app.include_router(mercado_router)
     app.include_router(forwards_router)
     app.include_router(graficos_router)
+    app.include_router(dolares_router)
     app.include_router(historico_router)
     app.include_router(posiciones_router)
     app.include_router(market_router)

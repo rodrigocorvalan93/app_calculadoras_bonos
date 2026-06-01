@@ -1,0 +1,7 @@
+{# Helpers de variación: clase de color + flecha. `v` es fracción (0.0022). #}
+{%- macro vcls(v) -%}
+{%- if v is none -%}{%- elif v > 0.00005 -%}var-up{%- elif v < -0.00005 -%}var-down{%- else -%}px-flat{%- endif -%}
+{%- endmacro -%}
+{%- macro arrow(v) -%}
+{%- if v is none -%}—{%- elif v > 0.00005 -%}▲{%- elif v < -0.00005 -%}▼{%- else -%}■{%- endif -%}
+{%- endmacro -%}

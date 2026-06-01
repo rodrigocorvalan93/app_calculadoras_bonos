@@ -10,7 +10,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from backend.services import bond_universe, curves, fx as fx_svc, instruments, marketdata_store, positions, pricing, symbols as syms
@@ -176,6 +176,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             "last_cls": last_cls, "bid_cls": bid_cls, "offer_cls": offer_cls,
             "last_ts": last_ts, "close_ts": close_ts,
             "price_source": price_source, "price_date": price_date,
+            "px_calc": cp(ref_px) if ref_px is not None else None,
             "delta_yield_bps": delta_yield_bps,
             "tirea": m.get("tirea"),
             "tna": m.get("tna"),
@@ -190,6 +191,9 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         row["tirea_bid"] = _tirea_at(code, cp(bid))
         row["tirea_offer"] = _tirea_at(code, cp(offer))
         row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
+        row["tirea_low"] = _tirea_at(code, cp(low))
+        row["tirea_high"] = _tirea_at(code, cp(high))
+        row["tirea_close"] = _tirea_at(code, cp(close))
     return row
 
 
@@ -398,6 +402,7 @@ async def mercado_book(
         nombre=meta.get("nombre") or code,
         symbol=symbol,
         snap=snap,
+        row=_row_for_code(code, plazo, leg, fx, book=True),     # toda la fila (sin recalcular)
         position=positions.position_for(code),                  # tenencia (desplegable)
         instr=await instruments.detail(symbol),                 # lámina mínima / tick / límites
         bids=with_yield(snap.bids if snap else None),
@@ -458,9 +463,70 @@ def _forwards_matrix(rows: list[dict]) -> dict:
     return {"header": [{"code": codes[j], "t": ts[j]} for j in range(n)], "rows": out_rows, "n": n}
 
 
-async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str) -> dict:
+async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str,
+                        include: set[str] | None = None) -> dict:
     rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
+    if include is not None:
+        rows = [r for r in rows if r["code"] in include]
     return _forwards_matrix(rows)
+
+
+def _is_fwd_point(r: dict) -> bool:
+    """El bono entra a la matriz si tiene TIREA y Duration finita y > 0."""
+    t, d = r.get("tirea"), r.get("duration")
+    return t is not None and t == t and d is not None and d == d and d > 0
+
+
+async def _forwards_candidates(curve_key: str, plazo: str, only_quoting: bool, leg: str) -> list[str]:
+    """Códigos que pueden entrar a la matriz (los que tienen TIREA+Duration),
+    ordenados por Duration — para la lista de checkboxes del filtro."""
+    rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
+    pts = [(r["code"], r["duration"]) for r in rows if _is_fwd_point(r)]
+    pts.sort(key=lambda p: p[1])
+    return [c for c, _ in pts]
+
+
+def _price_overrides(request: Request) -> dict[str, float]:
+    """Lee los `price_<CODE>` del query (what-if): precio nativo % VN > 0."""
+    out: dict[str, float] = {}
+    for k, v in request.query_params.multi_items():
+        if not k.startswith("price_"):
+            continue
+        try:
+            f = float(str(v).replace(",", "."))
+        except (TypeError, ValueError):
+            continue
+        if f == f and f > 0:
+            out[k[len("price_"):]] = f
+    return out
+
+
+async def _whatif_rows(curve_key: str, plazo: str, only_quoting: bool, leg: str,
+                       include: set[str] | None, overrides: dict[str, float]):
+    """Filas (code, precio mkt/editado, TIR, Duration) + la matriz de forwards
+    recalculada con esos precios. Un precio sin editar reproduce exactamente la
+    matriz de mercado (mismo `metrics_for_market_price` que la fila viva)."""
+    rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
+    # Mismo set que los checkboxes: con filtro, los tildados; sin filtro, los
+    # candidatos (TIREA+Duration válidas) — así las dos matrices coinciden.
+    if include is not None:
+        rows = [r for r in rows if r["code"] in include]
+    else:
+        rows = [r for r in rows if _is_fwd_point(r)]
+    out = []
+    for r in rows:
+        code = r["code"]
+        mkt = r.get("px_calc")            # precio nativo de mercado (el que valuó la fila)
+        ov = overrides.get(code)
+        price = ov if ov is not None else mkt
+        tirea = duration = None
+        if price is not None:
+            m = pricing.metrics_for_market_price(code, price) or {}
+            tirea, duration = m.get("tirea"), m.get("duration")
+        out.append({"code": code, "market": mkt, "price": price,
+                    "tirea": tirea, "duration": duration, "edited": ov is not None})
+    matrix = _forwards_matrix(out)
+    return out, matrix
 
 
 @forwards_router.get("/forwards", response_class=HTMLResponse)
@@ -476,12 +542,41 @@ async def forwards_page(
     table = curves.build_curve_codes()
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
     selected_key = curve if (curve and curve in table) else default_key
-    fwd = await _forwards_for(selected_key, plazo, only_quoting, leg) if selected_key else {"header": [], "rows": [], "n": 0}
+    if selected_key:
+        candidates = await _forwards_candidates(selected_key, plazo, only_quoting, leg)
+        fwd = await _forwards_for(selected_key, plazo, only_quoting, leg)
+        wi_rows, wi_fwd = await _whatif_rows(selected_key, plazo, only_quoting, leg, None, {})
+    else:
+        candidates, fwd, wi_rows, wi_fwd = [], {"header": [], "rows": [], "n": 0}, [], {"header": [], "rows": [], "n": 0}
     return _render(
         request, "forwards.html",
         all_curves=all_curves, table=table, selected_key=selected_key,
         selected_def=curves.curve_def(selected_key) if selected_key else None,
-        fwd=fwd, plazo=plazo, only_quoting=only_quoting, leg=leg,
+        candidates=candidates, selected_codes=set(candidates),
+        fwd=fwd, wi_rows=wi_rows, wi_fwd=wi_fwd,
+        curve=selected_key, plazo=plazo, only_quoting=only_quoting, leg=leg,
+    )
+
+
+@forwards_router.get("/forwards/body", response_class=HTMLResponse)
+async def forwards_body(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+) -> HTMLResponse:
+    """Curva/plazo/leg cambió → reconstruye filtro + matriz + what-if (estado
+    fresco: todos los bonos tildados, precios a mercado)."""
+    candidates = await _forwards_candidates(curve, plazo, only_quoting, leg)
+    fwd = await _forwards_for(curve, plazo, only_quoting, leg)
+    wi_rows, wi_fwd = await _whatif_rows(curve, plazo, only_quoting, leg, None, {})
+    return _render(
+        request, "partials/forwards_body.html",
+        selected_def=curves.curve_def(curve),
+        candidates=candidates, selected_codes=set(candidates),
+        fwd=fwd, wi_rows=wi_rows, wi_fwd=wi_fwd,
+        curve=curve, plazo=plazo, only_quoting=only_quoting, leg=leg,
     )
 
 
@@ -492,12 +587,35 @@ async def forwards_table_partial(
     plazo: str = "24hs",
     only_quoting: bool = True,
     leg: str = "native",
+    code: list[str] = Query(default=None),
+    filtered: int = 0,
 ) -> HTMLResponse:
-    fwd = await _forwards_for(curve, plazo, only_quoting, leg)
+    include = set(code or []) if filtered else None
+    fwd = await _forwards_for(curve, plazo, only_quoting, leg, include=include)
     return _render(
         request, "partials/forwards_table.html",
         fwd=fwd, selected_def=curves.curve_def(curve),
         plazo=plazo, only_quoting=only_quoting, leg=leg,
+    )
+
+
+@forwards_router.get("/forwards/whatif", response_class=HTMLResponse)
+async def forwards_whatif(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+    code: list[str] = Query(default=None),
+    filtered: int = 0,
+) -> HTMLResponse:
+    include = set(code or []) if filtered else None
+    overrides = _price_overrides(request)
+    wi_rows, wi_fwd = await _whatif_rows(curve, plazo, only_quoting, leg, include, overrides)
+    return _render(
+        request, "partials/forwards_whatif.html",
+        wi_rows=wi_rows, wi_fwd=wi_fwd, selected_def=curves.curve_def(curve),
+        curve=curve, plazo=plazo, only_quoting=only_quoting, leg=leg,
     )
 
 

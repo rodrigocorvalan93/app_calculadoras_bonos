@@ -19,7 +19,8 @@
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
 </head>
-<body hx-boost="false">
+<body hx-boost="false"
+      x-data="{ railOpen: (function(){ try { return localStorage.getItem('fx_rail') !== '0'; } catch (e) { return true; } })() }">
   <header class="topbar" x-data="themeSwitcher()">
     <a class="brand" href="/yas">
       <svg class="brand-mark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -32,6 +33,7 @@
       <a class="tab {% block tab_comparador %}{% endblock %}" href="/comparador">Comparador</a>
       <a class="tab {% block tab_curves %}{% endblock %}" href="/curves">Curvas</a>
       <a class="tab {% block tab_mercado %}{% endblock %}" href="/mercado">Mercado</a>
+      <a class="tab {% block tab_dolares %}{% endblock %}" href="/dolares">Dólares</a>
       <a class="tab {% block tab_posiciones %}{% endblock %}" href="/posiciones">Posiciones</a>
       <a class="tab {% block tab_matriz %}{% endblock %}" href="/matriz">Matriz</a>
       <a class="tab {% block tab_forwards %}{% endblock %}" href="/forwards">Forwards</a>
@@ -39,6 +41,9 @@
       <a class="tab {% block tab_historicos %}{% endblock %}" href="/historicos">Históricos</a>
     </nav>
     <div class="topbar-meta">
+      <button type="button" class="rail-toggle" :class="{ active: railOpen }"
+              @click="railOpen = !railOpen; try { localStorage.setItem('fx_rail', railOpen ? '1' : '0'); } catch (e) {}"
+              title="Mostrar/ocultar el monitor de dólar">💵</button>
       <div class="theme-switch" role="tablist" aria-label="Tema">
         <button type="button" role="tab" :aria-selected="theme==='dark'"  :class="{ active: theme==='dark'  }" @click="set('dark')"  title="Dark (Bloomberg)">Dark</button>
         <button type="button" role="tab" :aria-selected="theme==='light'" :class="{ active: theme==='light' }" @click="set('light')" title="Light">Light</button>
@@ -48,9 +53,15 @@
     </div>
   </header>
 
-  <main class="content">
-    {% block content %}{% endblock %}
-  </main>
+  <div class="layout" :class="{ 'rail-closed': !railOpen }">
+    <aside class="fx-rail" x-show="railOpen" x-cloak
+           hx-get="/dolares/rail" hx-trigger="load, every 15s" hx-swap="innerHTML">
+      <div class="muted" style="padding:12px;font-size:12px">Cargando dólar…</div>
+    </aside>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 
   <footer class="footer">
     <span>FastAPI rewrite · sub-50 ms p95 target</span>

@@ -329,8 +329,14 @@ def position_for(code: Optional[str]) -> Optional[Dict[str, Any]]:
     """
     if not code:
         return None
+    from . import symbols as syms  # normaliza sufijos j/v igual que el path de precios
     c = ensure_loaded()
-    agg = c.get("by_code", {}).get(str(code).strip().upper())
+    by = c.get("by_code", {})
+    key = str(code).strip().upper()
+    agg = by.get(key)
+    if not agg:                       # fallback: TTS26v / TX26j → TTS26 / TX26 (md_symbol)
+        key = syms.calc_to_md_code(key).upper()
+        agg = by.get(key)
     if not agg:
         return None
     funds = []
@@ -345,7 +351,7 @@ def position_for(code: Optional[str]) -> Optional[Dict[str, Any]]:
         })
     funds.sort(key=lambda x: (x["valor"] or 0.0), reverse=True)
     return {
-        "code": str(code).strip().upper(),
+        "code": key,
         "total_cantidad": agg["total_cantidad"],
         "total_valor": agg["total_valor"],
         "n_fondos": len(funds),
