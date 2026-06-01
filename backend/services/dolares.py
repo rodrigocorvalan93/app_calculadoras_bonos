@@ -292,51 +292,64 @@ def _a3500_official() -> Dict[str, Any]:
     }
 
 
+def _official_base() -> Dict[str, Any]:
+    """Esqueleto del oficial con el set de claves COMPLETO — así el template
+    nunca topa con una clave ausente, venga del path que venga."""
+    return {"source": "none", "last": None, "close": None, "var_pct": None,
+            "bid": None, "offer": None, "volume": None, "hora": None,
+            "date": None, "siopel_n": 0}
+
+
 def official_fx() -> Dict[str, Any]:
     """Dólar oficial mayorista. Prefiere SIOPEL (MAE en vivo) si está
-    cacheado; si no, A3500 de la serie macro. Siempre lee de memoria."""
-    a3500 = _a3500_official()
-    with _mae_lock:
-        ust = _mae_snap.get("ust")
-        n_rows = len(_mae_snap.get("rows") or [])
-        ts = _mae_snap.get("ts") or 0.0
-    if ust and ust.get("last"):
-        out = {
-            "source": "SIOPEL",
-            "last": ust["last"],
-            "close": ust.get("close") or a3500.get("close"),
-            "bid": ust.get("bid"),
-            "offer": ust.get("offer"),
-            "var_pct": ust.get("var_pct"),
-            "volume": ust.get("volume"),
-            "hora": ust.get("hora"),
-            "date": a3500.get("date"),
-            "siopel_n": n_rows,
-            "siopel_ts": ts,
-            "a3500": a3500,
-        }
-        # Si SIOPEL no reportó variación, derivarla contra el close A3500.
-        if out["var_pct"] is None and a3500.get("close"):
-            out["var_pct"] = _var(out["last"], a3500["close"])
+    cacheado; si no, DLR/SPOT del store; si no, A3500 de la serie macro.
+    Siempre lee de memoria y NUNCA lanza (devuelve el esqueleto si algo
+    raro pasa) — es el núcleo compartido por la página y el riel."""
+    out = _official_base()
+    try:
+        a3500 = _a3500_official()
+        with _mae_lock:
+            ust = _mae_snap.get("ust")
+            n_rows = len(_mae_snap.get("rows") or [])
+            ts = _mae_snap.get("ts") or 0.0
+        out["siopel_n"] = n_rows
+        out["date"] = a3500.get("date")
+
+        # 1) SIOPEL (MAE en vivo).
+        if ust and ust.get("last"):
+            out.update({
+                "source": "SIOPEL", "last": ust.get("last"),
+                "close": ust.get("close") or a3500.get("close"),
+                "bid": ust.get("bid"), "offer": ust.get("offer"),
+                "var_pct": ust.get("var_pct"), "volume": ust.get("volume"),
+                "hora": ust.get("hora"), "siopel_ts": ts,
+            })
+            if out["var_pct"] is None and a3500.get("close"):
+                out["var_pct"] = _var(out["last"], a3500["close"])
+            return out
+
+        # 2) DLR/SPOT del store: oficial intradía bidireccional.
+        spot = _spot_official()
+        if spot:
+            close = spot.get("close") or a3500.get("last")
+            out.update({
+                "source": "DLR/SPOT", "last": spot.get("last"), "close": close,
+                "bid": spot.get("bid"), "offer": spot.get("offer"),
+                "var_pct": _var(spot.get("last"), close), "volume": spot.get("volume"),
+            })
+            return out
+
+        # 3) A3500 de la serie (día/día).
+        out.update({
+            "source": a3500.get("source") or "none", "last": a3500.get("last"),
+            "close": a3500.get("close"), "var_pct": a3500.get("var_pct"),
+            "bid": a3500.get("bid"), "offer": a3500.get("offer"),
+            "volume": a3500.get("volume"),
+        })
         return out
-
-    # 2) DLR/SPOT del store: oficial intradía bidireccional.
-    spot = _spot_official()
-    if spot:
-        # close de referencia: el propio settlement del spot o, si falta, el
-        # último fixing A3500 publicado (cierre oficial de ayer).
-        if spot["close"] is None:
-            spot["close"] = a3500.get("last")
-        spot["var_pct"] = _var(spot["last"], spot["close"])
-        spot["date"] = a3500.get("date")
-        spot["siopel_n"] = n_rows
-        spot["a3500"] = a3500
-        return spot
-
-    # 3) A3500 de la serie (día/día; el mayorista oficial casi siempre sube).
-    a3500["siopel_n"] = n_rows
-    a3500["a3500"] = a3500
-    return a3500
+    except Exception:  # noqa: BLE001
+        logger.exception("[dolares] official_fx falló; devuelvo esqueleto")
+        return out
 
 
 def siopel_rows() -> List[Dict[str, Any]]:
@@ -346,57 +359,55 @@ def siopel_rows() -> List[Dict[str, Any]]:
 
 # ── Resumen para el riel lateral ───────────────────────────────────────────
 
+def _summary_default(plazo: str) -> Dict[str, Any]:
+    return {"plazo": plazo, "usd": None, "usb": None, "canje": None,
+            "brecha": None, "brecha_var_pp": None, "oficial": _official_base(),
+            "as_of": time.time()}
+
+
 def summary(plazo: str = "24hs") -> Dict[str, Any]:
-    """Payload del riel: USD/USB top-vol con variación, brecha y canje."""
-    usd_rows = fx_rows("USD", plazo)
-    usb_rows = fx_rows("USB", plazo)
-    cj_rows = canje_rows(plazo)
-    usd = _reference(usd_rows)
-    usb = _reference(usb_rows)
-    # Canje: bono de mayor volumen cable (vol_c_m) con last válido.
-    cj_priced = [r for r in cj_rows if r["last"] is not None]
-    cj = None
-    if cj_priced:
-        cj_vol = [r for r in cj_priced if r["vol_c_m"] is not None]
-        cj = max(cj_vol, key=lambda r: r["vol_c_m"] or 0.0) if cj_vol else cj_priced[0]
-    ofi = official_fx()
+    """Payload del riel: USD/USB top-vol con variación, brecha y canje.
+    Nunca lanza — el riel se carga en TODAS las pestañas."""
+    try:
+        usd = _reference(fx_rows("USD", plazo))
+        usb = _reference(fx_rows("USB", plazo))
+        cj_rows = canje_rows(plazo)
+        # Canje: bono de mayor volumen cable (vol_c_m) con last válido.
+        cj_priced = [r for r in cj_rows if r["last"] is not None]
+        cj = None
+        if cj_priced:
+            cj_vol = [r for r in cj_priced if r["vol_c_m"] is not None]
+            cj = max(cj_vol, key=lambda r: r["vol_c_m"] or 0.0) if cj_vol else cj_priced[0]
+        ofi = official_fx()
 
-    def _leg_payload(r: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if not r:
-            return None
-        return {"base": r["base"], "last": r["last"], "var_pct": r["var_pct"],
-                "bid": r["bid"], "offer": r["offer"]}
+        def _leg_payload(r: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+            if not r:
+                return None
+            return {"base": r["base"], "last": r["last"], "var_pct": r["var_pct"],
+                    "bid": r["bid"], "offer": r["offer"]}
 
-    ccl = usd["last"] if usd else None
-    ccl_close = usd["close"] if usd else None
-    brecha = None
-    brecha_var_pp = None
-    if ccl and ofi.get("last"):
-        brecha = ccl / ofi["last"] - 1.0
-        if ccl_close and ofi.get("close"):
-            brecha_ayer = ccl_close / ofi["close"] - 1.0
-            brecha_var_pp = brecha - brecha_ayer
+        ccl = usd["last"] if usd else None
+        ccl_close = usd["close"] if usd else None
+        brecha = brecha_var_pp = None
+        if ccl and ofi.get("last"):
+            brecha = ccl / ofi["last"] - 1.0
+            if ccl_close and ofi.get("close"):
+                brecha_var_pp = brecha - (ccl_close / ofi["close"] - 1.0)
 
-    canje = None
-    if cj:
-        canje = {
-            "base": cj["base"],
-            "last": cj["last"],      # ya es CCL/MEP − 1 (fracción)
-            "bid": cj["bid"],
-            "offer": cj["offer"],
-            "var_pct": cj["var_pct"],
+        canje = None
+        if cj:
+            canje = {"base": cj["base"], "last": cj["last"],   # last ya es CCL/MEP − 1
+                     "bid": cj["bid"], "offer": cj["offer"], "var_pct": cj["var_pct"]}
+
+        return {
+            "plazo": plazo,
+            "usd": _leg_payload(usd), "usb": _leg_payload(usb),
+            "canje": canje, "brecha": brecha, "brecha_var_pp": brecha_var_pp,
+            "oficial": ofi, "as_of": time.time(),
         }
-
-    return {
-        "plazo": plazo,
-        "usd": _leg_payload(usd),
-        "usb": _leg_payload(usb),
-        "canje": canje,
-        "brecha": brecha,
-        "brecha_var_pp": brecha_var_pp,
-        "oficial": ofi,
-        "as_of": time.time(),
-    }
+    except Exception:  # noqa: BLE001
+        logger.exception("[dolares] summary falló; devuelvo esqueleto")
+        return _summary_default(plazo)
 
 
 # ── Poller MAE (background, sólo si hay MAE_API_KEY) ───────────────────────

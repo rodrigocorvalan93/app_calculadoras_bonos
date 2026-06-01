@@ -96,6 +96,19 @@ def test_puntas_and_operation_math() -> None:
     assert ars / usd_qty == pytest.approx(p["offer"])
 
 
+def test_official_and_summary_are_robust() -> None:
+    """El núcleo del monitor nunca debe tirar y siempre trae el set de claves
+    completo (la página y el riel se cargan en todas las pestañas)."""
+    ofi = dx.official_fx()
+    for k in ("source", "last", "close", "var_pct", "bid", "offer", "volume", "date"):
+        assert k in ofi, k
+    s = dx.summary()
+    for k in ("plazo", "usd", "usb", "canje", "brecha", "brecha_var_pp", "oficial"):
+        assert k in s, k
+    if s["canje"]:
+        assert "var_pct" in s["canje"]        # el riel muestra la variación del canje
+
+
 @pytest.mark.asyncio
 async def test_dolares_endpoints() -> None:
     from httpx import ASGITransport, AsyncClient

@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
+from backend.locale_ar import fmt_pct
 from backend.services import bond_universe, curves, fx as fx_svc, instruments, marketdata_store, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
@@ -191,9 +192,8 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         row["tirea_bid"] = _tirea_at(code, cp(bid))
         row["tirea_offer"] = _tirea_at(code, cp(offer))
         row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
-        row["tirea_low"] = _tirea_at(code, cp(low))
-        row["tirea_high"] = _tirea_at(code, cp(high))
-        row["tirea_close"] = _tirea_at(code, cp(close))
+        # tirea_low/high/close son sólo para el panel del libro (un bono), NO
+        # para cada fila de la tabla — se calculan en la route /mercado/book.
     return row
 
 
@@ -395,6 +395,11 @@ async def mercado_book(
             out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px))})
         return out
 
+    row = _row_for_code(code, plazo, leg, fx, book=True)        # toda la fila (sin recalcular)
+    if row:  # TIR de mín/máx/cierre — sólo para este bono (no para cada fila de la tabla)
+        row["tirea_low"] = _tirea_at(code, cp(snap.low if snap else None))
+        row["tirea_high"] = _tirea_at(code, cp(snap.high if snap else None))
+        row["tirea_close"] = _tirea_at(code, cp(snap.close if snap else None))
     return _render(
         request,
         "partials/mercado_book.html",
@@ -402,7 +407,7 @@ async def mercado_book(
         nombre=meta.get("nombre") or code,
         symbol=symbol,
         snap=snap,
-        row=_row_for_code(code, plazo, leg, fx, book=True),     # toda la fila (sin recalcular)
+        row=row,
         position=positions.position_for(code),                  # tenencia (desplegable)
         instr=await instruments.detail(symbol),                 # lámina mínima / tick / límites
         bids=with_yield(snap.bids if snap else None),
@@ -447,28 +452,23 @@ def _forwards_matrix(rows: list[dict]) -> dict:
     vmin = min(finite) if finite else 0.0
     vmax = max(finite) if finite else 1.0
 
+    span = (vmax - vmin) or 1.0
     out_rows = []
     for i in range(n):
         cells = []
         for j in range(n):
             f = raw[i][j]
             if f is None:
-                cells.append({"fwd": None, "bg": ""})
+                cells.append({"txt": "·", "bg": ""})
             else:
-                norm = (f - vmin) / (vmax - vmin) if vmax > vmin else 0.5
-                norm = max(0.0, min(1.0, norm))
+                norm = min(1.0, max(0.0, (f - vmin) / span))
                 alpha = 0.08 + norm * 0.42
-                cells.append({"fwd": f, "bg": f"background-color: rgba(76,201,240,{alpha:.2f})"})
+                # Texto pre-formateado en Python (evita N² dispatch del filtro
+                # Jinja `ar_pct` al renderizar la matriz — clave en curvas anchas).
+                cells.append({"txt": fmt_pct(f, 2),
+                              "bg": f"background-color: rgba(76,201,240,{alpha:.2f})"})
         out_rows.append({"code": codes[i], "t": ts[i], "tirea": ys[i], "cells": cells})
     return {"header": [{"code": codes[j], "t": ts[j]} for j in range(n)], "rows": out_rows, "n": n}
-
-
-async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str,
-                        include: set[str] | None = None) -> dict:
-    rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
-    if include is not None:
-        rows = [r for r in rows if r["code"] in include]
-    return _forwards_matrix(rows)
 
 
 def _is_fwd_point(r: dict) -> bool:
@@ -477,13 +477,68 @@ def _is_fwd_point(r: dict) -> bool:
     return t is not None and t == t and d is not None and d == d and d > 0
 
 
-async def _forwards_candidates(curve_key: str, plazo: str, only_quoting: bool, leg: str) -> list[str]:
-    """Códigos que pueden entrar a la matriz (los que tienen TIREA+Duration),
-    ordenados por Duration — para la lista de checkboxes del filtro."""
-    rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
+# Tope de bonos en la matriz: una matriz triangular es O(N²) en cómputo Y en
+# render (una corp curve tiene >130 bonos → 16k celdas, ilegible y lenta). Se
+# muestran los MAX_FWD de mayor volumen; los checkboxes siguen permitiendo
+# elegir cuáles. Mantiene el target sub-50 ms y la legibilidad.
+MAX_FWD = 50
+
+
+def _fwd_points(rows: list[dict]) -> tuple[list[dict], bool, int]:
+    """Bonos válidos para la matriz, capados a los MAX_FWD de mayor volumen.
+    Devuelve (rows_capados, truncado, total_válidos)."""
+    pts = [r for r in rows if _is_fwd_point(r)]
+    total = len(pts)
+    if total > MAX_FWD:
+        pts = sorted(pts, key=lambda r: -(r.get("volume") or 0.0))[:MAX_FWD]
+    return pts, total > MAX_FWD, total
+
+
+# Helpers PUROS sobre `rows` ya construidas — así la página y el body arman
+# filtro + matriz + what-if con UNA sola pasada de `_rows_for` (no tres).
+def _candidates_from_rows(rows: list[dict]) -> list[str]:
     pts = [(r["code"], r["duration"]) for r in rows if _is_fwd_point(r)]
     pts.sort(key=lambda p: p[1])
     return [c for c, _ in pts]
+
+
+def _matrix_from_rows(rows: list[dict], include: set[str] | None = None) -> dict:
+    if include is not None:
+        rows = [r for r in rows if r["code"] in include]
+    capped, trunc, total = _fwd_points(rows)
+    m = _forwards_matrix(capped)
+    m["truncated"], m["total"] = trunc, total
+    return m
+
+
+def _whatif_from_rows(rows: list[dict], include: set[str] | None,
+                      overrides: dict[str, float]):
+    """(filas editables, matriz). Un bono SIN editar reusa la TIR/Duration ya
+    calculada en su fila (cero pricing extra); sólo los editados recalculan."""
+    if include is not None:
+        rows = [r for r in rows if r["code"] in include]
+    capped, trunc, total = _fwd_points(rows)   # mismo tope/criterio que la matriz
+    out = []
+    for r in capped:
+        code = r["code"]
+        mkt = r.get("px_calc")            # precio nativo de mercado (el que valuó la fila)
+        ov = overrides.get(code)
+        if ov is not None:
+            m = pricing.metrics_for_market_price(code, ov) or {}
+            tirea, duration, price = m.get("tirea"), m.get("duration"), ov
+        else:                              # reusa lo ya calculado en la fila
+            tirea, duration, price = r.get("tirea"), r.get("duration"), mkt
+        out.append({"code": code, "market": mkt, "price": price,
+                    "tirea": tirea, "duration": duration, "edited": ov is not None})
+    matrix = _forwards_matrix(out)
+    matrix["truncated"], matrix["total"] = trunc, total
+    return out, matrix
+
+
+async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str,
+                        include: set[str] | None = None) -> dict:
+    rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
+    return _matrix_from_rows(rows, include)
 
 
 def _price_overrides(request: Request) -> dict[str, float]:
@@ -503,30 +558,8 @@ def _price_overrides(request: Request) -> dict[str, float]:
 
 async def _whatif_rows(curve_key: str, plazo: str, only_quoting: bool, leg: str,
                        include: set[str] | None, overrides: dict[str, float]):
-    """Filas (code, precio mkt/editado, TIR, Duration) + la matriz de forwards
-    recalculada con esos precios. Un precio sin editar reproduce exactamente la
-    matriz de mercado (mismo `metrics_for_market_price` que la fila viva)."""
     rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
-    # Mismo set que los checkboxes: con filtro, los tildados; sin filtro, los
-    # candidatos (TIREA+Duration válidas) — así las dos matrices coinciden.
-    if include is not None:
-        rows = [r for r in rows if r["code"] in include]
-    else:
-        rows = [r for r in rows if _is_fwd_point(r)]
-    out = []
-    for r in rows:
-        code = r["code"]
-        mkt = r.get("px_calc")            # precio nativo de mercado (el que valuó la fila)
-        ov = overrides.get(code)
-        price = ov if ov is not None else mkt
-        tirea = duration = None
-        if price is not None:
-            m = pricing.metrics_for_market_price(code, price) or {}
-            tirea, duration = m.get("tirea"), m.get("duration")
-        out.append({"code": code, "market": mkt, "price": price,
-                    "tirea": tirea, "duration": duration, "edited": ov is not None})
-    matrix = _forwards_matrix(out)
-    return out, matrix
+    return _whatif_from_rows(rows, include, overrides)
 
 
 @forwards_router.get("/forwards", response_class=HTMLResponse)
@@ -543,9 +576,10 @@ async def forwards_page(
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
     selected_key = curve if (curve and curve in table) else default_key
     if selected_key:
-        candidates = await _forwards_candidates(selected_key, plazo, only_quoting, leg)
-        fwd = await _forwards_for(selected_key, plazo, only_quoting, leg)
-        wi_rows, wi_fwd = await _whatif_rows(selected_key, plazo, only_quoting, leg, None, {})
+        rows, _meta = await _rows_for(selected_key, plazo, only_quoting, leg)   # 1 sola pasada
+        candidates = _candidates_from_rows(rows)
+        fwd = _matrix_from_rows(rows)
+        wi_rows, wi_fwd = _whatif_from_rows(rows, None, {})
     else:
         candidates, fwd, wi_rows, wi_fwd = [], {"header": [], "rows": [], "n": 0}, [], {"header": [], "rows": [], "n": 0}
     return _render(
@@ -568,9 +602,10 @@ async def forwards_body(
 ) -> HTMLResponse:
     """Curva/plazo/leg cambió → reconstruye filtro + matriz + what-if (estado
     fresco: todos los bonos tildados, precios a mercado)."""
-    candidates = await _forwards_candidates(curve, plazo, only_quoting, leg)
-    fwd = await _forwards_for(curve, plazo, only_quoting, leg)
-    wi_rows, wi_fwd = await _whatif_rows(curve, plazo, only_quoting, leg, None, {})
+    rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)   # 1 sola pasada
+    candidates = _candidates_from_rows(rows)
+    fwd = _matrix_from_rows(rows)
+    wi_rows, wi_fwd = _whatif_from_rows(rows, None, {})
     return _render(
         request, "partials/forwards_body.html",
         selected_def=curves.curve_def(curve),

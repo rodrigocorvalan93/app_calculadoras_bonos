@@ -6,7 +6,7 @@
 <div class="card">
   <div class="card-title">
     <span>{{ selected_def.label }} · Forwards (mercado)</span>
-    <span class="card-title-aux">{{ fwd.n }} bonos · plazo {{ plazo }}{% if leg and leg != "native" %} · leg {{ leg }}{% endif %} · fila=corto, col=largo</span>
+    <span class="card-title-aux">{% if fwd.truncated %}top {{ fwd.n }} de {{ fwd.total }} (mayor volumen) — destildá para elegir{% else %}{{ fwd.n }} bonos{% endif %} · plazo {{ plazo }}{% if leg and leg != "native" %} · leg {{ leg }}{% endif %} · fila=corto, col=largo</span>
   </div>
   <div class="card-body" style="padding:0">
     {% include "partials/_fwd_matrix.html" %}

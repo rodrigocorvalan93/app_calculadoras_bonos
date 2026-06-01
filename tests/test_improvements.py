@@ -90,6 +90,24 @@ async def test_forwards_filter_and_whatif() -> None:
         assert 'id="forwards-filter"' in r3.text
 
 
+def test_forwards_matrix_caps_width() -> None:
+    """Curvas anchas: la matriz se capa a MAX_FWD por volumen (perf + legible).
+    El what-if comparte el tope y reusa la TIR de la fila si no se editó."""
+    from backend.routes import curves as rc
+
+    n = rc.MAX_FWD + 30
+    rows = [{"code": f"B{i}", "tirea": 0.10 + i * 0.001, "duration": 1.0 + i * 0.1,
+             "px_calc": 90.0, "volume": float(i)} for i in range(n)]
+    m = rc._matrix_from_rows(rows)
+    assert m["truncated"] is True and m["total"] == n and m["n"] == rc.MAX_FWD
+    kept = {r["code"] for r in m["rows"]}
+    assert f"B{n - 1}" in kept and f"B0" not in kept       # se quedan los de mayor volumen
+
+    wi_rows, wi_m = rc._whatif_from_rows(rows, None, {})
+    assert len(wi_rows) == rc.MAX_FWD and wi_m["n"] == rc.MAX_FWD
+    assert all(not r["edited"] for r in wi_rows)            # sin overrides → nada editado
+
+
 @pytest.mark.asyncio
 async def test_mercado_book_shows_row_stats() -> None:
     from httpx import ASGITransport, AsyncClient

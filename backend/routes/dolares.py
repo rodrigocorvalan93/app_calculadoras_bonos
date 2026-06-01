@@ -7,12 +7,15 @@ sub-50 ms p95 sin tocar el broker en el path de request.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from backend.services import dolares as dx, fx as fx_svc
+
+logger = logging.getLogger("backend.dolares.routes")
 
 router = APIRouter(tags=["dolares"])
 
@@ -22,6 +25,16 @@ _LEGS = (("USD", "USD · Cable"), ("USB", "USB · MEP"))
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
+
+
+def _safe(label: str, fn: Callable[[], Any], default: Any) -> Any:
+    """Corre `fn` y, si lanza, loguea el traceback y degrada a `default` — el
+    monitor de dólar no debe tirar 500 (se carga en todas las pestañas)."""
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001
+        logger.exception("[dolares] %s falló; degradado", label)
+        return default
 
 
 def _norm_plazos(plazo: str) -> List[str]:
@@ -37,24 +50,24 @@ def _tables_ctx(plazo: str) -> Dict[str, Any]:
     for pz in plazos:
         blocks.append({
             "plazo": pz,
-            "usd": dx.fx_rows("USD", pz),
-            "usb": dx.fx_rows("USB", pz),
-            "canje": dx.canje_rows(pz),
+            "usd": _safe(f"fx_rows USD {pz}", lambda pz=pz: dx.fx_rows("USD", pz), []),
+            "usb": _safe(f"fx_rows USB {pz}", lambda pz=pz: dx.fx_rows("USB", pz), []),
+            "canje": _safe(f"canje_rows {pz}", lambda pz=pz: dx.canje_rows(pz), []),
         })
     return {"blocks": blocks, "plazo_sel": plazo, "legs": _LEGS}
 
 
 @router.get("/dolares", response_class=HTMLResponse)
 async def dolares_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
-    bases = fx_svc.fx_bases()
-    ctx = _tables_ctx(plazo)
+    ctx = _safe("tables_ctx", lambda: _tables_ctx(plazo),
+                {"blocks": [], "plazo_sel": plazo, "legs": _LEGS})
     return _render(
         request,
         "dolares.html",
-        bases=bases,
-        siopel=dx.siopel_rows(),
-        oficial=dx.official_fx(),
-        summary=dx.summary("24hs"),
+        bases=_safe("fx_bases", fx_svc.fx_bases, []),
+        siopel=_safe("siopel_rows", dx.siopel_rows, []),
+        oficial=dx.official_fx(),          # self-guarded (nunca lanza)
+        summary=dx.summary("24hs"),        # self-guarded (nunca lanza)
         plazos_opt=[("24hs", "24 hs"), ("CI", "Contado Inmediato"), ("ambos", "Ambos")],
         **ctx,
     )
@@ -71,7 +84,7 @@ async def dolares_oficial(request: Request) -> HTMLResponse:
     """Partial htmx: SIOPEL oficial + A3500 (auto-refresh)."""
     return _render(
         request, "partials/dolares_oficial.html",
-        siopel=dx.siopel_rows(), oficial=dx.official_fx(),
+        siopel=_safe("siopel_rows", dx.siopel_rows, []), oficial=dx.official_fx(),
     )
 
 
@@ -94,7 +107,10 @@ async def dolares_calc(
 ) -> HTMLResponse:
     leg = leg.upper() if leg.upper() in ("USD", "USB") else "USD"
     pz = "CI" if (plazo or "").lower().startswith("ci") else "24hs"
-    p = dx.puntas(base, leg, pz)
+    p = _safe("puntas", lambda: dx.puntas(base, leg, pz), {
+        "base": base, "leg": leg, "plazo": pz, "ars_bid": None, "ars_offer": None,
+        "ars_last": None, "usd_bid": None, "usd_offer": None, "usd_last": None,
+        "bid": None, "last": None, "offer": None})
 
     res: Dict[str, Any] = {
         "ok": False, "base": base, "leg": leg, "plazo": pz, "side": side,

@@ -37,10 +37,15 @@
 <div class="rail-item">
   <div class="rail-l">Canje · CCL/MEP{% if summary.canje %} <span class="rail-base">{{ summary.canje.base }}</span>{% endif %}</div>
   {% if summary.canje and summary.canje.last is not none %}
-    <div class="rail-v {{ fx.vcls(summary.canje.var_pct) }}">{{ summary.canje.last | ar_pct(2) }}</div>
-    <div class="rail-s muted">
-      bid {{ summary.canje.bid | ar_pct(2) }} · offer {{ summary.canje.offer | ar_pct(2) }}
+    <div class="rail-v {{ fx.vcls(summary.canje.var_pct) }}">
+      {{ summary.canje.last | ar_pct(2) }}
+      <span class="rail-arrow">{{ fx.arrow(summary.canje.var_pct) }}</span>
     </div>
+    {% if summary.canje.var_pct is not none %}
+      <div class="rail-s {{ fx.vcls(summary.canje.var_pct) }}">{{ summary.canje.var_pct | ar_pct(2) }} <span class="muted">vs close</span></div>
+    {% else %}
+      <div class="rail-s muted">bid {{ summary.canje.bid | ar_pct(2) }} · offer {{ summary.canje.offer | ar_pct(2) }}</div>
+    {% endif %}
   {% else %}
     <div class="rail-v muted">—</div>
   {% endif %}
