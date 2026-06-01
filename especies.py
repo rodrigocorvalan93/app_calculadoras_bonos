@@ -25847,6 +25847,7 @@ AFCNO = rentafija.Bono(AFCNO)
 BF36O = rentafija.Bono(BF36O)
 BF38O = rentafija.Bono(BF38O)
 BF41O = rentafija.Bono(BF41O)
+BF46O = rentafija.Bono(BF46O)
 SXC1O = rentafija.Bono(SXC1O)
 SXC3O = rentafija.Bono(SXC3O)
 BNCXO = rentafija.Bono(BNCXO)
@@ -26434,7 +26435,7 @@ todos_los_bonos = [
 
     T661O, TY34O, HBCBO,
     BSCRO, RB59O, RB61O, BNCXO,
-    BF36O, SXC1O, BDCKO, DHSGO, PSSWO,
+    BF36O, SXC1O, BDCKO, DHSGO, PSSWO, BF46O,
     BPCRO, PVC4O, TLCRO, ZPC1O, PS37O,
     RC3CO, RVS1O, PS35O,
     LNS3P, VWCDO, RB64O, TY37O, SXC3O, FTN3O,
