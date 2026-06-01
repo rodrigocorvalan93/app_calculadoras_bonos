@@ -67,6 +67,20 @@ def test_match_by_ticker_and_leg() -> None:
         _clear()
 
 
+def test_byma_cauciones_from_store() -> None:
+    """Caución BYMA leída del store: MERV - XMEV - PESOS - {n}D."""
+    from backend.services import cauciones, marketdata_store as mds
+    assert cauciones.symbols("PESOS")[0] == "MERV - XMEV - PESOS - 1D"
+    store = mds.get_store()
+    store.update_from_md("MERV - XMEV - PESOS - 1D", {
+        "LA": {"price": 29.5}, "BI": {"price": 29.3}, "OF": {"price": 29.7},
+        "CL": {"price": 29.4}, "EV": 1e11})
+    r1 = next((r for r in cauciones.byma_rows("PESOS") if r["plazo"] == "1D"), None)
+    assert r1 is not None
+    assert r1["tasa"] == pytest.approx(29.5) and r1["bid"] == pytest.approx(29.3)
+    assert r1["var"] == pytest.approx(29.5 - 29.4)
+
+
 def test_degrades_without_key(monkeypatch) -> None:
     monkeypatch.delenv("MAE_API_KEY", raising=False)
     _clear()
