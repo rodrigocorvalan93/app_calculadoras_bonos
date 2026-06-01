@@ -113,15 +113,19 @@ def series_list() -> List[Dict[str, Any]]:
     return [{"key": k, "label": v["label"], "n": len(v["points"])} for k, v in c["series"].items()]
 
 
-def series_points(key: str, days: Optional[int] = None) -> Dict[str, Any]:
-    """Puntos de una serie. `days` recorta a los últimos N días calendario
-    (aprox, por cantidad de observaciones recientes no — usamos fecha)."""
+def series_points(key: str, days: Optional[int] = None,
+                  desde: Optional[str] = None, hasta: Optional[str] = None) -> Dict[str, Any]:
+    """Puntos de una serie. Si se pasan `desde`/`hasta` (ISO 'YYYY-MM-DD') se
+    recorta a ese rango exacto (tienen prioridad sobre `days`); si no, `days`
+    recorta a los últimos N días calendario desde la última observación."""
     c = ensure_loaded()
     s = c["series"].get(key)
     if not s:
         return {"label": "", "points": []}
     pts = s["points"]
-    if days and pts:
+    if (desde or hasta) and pts:
+        pts = [p for p in pts if (not desde or p[0] >= desde) and (not hasta or p[0] <= hasta)]
+    elif days and pts:
         from datetime import date, timedelta
         try:
             cutoff = (date.fromisoformat(pts[-1][0]) - timedelta(days=days)).isoformat()

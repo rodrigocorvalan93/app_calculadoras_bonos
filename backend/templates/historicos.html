@@ -3,44 +3,70 @@
 {% block tab_historicos %}active{% endblock %}
 
 {% block content %}
-<section class="curves">
+<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false }">
   <header class="yas-header">
-    <h1>Históricos · Macro (BCRA)</h1>
-    <p class="muted">Evolución de A3500, BADLAR, TAMAR, CER, UVA e inflación. Lectura única del backup + cache (la macro cambia 1×/día); <strong>Actualizar</strong> relee.</p>
+    <h1>Históricos</h1>
+    <p class="muted">Series macro del BCRA y evolución histórica de tasas por curva (BYMA). Rango personalizable. Lectura única + cache; <strong>Actualizar</strong> relee.</p>
   </header>
 
-  {% if status and not status.loaded %}
-    <div class="alert">No se cargaron las series: {{ status.error }}</div>
-  {% endif %}
+  <div style="display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)">
+    <button @click="tab='macro'"
+            :style="tab==='macro' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
+            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📊 Macro (BCRA)</button>
+    <button @click="tab='curvas'; if(!curvaLoaded){curvaLoaded=true; $nextTick(()=>htmx.trigger('#hist-curva','reveal'))}"
+            :style="tab==='curvas' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
+            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Tasas por curva</button>
+  </div>
 
-  <div class="curve-picker card">
-    <div class="card-body">
-      <div class="row-fields">
-        <label class="field">
-          <span>Variable</span>
-          <select name="serie" hx-get="/historicos/svg" hx-trigger="change"
-                  hx-target="#hist-svg" hx-swap="innerHTML" hx-include="[name=rango]">
-            {% for s in series %}
-              <option value="{{ s.key }}" {% if s.key == selected %}selected{% endif %}>{{ s.label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="field">
-          <span>Rango</span>
-          <select name="rango" hx-get="/historicos/svg" hx-trigger="change"
-                  hx-target="#hist-svg" hx-swap="innerHTML" hx-include="[name=serie]">
-            {% for r, lbl in [("1m","1M"),("3m","3M"),("6m","6M"),("1a","1A"),("3a","3A"),("5a","5A"),("todo","Todo")] %}
-              <option value="{{ r }}" {% if r == rango %}selected{% endif %}>{{ lbl }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <a class="btn-primary" style="align-self:flex-end" href="/historicos?refresh=1&serie={{ selected }}&rango={{ rango }}">↻ Actualizar</a>
+  {# ── Macro (BCRA) ── #}
+  <div x-show="tab==='macro'">
+    {% if status and not status.loaded %}
+      <div class="alert">No se cargaron las series: {{ status.error }}</div>
+    {% endif %}
+    <div id="hm-ctrls" class="curve-picker card">
+      <div class="card-body">
+        <div class="row-fields">
+          <label class="field">
+            <span>Variable</span>
+            <select name="serie" hx-get="/historicos/svg" hx-trigger="change" hx-target="#hist-svg" hx-swap="innerHTML"
+                    hx-include="#hm-ctrls [name=rango], #hm-ctrls [name=desde], #hm-ctrls [name=hasta]">
+              {% for s in series %}<option value="{{ s.key }}" {% if s.key == selected %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span>Rango</span>
+            <select name="rango" hx-get="/historicos/svg" hx-trigger="change" hx-target="#hist-svg" hx-swap="innerHTML"
+                    hx-include="#hm-ctrls [name=serie], #hm-ctrls [name=desde], #hm-ctrls [name=hasta]">
+              {% for r, lbl in [("1m","1M"),("3m","3M"),("6m","6M"),("1a","1A"),("3a","3A"),("5a","5A"),("todo","Todo")] %}
+                <option value="{{ r }}" {% if r == rango %}selected{% endif %}>{{ lbl }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span>Desde</span>
+            <input type="date" name="desde" value="{{ desde }}" hx-get="/historicos/svg" hx-trigger="change" hx-target="#hist-svg" hx-swap="innerHTML"
+                   hx-include="#hm-ctrls [name=serie], #hm-ctrls [name=rango], #hm-ctrls [name=hasta]">
+          </label>
+          <label class="field">
+            <span>Hasta</span>
+            <input type="date" name="hasta" value="{{ hasta }}" hx-get="/historicos/svg" hx-trigger="change" hx-target="#hist-svg" hx-swap="innerHTML"
+                   hx-include="#hm-ctrls [name=serie], #hm-ctrls [name=rango], #hm-ctrls [name=desde]">
+          </label>
+          <a class="btn-primary" style="align-self:flex-end" href="/historicos?refresh=1&serie={{ selected }}&rango={{ rango }}">↻ Actualizar</a>
+        </div>
+        <p class="muted" style="font-size:11px;margin-top:6px">Desde/Hasta tienen prioridad sobre el preset de Rango. Vaciá las fechas para volver a los presets.</p>
       </div>
+    </div>
+    <div id="hist-svg">
+      {% include "partials/historico_svg.html" %}
     </div>
   </div>
 
-  <div id="hist-svg">
-    {% include "partials/historico_svg.html" %}
+  {# ── Tasas por curva (BYMA) — lazy: carga al abrir la pestaña ── #}
+  <div x-show="tab==='curvas'" x-cloak>
+    <div id="hist-curva" hx-get="/historicos/curva" hx-trigger="reveal" hx-swap="innerHTML">
+      <p class="muted" style="padding:10px">Cargando histórico BYMA…</p>
+    </div>
   </div>
 </section>
 {% endblock %}
