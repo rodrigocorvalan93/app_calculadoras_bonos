@@ -37,6 +37,40 @@ def test_position_for_strips_jv_suffix() -> None:
         positions._cache = saved
 
 
+def test_position_for_ignores_plazo_suffix() -> None:
+    """'S31L6 CI' (mismo bono, plazo CI) cae en la tenencia de 'S31L6'."""
+    saved = positions._cache
+    positions._cache = {
+        "error": None, "paths": {}, "holdings": [], "loaded": True,
+        "fondos": {10: "Performance"}, "pn": {10: 1000.0},
+        "by_code": {"S31L6": {
+            "especie": "S31L6", "total_cantidad": 150.0, "total_valor": 1380.0,
+            "funds": [{"cod_fondo": 10, "cantidad": 150.0, "valor": 1380.0}],
+        }},
+    }
+    try:
+        assert positions._norm_code("S31L6 CI") == "S31L6"
+        assert positions._norm_code("S31L6 24HS") == "S31L6"
+        assert positions._norm_code("TX26j") == "TX26J"          # NO toca el sufijo j/v
+        p = positions.position_for("S31L6 CI")
+        assert p is not None and p["code"] == "S31L6" and p["total_cantidad"] == 150.0
+    finally:
+        positions._cache = saved
+
+
+def test_corporate_curves_are_seeded() -> None:
+    """Los corporativos (RVS1O y la curva corp_tamar) se suscriben al WS."""
+    from backend import main
+    from backend.services import curves, symbols as syms
+
+    bond_universe.ensure_loaded()
+    seed = set(main._initial_symbols())
+    assert syms.md_symbol("RVS1O", "24hs") in seed
+    corp = curves.build_curve_codes().get("corp_tamar", [])
+    if corp:
+        assert all(syms.md_symbol(c, "24hs") in seed for c in corp)
+
+
 def _first_codes(n: int = 2) -> list[str]:
     bond_universe.ensure_loaded()
     codes = bond_universe.all_codes()

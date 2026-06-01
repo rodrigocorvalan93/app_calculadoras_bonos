@@ -67,11 +67,23 @@ def _f(x: Any) -> Optional[float]:
         return None
 
 
+_PLAZO_SUFFIX = re.compile(r"\s+(CI|24HS|24|48HS|48|T\+?[012])$")
+
+
+def _strip_plazo(s: str) -> str:
+    """'S31L6 CI' / 'S31L6 24HS' → 'S31L6': mismo bono, distinto plazo de
+    liquidación (un fondo opera normal, otro CI). Para posición / comparador /
+    clasificaciones es el mismo papel, así que se ignora el sufijo de plazo."""
+    return _PLAZO_SUFFIX.sub("", s).strip()
+
+
 def _norm_code(x: Any) -> Optional[str]:
     if x is None:
         return None
     s = str(x).strip().upper()
-    return None if s in ("NC", "NAN", "NONE", "") else s
+    if s in ("NC", "NAN", "NONE", ""):
+        return None
+    return _strip_plazo(s) or None
 
 
 # ── fondos (CodFondo → Nombre), parser tolerante ──────────────────────────
@@ -332,7 +344,7 @@ def position_for(code: Optional[str]) -> Optional[Dict[str, Any]]:
     from . import symbols as syms  # normaliza sufijos j/v igual que el path de precios
     c = ensure_loaded()
     by = c.get("by_code", {})
-    key = str(code).strip().upper()
+    key = _strip_plazo(str(code).strip().upper())    # ignora ' CI' / ' 24hs'
     agg = by.get(key)
     if not agg:                       # fallback: TTS26v / TX26j → TTS26 / TX26 (md_symbol)
         key = syms.calc_to_md_code(key).upper()
