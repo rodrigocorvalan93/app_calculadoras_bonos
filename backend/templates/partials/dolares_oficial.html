@@ -1,0 +1,73 @@
+{% import "partials/_fx_macros.html" as fx %}
+<div class="card">
+  <div class="card-title">
+    <span>🏛️ Oficial · {{ oficial.source }}</span>
+    <span class="card-title-aux">
+      {% if oficial.source == "SIOPEL" %}MAE — UST$T Mayorista (en vivo)
+      {% elif oficial.source == "A3500" %}A3500 mayorista · al {{ oficial.date }}
+      {% else %}sin dato{% endif %}
+    </span>
+  </div>
+  <div class="card-body">
+    <div class="fx-oficial-kpis">
+      <div class="kpi">
+        <div class="kpi-l">Último</div>
+        <div class="kpi-v {{ fx.vcls(oficial.var_pct) }}">{{ oficial.last | ar_num(2) }}</div>
+        <div class="kpi-s {{ fx.vcls(oficial.var_pct) }}">{{ fx.arrow(oficial.var_pct) }} {{ oficial.var_pct | ar_pct(2) }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l">Cierre previo</div>
+        <div class="kpi-v">{{ oficial.close | ar_num(2) }}</div>
+      </div>
+      {% if oficial.bid or oficial.offer %}
+      <div class="kpi">
+        <div class="kpi-l">Compra / Venta</div>
+        <div class="kpi-v">{{ oficial.bid | ar_num(2) }} / {{ oficial.offer | ar_num(2) }}</div>
+      </div>
+      {% endif %}
+      {% if oficial.volume %}
+      <div class="kpi">
+        <div class="kpi-l">Volumen</div>
+        <div class="kpi-v">{{ oficial.volume | ar_hum }}</div>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if siopel and siopel|length %}
+      <div class="table-scroll" style="margin-top:10px">
+        <table class="cashflows curve-table mercado-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">Ticker</th><th style="text-align:left">Segmento</th>
+              <th>Plazo</th><th>Compra</th><th>Venta</th><th>Último</th>
+              <th>Var %</th><th>Volumen</th><th>Hora</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in siopel %}
+              {% set v = r.variacion %}
+              {% set vf = v if (v is number) else none %}
+              <tr>
+                <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.ticker }}</td>
+                <td style="text-align:left">{{ r.segmento }}</td>
+                <td>{{ r.plazo }}</td>
+                <td>{{ r.precioCompra | ar_num(4) }}</td>
+                <td>{{ r.precioVenta | ar_num(4) }}</td>
+                <td style="font-weight:600">{{ r.precioUltimo | ar_num(4) }}</td>
+                <td class="{{ fx.vcls(vf) }}">{{ fx.arrow(vf) }} {{ vf | ar_pct(2) }}</td>
+                <td style="color:var(--text-muted)">{{ r.volumenOperado | ar_hum }}</td>
+                <td style="color:var(--text-muted);font-size:11px">{{ r.horaUltima }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif oficial.source != "SIOPEL" %}
+      <p class="muted" style="margin:8px 0 0;font-size:12px">
+        SIOPEL en vivo no disponible (sin <code>MAE_API_KEY</code> o API caída).
+        Se usa el A3500 mayorista de la serie macro; la variación es día/día
+        del último dato publicado.
+      </p>
+    {% endif %}
+  </div>
+</div>

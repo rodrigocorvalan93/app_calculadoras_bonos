@@ -1,0 +1,28 @@
+{% if not r.ok %}
+  <div class="alert">Faltan puntas para {{ r.base }} / {{ r.leg }} / {{ r.plazo }} (sin book completo).</div>
+{% else %}
+<div class="fx-calc-res">
+  <div class="fx-calc-tc">
+    TC efectivo <strong>{{ r.fx_eff | ar_num(2) }}</strong>
+    <span class="muted">· {{ "Comprar" if r.side == "comprar" else "Vender" }} USD vía {{ r.leg }} ({{ r.base }}, {{ r.plazo }})</span>
+  </div>
+  <div class="metrics-grid metrics-margen" style="margin-top:8px">
+    <div class="metric">
+      <div class="metric-label">VN a operar</div>
+      <div class="metric-value">{{ r.vn | ar_int }}</div>
+    </div>
+    <div class="metric metric-highlight">
+      <div class="metric-label">ARS</div>
+      <div class="metric-value">{{ r.ars | ar_money(2) }}</div>
+    </div>
+    <div class="metric metric-highlight">
+      <div class="metric-label">USD</div>
+      <div class="metric-value">{{ r.usd | ar_money(2) }}</div>
+    </div>
+  </div>
+  <p class="muted" style="margin:8px 0 0;font-size:12px">
+    {{ r.lbl_a }} @ ARS {{ r.px_a | ar_num(4) }} (VN 100) ·
+    {{ r.lbl_u }} @ {{ r.leg }} {{ r.px_u | ar_num(4) }} (VN 100)
+  </p>
+</div>
+{% endif %}

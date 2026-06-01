@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Dólares{% endblock %}
+{% block tab_dolares %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>💵 Monitor de Dólares</h1>
+    <p class="muted">
+      USD = vía Cable (ticker …C) · USB = vía MEP/Bolsa (ticker …D).
+      Bid implícito = ARS bid / pata-USD offer · Offer = ARS offer / pata-USD bid ·
+      Last = ARS last / pata-USD last. Var % = last hoy / cierre de ayer − 1.
+      Todo en vivo desde el store (sin re-fetch); el riel izquierdo sigue el de mayor volumen.
+    </p>
+  </header>
+
+  {# ── 1. Oficial (SIOPEL / A3500) ─────────────────────────────────── #}
+  <div id="dolar-oficial" hx-get="/dolares/oficial" hx-trigger="load, every 15s" hx-swap="innerHTML">
+    {% include "partials/dolares_oficial.html" %}
+  </div>
+
+  {# ── 2. Selector de plazo + tablas FX implícito + canje ──────────── #}
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <fieldset class="field field-mode" id="plazo-sel">
+          <legend>Plazo</legend>
+          {% for val, lbl in plazos_opt %}
+          <label>
+            <input type="radio" name="plazo" value="{{ val }}" {% if val == plazo_sel %}checked{% endif %}
+                   hx-get="/dolares/tables" hx-target="#dolar-tables" hx-swap="innerHTML" hx-trigger="change">
+            {{ lbl }}
+          </label>
+          {% endfor %}
+        </fieldset>
+      </div>
+    </div>
+  </div>
+
+  <div id="dolar-tables" hx-get="/dolares/tables" hx-trigger="every 15s"
+       hx-swap="innerHTML" hx-include="#plazo-sel">
+    {% include "partials/dolares_tables.html" %}
+  </div>
+
+  {# ── 3. Calculadora de operación FX ──────────────────────────────── #}
+  <div class="card">
+    <div class="card-title"><span>🧮 Calculadora de operación FX</span>
+      <span class="card-title-aux">comprar/vender USD cruzando el bono contra su pata dólar</span>
+    </div>
+    <div class="card-body">
+      <form hx-get="/dolares/calc" hx-target="#calc-res" hx-swap="innerHTML"
+            hx-trigger="load, change, submit">
+        <div class="row-fields">
+          <label class="field field-bond">
+            <span>Bono</span>
+            <select name="base">
+              {% for b in bases %}
+                <option value="{{ b }}" {% if b == "GD30" %}selected{% endif %}>{{ b }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <fieldset class="field field-mode">
+            <legend>Leg</legend>
+            <label><input type="radio" name="leg" value="USD" checked> USD · Cable</label>
+            <label><input type="radio" name="leg" value="USB"> USB · MEP</label>
+          </fieldset>
+          <fieldset class="field field-mode">
+            <legend>Plazo</legend>
+            <label><input type="radio" name="plazo" value="24hs" checked> 24 hs</label>
+            <label><input type="radio" name="plazo" value="CI"> CI</label>
+          </fieldset>
+          <fieldset class="field field-mode">
+            <legend>Operación</legend>
+            <label><input type="radio" name="side" value="comprar" checked> Comprar USD</label>
+            <label><input type="radio" name="side" value="vender"> Vender USD</label>
+          </fieldset>
+          <fieldset class="field field-mode">
+            <legend>Definir por</legend>
+            <label><input type="radio" name="modo" value="usd" checked> USD</label>
+            <label><input type="radio" name="modo" value="ars"> ARS</label>
+          </fieldset>
+          <label class="field">
+            <span>Cantidad</span>
+            <input type="number" name="cantidad" value="10000" step="100" min="0">
+          </label>
+        </div>
+      </form>
+      <div id="calc-res" style="margin-top:10px"></div>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,79 @@
+{% import "partials/_fx_macros.html" as fx %}
+{% if not blocks %}
+  <div class="alert">Sin universo de bases (globales / bonares) cargado.</div>
+{% else %}
+{% for b in blocks %}
+<div class="card">
+  <div class="card-title">
+    <span>Dólar implícito · plazo {{ b.plazo }}</span>
+    <span class="card-title-aux">USD = vía Cable (…C) · USB = vía MEP (…D) · ordenado por volumen</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="dolar-tables">
+      {% for leg, rows in [("USD · Cable", b.usd), ("USB · MEP", b.usb)] %}
+      <div class="dolar-tbl">
+        <div class="dolar-tbl-h">{{ leg }}</div>
+        <div class="table-scroll">
+          <table class="cashflows curve-table mercado-table">
+            <thead>
+              <tr>
+                <th style="text-align:left">Bono</th>
+                <th>Bid</th><th>Last</th><th>Offer</th>
+                <th>Var %</th><th>Vol USD (M)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if not rows %}
+                <tr><td colspan="6" class="muted" style="text-align:center">Sin book.</td></tr>
+              {% endif %}
+              {% for r in rows %}
+                <tr>
+                  <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.base }}</td>
+                  <td>{{ r.bid | ar_num(2) }}</td>
+                  <td class="{{ fx.vcls(r.var_pct) }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
+                  <td>{{ r.offer | ar_num(2) }}</td>
+                  <td class="{{ fx.vcls(r.var_pct) }}">{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}</td>
+                  <td style="color:var(--text-muted)">{{ r.vol_usd_m | ar_num(2) }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="dolar-tbl" style="border-top:1px solid var(--border-soft)">
+      <div class="dolar-tbl-h">🔁 Canje · CCL/MEP − 1 (positivo = cable más caro que el MEP)</div>
+      <div class="table-scroll">
+        <table class="cashflows curve-table mercado-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">Bono</th>
+              <th>Bid</th><th>Last</th><th>Offer</th>
+              <th>Δ vs ayer</th><th>Vol C (M)</th><th>Vol D (M)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if not b.canje %}
+              <tr><td colspan="7" class="muted" style="text-align:center">Sin pares C/D con book.</td></tr>
+            {% endif %}
+            {% for r in b.canje %}
+              <tr>
+                <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.base }}</td>
+                <td>{{ r.bid | ar_pct(2) }}</td>
+                <td class="{{ fx.vcls(r.var_pct) }}" style="font-weight:600">{{ r.last | ar_pct(2) }}</td>
+                <td>{{ r.offer | ar_pct(2) }}</td>
+                <td class="{{ fx.vcls(r.var_pct) }}">{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}</td>
+                <td style="color:var(--text-muted)">{{ r.vol_c_m | ar_num(2) }}</td>
+                <td style="color:var(--text-muted)">{{ r.vol_d_m | ar_num(2) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endif %}

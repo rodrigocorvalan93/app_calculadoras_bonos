@@ -1,0 +1,65 @@
+{% import "partials/_fx_macros.html" as fx %}
+<div class="rail-head">
+  <span>💵 Dólar</span>
+  <a class="rail-more" href="/dolares" title="Abrir monitor de dólares">monitor →</a>
+</div>
+
+{% macro leg_block(title, leg) %}
+<div class="rail-item">
+  <div class="rail-l">{{ title }}{% if leg %} · <span class="rail-base">{{ leg.base }}</span>{% endif %}</div>
+  {% if leg and leg.last is not none %}
+    <div class="rail-v {{ fx.vcls(leg.var_pct) }}">
+      {{ leg.last | ar_num(2) }}
+      <span class="rail-arrow">{{ fx.arrow(leg.var_pct) }}</span>
+    </div>
+    <div class="rail-s {{ fx.vcls(leg.var_pct) }}">{{ leg.var_pct | ar_pct(2) }} <span class="muted">vs close</span></div>
+  {% else %}
+    <div class="rail-v muted">—</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{{ leg_block("USD · Cable", summary.usd) }}
+{{ leg_block("USB · MEP", summary.usb) }}
+
+<div class="rail-item">
+  <div class="rail-l">Brecha · CCL/oficial</div>
+  {% if summary.brecha is not none %}
+    <div class="rail-v {{ fx.vcls(summary.brecha_var_pp) }}">{{ summary.brecha | ar_pct(2) }}</div>
+    {% if summary.brecha_var_pp is not none %}
+      <div class="rail-s {{ fx.vcls(summary.brecha_var_pp) }}">{{ fx.arrow(summary.brecha_var_pp) }} {{ summary.brecha_var_pp | ar_pct(2) }} pp</div>
+    {% endif %}
+  {% else %}
+    <div class="rail-v muted">—</div>
+  {% endif %}
+</div>
+
+<div class="rail-item">
+  <div class="rail-l">Canje · CCL/MEP{% if summary.canje %} <span class="rail-base">{{ summary.canje.base }}</span>{% endif %}</div>
+  {% if summary.canje and summary.canje.last is not none %}
+    <div class="rail-v {{ fx.vcls(summary.canje.var_pct) }}">{{ summary.canje.last | ar_pct(2) }}</div>
+    <div class="rail-s muted">
+      bid {{ summary.canje.bid | ar_pct(2) }} · offer {{ summary.canje.offer | ar_pct(2) }}
+    </div>
+  {% else %}
+    <div class="rail-v muted">—</div>
+  {% endif %}
+</div>
+
+<div class="rail-item rail-oficial">
+  <div class="rail-l">Oficial · {{ summary.oficial.source }}</div>
+  {% if summary.oficial.last is not none %}
+    <div class="rail-v {{ fx.vcls(summary.oficial.var_pct) }}">
+      {{ summary.oficial.last | ar_num(2) }}
+      <span class="rail-arrow">{{ fx.arrow(summary.oficial.var_pct) }}</span>
+    </div>
+    <div class="rail-s {{ fx.vcls(summary.oficial.var_pct) }}">
+      {{ summary.oficial.var_pct | ar_pct(2) }}
+      {% if summary.oficial.date %}<span class="muted">· al {{ summary.oficial.date }}</span>{% endif %}
+    </div>
+  {% else %}
+    <div class="rail-v muted">—</div>
+  {% endif %}
+</div>
+
+<div class="rail-foot muted">plazo {{ summary.plazo }} · actualiza cada 15s</div>
