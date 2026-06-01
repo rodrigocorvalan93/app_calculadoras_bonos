@@ -1,0 +1,91 @@
+{% set ch = curve_chart %}
+{% if not hist_meta or not hist_meta.loaded %}
+  <div class="alert">
+    <strong>Histórico BYMA no disponible.</strong>
+    {% if hist_meta and hist_meta.error %}<br><span class="muted">{{ hist_meta.error }}</span>{% endif %}
+    <br>Configurá en <code>secrets.txt</code> una de: <code>DELTA_HISTORICO_PATH</code> (ruta al Excel),
+    <code>DELTA_HISTORICO_DIR</code> (carpeta) o <code>DELTA_BASES_DIR</code> (si está junto a las carteras).
+  </div>
+{% else %}
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <label class="field">
+          <span>Curva</span>
+          <select name="curve" hx-get="/historicos/curva" hx-trigger="change" hx-target="#hist-curva" hx-swap="innerHTML"
+                  hx-include="#hist-curva [name=metric], #hist-curva [name=desde], #hist-curva [name=hasta], #hist-curva [name=proy]">
+            {% for o in curve_opts %}<option value="{{ o.key }}" {% if o.key == curve_sel %}selected{% endif %}>{{ o.label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Métrica</span>
+          <select name="metric" hx-get="/historicos/curva" hx-trigger="change" hx-target="#hist-curva" hx-swap="innerHTML"
+                  hx-include="#hist-curva [name=curve], #hist-curva [name=desde], #hist-curva [name=hasta], #hist-curva [name=proy]">
+            {% for m in ["TIREA","TNA","TEM","Paridad"] %}<option value="{{ m }}" {% if m == metric %}selected{% endif %}>{{ m }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Desde</span>
+          <input type="date" name="desde" value="{{ desde }}" hx-get="/historicos/curva" hx-trigger="change" hx-target="#hist-curva" hx-swap="innerHTML"
+                 hx-include="#hist-curva [name=curve], #hist-curva [name=metric], #hist-curva [name=hasta], #hist-curva [name=proy]">
+        </label>
+        <label class="field">
+          <span>Hasta</span>
+          <input type="date" name="hasta" value="{{ hasta }}" hx-get="/historicos/curva" hx-trigger="change" hx-target="#hist-curva" hx-swap="innerHTML"
+                 hx-include="#hist-curva [name=curve], #hist-curva [name=metric], #hist-curva [name=desde], #hist-curva [name=proy]">
+        </label>
+        <label class="field">
+          <span>Tipo</span>
+          <select name="proy" hx-get="/historicos/curva" hx-trigger="change" hx-target="#hist-curva" hx-swap="innerHTML"
+                  hx-include="#hist-curva [name=curve], #hist-curva [name=metric], #hist-curva [name=desde], #hist-curva [name=hasta]">
+            {% for p, lbl in [("todos","Todos"),("base","Base"),("proy","Proy (j)")] %}<option value="{{ p }}" {% if p == proy %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <p class="muted" style="font-size:11px;margin-top:6px">{{ hist_meta.n_codes }} códigos · {{ hist_meta.n_dates }} fechas · {{ hist_meta.n_obs }} obs · histórico {{ hist_meta.dmin }} → {{ hist_meta.dmax }}. Cada línea es la {{ metric }} histórica de un bono de la curva.</p>
+    </div>
+  </div>
+
+  {% if not ch or not ch.loaded or ch.n_lines == 0 %}
+    <div class="alert">Sin datos históricos para esta curva en el rango/filtro elegido.</div>
+  {% else %}
+  <div class="card">
+    <div class="card-title">
+      <span>{{ ch.curve_label }} · {{ ch.metric }} histórica</span>
+      <span class="card-title-aux">{{ ch.n_lines }} bonos · {{ ch.dmin }} → {{ ch.dmax }}</span>
+    </div>
+    <div class="card-body">
+      <svg viewBox="0 0 {{ ch.width }} {{ ch.height }}" width="100%" style="max-width:100%;height:auto;font-family:inherit">
+        {% for t in ch.yticks %}
+          <line x1="{{ ch.x0 }}" y1="{{ t.y }}" x2="{{ ch.x1 }}" y2="{{ t.y }}" stroke="var(--border)" stroke-width="1" opacity="0.5"/>
+          <text x="{{ ch.x0 - 8 }}" y="{{ t.y + 4 }}" text-anchor="end" font-size="11" fill="var(--text-muted)">{{ t.v }}</text>
+        {% endfor %}
+        {% for t in ch.xticks %}
+          <line x1="{{ t.x }}" y1="{{ ch.y0 }}" x2="{{ t.x }}" y2="{{ ch.y1 }}" stroke="var(--border)" stroke-width="1" opacity="0.25"/>
+          <text x="{{ t.x }}" y="{{ ch.y1 + 16 }}" text-anchor="middle" font-size="10" fill="var(--text-muted)">{{ t.v }}</text>
+        {% endfor %}
+        {% if ch.bands %}
+          <line x1="{{ ch.x0 }}" y1="{{ ch.bands.mean.y }}" x2="{{ ch.x1 }}" y2="{{ ch.bands.mean.y }}" stroke="var(--text-muted)" stroke-width="1.1"/>
+          <text x="{{ ch.x1 + 4 }}" y="{{ ch.bands.mean.y + 4 }}" font-size="9.5" fill="var(--text-muted)">Prom {{ ch.bands.mean.v }}</text>
+          <line x1="{{ ch.x0 }}" y1="{{ ch.bands.min.y }}" x2="{{ ch.x1 }}" y2="{{ ch.bands.min.y }}" stroke="var(--text-muted)" stroke-width="0.7" stroke-dasharray="4 3" opacity="0.7"/>
+          <text x="{{ ch.x1 + 4 }}" y="{{ ch.bands.min.y + 4 }}" font-size="9.5" fill="var(--text-muted)">Mín {{ ch.bands.min.v }}</text>
+          <line x1="{{ ch.x0 }}" y1="{{ ch.bands.max.y }}" x2="{{ ch.x1 }}" y2="{{ ch.bands.max.y }}" stroke="var(--text-muted)" stroke-width="0.7" stroke-dasharray="4 3" opacity="0.7"/>
+          <text x="{{ ch.x1 + 4 }}" y="{{ ch.bands.max.y + 4 }}" font-size="9.5" fill="var(--text-muted)">Máx {{ ch.bands.max.v }}</text>
+        {% endif %}
+        {% for ln in ch.lines %}
+          <path d="{{ ln.path }}" fill="none" stroke="{{ ln.color }}" stroke-width="1.5" opacity="0.92"/>
+        {% endfor %}
+      </svg>
+    </div>
+    <div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px 14px">
+      {% for ln in ch.lines %}
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px">
+          <span style="width:10px;height:10px;border-radius:2px;background:{{ ln.color }}"></span>
+          <strong>{{ ln.code }}</strong>
+          <span style="color:var(--text-muted)">{{ ln.last | ar_num(1) }}% ({% if ln.delta >= 0 %}+{% endif %}{{ ln.delta | ar_num(0) }} {{ ln.delta_unit }})</span>
+        </span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+{% endif %}

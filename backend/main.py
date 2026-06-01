@@ -53,12 +53,11 @@ def _initial_symbols() -> list[str]:
     except Exception:  # noqa: BLE001
         return []
     seed: set[str] = set()
-    for key in (
-        "lecap", "cer", "tamar", "cerproy",
-        "dolarlinked", "globales", "bonares", "bopreales",
-        "dualfija", "dualtamar", "dualcer",
-    ):
-        for code in codes_by_curve.get(key, []) or []:
+    # Todas las curvas — soberanas Y corporativas (corp_tamar/badlar/tasafija/
+    # uva/dlk/hdmep/hdcable). Antes sólo se sembraban las soberanas, así que los
+    # corporativos (p. ej. RVS1O, TAMAR corp) no levantaban precio ni libro.
+    for codes in codes_by_curve.values():
+        for code in codes or []:
             seed.update(syms.md_symbols([code], plazo="24hs"))
             seed.update(syms.md_symbols([code], plazo="CI"))
     # Implicit-FX legs: the C (cable) and D (MEP) tickers of the liquid

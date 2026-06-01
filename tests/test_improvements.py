@@ -37,6 +37,40 @@ def test_position_for_strips_jv_suffix() -> None:
         positions._cache = saved
 
 
+def test_position_for_ignores_plazo_suffix() -> None:
+    """'S31L6 CI' (mismo bono, plazo CI) cae en la tenencia de 'S31L6'."""
+    saved = positions._cache
+    positions._cache = {
+        "error": None, "paths": {}, "holdings": [], "loaded": True,
+        "fondos": {10: "Performance"}, "pn": {10: 1000.0},
+        "by_code": {"S31L6": {
+            "especie": "S31L6", "total_cantidad": 150.0, "total_valor": 1380.0,
+            "funds": [{"cod_fondo": 10, "cantidad": 150.0, "valor": 1380.0}],
+        }},
+    }
+    try:
+        assert positions._norm_code("S31L6 CI") == "S31L6"
+        assert positions._norm_code("S31L6 24HS") == "S31L6"
+        assert positions._norm_code("TX26j") == "TX26J"          # NO toca el sufijo j/v
+        p = positions.position_for("S31L6 CI")
+        assert p is not None and p["code"] == "S31L6" and p["total_cantidad"] == 150.0
+    finally:
+        positions._cache = saved
+
+
+def test_corporate_curves_are_seeded() -> None:
+    """Los corporativos (RVS1O y la curva corp_tamar) se suscriben al WS."""
+    from backend import main
+    from backend.services import curves, symbols as syms
+
+    bond_universe.ensure_loaded()
+    seed = set(main._initial_symbols())
+    assert syms.md_symbol("RVS1O", "24hs") in seed
+    corp = curves.build_curve_codes().get("corp_tamar", [])
+    if corp:
+        assert all(syms.md_symbol(c, "24hs") in seed for c in corp)
+
+
 def _first_codes(n: int = 2) -> list[str]:
     bond_universe.ensure_loaded()
     codes = bond_universe.all_codes()
@@ -57,6 +91,40 @@ async def test_comparador_delta_is_b_minus_a() -> None:
             "a": a, "b": b, "mode": "precio", "val_a": "70", "val_b": "72", "plazo": "24hs"})
     assert r.status_code == 200
     assert "Δ (B−A)" in r.text          # header en la dirección nueva
+
+
+@pytest.mark.asyncio
+async def test_comparador_modes_tir_and_margen() -> None:
+    """El comparador acepta los 4 modos; en margen, un bono de tasa fija
+    muestra 'no aplica' en vez de un número engañoso."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, pricing
+
+    bond_universe.ensure_loaded()
+    var = fija = None
+    for c in bond_universe.all_codes():
+        m = pricing.bond_meta(c) or {}
+        t = (m.get("tipo_tasa_interes") or "").upper()
+        idx = (m.get("index") or "").upper()
+        if not var and t in ("VARIABLE", "VARIABLE_CAP") and idx in ("TAMAR", "BADLAR"):
+            var = c
+        if not fija and t not in ("VARIABLE", "VARIABLE_CAP"):
+            fija = c
+        if var and fija:
+            break
+    if not (var and fija):
+        pytest.skip("falta un bono variable o uno de tasa fija")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        rt = await ac.get("/comparador/result", params={
+            "a": var, "b": fija, "mode": "tir", "val_a": "0.40", "val_b": "0.45", "plazo": "24hs"})
+        rm = await ac.get("/comparador/result", params={
+            "a": var, "b": fija, "mode": "margen", "val_a": "0.02", "val_b": "0.03", "plazo": "24hs"})
+    assert rt.status_code == 200 and "por TIREA" in rt.text
+    assert rm.status_code == 200 and "por Margen" in rm.text
+    assert "no aplica" in rm.text          # la fija no tiene margen
 
 
 @pytest.mark.asyncio
