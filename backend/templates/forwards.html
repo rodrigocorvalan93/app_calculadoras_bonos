@@ -6,7 +6,7 @@
 <section class="curves">
   <header class="yas-header">
     <h1>Forwards implícitos (TIR)</h1>
-    <p class="muted">Matriz triangular por curva: <strong>fila = bono corto</strong>, <strong>columna = bono largo</strong>, celda = forward anualizado (EA) entre ambos, eje Duration. Aproximado (TIR como spot). Refresh 5 s.</p>
+    <p class="muted">Matriz triangular por curva: <strong>fila = bono corto</strong>, <strong>columna = bono largo</strong>, celda = forward anualizado (EA) entre ambos, eje Duration. Tildá/destildá bonos para achicar la matriz; abajo, una matriz <strong>what-if</strong> con el precio editable. Refresh 5 s.</p>
   </header>
 
   <div class="curve-picker card">
@@ -14,8 +14,8 @@
       <div class="row-fields">
         <label class="field">
           <span>Curva</span>
-          <select name="curve" hx-get="/forwards/table" hx-trigger="change"
-                  hx-target="#forwards-table" hx-swap="innerHTML"
+          <select name="curve" hx-get="/forwards/body" hx-trigger="change"
+                  hx-target="#forwards-body" hx-swap="innerHTML"
                   hx-include="[name=plazo], [name=only_quoting], [name=leg]">
             {% for c in all_curves %}
               {% set count = (table.get(c.key) or []) | length %}
@@ -27,8 +27,8 @@
         </label>
         <label class="field">
           <span>Plazo</span>
-          <select name="plazo" hx-get="/forwards/table" hx-trigger="change"
-                  hx-target="#forwards-table" hx-swap="innerHTML"
+          <select name="plazo" hx-get="/forwards/body" hx-trigger="change"
+                  hx-target="#forwards-body" hx-swap="innerHTML"
                   hx-include="[name=curve], [name=only_quoting], [name=leg]">
             <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
@@ -36,8 +36,8 @@
         </label>
         <label class="field">
           <span>Leg (FX)</span>
-          <select name="leg" hx-get="/forwards/table" hx-trigger="change"
-                  hx-target="#forwards-table" hx-swap="innerHTML"
+          <select name="leg" hx-get="/forwards/body" hx-trigger="change"
+                  hx-target="#forwards-body" hx-swap="innerHTML"
                   hx-include="[name=curve], [name=plazo], [name=only_quoting]">
             <option value="native" {% if leg == "native" %}selected{% endif %}>Nativa</option>
             <option value="USD"    {% if leg == "USD"    %}selected{% endif %}>USD (cable)</option>
@@ -47,7 +47,7 @@
         </label>
         <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
           <input type="checkbox" name="only_quoting" value="true" {% if only_quoting %}checked{% endif %}
-                 hx-get="/forwards/table" hx-trigger="change" hx-target="#forwards-table" hx-swap="innerHTML"
+                 hx-get="/forwards/body" hx-trigger="change" hx-target="#forwards-body" hx-swap="innerHTML"
                  hx-include="[name=curve], [name=plazo], [name=leg]">
           Solo con cotización
         </label>
@@ -55,10 +55,19 @@
     </div>
   </div>
 
-  <div id="forwards-table"
-       hx-get="/forwards/table" hx-trigger="every 5s" hx-swap="innerHTML"
-       hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]">
-    {% include "partials/forwards_table.html" %}
+  <div id="forwards-body">
+    {% include "partials/forwards_body.html" %}
   </div>
 </section>
+
+<script>
+  // Tildar/destildar todos los bonos del filtro y avisar a htmx (la matriz y
+  // el what-if escuchan "change from:#forwards-filter").
+  function fwdToggleAll(on){
+    var f = document.getElementById('forwards-filter');
+    if(!f) return;
+    f.querySelectorAll('input[name=code]').forEach(function(c){ c.checked = on; });
+    f.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+</script>
 {% endblock %}

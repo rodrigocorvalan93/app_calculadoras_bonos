@@ -1,0 +1,44 @@
+{# Cuerpo de Forwards: filtro de bonos + matriz de mercado + what-if.
+   Se re-renderiza entero cuando cambia curva/plazo/leg (estado fresco). #}
+{% if not selected_def %}
+  <div class="alert">Curva no encontrada.</div>
+{% else %}
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">
+      <span>Bonos en la matriz</span>
+      <span class="card-title-aux">destildá para achicarla</span>
+    </div>
+    <div class="card-body">
+      <div id="forwards-filter" class="fwd-filter">
+        <input type="hidden" name="filtered" value="1">
+        {% for c in candidates %}
+        <label class="fwd-chk"><input type="checkbox" name="code" value="{{ c }}" {% if c in selected_codes %}checked{% endif %}> {{ c }}</label>
+        {% else %}
+        <span class="muted">Sin bonos con TIREA+Duration en esta curva.</span>
+        {% endfor %}
+      </div>
+      {% if candidates %}
+      <div class="fwd-filter-actions">
+        <button type="button" class="btn-ghost" onclick="fwdToggleAll(true)">Todos</button>
+        <button type="button" class="btn-ghost" onclick="fwdToggleAll(false)">Ninguno</button>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div id="forwards-matrix"
+       hx-get="/forwards/table"
+       hx-trigger="every 5s, change from:#forwards-filter delay:200ms"
+       hx-include="[name=curve],[name=plazo],[name=leg],[name=only_quoting],#forwards-filter"
+       hx-swap="innerHTML">
+    {% include "partials/forwards_table.html" %}
+  </div>
+
+  <div id="forwards-whatif" style="margin-top:14px"
+       hx-get="/forwards/whatif"
+       hx-trigger="change, change from:#forwards-filter delay:200ms"
+       hx-include="[name=curve],[name=plazo],[name=leg],[name=only_quoting],#forwards-filter,#wi-prices"
+       hx-swap="innerHTML">
+    {% include "partials/forwards_whatif.html" %}
+  </div>
+{% endif %}

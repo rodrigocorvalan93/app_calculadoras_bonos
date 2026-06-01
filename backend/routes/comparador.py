@@ -2,7 +2,7 @@
 
 Reutiliza el motor de YAS (`pricing.compute_metrics`): cada bono se valúa al
 precio (o TNA) dado y se muestran Precio / TIREA / TNA / TEM / Duration /
-Paridad / Margen, con la diferencia A−B para las métricas comparables. Si no
+Paridad / Margen, con la diferencia B−A para las métricas comparables. Si no
 se pasa precio y el modo es "precio", se autocompleta con el last del store
 (igual que el autofill del comparador legacy de OMSweb_app).
 """
@@ -19,7 +19,7 @@ router = APIRouter(tags=["comparador"])
 
 # modo del comparador → modo de compute_metrics
 _MODE = {"precio": "precio", "tna": "tna"}
-# métricas (decimales) con diferencia A−B comparable
+# métricas (decimales) con diferencia B−A comparable
 _DELTA_KEYS = ("tirea", "tna", "tem", "duration", "paridad")
 
 
@@ -131,7 +131,7 @@ async def comparador_result(
             va, vb = ma.get(k), mb.get(k)
             try:
                 if va is not None and vb is not None and va == va and vb == vb:
-                    deltas[k] = float(va) - float(vb)
+                    deltas[k] = float(vb) - float(va)
             except (TypeError, ValueError):
                 pass
 

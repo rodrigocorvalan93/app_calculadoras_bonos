@@ -680,10 +680,22 @@ select {
 /* Libro (profundidad) en Mercado */
 .book-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 8px; }
 .mercado-book { margin-top: 4px; }
+/* Panel de datos de la fila, junto al libro */
+.book-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(94px, 1fr)); gap: 8px 14px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.book-stats > div { display: flex; flex-direction: column; }
+.book-stats span { color: var(--text-muted); font-size: 9.5px; text-transform: uppercase; letter-spacing: .03em; }
+.book-stats b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.book-stats small { font-size: 10px; font-weight: 400; }
 
 /* Resumen de composición (Posiciones) */
 .resumen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
 .resumen-h { font-weight: 600; color: var(--text-muted); font-size: 12px; margin-bottom: 5px; text-transform: none; }
+
+/* Posición por fondo (Comparador) */
+.pos-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.pos-head { font-size: 12px; margin-bottom: 4px; }
+.pos-table { width: 100%; }
+.pos-table th, .pos-table td { padding: 2px 6px; font-size: 11.5px; }
 
 /* Botón primario (Comparador, etc.) */
 .btn-primary {
@@ -692,6 +704,28 @@ select {
 }
 .btn-primary:hover { background: var(--accent-strong); }
 [data-theme="delta"] .btn-primary, [data-theme="light"] .btn-primary { color: #ffffff; }
+
+/* Botón secundario (Todos / Ninguno del filtro de forwards) */
+.btn-ghost {
+  background: transparent; color: var(--text-soft); border: 1px solid var(--border);
+  border-radius: 7px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+}
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Forwards: filtro de bonos + what-if (precio editable) */
+.fwd-filter { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.fwd-chk { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.fwd-chk input[type=checkbox] { accent-color: var(--accent); }
+.fwd-filter-actions { margin-top: 10px; display: flex; gap: 8px; }
+.wi-layout { display: grid; grid-template-columns: minmax(220px, 330px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 820px) { .wi-layout { grid-template-columns: 1fr; } }
+.wi-table { width: 100%; }
+.wi-px {
+  width: 82px; background: var(--panel-3); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 6px; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right;
+}
+.wi-px:focus { outline: none; border-color: var(--accent); }
+.wi-edited td { background: rgba(76,201,240,0.10); }
 
 /* ── Layout con riel lateral de dólar (base.html) ──────────────────── */
 [x-cloak] { display: none !important; }

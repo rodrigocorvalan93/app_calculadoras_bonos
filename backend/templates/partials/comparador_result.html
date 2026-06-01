@@ -16,7 +16,7 @@
           <th style="text-align:left">Métrica</th>
           <th>{{ a or "A" }}</th>
           <th>{{ b or "B" }}</th>
-          <th>Δ (A−B)</th>
+          <th>Δ (B−A)</th>
         </tr>
       </thead>
       <tbody>
@@ -109,10 +109,36 @@
   {% endif %}
   {% if pos_a or pos_b %}
   <div style="padding:11px 14px;border-top:1px solid var(--border)">
-    <strong>Mi posición</strong> ·
-    {{ a }}: {% if pos_a %}<span style="color:var(--accent);font-weight:600">{{ pos_a.total_cantidad | ar_hum }} VN</span> · {{ pos_a.total_valor | ar_hum }} <span class="muted">({{ pos_a.n_fondos }} fondo{{ "s" if pos_a.n_fondos != 1 else "" }})</span>{% else %}<span class="muted">sin posición</span>{% endif %}
-    &nbsp;·&nbsp;
-    {{ b }}: {% if pos_b %}<span style="color:var(--accent);font-weight:600">{{ pos_b.total_cantidad | ar_hum }} VN</span> · {{ pos_b.total_valor | ar_hum }} <span class="muted">({{ pos_b.n_fondos }} fondo{{ "s" if pos_b.n_fondos != 1 else "" }})</span>{% else %}<span class="muted">sin posición</span>{% endif %}
+    <div class="resumen-h" style="margin-bottom:6px">Mi posición</div>
+    <div class="pos-grid">
+      {% for tag, pos in [(a, pos_a), (b, pos_b)] if tag %}
+      <div class="pos-col">
+        <div class="pos-head">
+          <strong>{{ tag }}</strong>
+          {% if pos %}<span class="muted">·
+            <span style="color:var(--accent);font-weight:600">{{ pos.total_cantidad | ar_int }}</span> VN
+            · {{ pos.total_valor | ar_int }}
+            ({{ pos.n_fondos }} fondo{{ "s" if pos.n_fondos != 1 else "" }})</span>
+          {% else %}<span class="muted">· sin posición</span>{% endif %}
+        </div>
+        {% if pos %}
+        <table class="cashflows pos-table">
+          <thead><tr><th style="text-align:left">Fondo</th><th>VN</th><th>Valor</th><th>% PN</th></tr></thead>
+          <tbody>
+            {% for f in pos.funds %}
+            <tr>
+              <td style="text-align:left;font-size:11px">{{ f.nombre }}</td>
+              <td>{{ f.cantidad | ar_int }}</td>
+              <td>{{ f.valor | ar_int }}</td>
+              <td>{{ f.pct_pn | ar_pct(2) if f.pct_pn is not none else "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
   {% if (ma and ma.error) or (mb and mb.error) %}

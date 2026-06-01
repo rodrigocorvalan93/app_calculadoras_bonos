@@ -4,9 +4,26 @@
     <span class="card-title-aux">{{ nombre }} · {{ symbol }}</span>
   </div>
   <div class="card-body">
-    {# O/H/L/C, Last, VWAP, Var, TIREA, Dur, Vol ya están en la fila de la
-       tabla de arriba — acá no los repetimos. El libro aporta la
-       profundidad con la TIR por nivel; abajo, la tenencia. #}
+    {# Toda la data de la fila, acá mismo (sin recalcular nada — viene del
+       mismo motor que la tabla de arriba). Después, profundidad con TIR por
+       nivel y la tenencia. #}
+    {% if row %}
+    <div class="book-stats">
+      <div><span>Last</span><b class="{{ row.last_cls }}">{{ row.last | ar_num(2) }}</b></div>
+      <div><span>Last bid</span><b class="{{ row.bid_cls }}">{{ row.bid | ar_num(2) }}</b></div>
+      <div><span>Offer</span><b class="{{ row.offer_cls }}">{{ row.offer | ar_num(2) }}</b></div>
+      <div><span>Var %</span><b class="{{ 'px-up' if (row.var_pct or 0) > 0 else ('px-down' if (row.var_pct or 0) < 0 else '') }}">{% if row.var_pct is not none %}{{ row.var_pct | ar_num(2) }}%{% else %}—{% endif %}</b></div>
+      <div><span>TIR @ last</span><b style="color:var(--accent)">{{ row.tirea_last | ar_pct(2) }}</b></div>
+      <div><span>Duration</span><b>{{ row.duration | ar_num(2) }}</b></div>
+      <div><span>VWAP</span><b>{{ row.vwap | ar_num(2) }}</b></div>
+      <div><span>Vol (efvo)</span><b>{{ row.volume | ar_hum }}</b></div>
+      <div><span>Vol (VN)</span><b>{{ row.nominal | ar_hum }}</b></div>
+      <div><span>Open</span><b>{{ row.open | ar_num(2) }}</b></div>
+      <div><span>Close</span><b>{{ row.close | ar_num(2) }}</b></div>
+      <div><span>Mín op.</span><b>{{ row.low | ar_num(2) }} <small class="muted">· {{ row.tirea_low | ar_pct(2) }}</small></b></div>
+      <div><span>Máx op.</span><b>{{ row.high | ar_num(2) }} <small class="muted">· {{ row.tirea_high | ar_pct(2) }}</small></b></div>
+    </div>
+    {% endif %}
     {% if instr and (instr.lamina is not none or instr.tick is not none or instr.low_limit is not none) %}
     <div class="muted" style="margin-bottom:8px;font-size:12px">
       {% if instr.lamina is not none %}<strong>Lámina mínima:</strong> {{ instr.lamina | ar_num(0) }}{% endif %}
