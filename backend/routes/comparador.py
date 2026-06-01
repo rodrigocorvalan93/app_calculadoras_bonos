@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.services import bond_universe, marketdata_store, positions, pricing, symbols as syms
+from backend.services import bond_universe, delta_especies, marketdata_store, positions, pricing, symbols as syms
 
 router = APIRouter(tags=["comparador"])
 
@@ -156,6 +156,7 @@ async def comparador_result(
         "partials/comparador_result.html",
         ma=ma, mb=mb, deltas=deltas, swap=swap, fwd=fwd,
         pos_a=positions.position_for(a), pos_b=positions.position_for(b),
+        esp_a=delta_especies.info(a), esp_b=delta_especies.info(b),
         a=a, b=b, mode=mode, plazo=plazo, vn=vn,
     )
 

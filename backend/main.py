@@ -85,6 +85,14 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] positions load failed")
 
+    # Delta - Especies.xlsx: metadata extra de bonos (lectura única, cache).
+    try:
+        from backend.services import delta_especies
+        de = delta_especies.ensure_loaded()
+        logger.info("[main] delta_especies: loaded=%s n=%s", de["loaded"], len(de["by_code"]))
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] delta_especies load failed")
+
     ws = get_ws_client()
     if settings.primary_user and settings.primary_pass:
         try:
