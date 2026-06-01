@@ -28,6 +28,20 @@ logger = logging.getLogger("backend.positions")
 _COMPOSICION_FILE = "Delta_Composicion.xlsx"
 _PN_FILE = "Delta_PN.xlsx"
 
+# Fallback CodFondo → Nombre (de OMSposiciones). Se usa si Delta_Fondos.txt
+# no está disponible / no parsea, así nunca se muestran sólo números.
+_FONDO_NOMBRES_FALLBACK: Dict[int, str] = {
+    1: "Acciones", 2: "Ahorro", 13: "Ahorro Plus", 39: "Cohen Pesos",
+    18: "Crecimiento", 37: "CRF DOL", 14: "FEDERAL I", 15: "Gestion I",
+    16: "Gestion II", 19: "Gestion III", 9: "Gestion IV", 28: "Gestion IX",
+    41: "Gestion Pyme", 21: "Gestion V", 23: "Gestión VI", 24: "Gestion VII",
+    25: "Gestion VIII", 34: "Gestion X", 40: "Gestion XI", 8: "Internacional",
+    3: "Latinoamerica", 7: "Moneda", 12: "Multimercado I", 35: "MULTIMERCADO II",
+    27: "Patrimonio I", 20: "Performance", 5: "Pesos", 36: "PLUS", 11: "Pyme",
+    38: "PYMES", 6: "Recursos", 4: "Renta", 22: "Renta Dolares",
+    26: "DOLARES PLUS", 10: "Select", 42: "Gestion XIII",
+}
+
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
 
@@ -85,40 +99,78 @@ def _parse_fondos(path: str) -> Dict[int, str]:
     header = [c.strip().lower() for c in rows[0]]
     is_header = any(t in h for h in header for t in ("cod", "id", "num")) and \
         any(t in h for h in header for t in ("nombre", "denomi", "descri", "fondo"))
+
     col_code, col_name = 0, 1
-    data_rows = rows[1:] if is_header else rows
+    if is_header:
+        # columna de código
+        for i, h in enumerate(header):
+            if any(t in h for t in ("codfondo", "cod_fondo", "cod fondo")) or h in ("cod", "id"):
+                col_code = i
+                break
+        # columna de nombre por prioridad (token específico primero; 'corto'
+        # genérico al final para que 'NombreCorto' gane sobre una col 'Corto').
+        col_name = -1
+        for token in ("nombrecorto", "nombre corto", "denomi", "nombre", "descri", "corto"):
+            for i, h in enumerate(header):
+                if i != col_code and token in h:
+                    col_name = i
+                    break
+            if col_name >= 0:
+                break
+        if col_name < 0:
+            col_name = 1 if col_code != 1 else (2 if len(header) > 2 else 1)
+        data_rows = rows[1:]
+    else:
+        data_rows = rows
+
     out: Dict[int, str] = {}
     for r in data_rows:
         if len(r) <= max(col_code, col_name):
             continue
         try:
-            cod = int(float(str(r[col_code]).strip()))
+            cod = int(float(str(r[col_code]).strip().strip('"').strip("'")))
         except (TypeError, ValueError):
             continue
-        name = str(r[col_name]).strip()
+        name = str(r[col_name]).strip().strip('"').strip("'")
         if name:
             out[cod] = name
     return out
 
 
+def _find_ci(dirpath: str, fname: str) -> Optional[str]:
+    """Busca un archivo en dirpath case-insensitive (robusto en Linux)."""
+    if not dirpath or not os.path.isdir(dirpath):
+        return None
+    target = fname.lower()
+    try:
+        for f in os.listdir(dirpath):
+            if f.lower() == target:
+                return os.path.join(dirpath, f)
+    except OSError:
+        return None
+    return None
+
+
 def _fondos_path() -> Optional[str]:
-    """Resuelve Delta_Fondos.txt como OMSposiciones: DELTA_FONDOS_PATH, luego
-    DELTA_BASES_DIR/../Text/Esco/, ../, y junto a los Excel."""
+    """Resuelve Delta_Fondos.txt. Prioridad: DELTA_FONDOS_PATH, luego bajo
+    DELTA_HISTORICO_DIR y DELTA_BASES_DIR (en Text/Esco/, ../Text/Esco/, raíz),
+    case-insensitive (el archivo suele ser 'Delta_fondos.txt')."""
     env = os.getenv("DELTA_FONDOS_PATH")
     if env:
         env = os.path.expandvars(os.path.expanduser(env))
         if os.path.isfile(env):
             return env
-    base = os.getenv("DELTA_BASES_DIR")
-    if base:
-        parent = os.path.dirname(base.rstrip("\\/"))
-        for cand in (
-            os.path.join(parent, "Text", "Esco", "Delta_Fondos.txt"),
-            os.path.join(parent, "Delta_Fondos.txt"),
-            os.path.join(base, "Delta_Fondos.txt"),
-        ):
-            if os.path.isfile(cand):
-                return cand
+    for base_env in ("DELTA_HISTORICO_DIR", "DELTA_BASES_DIR"):
+        base = os.getenv(base_env)
+        if not base:
+            continue
+        base = os.path.expandvars(os.path.expanduser(base)).rstrip("\\/")
+        parent = os.path.dirname(base)
+        for d in (os.path.join(base, "Text", "Esco"), base,
+                  os.path.join(parent, "Text", "Esco"), parent):
+            hit = _find_ci(d, "Delta_Fondos.txt")
+            if hit:
+                return hit
     return None
 
 
@@ -126,10 +178,12 @@ def _fondo_names() -> Dict[int, str]:
     path = _fondos_path()
     if path:
         try:
-            return _parse_fondos(path)
+            parsed = _parse_fondos(path)
+            if parsed:
+                return parsed
         except Exception as exc:  # noqa: BLE001
             logger.warning("[positions] fondos parse failed: %s", exc)
-    return {}
+    return dict(_FONDO_NOMBRES_FALLBACK)
 
 
 # ── carga ──────────────────────────────────────────────────────────────────
@@ -241,7 +295,8 @@ def status() -> Dict[str, Any]:
 
 def fondo_label(cod: int) -> str:
     c = ensure_loaded()
-    return c["fondos"].get(cod) or f"Fondo {cod}"
+    nombre = c["fondos"].get(cod)
+    return f"{cod} — {nombre}" if nombre else f"Fondo {cod}"
 
 
 def fondos() -> List[Dict[str, Any]]:

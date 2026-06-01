@@ -23,7 +23,8 @@ from fastapi.templating import Jinja2Templates
 from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
 from backend.routes.comparador import router as comparador_router
-from backend.routes.curves import mercado_router, router as curves_router
+from backend.routes.curves import forwards_router, graficos_router, mercado_router, router as curves_router
+from backend.routes.historico import router as historico_router
 from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
 from backend.routes.yas import router as yas_router
@@ -84,6 +85,22 @@ async def lifespan(app: FastAPI):
         logger.info("[main] positions: loaded=%s holdings=%s", st["loaded"], len(st["holdings"]))
     except Exception:  # noqa: BLE001
         logger.exception("[main] positions load failed")
+
+    # Delta - Especies.xlsx: metadata extra de bonos (lectura única, cache).
+    try:
+        from backend.services import delta_especies
+        de = delta_especies.ensure_loaded()
+        logger.info("[main] delta_especies: loaded=%s n=%s", de["loaded"], len(de["by_code"]))
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] delta_especies load failed")
+
+    # Históricos macro (BCRA): lectura única del json (en el repo).
+    try:
+        from backend.services import historico
+        h = historico.ensure_loaded()
+        logger.info("[main] historico: loaded=%s series=%s", h["loaded"], len(h["series"]))
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] historico load failed")
 
     ws = get_ws_client()
     if settings.primary_user and settings.primary_pass:
@@ -150,6 +167,9 @@ def create_app() -> FastAPI:
     app.include_router(comparador_router)
     app.include_router(curves_router)
     app.include_router(mercado_router)
+    app.include_router(forwards_router)
+    app.include_router(graficos_router)
+    app.include_router(historico_router)
     app.include_router(posiciones_router)
     app.include_router(market_router)
 

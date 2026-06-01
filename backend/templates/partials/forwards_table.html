@@ -1,0 +1,38 @@
+{% if not selected_def %}
+  <div class="alert">Curva no encontrada.</div>
+{% elif not fwd or fwd.n < 2 %}
+  <div class="alert">Necesito al menos 2 bonos con TIREA y Duration en <strong>{{ selected_def.label }}</strong> (¿hay cotización?).</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ selected_def.label }} · Forwards</span>
+    <span class="card-title-aux">{{ fwd.n }} bonos · plazo {{ plazo }}{% if leg and leg != "native" %} · leg {{ leg }}{% endif %} · fila=corto, col=largo</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+    <table class="cashflows curve-table mercado-table">
+      <thead>
+        <tr>
+          <th style="text-align:left">corto \ largo</th>
+          {% for h in fwd.header %}
+            <th>{{ h.code }}<br><span class="muted" style="font-weight:400;font-size:10px">{{ h.t | ar_num(1) }}a</span></th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in fwd.rows %}
+          <tr>
+            <td style="text-align:left;color:var(--accent);font-weight:600">
+              {{ r.code }} <span class="muted" style="font-weight:400">{{ r.t | ar_num(1) }}a</span>
+            </td>
+            {% for c in r.cells %}
+              <td style="{{ c.bg }}">{% if c.fwd is not none %}{{ c.fwd | ar_pct(2) }}{% else %}·{% endif %}</td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}

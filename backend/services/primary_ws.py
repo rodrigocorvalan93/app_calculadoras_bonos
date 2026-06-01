@@ -171,6 +171,18 @@ class PrimaryWS:
             logger.warning("[primary_ws] login failed: %s", exc)
             return False
 
+    async def get_json(self, path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+        """GET REST autenticado (usa el httpx client con las cookies del login).
+        Para endpoints estáticos como rest/instruments/detail. None si falla."""
+        if self._http is None:
+            return None
+        try:
+            r = await self._http.get(path, params=params or {})
+            r.raise_for_status()
+            return r.json()
+        except Exception:  # noqa: BLE001
+            return None
+
     async def start(self, symbols: Iterable[str] = ()) -> None:
         """Spawn the reader loop. Idempotent."""
         if self._task and not self._task.done():
