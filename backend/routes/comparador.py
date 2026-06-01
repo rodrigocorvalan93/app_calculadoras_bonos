@@ -1,10 +1,13 @@
-"""Comparador de bonos — A vs B por precio o TNA, métricas lado a lado.
+"""Comparador de bonos — A vs B por precio, TIREA, TNA o margen, métricas lado
+a lado.
 
 Reutiliza el motor de YAS (`pricing.compute_metrics`): cada bono se valúa al
-precio (o TNA) dado y se muestran Precio / TIREA / TNA / TEM / Duration /
-Paridad / Margen, con la diferencia B−A para las métricas comparables. Si no
-se pasa precio y el modo es "precio", se autocompleta con el last del store
-(igual que el autofill del comparador legacy de OMSweb_app).
+precio / TIREA / TNA / margen dado y se muestran Precio / TIREA / TNA / TEM /
+Duration / Paridad / Margen, con la diferencia B−A para las métricas
+comparables. Si no se pasa precio y el modo es "precio", se autocompleta con el
+last del store (igual que el autofill del comparador legacy de OMSweb_app). El
+margen sólo aplica a tasa variable benchmarkeada (TAMAR/BADLAR); en los demás
+bonos cae a valuar por el last y se marca "no aplica".
 """
 from __future__ import annotations
 
@@ -17,14 +20,23 @@ from backend.services import bond_universe, delta_especies, marketdata_store, po
 
 router = APIRouter(tags=["comparador"])
 
-# modo del comparador → modo de compute_metrics
-_MODE = {"precio": "precio", "tna": "tna"}
+# modo del comparador → modo de compute_metrics (mismos 4 que YAS)
+_MODE = {"precio": "precio", "tir": "tir", "tna": "tna", "margen": "margen"}
 # métricas (decimales) con diferencia B−A comparable
-_DELTA_KEYS = ("tirea", "tna", "tem", "duration", "paridad")
+_DELTA_KEYS = ("tirea", "tna", "tem", "duration", "paridad", "margen_tna")
 
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
+
+
+def _margen_aplica(meta: Dict[str, Any]) -> bool:
+    """El margen TNA sólo tiene sentido en tasa variable con benchmark
+    (TAMAR/BADLAR) — mismo criterio que pricing.index_applied / margen_tna."""
+    return (
+        (meta.get("tipo_tasa_interes") or "").upper() in ("VARIABLE", "VARIABLE_CAP")
+        and (meta.get("index") or "").upper() in ("TAMAR", "BADLAR")
+    )
 
 
 def _to_float(v: Any) -> Optional[float]:
@@ -106,18 +118,32 @@ async def comparador_result(
     def metrics(code: str, val: str) -> Optional[Dict[str, Any]]:
         if not code:
             return None
+        meta = pricing.bond_meta(code) or {}
         v = _to_float(val)
-        if v is None and cm_mode == "precio":
+        eff_mode = cm_mode
+        margen_na = False
+        if cm_mode == "margen" and not _margen_aplica(meta):
+            # tasa fija/CER/HD: el margen no aplica → valúo al last para igual
+            # mostrar las métricas, y marco "no aplica".
+            margen_na = True
+            eff_mode = "precio"
+            v = _market_last(code, plazo)
+        elif v is None and cm_mode == "precio":
             v = _market_last(code, plazo)   # autofill desde el mercado
         if v is None:
-            return None
-        m = pricing.compute_metrics(code, cm_mode, v, settle=settle, include_cashflows=False)
-        meta = pricing.bond_meta(code) or {}
+            return {
+                "code": code, "nombre": meta.get("nombre"), "moneda": meta.get("moneda"),
+                "vencimiento": meta.get("vencimiento"), "margen_na": margen_na,
+                "error": "margen no aplica y sin last de mercado" if margen_na
+                else ("sin last de mercado" if cm_mode == "precio" else "ingresá un valor"),
+            }
+        m = pricing.compute_metrics(code, eff_mode, v, settle=settle, include_cashflows=False)
         m["code"] = code
         m["nombre"] = meta.get("nombre")
         m["moneda"] = meta.get("moneda")
         m["vencimiento"] = meta.get("vencimiento")
         m["input_value"] = v
+        m["margen_na"] = margen_na
         return m
 
     ma = metrics(a, val_a)

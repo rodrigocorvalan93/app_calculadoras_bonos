@@ -1,13 +1,16 @@
 {% if not ma and not mb %}
   <div class="alert">
     Elegí dos bonos y tocá <strong>Comparar</strong>.
-    {% if mode == 'precio' %}Si dejás el valor vacío, se usa el last del mercado.{% else %}Ingresá la TNA en decimal (ej. 0,38).{% endif %}
+    {% if mode == 'precio' %}Si dejás el valor vacío, se usa el last del mercado.
+    {% elif mode == 'tir' %}Ingresá la TIREA en decimal (ej. 0,40).
+    {% elif mode == 'margen' %}Ingresá el margen en decimal (ej. 0,02). Sólo aplica a tasa variable (TAMAR/BADLAR); el resto se valúa al last.
+    {% else %}Ingresá la TNA en decimal (ej. 0,38).{% endif %}
   </div>
 {% else %}
 <div class="card">
   <div class="card-title">
     <span>{{ a or "A" }} vs {{ b or "B" }}</span>
-    <span class="card-title-aux">modo {{ mode }} · plazo {{ plazo }}</span>
+    <span class="card-title-aux">por {{ {'precio':'Precio','tir':'TIREA','tna':'TNA','margen':'Margen'}.get(mode, mode) }} · plazo {{ plazo }}</span>
   </div>
   <div class="card-body" style="padding:0">
     <table class="cashflows comp-table">
@@ -36,7 +39,8 @@
         <tr><td style="text-align:left">Precio clean</td>
             <td>{{ ma.precio_clean_pct | ar_num(4) if ma else "—" }}</td>
             <td>{{ mb.precio_clean_pct | ar_num(4) if mb else "—" }}</td><td>—</td></tr>
-        <tr><td style="text-align:left;font-weight:600">TIREA</td>
+        <tr {% if mode == 'tir' %}style="background:rgba(0,180,200,.06)"{% endif %}>
+            <td style="text-align:left;font-weight:600">TIREA</td>
             <td style="color:var(--accent);font-weight:600">{{ ma.tirea | ar_pct(2) if ma else "—" }}</td>
             <td style="color:var(--accent);font-weight:600">{{ mb.tirea | ar_pct(2) if mb else "—" }}</td>
             <td>{{ deltas.tirea | ar_pct(2) if 'tirea' in deltas else "—" }}</td></tr>
@@ -53,12 +57,14 @@
             <td>{{ mb.duration | ar_num(2) if mb else "—" }}</td>
             <td>{{ deltas.duration | ar_num(2) if 'duration' in deltas else "—" }}</td></tr>
         <tr><td style="text-align:left">Paridad</td>
-            <td>{{ (ma.paridad * 100) | ar_pct_pp(1) if (ma and ma.paridad == ma.paridad) else "—" }}</td>
-            <td>{{ (mb.paridad * 100) | ar_pct_pp(1) if (mb and mb.paridad == mb.paridad) else "—" }}</td>
+            <td>{{ (ma.paridad * 100) | ar_pct_pp(1) if (ma and ma.paridad is number) else "—" }}</td>
+            <td>{{ (mb.paridad * 100) | ar_pct_pp(1) if (mb and mb.paridad is number) else "—" }}</td>
             <td>{{ (deltas.paridad * 100) | ar_pct_pp(1) if 'paridad' in deltas else "—" }}</td></tr>
-        <tr><td style="text-align:left">Margen TNA</td>
-            <td>{{ ma.margen_tna | ar_pct(2) if ma else "—" }}</td>
-            <td>{{ mb.margen_tna | ar_pct(2) if mb else "—" }}</td><td>—</td></tr>
+        <tr {% if mode == 'margen' %}style="background:rgba(0,180,200,.06)"{% endif %}>
+            <td style="text-align:left{% if mode == 'margen' %};font-weight:600{% endif %}">Margen TNA</td>
+            <td>{% if ma and ma.margen_na %}<span class="muted">no aplica</span>{% else %}{{ ma.margen_tna | ar_pct(2) if ma else "—" }}{% endif %}</td>
+            <td>{% if mb and mb.margen_na %}<span class="muted">no aplica</span>{% else %}{{ mb.margen_tna | ar_pct(2) if mb else "—" }}{% endif %}</td>
+            <td>{{ deltas.margen_tna | ar_pct(2) if 'margen_tna' in deltas else "—" }}</td></tr>
         <tr><td style="text-align:left">Int. corridos</td>
             <td>{{ ma.intereses_corridos | ar_num(4) if ma else "—" }}</td>
             <td>{{ mb.intereses_corridos | ar_num(4) if mb else "—" }}</td><td>—</td></tr>

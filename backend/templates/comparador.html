@@ -6,7 +6,7 @@
 <section class="curves">
   <header class="yas-header">
     <h1>Comparador</h1>
-    <p class="muted">Compará dos bonos por precio o por TNA. Si dejás el precio vacío se toma el last del mercado. Las métricas usan el mismo motor que YAS.</p>
+    <p class="muted">Compará dos bonos por precio, TIREA, TNA o margen. Si dejás el precio vacío se toma el last del mercado. El margen sólo aplica a tasa variable (TAMAR/BADLAR). Las métricas usan el mismo motor que YAS.</p>
   </header>
 
   <div class="curve-picker card">
@@ -20,7 +20,9 @@
           <span>Modo</span>
           <select name="mode">
             <option value="precio" {% if mode == "precio" %}selected{% endif %}>Por Precio</option>
+            <option value="tir"    {% if mode == "tir"    %}selected{% endif %}>Por TIREA</option>
             <option value="tna"    {% if mode == "tna"    %}selected{% endif %}>Por TNA</option>
+            <option value="margen" {% if mode == "margen" %}selected{% endif %}>Por Margen</option>
           </select>
         </label>
         <label class="field">
@@ -45,7 +47,7 @@
                  hx-include="[name=a],[name=mode],[name=plazo]">
         </label>
         <label class="field">
-          <span>Valor A <small class="muted">(precio % VN o TNA decimal)</small></span>
+          <span>Valor A <small class="muted">(precio %VN · TIR/TNA/margen en decimal)</small></span>
           <span id="valfield-a"><input type="number" name="val_a" step="0.0001" placeholder="vacío = last de mercado" autocomplete="off"></span>
         </label>
         <label class="field">
@@ -56,7 +58,7 @@
                  hx-include="[name=b],[name=mode],[name=plazo]">
         </label>
         <label class="field">
-          <span>Valor B <small class="muted">(precio % VN o TNA decimal)</small></span>
+          <span>Valor B <small class="muted">(precio %VN · TIR/TNA/margen en decimal)</small></span>
           <span id="valfield-b"><input type="number" name="val_b" step="0.0001" placeholder="vacío = last de mercado" autocomplete="off"></span>
         </label>
         <button

@@ -60,6 +60,40 @@ async def test_comparador_delta_is_b_minus_a() -> None:
 
 
 @pytest.mark.asyncio
+async def test_comparador_modes_tir_and_margen() -> None:
+    """El comparador acepta los 4 modos; en margen, un bono de tasa fija
+    muestra 'no aplica' en vez de un número engañoso."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, pricing
+
+    bond_universe.ensure_loaded()
+    var = fija = None
+    for c in bond_universe.all_codes():
+        m = pricing.bond_meta(c) or {}
+        t = (m.get("tipo_tasa_interes") or "").upper()
+        idx = (m.get("index") or "").upper()
+        if not var and t in ("VARIABLE", "VARIABLE_CAP") and idx in ("TAMAR", "BADLAR"):
+            var = c
+        if not fija and t not in ("VARIABLE", "VARIABLE_CAP"):
+            fija = c
+        if var and fija:
+            break
+    if not (var and fija):
+        pytest.skip("falta un bono variable o uno de tasa fija")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        rt = await ac.get("/comparador/result", params={
+            "a": var, "b": fija, "mode": "tir", "val_a": "0.40", "val_b": "0.45", "plazo": "24hs"})
+        rm = await ac.get("/comparador/result", params={
+            "a": var, "b": fija, "mode": "margen", "val_a": "0.02", "val_b": "0.03", "plazo": "24hs"})
+    assert rt.status_code == 200 and "por TIREA" in rt.text
+    assert rm.status_code == 200 and "por Margen" in rm.text
+    assert "no aplica" in rm.text          # la fija no tiene margen
+
+
+@pytest.mark.asyncio
 async def test_forwards_filter_and_whatif() -> None:
     from httpx import ASGITransport, AsyncClient
 
