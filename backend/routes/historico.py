@@ -1,11 +1,13 @@
-"""Históricos — series macro del BCRA (line chart SVG server-side).
+"""Históricos — series macro del BCRA + histórico de tasas por curva (BYMA).
 
-Sirve del cache de `services.historico` (lectura única del json; refresh
-explícito). El histórico de precios/tasas de bonos (Excel) se suma cuando
-tengamos el formato de las columnas.
+Macro: cache del json (lectura única; refresh explícito), line chart SVG.
+Curvas: Excel local pre-indexado en `services.historico_byma`. La primera
+lectura del Excel (~3-4 s, 20k+ filas) se hace en un threadpool para no
+bloquear el event loop; después es cache en memoria.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request
@@ -177,6 +179,8 @@ async def historicos_svg(request: Request, serie: str = "", rango: str = "1a",
 async def historicos_curva(request: Request, curve: str = "", metric: str = "TIREA",
                            desde: Optional[str] = None, hasta: Optional[str] = None,
                            proy: str = "todos") -> HTMLResponse:
-    ctx = _curve_ctx(curve, metric, desde, hasta, proy)
+    # La primera vez lee el Excel (~3-4 s); lo corremos fuera del event loop.
+    loop = asyncio.get_running_loop()
+    ctx = await loop.run_in_executor(None, _curve_ctx, curve, metric, desde, hasta, proy)
     return _render(request, "partials/historico_curva.html",
                    desde=desde or "", hasta=hasta or "", **ctx)
