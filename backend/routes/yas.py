@@ -131,16 +131,20 @@ async def yas_meta(request: Request, code: str) -> HTMLResponse:
     )
 
 
-@router.get("/market/{code}", response_class=HTMLResponse)
+@router.get("/market", response_class=HTMLResponse)
 async def yas_market_card(
     request: Request,
-    code: str,
+    code: str = "",
     plazo: str = "24hs",
 ) -> HTMLResponse:
-    """HTMX partial — bid / offer / last / OHLC for a bond from the store."""
+    """HTMX partial — bid / offer / last / OHLC for a bond from the store.
+
+    El `code` viene por query (hx-include del form), no en la URL — así el
+    panel sigue al bono seleccionado en vez de quedar fijo al inicial.
+    """
     store = marketdata_store.get_store()
-    symbol = syms.md_symbol(code, plazo)
-    snap = store.get(symbol)
+    symbol = syms.md_symbol(code, plazo) if code else ""
+    snap = store.get(symbol) if symbol else None
     return _render(
         request,
         "partials/yas_market_card.html",

@@ -167,7 +167,7 @@ async def test_yas_market_card_empty_store() -> None:
     from backend.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        r = await ac.get("/yas/market/GD30")
+        r = await ac.get("/yas/market?code=GD30&plazo=24hs")
     assert r.status_code == 200
     assert "MERV - XMEV - GD30 - 24hs" in r.text
     assert "sin data en el store" in r.text
@@ -194,13 +194,38 @@ async def test_yas_market_card_with_injected_snapshot() -> None:
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        r = await ac.get("/yas/market/GD30")
+        r = await ac.get("/yas/market?code=GD30&plazo=24hs")
     assert r.status_code == 200
     # es-AR formatting: comma decimal, period thousands.
     assert "69,9500" in r.text  # bid
     assert "70,0500" in r.text  # offer
     assert "70,0000" in r.text  # last
     assert "2026-05-28T15:30:00" in r.text
+
+
+@pytest.mark.asyncio
+async def test_yas_market_card_follows_selected_bond() -> None:
+    """Regresión: el card de market data debe seguir al bono seleccionado, no
+    quedar fijo al inicial (la URL no debe traer el code hardcodeado)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import marketdata_store as mds_
+
+    store = mds_.get_store()
+    store.update_from_md("MERV - XMEV - GD30 - 24hs", {"LA": {"price": 70.00}})
+    store.update_from_md("MERV - XMEV - AL30 - 24hs", {"LA": {"price": 71.50}})
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        page = await ac.get("/yas")
+        rg = await ac.get("/yas/market?code=GD30&plazo=24hs")
+        ra = await ac.get("/yas/market?code=AL30&plazo=24hs")
+    assert page.status_code == 200
+    assert 'hx-get="/yas/market"' in page.text                       # URL sin code fijo
+    assert 'hx-include="[name=code], [name=plazo]"' in page.text     # lo toma del form
+    assert "MERV - XMEV - GD30 - 24hs" in rg.text and "70,0000" in rg.text
+    assert "MERV - XMEV - AL30 - 24hs" in ra.text and "71,5000" in ra.text
+    assert "AL30" not in rg.text                                     # cada card, su bono
 
 
 # ── Curves table with live store ─────────────────────────────────────
