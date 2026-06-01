@@ -14,12 +14,26 @@ try:
 except ImportError:  # pragma: no cover - numpy always present at runtime
     np = None  # type: ignore[assignment]
 
+try:
+    from jinja2 import Undefined
+except ImportError:  # pragma: no cover - jinja2 always present at runtime
+    Undefined = ()  # type: ignore[assignment]
+
 
 DASH = "—"
 
 
+def _is_missing(x: Any) -> bool:
+    """None o un `Undefined` de Jinja (clave inexistente en el contexto).
+
+    Clave: `float(Undefined)` lanza `UndefinedError` (NO TypeError/ValueError),
+    así que sin este chequeo un `{{ obj.campo_que_no_existe | ar_num }}` tira
+    500 en el render. Tratarlo como vacío blinda todos los filtros."""
+    return x is None or isinstance(x, Undefined)
+
+
 def _is_nan(x: Any) -> bool:
-    if x is None:
+    if _is_missing(x):
         return True
     if isinstance(x, str):
         return False
@@ -84,7 +98,7 @@ def fmt_money(x: Any, decimals: int = 2) -> str:
 
 
 def fmt_date(d: Any) -> str:
-    if d is None:
+    if _is_missing(d):
         return DASH
     if isinstance(d, datetime):
         return d.strftime("%d/%m/%Y")
@@ -95,7 +109,7 @@ def fmt_date(d: Any) -> str:
 
 def fmt_ts(ts: Any) -> str:
     """Epoch-ms (o string) → 'DD/MM HH:MM:SS'. Para Price Date (LA/CL)."""
-    if ts is None or ts == "":
+    if _is_missing(ts) or ts == "":
         return DASH
     try:
         ms = float(ts)

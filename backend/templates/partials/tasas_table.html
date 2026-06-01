@@ -1,12 +1,46 @@
-{% if not status.enabled %}
-  <div class="alert">MAE no configurado (falta <code>MAE_API_KEY</code>). Cauciones / repo no disponibles; el resto de la app funciona igual.</div>
-{% elif not status.fresh and not cauciones and not repo %}
-  <div class="alert">Sin snapshot de MAE todavía (¿poller arrancando o API caída?).</div>
+{% import "partials/_fx_macros.html" as fx %}
+{% if not status.enabled and not byma_cauciones %}
+  <div class="alert">MAE no configurado (falta <code>MAE_API_KEY</code>) y sin caución BYMA en el store. El resto de la app funciona igual.</div>
+{% endif %}
+
+{% if oficial and oficial.last is not none %}
+<div class="mae-strip" style="margin-bottom:12px">
+  <span class="mae-tag">Dólar oficial</span>
+  <span>{{ oficial.source }}</span>
+  <span>Últ <b>{{ oficial.last | ar_num(2) }}</b></span>
+  {% if oficial.var_pct is not none %}<span>Var <b class="{{ 'px-up' if oficial.var_pct > 0 else ('px-down' if oficial.var_pct < 0 else '') }}">{{ oficial.var_pct | ar_pct(2) }}</b></span>{% endif %}
+  {% if oficial.date %}<span class="muted">al {{ oficial.date }}</span>{% endif %}
+</div>
 {% endif %}
 
 <div class="dolar-tables">
   <div class="dolar-tbl">
-    <div class="dolar-tbl-h">🔁 Cauciones · por plazo</div>
+    <div class="dolar-tbl-h">🔁 Cauciones BYMA $ · por plazo</div>
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr><th style="text-align:left">Plazo</th><th>Tasa</th><th>Bid</th><th>Offer</th><th>Var</th><th>Volumen</th></tr>
+        </thead>
+        <tbody>
+          {% for r in byma_cauciones %}
+            <tr>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}</td>
+              <td style="font-weight:600">{{ r.tasa | ar_num(2) }}</td>
+              <td class="{{ fx.vcls(r.var) }}">{{ r.bid | ar_num(2) }}</td>
+              <td>{{ r.offer | ar_num(2) }}</td>
+              <td>{{ r.var | ar_num(2) }}</td>
+              <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="muted" style="text-align:center">Sin caución BYMA en el store (¿broker offline?).</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="dolar-tbl">
+    <div class="dolar-tbl-h">🔁 Cauciones MAE · por plazo</div>
     <div class="table-scroll">
       <table class="cashflows curve-table mercado-table">
         <thead>
@@ -23,7 +57,7 @@
               <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="muted" style="text-align:center">Sin cauciones operadas.</td></tr>
+            <tr><td colspan="6" class="muted" style="text-align:center">Sin cauciones MAE (¿sin MAE_API_KEY?).</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -31,7 +65,7 @@
   </div>
 
   <div class="dolar-tbl">
-    <div class="dolar-tbl-h">🏦 Repo · ruedas</div>
+    <div class="dolar-tbl-h">🏦 Repo MAE · ruedas</div>
     <div class="table-scroll">
       <table class="cashflows curve-table mercado-table">
         <thead>

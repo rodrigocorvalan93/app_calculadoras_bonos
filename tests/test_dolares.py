@@ -109,6 +109,42 @@ def test_official_and_summary_are_robust() -> None:
         assert "var_pct" in s["canje"]        # el riel muestra la variación del canje
 
 
+def test_locale_filters_are_undefined_safe() -> None:
+    """Un `{{ obj.campo_inexistente | ar_num }}` da Jinja Undefined; los filtros
+    deben devolver '—' y NO lanzar UndefinedError (causó el 500 de /dolares)."""
+    from jinja2 import Undefined
+
+    from backend import locale_ar as L
+    u = Undefined(name="precioCompra")
+    for fn in (L.fmt_num, L.fmt_pct, L.fmt_pct_pp, L.fmt_int, L.fmt_money, L.fmt_hum, L.fmt_ts, L.fmt_date):
+        assert fn(u) == L.DASH, fn.__name__
+
+
+@pytest.mark.asyncio
+async def test_dolares_survives_siopel_without_compra_venta() -> None:
+    """Las filas reales de MAE no traen precioCompra/precioVenta → la pestaña
+    Dólares no debe romper (regresión del 500 en dolares_oficial.html)."""
+    import time as _t
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    rows = [{"ticker": "UST$T", "segmento": "Mayorista", "plazo": "000",
+             "precioUltimo": 1405.0, "variacion": -0.0049}]   # sin compra/venta/mín/máx
+    with dx._mae_lock:
+        dx._mae_snap.update({"rows": rows, "ts": _t.time(), "ust": dx._extract_ust(rows)})
+    dx._cache.clear()
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            assert (await ac.get("/dolares")).status_code == 200
+            assert (await ac.get("/dolares/oficial")).status_code == 200
+    finally:
+        with dx._mae_lock:
+            dx._mae_snap.update({"rows": [], "ts": 0.0, "ust": None})
+        dx._cache.clear()
+
+
 @pytest.mark.asyncio
 async def test_dolares_endpoints() -> None:
     from httpx import ASGITransport, AsyncClient

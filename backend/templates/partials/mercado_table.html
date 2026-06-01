@@ -8,6 +8,7 @@
     <span>{{ selected_def.label }} · Mercado</span>
     <span class="card-title-aux">
       {{ rows | length }} instrumentos · plazo {{ plazo }}
+      {% if fuente == "mae" %} · <strong style="color:var(--cyan)">fuente MAE (OTC, sin libro)</strong>{% endif %}
       {% if leg and leg != "native" %} · leg {{ leg }}{% endif %}
       {% if row_meta and row_meta.store_empty %}
         · sin data live (broker offline)
@@ -51,7 +52,7 @@
         {% for r in rows %}
           {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
           <tr style="cursor:pointer"
-              hx-get="/mercado/book/{{ r.code }}?plazo={{ plazo }}&leg={{ leg }}"
+              hx-get="/mercado/book/{{ r.code }}?plazo={{ plazo }}&leg={{ leg }}&fuente={{ fuente }}"
               hx-target="#mercado-book"
               hx-swap="innerHTML"
               title="Ver libro de {{ r.code }}">

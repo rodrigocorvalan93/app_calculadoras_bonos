@@ -72,6 +72,14 @@ def _initial_symbols() -> list[str]:
     # la pestaña Dólares / el riel. Si el broker no lo sirve, degrada al A3500.
     from backend.services.dolares import SPOT_SYMBOL
     seed.add(SPOT_SYMBOL)
+    # Cauciones BYMA (pesos y dólares): MERV - XMEV - PESOS/DOLAR - {n}D, para
+    # la pestaña Tasas. Se leen del store igual que los bonos.
+    try:
+        from backend.services import cauciones as cauc_svc
+        seed.update(cauc_svc.symbols("PESOS"))
+        seed.update(cauc_svc.symbols("DOLAR"))
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] caución seed failed")
     return sorted(seed)
 
 

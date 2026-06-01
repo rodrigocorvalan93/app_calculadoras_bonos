@@ -67,6 +67,20 @@ def test_match_by_ticker_and_leg() -> None:
         _clear()
 
 
+def test_byma_cauciones_from_store() -> None:
+    """Caución BYMA leída del store: MERV - XMEV - PESOS - {n}D."""
+    from backend.services import cauciones, marketdata_store as mds
+    assert cauciones.symbols("PESOS")[0] == "MERV - XMEV - PESOS - 1D"
+    store = mds.get_store()
+    store.update_from_md("MERV - XMEV - PESOS - 1D", {
+        "LA": {"price": 29.5}, "BI": {"price": 29.3}, "OF": {"price": 29.7},
+        "CL": {"price": 29.4}, "EV": 1e11})
+    r1 = next((r for r in cauciones.byma_rows("PESOS") if r["plazo"] == "1D"), None)
+    assert r1 is not None
+    assert r1["tasa"] == pytest.approx(29.5) and r1["bid"] == pytest.approx(29.3)
+    assert r1["var"] == pytest.approx(29.5 - 29.4)
+
+
 def test_degrades_without_key(monkeypatch) -> None:
     monkeypatch.delenv("MAE_API_KEY", raising=False)
     _clear()
@@ -75,6 +89,37 @@ def test_degrades_without_key(monkeypatch) -> None:
     assert mae.match("AL30") is None
     st = mae.status()
     assert st["enabled"] is False and st["n_rentafija"] == 0
+
+
+@pytest.mark.asyncio
+async def test_mercado_source_switch() -> None:
+    """fuente=mae cambia los precios a los de MAE (con fallback a BYMA)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, curves, marketdata_store as mds, symbols as syms
+
+    bond_universe.ensure_loaded()
+    table = curves.build_curve_codes()
+    ck = next((k for k, v in table.items() if v), None)
+    if not ck:
+        pytest.skip("sin curvas")
+    code = table[ck][0]
+    mds.get_store().update_from_md(syms.md_symbol(code, "24hs"), {
+        "LA": {"price": 98.2}, "BI": {"price": 98.0}, "OF": {"price": 98.4},
+        "CL": {"price": 98.1}, "EV": 2e7, "NV": 2e5})
+    _inject(rentafija=[{"ticker": code, "segmento": "Bilateral PPT", "moneda": "$",
+                        "precioUltimo": 150.0, "precioCierreAnterior": 148.0,
+                        "variacion": 1.35, "volumenAcumulado": 9e6, "montoAcumulado": 1.3e9}])
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            rb = await ac.get(f"/mercado/table?curve={ck}&fuente=byma")
+            rm = await ac.get(f"/mercado/table?curve={ck}&fuente=mae")
+        assert rb.status_code == 200 and rm.status_code == 200
+        assert "fuente MAE" in rm.text and "fuente MAE" not in rb.text
+        assert "150,00" in rm.text                 # precio MAE en modo MAE
+    finally:
+        _clear()
 
 
 @pytest.mark.asyncio

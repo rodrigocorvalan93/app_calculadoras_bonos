@@ -39,24 +39,28 @@
           <thead>
             <tr>
               <th style="text-align:left">Ticker</th><th style="text-align:left">Segmento</th>
-              <th>Plazo</th><th>Compra</th><th>Venta</th><th>Último</th>
-              <th>Var %</th><th>Volumen</th><th>Hora</th>
+              <th>Plazo</th><th>Mon.</th><th>Último</th><th>Cierre ant.</th>
+              <th>Var %</th><th>Mín</th><th>Máx</th><th>Volumen</th><th>Hora</th>
             </tr>
           </thead>
           <tbody>
+            {# MAE no informa compra/venta (no están en EntidadCotizacion); se
+               usan los campos reales con .get() → clave ausente = vacío, sin 500. #}
             {% for r in siopel %}
-              {% set v = r.variacion %}
+              {% set v = r.get('variacion') %}
               {% set vf = v if (v is number) else none %}
               <tr>
-                <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.ticker }}</td>
-                <td style="text-align:left">{{ r.segmento }}</td>
-                <td>{{ r.plazo }}</td>
-                <td>{{ r.precioCompra | ar_num(4) }}</td>
-                <td>{{ r.precioVenta | ar_num(4) }}</td>
-                <td style="font-weight:600">{{ r.precioUltimo | ar_num(4) }}</td>
+                <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.get('ticker') }}</td>
+                <td style="text-align:left">{{ r.get('segmento') }}</td>
+                <td>{{ r.get('plazo') }}</td>
+                <td>{{ r.get('moneda') }}</td>
+                <td style="font-weight:600">{{ r.get('precioUltimo') | ar_num(4) }}</td>
+                <td style="color:var(--text-muted)">{{ r.get('precioCierreAnterior') | ar_num(4) }}</td>
                 <td class="{{ fx.vcls(vf) }}">{{ fx.arrow(vf) }} {{ vf | ar_pct(2) }}</td>
-                <td style="color:var(--text-muted)">{{ r.volumenOperado | ar_hum }}</td>
-                <td style="color:var(--text-muted);font-size:11px">{{ r.horaUltima }}</td>
+                <td>{{ r.get('precioMinimo') | ar_num(4) }}</td>
+                <td>{{ r.get('precioMaximo') | ar_num(4) }}</td>
+                <td style="color:var(--text-muted)">{{ (r.get('volumenOperado') or r.get('volumenAcumulado')) | ar_hum }}</td>
+                <td style="color:var(--text-muted);font-size:11px">{{ r.get('horaUltima') }}</td>
               </tr>
             {% endfor %}
           </tbody>

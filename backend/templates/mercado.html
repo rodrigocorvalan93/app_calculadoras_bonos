@@ -20,7 +20,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=plazo], [name=only_quoting], [name=leg]"
+            hx-include="[name=plazo], [name=only_quoting], [name=leg], [name=fuente]"
           >
             {% for c in all_curves %}
               {% set count = (table.get(c.key) or []) | length %}
@@ -38,7 +38,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=only_quoting], [name=leg]"
+            hx-include="[name=curve], [name=only_quoting], [name=leg], [name=fuente]"
           >
             <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
@@ -52,13 +52,28 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=only_quoting]"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=fuente]"
             title="Nativa: precio del ticker propio (fx-free). USD/USB: precio cable/MEP directo. ARS: precio pesos ÷ FX nativo."
           >
             <option value="native" {% if leg == "native" %}selected{% endif %}>Nativa</option>
             <option value="USD"    {% if leg == "USD"    %}selected{% endif %}>USD (cable)</option>
             <option value="USB"    {% if leg == "USB"    %}selected{% endif %}>USB (MEP)</option>
             <option value="ARS"    {% if leg == "ARS"    %}selected{% endif %}>ARS (pesos)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Fuente</span>
+          <select
+            name="fuente"
+            hx-get="/mercado/table"
+            hx-trigger="change"
+            hx-target="#mercado-table"
+            hx-swap="innerHTML"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]"
+            title="BYMA: book en vivo del broker. MAE: precios OTC (último/cierre/var/mín-máx/volumen), sin libro; cae a BYMA si no hay dato MAE para el bono."
+          >
+            <option value="byma" {% if fuente != "mae" %}selected{% endif %}>BYMA (book)</option>
+            <option value="mae"  {% if fuente == "mae" %}selected{% endif %}>MAE (OTC)</option>
           </select>
         </label>
 
@@ -72,7 +87,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=leg]"
+            hx-include="[name=curve], [name=plazo], [name=leg], [name=fuente]"
           >
           Solo con cotización
         </label>
@@ -85,7 +100,7 @@
     hx-get="/mercado/table"
     hx-trigger="every 5s"
     hx-swap="innerHTML"
-    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]"
+    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente]"
   >
     {% include "partials/mercado_table.html" %}
   </div>

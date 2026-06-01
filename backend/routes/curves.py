@@ -82,7 +82,8 @@ def _dur_sort_key(r: dict):
     return (bad, d if not bad else 0.0)
 
 
-def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: bool = False) -> dict | None:
+def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: bool = False,
+                  fuente: str = "byma") -> dict | None:
     meta = pricing.bond_meta(code)
     if not meta:
         return None
@@ -200,6 +201,32 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         # Volumen total nominal = BYMA (NV) + MAE (volumenAcumulado VN).
         vols = [v for v in (nominal, (mae_q or {}).get("volumen")) if v is not None]
         row["vol_total"] = sum(vols) if vols else None
+
+    # Switch de fuente: en modo MAE los precios pasan a los de MAE (último/
+    # cierre/var/mín/máx/volumen) con TIR recalculada; sin libro (MAE no informa
+    # puntas). Si el bono no tiene dato MAE, cae a BYMA (marca "BYMA*").
+    if fuente == "mae":
+        mq = row.get("mae") if book else mae_svc.match(code, leg)
+        if mq and mq.get("last") is not None:
+            mlast, mclose = mq["last"], mq.get("close")
+            try:
+                mvar = (mlast / mclose - 1.0) * 100.0 if mclose else mq.get("var_pct")
+            except (TypeError, ZeroDivisionError):
+                mvar = mq.get("var_pct")
+            row.update({
+                "last": mlast, "close": mclose, "var_pct": mvar, "var_px": None, "var_bg": "",
+                "low": mq.get("min"), "high": mq.get("max"),
+                "bid": None, "offer": None, "bid_size": None, "offer_size": None,
+                "nominal": mq.get("volumen"), "volume": mq.get("monto"), "vwap": None,
+                "price_source": "MAE", "src": "MAE", "last_cls": _px_cls(mlast, mclose),
+            })
+            if book:
+                row["tirea_last"] = _tirea_at(code, cp(mlast))
+                row["tirea_bid"] = row["tirea_offer"] = None
+        else:
+            row["src"] = "BYMA*"        # sin dato MAE → se muestra BYMA
+    else:
+        row["src"] = "BYMA"
     return row
 
 
@@ -214,6 +241,7 @@ async def _rows_for(
     only_quoting: bool = True,
     leg: str = "native",
     book: bool = False,
+    fuente: str = "byma",
 ) -> tuple[list[dict], dict]:
     """One row per bond. Live columns come from the in-process store;
     TIREA / Duration are cached so a 5 s poll hits the cache nearly
@@ -237,7 +265,7 @@ async def _rows_for(
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
     loop = asyncio.get_running_loop()
     raw: list[dict | None] = await asyncio.gather(
-        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo, leg, fx, book) for code in codes)
+        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo, leg, fx, book, fuente) for code in codes)
     )
     rows = [r for r in raw if r is not None]
     quoting = sum(1 for r in rows if _has_quote(r))
@@ -324,6 +352,7 @@ async def mercado_page(
     plazo: str = "24hs",
     only_quoting: bool = True,
     leg: str = "native",
+    fuente: str = "byma",
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     all_curves = curves.list_curves()
@@ -331,7 +360,7 @@ async def mercado_page(
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
     selected_key = curve if (curve and curve in table) else default_key
     rows, row_meta = (
-        await _rows_for(selected_key, plazo, only_quoting, leg, book=True)
+        await _rows_for(selected_key, plazo, only_quoting, leg, book=True, fuente=fuente)
         if selected_key else ([], {})
     )
     return _render(
@@ -346,6 +375,7 @@ async def mercado_page(
         plazo=plazo,
         only_quoting=only_quoting,
         leg=leg,
+        fuente=fuente,
     )
 
 
@@ -356,9 +386,10 @@ async def mercado_table_partial(
     plazo: str = "24hs",
     only_quoting: bool = True,
     leg: str = "native",
+    fuente: str = "byma",
 ) -> HTMLResponse:
     """HTMX partial: blotter body for the requested curve."""
-    rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True)
+    rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
     return _render(
         request,
         "partials/mercado_table.html",
@@ -368,6 +399,7 @@ async def mercado_table_partial(
         plazo=plazo,
         only_quoting=only_quoting,
         leg=leg,
+        fuente=fuente,
     )
 
 
@@ -377,6 +409,7 @@ async def mercado_book(
     code: str,
     plazo: str = "24hs",
     leg: str = "native",
+    fuente: str = "byma",
 ) -> HTMLResponse:
     """Libro (profundidad) de un instrumento — se carga al clickear su fila."""
     bond_universe.ensure_loaded()
@@ -401,11 +434,11 @@ async def mercado_book(
             out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px))})
         return out
 
-    row = _row_for_code(code, plazo, leg, fx, book=True)        # toda la fila (sin recalcular)
-    if row:  # TIR de mín/máx/cierre — sólo para este bono (no para cada fila de la tabla)
-        row["tirea_low"] = _tirea_at(code, cp(snap.low if snap else None))
-        row["tirea_high"] = _tirea_at(code, cp(snap.high if snap else None))
-        row["tirea_close"] = _tirea_at(code, cp(snap.close if snap else None))
+    row = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente)   # fila (BYMA o MAE)
+    if row:  # TIR de mín/máx/cierre — sólo para este bono; sobre la fuente activa
+        row["tirea_low"] = _tirea_at(code, cp(row.get("low")))
+        row["tirea_high"] = _tirea_at(code, cp(row.get("high")))
+        row["tirea_close"] = _tirea_at(code, cp(row.get("close")))
     return _render(
         request,
         "partials/mercado_book.html",
@@ -418,6 +451,7 @@ async def mercado_book(
         instr=await instruments.detail(symbol),                 # lámina mínima / tick / límites
         bids=with_yield(snap.bids if snap else None),
         offers=with_yield(snap.offers if snap else None),
+        fuente=fuente,
     )
 
 
