@@ -92,6 +92,37 @@ def test_degrades_without_key(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mercado_source_switch() -> None:
+    """fuente=mae cambia los precios a los de MAE (con fallback a BYMA)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, curves, marketdata_store as mds, symbols as syms
+
+    bond_universe.ensure_loaded()
+    table = curves.build_curve_codes()
+    ck = next((k for k, v in table.items() if v), None)
+    if not ck:
+        pytest.skip("sin curvas")
+    code = table[ck][0]
+    mds.get_store().update_from_md(syms.md_symbol(code, "24hs"), {
+        "LA": {"price": 98.2}, "BI": {"price": 98.0}, "OF": {"price": 98.4},
+        "CL": {"price": 98.1}, "EV": 2e7, "NV": 2e5})
+    _inject(rentafija=[{"ticker": code, "segmento": "Bilateral PPT", "moneda": "$",
+                        "precioUltimo": 150.0, "precioCierreAnterior": 148.0,
+                        "variacion": 1.35, "volumenAcumulado": 9e6, "montoAcumulado": 1.3e9}])
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            rb = await ac.get(f"/mercado/table?curve={ck}&fuente=byma")
+            rm = await ac.get(f"/mercado/table?curve={ck}&fuente=mae")
+        assert rb.status_code == 200 and rm.status_code == 200
+        assert "fuente MAE" in rm.text and "fuente MAE" not in rb.text
+        assert "150,00" in rm.text                 # precio MAE en modo MAE
+    finally:
+        _clear()
+
+
+@pytest.mark.asyncio
 async def test_tasas_endpoints() -> None:
     from httpx import ASGITransport, AsyncClient
 
