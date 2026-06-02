@@ -6,7 +6,7 @@
 <section class="curves">
   <header class="yas-header">
     <h1>Gráficos · TIREA vs Duration</h1>
-    <p class="muted">Scatter de la curva: cada punto es un bono (x = Duration, y = TIREA). USD/USB en cyan, ARS en naranja. Refresh 5 s.</p>
+    <p class="muted">Scatter de la curva: cada punto es un bono (x = Duration, y = TIREA), con la <span style="color:#a78bfa">regresión NSS</span>. Ingresá una Duration para estimar TIR/TEM/TNAs. USD/USB en cyan, ARS en naranja. Refresh 5 s.</p>
   </header>
 
   <div class="curve-picker card">
@@ -51,6 +51,13 @@
                  hx-include="[name=curve], [name=plazo], [name=leg]">
           Solo con cotización
         </label>
+        <label class="field">
+          <span>Estimar @ Duration <small class="muted">(NSS)</small></span>
+          <input type="text" inputmode="decimal" name="duration" placeholder="ej. 1,5" autocomplete="off"
+                 hx-get="/graficos/estimate" hx-trigger="keyup changed delay:250ms, change"
+                 hx-target="#grafico-estimate" hx-swap="innerHTML"
+                 hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]">
+        </label>
       </div>
     </div>
   </div>
@@ -60,5 +67,7 @@
        hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]">
     {% include "partials/graficos_svg.html" %}
   </div>
+
+  <div id="grafico-estimate" style="margin-top:14px"></div>
 </section>
 {% endblock %}

@@ -6,7 +6,7 @@
 <div class="card">
   <div class="card-title">
     <span>{{ selected_def.label }} · TIREA vs Duration</span>
-    <span class="card-title-aux">{{ chart.n }} bonos · plazo {{ plazo }}{% if leg and leg != "native" %} · leg {{ leg }}{% endif %}</span>
+    <span class="card-title-aux">{{ chart.n }} bonos · plazo {{ plazo }}{% if leg and leg != "native" %} · leg {{ leg }}{% endif %}{% if chart.nss_path %} · <span style="color:#a78bfa">— regresión NSS</span>{% endif %}</span>
   </div>
   <div class="card-body">
     <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" width="100%" style="max-width:100%;height:auto;font-family:inherit">
@@ -22,6 +22,10 @@
       <text x="{{ (chart.x0 + chart.x1) / 2 }}" y="{{ chart.height - 6 }}" text-anchor="middle" font-size="12" fill="var(--text-muted)">Duration (años)</text>
       <text x="16" y="{{ (chart.y0 + chart.y1) / 2 }}" text-anchor="middle" font-size="12" fill="var(--text-muted)"
             transform="rotate(-90 16 {{ (chart.y0 + chart.y1) / 2 }})">TIREA (%)</text>
+      {# regresión NSS (Duration → TIREA), detrás de los puntos #}
+      {% if chart.nss_path %}
+        <path d="{{ chart.nss_path }}" fill="none" stroke="#a78bfa" stroke-width="2.2" opacity="0.9"/>
+      {% endif %}
       {# puntos #}
       {% for p in chart.points %}
         <circle cx="{{ p.cx }}" cy="{{ p.cy }}" r="4.5" fill="{{ p.color }}" opacity="0.92">

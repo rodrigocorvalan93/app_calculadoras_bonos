@@ -729,13 +729,24 @@ def _chart_data(rows: list[dict], width: int = 940, height: int = 480) -> dict:
         points.append({"code": code, "cx": sx(d), "cy": sy(t), "dur": d, "tirea": t, "color": color})
     points.sort(key=lambda p: p["cx"])
 
+    # Overlay de la regresión Nelson-Siegel-Svensson (Duration → TIREA), si hay
+    # puntos suficientes. Se mapea con el mismo sx/sy que el scatter.
+    nss_path = None
+    try:
+        from backend.services import nss as nss_svc
+        sm = nss_svc.sample(xs, ys)
+        if sm:
+            nss_path = "M " + " L ".join(f"{sx(x)},{sy(y)}" for x, y in sm)
+    except Exception:  # noqa: BLE001
+        nss_path = None
+
     def ticks(lo, hi, n=5):
         return [lo + (hi - lo) / n * i for i in range(n + 1)]
 
     xticks = [{"x": sx(v), "v": round(v, 1)} for v in ticks(xmin, xmax)]
     yticks = [{"y": sy(v), "v": round(v, 1)} for v in ticks(ymin, ymax)]
     return {
-        "points": points, "xticks": xticks, "yticks": yticks,
+        "points": points, "xticks": xticks, "yticks": yticks, "nss_path": nss_path,
         "width": width, "height": height, "ml": ml, "mt": mt, "pw": pw, "ph": ph,
         "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph, "n": len(pts),
     }
@@ -782,3 +793,35 @@ async def graficos_svg(
         chart=chart, selected_def=curves.curve_def(curve),
         plazo=plazo, only_quoting=only_quoting, leg=leg,
     )
+
+
+@graficos_router.get("/graficos/estimate", response_class=HTMLResponse)
+async def graficos_estimate(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+    duration: str = "",
+) -> HTMLResponse:
+    """Estima TIR / TEM / TNAs a una `duration` dada con la regresión NSS de la
+    curva (Duration → TIREA). El fit corre en threadpool (CPU, scipy)."""
+    from backend.services import nss as nss_svc
+
+    try:
+        d = float(str(duration).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        d = None
+    est = None
+    if d is not None:
+        rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
+        pts = [(r["duration"], r["tirea"] * 100.0) for r in rows
+               if r.get("duration") is not None and r["duration"] == r["duration"]
+               and r.get("tirea") is not None and r["tirea"] == r["tirea"]]
+        if len(pts) >= 4:
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            loop = asyncio.get_running_loop()
+            est = await loop.run_in_executor(None, nss_svc.estimate, d, xs, ys)
+    return _render(request, "partials/graficos_estimate.html",
+                   est=est, duration=duration, n=len(rows) if d is not None else 0)
