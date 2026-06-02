@@ -51,7 +51,9 @@ CURVES: List[CurveDef] = [
 # Aggregate curves are unions of other curves. They show up as
 # `<curve_key>` whose codes = sorted union of the listed sub-keys.
 AGGREGATES: Dict[str, List[str]] = {
-    "todos_ars_proyectado": ["cerproy", "tamar", "lecap"],
+    # Todos los ARS por tipo de ajuste (proyectados): TAMAR + CER Proyectado +
+    # Tasa Fija, incluyendo los duales en su bucket (dual TAMAR/CER/Fija).
+    "todos_ars_proyectado": ["cerproy", "tamar", "lecap", "dualfija", "dualtamar", "dualcer"],
 }
 
 

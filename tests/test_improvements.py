@@ -71,6 +71,17 @@ def test_corporate_curves_are_seeded() -> None:
         assert all(syms.md_symbol(c, "24hs") in seed for c in corp)
 
 
+def test_todos_ars_aggregate_includes_duals() -> None:
+    """'Todos ARS (Proyectado)' = TAMAR + CER Proy + Tasa Fija + duales."""
+    from backend.services import curves
+
+    bond_universe.ensure_loaded()
+    g = curves.build_curve_codes()
+    agg = set(g.get("todos_ars_proyectado", []))
+    for sub in ("tamar", "cerproy", "lecap", "dualfija", "dualtamar", "dualcer"):
+        assert set(g.get(sub, [])) <= agg, f"falta {sub} en el agregado"
+
+
 def _first_codes(n: int = 2) -> list[str]:
     bond_universe.ensure_loaded()
     codes = bond_universe.all_codes()
