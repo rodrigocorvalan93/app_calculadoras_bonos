@@ -11,7 +11,7 @@ import asyncio
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.services import historico, historico_byma
 
@@ -179,8 +179,65 @@ async def historicos_svg(request: Request, serie: str = "", rango: str = "1a",
 async def historicos_curva(request: Request, curve: str = "", metric: str = "TIREA",
                            desde: Optional[str] = None, hasta: Optional[str] = None,
                            proy: str = "todos") -> HTMLResponse:
-    # La primera vez lee el Excel (~3-4 s); lo corremos fuera del event loop.
+    # Sólo arma los controles (curvas con historia + meta); el chart lo dibuja
+    # uPlot desde /historicos/curva/data. La 1ª vez lee el Excel (~3-4 s) → executor.
+    def _light() -> Dict[str, Any]:
+        from backend.services import curves
+        keys = historico_byma.curves_with_history(desde, hasta, proy)
+        labels = {cv.key: cv.label for cv in curves.list_curves()}
+        sel = curve if curve in keys else (keys[0] if keys else None)
+        return {"curve_opts": [{"key": k, "label": labels.get(k, k)} for k in keys],
+                "curve_sel": sel, "metric": metric, "proy": proy, "hist_meta": historico_byma.meta()}
+
     loop = asyncio.get_running_loop()
-    ctx = await loop.run_in_executor(None, _curve_ctx, curve, metric, desde, hasta, proy)
+    ctx = await loop.run_in_executor(None, _light)
     return _render(request, "partials/historico_curva.html",
                    desde=desde or "", hasta=hasta or "", **ctx)
+
+
+def _unix(iso: str) -> Optional[int]:
+    """'YYYY-MM-DD' → epoch seconds (UTC), para el eje temporal de uPlot."""
+    from datetime import datetime, timezone
+    try:
+        return int(datetime.fromisoformat(str(iso)[:10]).replace(tzinfo=timezone.utc).timestamp())
+    except ValueError:
+        return None
+
+
+@router.get("/historicos/data")
+async def historicos_data(serie: str = "", rango: str = "1a",
+                          desde: Optional[str] = None, hasta: Optional[str] = None) -> JSONResponse:
+    """Serie macro en JSON para uPlot: x = epoch (s), y = valor."""
+    days = None if (desde or hasta) else _RANGOS.get(rango, 365)
+    data = historico.series_points(serie, days, desde, hasta)
+    pts = [(d, v) for d, v in data["points"] if _unix(d) is not None]
+    return JSONResponse({"label": data["label"], "n": len(pts),
+                         "x": [_unix(d) for d, _ in pts], "y": [v for _, v in pts]})
+
+
+@router.get("/historicos/curva/data")
+async def historicos_curva_data(curve: str = "", metric: str = "TIREA",
+                                desde: Optional[str] = None, hasta: Optional[str] = None,
+                                proy: str = "todos") -> JSONResponse:
+    """Histórico de tasas por curva en JSON para uPlot multilínea: una serie por
+    bono (alineadas a la unión de fechas, null en los huecos) + bandas."""
+    loop = asyncio.get_running_loop()
+    cs = await loop.run_in_executor(None, historico_byma.curve_series, curve, metric, desde, hasta, proy)
+    lines = cs.get("lines") or []
+    if not lines:
+        return JSONResponse({"loaded": cs.get("loaded", False), "x": [], "series": [],
+                             "bands": None, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")})
+    all_dates = sorted({d for ln in lines for d, _ in ln["points"]})
+    idx = {d: i for i, d in enumerate(all_dates)}
+    scale = 100.0
+    series = []
+    for ln in lines:
+        y = [None] * len(all_dates)
+        for d, v in ln["points"]:
+            y[idx[d]] = v * scale
+        series.append({"code": ln["code"], "y": y, "last": ln["last"] * scale,
+                       "delta": ln["delta"], "delta_unit": ln["delta_unit"]})
+    agg = cs.get("agg")
+    bands = {k: agg[k] * scale for k in ("mean", "min", "max")} if agg else None
+    return JSONResponse({"loaded": True, "x": [_unix(d) for d in all_dates], "series": series,
+                         "bands": bands, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")})
