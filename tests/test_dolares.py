@@ -110,14 +110,15 @@ def test_official_and_summary_are_robust() -> None:
 
 
 @pytest.mark.asyncio
-async def test_siopel_official_uses_real_previous_close() -> None:
-    """El cierre previo del oficial SIOPEL sale de precioCierreAnterior (no se
-    reconstruye desde 'variacion'); la variación es last/close − 1."""
+async def test_siopel_official_variation_from_variacion_field() -> None:
+    """La variación del oficial SIOPEL sale del campo 'variacion' de MAE (en %,
+    0,28 = 0,28%), y el cierre se deriva (last/(1+var)). NO de precioCierreAnterior,
+    que para el spot no es el cierre real (caso real: 1410,29 → daba 1,40%)."""
     import time as _t
 
     row = {"ticker": "UST$T", "segmento": "Mayorista", "plazo": "000",
-           "precioUltimo": 1425.50, "precioCierreAnterior": 1426.0,
-           "variacion": -0.035, "volumenOperado": 3.5e8}
+           "precioUltimo": 1430.0, "variacion": 0.28,
+           "precioCierreAnterior": 1410.29, "volumenOperado": 1.22e8}
     ust = dx._extract_ust([row])
     with dx._mae_lock:
         dx._mae_snap.update({"rows": [row], "ts": _t.time(), "ust": ust})
@@ -125,9 +126,9 @@ async def test_siopel_official_uses_real_previous_close() -> None:
     try:
         o = dx.official_fx()
         assert o["source"] == "SIOPEL"
-        assert o["close"] == pytest.approx(1426.0)
-        assert o["var_pct"] == pytest.approx(1425.50 / 1426.0 - 1.0)
-        assert o["var_pct"] != pytest.approx(-0.035)        # NO la variacion cruda
+        assert o["var_pct"] == pytest.approx(0.0028)                  # 0,28% = 28 bps
+        assert o["close"] == pytest.approx(1430.0 / 1.0028, rel=1e-4)  # ~1426
+        assert o["close"] != pytest.approx(1410.29)                   # NO precioCierreAnterior
     finally:
         with dx._mae_lock:
             dx._mae_snap.update({"rows": [], "ts": 0.0, "ust": None})
