@@ -67,8 +67,9 @@
     var box = document.getElementById('matriz-detail');
     if (!box) return;
     if (!q){ box.innerHTML = ''; return; }
+    // Sólo el nombre del fondo (sin el "1234 — " del label) para el copy/paste.
     var heads = [].slice.call(document.querySelectorAll('#matriz-table thead th')).slice(1)
-                  .map(function(th){ return th.textContent.trim(); });
+                  .map(function(th){ return th.textContent.trim().replace(/^\s*\d+\s*[—–-]\s*/, ''); });
     var blocks = [];
     document.querySelectorAll('#matriz-table tbody tr').forEach(function(tr){
       if (tr.style.display === 'none') return;
