@@ -71,6 +71,7 @@ def test_byma_cauciones_from_store() -> None:
     """Caución BYMA leída del store: MERV - XMEV - PESOS - {n}D."""
     from backend.services import cauciones, marketdata_store as mds
     assert cauciones.symbols("PESOS")[0] == "MERV - XMEV - PESOS - 1D"
+    assert cauciones.symbols("DOLAR")[0] == "MERV - XMEV - DOLAR - 1D"
     store = mds.get_store()
     store.update_from_md("MERV - XMEV - PESOS - 1D", {
         "LA": {"price": 29.5}, "BI": {"price": 29.3}, "OF": {"price": 29.7},
