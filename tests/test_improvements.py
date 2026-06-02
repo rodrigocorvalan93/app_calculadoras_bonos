@@ -120,14 +120,18 @@ async def test_matriz_has_copyable_detail() -> None:
 
 
 def test_todos_ars_aggregate_includes_duals() -> None:
-    """'Todos ARS (Proyectado)' = TAMAR + CER Proy + Tasa Fija + duales."""
-    from backend.services import curves
+    """'Todos ARS (Proyectado)' = TAMAR + CER Proy + Tasa Fija + duales, y los
+    códigos CER Proyectado resuelven (con una sola 'j', no 'jj')."""
+    from backend.services import curves, pricing
 
     bond_universe.ensure_loaded()
     g = curves.build_curve_codes()
     agg = set(g.get("todos_ars_proyectado", []))
     for sub in ("tamar", "cerproy", "lecap", "dualfija", "dualtamar", "dualcer"):
         assert set(g.get(sub, [])) <= agg, f"falta {sub} en el agregado"
+    cp = g.get("cerproy", [])
+    assert cp and all(pricing.bond_meta(c) for c in cp), "cerproy con códigos que no resuelven (¿jj?)"
+    assert all(not c.endswith("jj") for c in cp)
 
 
 def _first_codes(n: int = 2) -> list[str]:
