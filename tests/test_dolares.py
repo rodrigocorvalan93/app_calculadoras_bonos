@@ -109,6 +109,31 @@ def test_official_and_summary_are_robust() -> None:
         assert "var_pct" in s["canje"]        # el riel muestra la variación del canje
 
 
+@pytest.mark.asyncio
+async def test_siopel_official_uses_real_previous_close() -> None:
+    """El cierre previo del oficial SIOPEL sale de precioCierreAnterior (no se
+    reconstruye desde 'variacion'); la variación es last/close − 1."""
+    import time as _t
+
+    row = {"ticker": "UST$T", "segmento": "Mayorista", "plazo": "000",
+           "precioUltimo": 1425.50, "precioCierreAnterior": 1426.0,
+           "variacion": -0.035, "volumenOperado": 3.5e8}
+    ust = dx._extract_ust([row])
+    with dx._mae_lock:
+        dx._mae_snap.update({"rows": [row], "ts": _t.time(), "ust": ust})
+    dx._cache.clear()
+    try:
+        o = dx.official_fx()
+        assert o["source"] == "SIOPEL"
+        assert o["close"] == pytest.approx(1426.0)
+        assert o["var_pct"] == pytest.approx(1425.50 / 1426.0 - 1.0)
+        assert o["var_pct"] != pytest.approx(-0.035)        # NO la variacion cruda
+    finally:
+        with dx._mae_lock:
+            dx._mae_snap.update({"rows": [], "ts": 0.0, "ust": None})
+        dx._cache.clear()
+
+
 def test_locale_filters_are_undefined_safe() -> None:
     """Un `{{ obj.campo_inexistente | ar_num }}` da Jinja Undefined; los filtros
     deben devolver '—' y NO lanzar UndefinedError (causó el 500 de /dolares)."""

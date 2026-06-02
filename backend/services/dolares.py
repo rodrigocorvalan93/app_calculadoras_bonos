@@ -203,19 +203,19 @@ def _extract_ust(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             last = _pos(r.get("precioUltimo"))
             if last is None:
                 continue
-            var = r.get("variacion")
-            try:
-                var = float(var)
-            except (TypeError, ValueError):
-                var = None
-            close = (last / (1.0 + var)) if (var is not None and (1.0 + var) != 0) else None
+            # Cierre previo: el campo REAL de MAE (precioCierreAnterior), igual
+            # que mae.py. Antes se reconstruía como last/(1+variacion), pero la
+            # escala de 'variacion' no es confiable → cierre y variación mal
+            # (p. ej. ayer 1426 salía corrido). La variación se calcula limpia
+            # como last/close − 1.
+            close = _pos(r.get("precioCierreAnterior")) or _pos(r.get("cierreAyer"))
             best = {
                 "last": last,
                 "bid": _pos(r.get("precioCompra")),
                 "offer": _pos(r.get("precioVenta")),
-                "var_pct": var,
+                "var_pct": _var(last, close),
                 "close": close,
-                "volume": _pos(r.get("volumenOperado")),
+                "volume": _pos(r.get("volumenOperado")) or _pos(r.get("volumenAcumulado")),
                 "hora": r.get("horaUltima"),
                 "plazo": r.get("plazo"),
             }
