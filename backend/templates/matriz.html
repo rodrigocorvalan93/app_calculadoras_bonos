@@ -36,6 +36,9 @@
   <div id="matriz-table">
     {% include "partials/matriz_table.html" %}
   </div>
+
+  {# Detalle vertical de la especie buscada (fondo → tenencia), copiable a Excel #}
+  <div id="matriz-detail" style="margin-top:14px"></div>
 </section>
 
 <script>
@@ -55,7 +58,53 @@
     });
     var c = document.getElementById('matriz-count');
     if (c) c.textContent = q ? (shown + ' coincidencia' + (shown === 1 ? '' : 's')) : '';
+    buildMatrizDetail(q);
   }
+
+  // Detalle vertical (fondo → tenencia) de la(s) especie(s) filtrada(s), en un
+  // textarea tab-separado → se copia/pega directo en columnas de Excel.
+  function buildMatrizDetail(q){
+    var box = document.getElementById('matriz-detail');
+    if (!box) return;
+    if (!q){ box.innerHTML = ''; return; }
+    var heads = [].slice.call(document.querySelectorAll('#matriz-table thead th')).slice(1)
+                  .map(function(th){ return th.textContent.trim(); });
+    var blocks = [];
+    document.querySelectorAll('#matriz-table tbody tr').forEach(function(tr){
+      if (tr.style.display === 'none') return;
+      var tds = tr.querySelectorAll('td');
+      if (!tds.length) return;
+      var esp = tds[0].textContent.trim();
+      var lines = [];
+      for (var i = 1; i < tds.length; i++){
+        var v = tds[i].textContent.trim();
+        if (v && v !== '·') lines.push(heads[i - 1] + '\t' + v);
+      }
+      if (lines.length) blocks.push(esp + '\n' + lines.join('\n'));
+    });
+    if (!blocks.length){ box.innerHTML = ''; return; }
+    var text = blocks.join('\n\n');
+    var nLines = text.split('\n').length;
+    box.innerHTML =
+      '<div class="card"><div class="card-title">'
+      + '<span>Detalle por fondo <small class="muted">(copiá y pegá en Excel)</small></span>'
+      + '<button type="button" class="btn-primary" style="padding:3px 10px;font-size:11px" onclick="copyMatrizDetail()">Copiar</button>'
+      + '</div><div class="card-body">'
+      + '<textarea id="matriz-detail-text" readonly rows="' + Math.min(Math.max(nLines, 2), 24) + '"'
+      + ' style="width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);'
+      + 'border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;tab-size:16;resize:vertical"></textarea>'
+      + '</div></div>';
+    document.getElementById('matriz-detail-text').value = text;
+  }
+
+  function copyMatrizDetail(){
+    var ta = document.getElementById('matriz-detail-text');
+    if (!ta) return;
+    ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+    try { navigator.clipboard.writeText(ta.value); }
+    catch (e) { try { document.execCommand('copy'); } catch (e2) {} }
+  }
+
   document.body.addEventListener('htmx:afterSwap', function(e){
     if (e.target && e.target.id === 'matriz-table') matrizFilter();
   });

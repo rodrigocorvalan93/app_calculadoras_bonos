@@ -93,6 +93,32 @@ async def test_posiciones_shows_asof() -> None:
         positions._cache = saved
 
 
+@pytest.mark.asyncio
+async def test_matriz_has_copyable_detail() -> None:
+    """La Matriz trae el detalle vertical copiable (JS) y los datos para armarlo."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    saved = positions._cache
+    positions._cache = {
+        "loaded": True, "error": None, "paths": {}, "asof": None, "by_code": {},
+        "pn": {10: 1_000_000.0, 20: 500_000.0}, "fondos": {10: "RENTA", 20: "Multimercado"},
+        "holdings": [
+            {"cod_delta": "TX26", "cod_fondo": 10, "cantidad": 200000.0, "valor": 200000.0, "especie": "TX26", "clase": None},
+            {"cod_delta": "TX26", "cod_fondo": 20, "cantidad": 100000.0, "valor": 100000.0, "especie": "TX26", "clase": None},
+        ],
+    }
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            r = await ac.get("/matriz")
+        assert r.status_code == 200
+        assert 'id="matriz-detail"' in r.text and "buildMatrizDetail" in r.text
+        assert "RENTA" in r.text and "200.000" in r.text and "100.000" in r.text
+    finally:
+        positions._cache = saved
+
+
 def test_todos_ars_aggregate_includes_duals() -> None:
     """'Todos ARS (Proyectado)' = TAMAR + CER Proy + Tasa Fija + duales."""
     from backend.services import curves
