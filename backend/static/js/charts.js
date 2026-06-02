@@ -67,7 +67,28 @@
         ],
         cursor: { points: { size: 9 }, focus: { prox: 24 } },
         legend: { isolate: true },
+        padding: [12, 34, 0, 0],
         hooks: {
+          draw: [function (uu) {
+            // Etiqueta el código de cada bono sobre su punto (anti-superposición).
+            var ctx = uu.ctx; ctx.save();
+            ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.fillStyle = MUT; ctx.textBaseline = "bottom";
+            var X0 = uu.data[0], A = uu.data[1], U = uu.data[2];
+            var aS = uu.series[1].show, uS = uu.series[2].show, drawn = [];
+            for (var i = 0; i < X0.length; i++) {
+              if (!codes[i]) continue;
+              var isA = A[i] != null, isU = U[i] != null, yv = isA ? A[i] : (isU ? U[i] : null);
+              if (yv == null || (isA && !aS) || (isU && !uS)) continue;
+              var X = uu.valToPos(X0[i], "x", true), Y = uu.valToPos(yv, "y", true), ok = true;
+              for (var k = 0; k < drawn.length; k++) {
+                if (Math.abs(drawn[k][0] - X) < 26 && Math.abs(drawn[k][1] - Y) < 11) { ok = false; break; }
+              }
+              if (!ok) continue;
+              drawn.push([X, Y]);
+              ctx.fillText(codes[i], X + 5, Y - 3);
+            }
+            ctx.restore();
+          }],
           setCursor: [function (uu) {
             var i = uu.cursor.idx;
             if (i == null) { tip.style.display = "none"; return; }
@@ -203,17 +224,36 @@
           series: series,
           cursor: { focus: { prox: 16 } },
           legend: { isolate: true },
+          padding: [12, 64, 0, 0],
           hooks: { draw: [function (u) {
-            if (!bands) return;
             var ctx = u.ctx; ctx.save();
-            ["mean", "min", "max"].forEach(function (k) {
-              if (bands[k] == null) return;
-              var y = u.valToPos(bands[k], "y", true);
-              ctx.strokeStyle = MUT; ctx.globalAlpha = 0.8;
-              ctx.lineWidth = (k === "mean") ? 1.3 : 0.8;
-              ctx.setLineDash(k === "mean" ? [] : [4, 3]);
-              ctx.beginPath(); ctx.moveTo(u.bbox.left, y); ctx.lineTo(u.bbox.left + u.bbox.width, y); ctx.stroke();
-            });
+            // bandas prom/mín/máx
+            if (bands) {
+              ["mean", "min", "max"].forEach(function (k) {
+                if (bands[k] == null) return;
+                var y = u.valToPos(bands[k], "y", true);
+                ctx.strokeStyle = MUT; ctx.globalAlpha = 0.8;
+                ctx.lineWidth = (k === "mean") ? 1.3 : 0.8;
+                ctx.setLineDash(k === "mean" ? [] : [4, 3]);
+                ctx.beginPath(); ctx.moveTo(u.bbox.left, y); ctx.lineTo(u.bbox.left + u.bbox.width, y); ctx.stroke();
+              });
+              ctx.setLineDash([]); ctx.globalAlpha = 1;
+            }
+            // código de cada bono al final de su línea (anti-superposición vertical)
+            ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.textBaseline = "middle";
+            var X = u.data[0], drawn = [];
+            for (var si = 1; si < u.series.length; si++) {
+              if (!u.series[si].show) continue;
+              var ys = u.data[si], li = -1;
+              for (var i = ys.length - 1; i >= 0; i--) { if (ys[i] != null) { li = i; break; } }
+              if (li < 0) continue;
+              var px = u.valToPos(X[li], "x", true), py = u.valToPos(ys[li], "y", true), ok = true;
+              for (var d = 0; d < drawn.length; d++) { if (Math.abs(drawn[d] - py) < 11) { ok = false; break; } }
+              if (!ok) continue;
+              drawn.push(py);
+              ctx.fillStyle = u.series[si].stroke;
+              ctx.fillText(u.series[si].label, px + 4, py);
+            }
             ctx.restore();
           }] },
         };
