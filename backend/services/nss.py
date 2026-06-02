@@ -118,6 +118,17 @@ def sample(xs: List[float], ys: List[float], threshold: float = 3.0, n: int = 80
     return [(float(a), float(b)) for a, b in zip(xx, yy)]
 
 
+def eval_at(xs: List[float], ys: List[float], xq: List[float], threshold: float = 3.0):
+    """Ajusta NSS a (xs, ys) y evalúa en cada x de `xq` (% pp). None fuera del
+    rango fiteado, para que la línea no extrapole. Devuelve None si no fitea."""
+    f = fit(xs, ys, threshold)
+    if f is None:
+        return None
+    popt, x_min, x_max = f
+    yq = model(np.asarray(xq, dtype=np.float64), *popt)
+    return [float(v) if (x_min <= float(x) <= x_max) else None for x, v in zip(xq, yq)]
+
+
 def estimate(duration: float, xs: List[float], ys: List[float],
              threshold: float = 3.0, clip: bool = True) -> Optional[Dict[str, Any]]:
     """TIR / TEM / TNAs a una duration dada, vía NSS. y de entrada en %."""
