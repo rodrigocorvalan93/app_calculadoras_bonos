@@ -71,6 +71,28 @@ def test_corporate_curves_are_seeded() -> None:
         assert all(syms.md_symbol(c, "24hs") in seed for c in corp)
 
 
+@pytest.mark.asyncio
+async def test_posiciones_shows_asof() -> None:
+    """Posiciones muestra la fecha de la última cartera (mtime del archivo)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    assert positions._file_asof(None) is None
+    saved = positions._cache
+    positions._cache = {
+        "loaded": True, "error": None, "holdings": [], "pn": {10: 1000.0},
+        "fondos": {10: "Performance"}, "paths": {}, "by_code": {}, "asof": "01/06/2026 09:30",
+    }
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            r = await ac.get("/posiciones")
+        assert r.status_code == 200
+        assert "Última cartera: 01/06/2026 09:30" in r.text
+    finally:
+        positions._cache = saved
+
+
 def test_todos_ars_aggregate_includes_duals() -> None:
     """'Todos ARS (Proyectado)' = TAMAR + CER Proy + Tasa Fija + duales."""
     from backend.services import curves
