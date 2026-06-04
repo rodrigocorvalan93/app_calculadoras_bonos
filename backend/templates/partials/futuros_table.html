@@ -28,7 +28,7 @@
               <td style="text-align:left;color:var(--text-muted);font-size:11px">{{ r.code }}</td>
               <td>{{ r.dias }}</td>
               <td style="font-weight:600">{{ r.last | ar_num(2) }}</td>
-              <td class="{{ fx.vcls(r.var_pct) }}">{{ r.var_pct | ar_pct(2) }}</td>
+              <td class="{{ fx.vcls(r.var_pct) }}">{% if r.var_pct is not none %}{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}{% else %}—{% endif %}</td>
               <td style="font-weight:600">{{ r.tna | ar_pct(2) }}</td>
               <td>{{ r.tem | ar_pct(2) }}</td>
               <td>{{ r.tna_bid | ar_pct(2) }}</td>
