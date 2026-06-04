@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Futuros{% endblock %}
+{% block tab_futuros %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Futuros de dólar (DLR)</h1>
+    <p class="muted">Tasas implícitas de los futuros DLR (ROFEX) vs el spot oficial (A3500): mayorista (DLR/…M) y minorista (DLR/…). Más un panel de Dólar Linked soberanos contra la implícita del futuro más cercano. Refresh 5 s.</p>
+  </header>
+
+  <div id="fut-table" hx-get="/futuros/table" hx-trigger="every 5s" hx-swap="innerHTML">
+    {% include "partials/futuros_table.html" %}
+  </div>
+</section>
+{% endblock %}
