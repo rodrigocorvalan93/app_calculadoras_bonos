@@ -43,8 +43,11 @@ def save_to_json(data_dict: dict, filename: str = "bcra_data_backup.json") -> No
         tmp.index.name = "fecha"
         payload[key] = tmp.to_json(orient="index", date_format="iso")
 
-    with open(filename, "w") as f:
-        json.dump(payload, f)
+    try:
+        with open(filename, "w") as f:
+            json.dump(payload, f)
+    except OSError as exc:
+        print(f"[indices] WARN: no pude escribir {filename} ({exc}) — sigo sin actualizar el backup")
 
 
 def load_from_json(filename: str = "bcra_data_backup.json") -> dict:
@@ -1012,7 +1015,13 @@ def main():
     else:
         cer_completo_escenario_base = combined_df_cer.copy()
 
-    cer_completo_escenario_base.to_csv("cer_completo.csv", header=["Proyeccion CER"])
+    # El CSV es sólo un dump de cache: si el archivo está tomado (OneDrive,
+    # Excel, antivirus → Permission denied) NO debe abortar la población de
+    # rentafija.inputs (más abajo), que es lo que necesita especies/el universo.
+    try:
+        cer_completo_escenario_base.to_csv("cer_completo.csv", header=["Proyeccion CER"])
+    except OSError as exc:
+        _log_fx.warning("[indices] no pude escribir cer_completo.csv (%s) — sigo con los datos en memoria", exc)
 
     # UVA proyectado desde CER
     if not cer_completo_escenario_base.empty:
