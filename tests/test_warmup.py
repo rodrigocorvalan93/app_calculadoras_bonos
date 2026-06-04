@@ -60,8 +60,9 @@ async def test_warm_curves_once_fills_metrics_cache() -> None:
 
     # The exact key the curves route would look up is now cached: a
     # get_or_compute with a sentinel factory must NOT call the factory.
+    # La key incluye el fingerprint del índice (DLK/CER/UVA) — para nominales es 0.
     sentinel = object()
-    key = (code, round(price, 2), "")
+    key = (code, round(price, 2), "", pricing._index_fingerprint(pricing._bond_index_kind(code)))
     cached = pricing._curve_metrics_cache.get_or_compute(key, lambda: sentinel)
     assert cached is not sentinel
 

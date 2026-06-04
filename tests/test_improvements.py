@@ -71,6 +71,51 @@ def test_corporate_curves_are_seeded() -> None:
         assert all(syms.md_symbol(c, "24hs") in seed for c in corp)
 
 
+def test_dlk_tir_reacts_to_a3500() -> None:
+    """La TIR de un DLK reacciona al cambio del A3500 (la key del cache incluye el
+    índice). Antes quedaba vieja hasta el TTL de 20 s. LECAP no mete índice."""
+    import numpy as np
+    import rentafija
+
+    from backend.services import curves, pricing
+
+    bond_universe.ensure_loaded()
+    g = curves.build_curve_codes()
+    cer = (g.get("cer") or [None])[0]
+    if cer:
+        assert pricing._bond_index_kind(cer) == "cer"
+    lec = (g.get("lecap") or [None])[0]
+    if lec:
+        assert pricing._bond_index_kind(lec) == ""              # nominal → sin índice en la key
+    dlk = (g.get("dolarlinked") or g.get("corp_dlk") or [None])[0]
+    if not dlk:
+        pytest.skip("sin bonos dólar-linked")
+    assert pricing._bond_index_kind(dlk) == "a3500"
+    df = rentafija.inputs.get("a3500")
+    if df is None or not len(df):
+        pytest.skip("sin serie A3500")
+    col = df.columns.get_loc("tca3500")
+    orig = float(df.iloc[-1, col])
+    price = None
+    for p in (100.0, 1000.0, 5000.0, 500.0, 50.0, 10000.0):
+        m = pricing.metrics_for_market_price(dlk, p)
+        if m and np.isfinite(m.get("tirea", float("nan"))):
+            price = p
+            break
+    if price is None:
+        pytest.skip("el DLK no pricea en este entorno")
+    try:
+        t1 = pricing.metrics_for_market_price(dlk, price)["tirea"]
+        df.iloc[-1, col] = orig * 1.10                          # +10% A3500
+        pricing._index_val_cache.clear()                       # fingerprint lo toma ya
+        t2 = pricing.metrics_for_market_price(dlk, price)["tirea"]
+        assert abs(t1 - t2) > 1e-9                              # la TIR reaccionó
+    finally:
+        df.iloc[-1, col] = orig
+        pricing._index_val_cache.clear()
+        pricing._curve_metrics_cache.clear()
+
+
 @pytest.mark.asyncio
 async def test_posiciones_shows_asof() -> None:
     """Posiciones muestra la fecha de la última cartera (mtime del archivo)."""

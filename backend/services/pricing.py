@@ -521,6 +521,47 @@ from backend.cache import LockedTTLCache  # noqa: E402  (avoid top circular)
 # the first user click too.
 _curve_metrics_cache = LockedTTLCache(maxsize=8192, ttl=20)
 
+# Bonos ajustados (DLK/CER/UVA): su TIR a un precio dado depende del índice
+# (A3500/CER/UVA), no sólo del precio. Si la key del cache no lo incluye, al
+# cambiar el índice la TIR queda vieja hasta el TTL (20 s). Metemos el valor del
+# índice en la key — leído con un cache corto para que sea barato — así el cambio
+# se refleja en ~2 s sin perder el cacheo cuando el índice está quieto.
+_index_kind: Dict[str, str] = {}                       # code → "a3500"/"cer"/"uva"/"" (estático)
+_index_val_cache = LockedTTLCache(maxsize=8, ttl=2)    # valor actual del índice (lectura barata)
+_INDEX_COLS = {"a3500": ("a3500", "tca3500"), "cer": ("CER", "CER"), "uva": ("UVA", "UVA")}
+
+
+def _bond_index_kind(code: str) -> str:
+    k = _index_kind.get(code)
+    if k is None:
+        m = bond_meta(code) or {}
+        aj = (m.get("ajuste_sobre_capital") or "").upper()
+        mon = (m.get("moneda") or "").upper()
+        if "A3500" in aj or mon == "DLK":
+            k = "a3500"
+        elif "CER" in aj:
+            k = "cer"
+        elif "UVA" in aj:
+            k = "uva"
+        else:
+            k = ""
+        _index_kind[code] = k
+    return k
+
+
+def _index_fingerprint(kind: str) -> float:
+    if not kind:
+        return 0.0
+
+    def _f() -> float:
+        cols = _INDEX_COLS.get(kind)
+        if not cols:
+            return 0.0
+        _, val = _last_series_value(*cols)
+        return round(float(val), 6) if np.isfinite(val) else 0.0
+
+    return _index_val_cache.get_or_compute(kind, _f)
+
 
 def metrics_for_market_price(
     code: str,
@@ -548,7 +589,9 @@ def metrics_for_market_price(
         return None
 
     bucket = round(v, 2)
-    key = (code, bucket, settle or "")
+    # La key incluye el valor del índice para los DLK/CER/UVA → un cambio del
+    # A3500/CER/UVA invalida el cache (la TIR reacciona en ~2 s, no en 20 s).
+    key = (code, bucket, settle or "", _index_fingerprint(_bond_index_kind(code)))
 
     def _factory() -> Dict[str, Any]:
         try:
