@@ -66,7 +66,7 @@ async def _ctx(spot_override: str = "") -> Dict[str, Any]:
         m = min(matchable, key=lambda f: abs(f["dias"] - (dur or 0) * 365.0)) if (matchable and dur) else None
         if m:
             tea_fut = (1.0 + m["td"]) ** (365.0 / m["dias"]) - 1.0
-            b["fut_label"], b["fut_code"], b["fut_tna"] = m["label"], m["code"], m["tna"]
+            b["fut_label"], b["fut_code"], b["fut_tna"], b["fut_tea"] = m["label"], m["code"], m["tna"], tea_fut
             b["tir_sint"] = (1.0 + tirea) * (1.0 + tea_fut) - 1.0
             b["tna_sint"] = _bond_tna(tirea) + (m["tna"] or 0.0) if m["tna"] is not None else None
         dlk.append(b)
