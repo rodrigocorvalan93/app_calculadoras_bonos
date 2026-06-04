@@ -264,10 +264,21 @@ async def _rows_for(
     # native / USD / USB legs price straight off their own ticker.
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
     loop = asyncio.get_running_loop()
-    raw: list[dict | None] = await asyncio.gather(
-        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo, leg, fx, book, fuente) for code in codes)
+
+    # Construimos las filas en chunks (round-robin) en vez de 1 tarea por bono:
+    # para curvas anchas (corp_hdmep ~131) eso evitaba ~130 dispatches al pool en
+    # cada request (warm p95 ~120 ms). Con N_WORKERS chunks secuenciales se
+    # mantiene el paralelismo del path frío con una fracción del overhead.
+    n_workers = max(1, getattr(_row_pool, "_max_workers", 8))
+
+    def _build_chunk(chunk: list[str]) -> list[dict | None]:
+        return [_row_for_code(c, plazo, leg, fx, book, fuente) for c in chunk]
+
+    chunks = [codes[i::n_workers] for i in range(n_workers)]
+    parts: list[list[dict | None]] = await asyncio.gather(
+        *(loop.run_in_executor(_row_pool, _build_chunk, ch) for ch in chunks if ch)
     )
-    rows = [r for r in raw if r is not None]
+    rows = [r for part in parts for r in part if r is not None]
     quoting = sum(1 for r in rows if _has_quote(r))
     store_empty = quoting == 0
 
