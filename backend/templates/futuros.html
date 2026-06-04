@@ -6,11 +6,25 @@
 <section class="curves">
   <header class="yas-header">
     <h1>Futuros de dólar (DLR)</h1>
-    <p class="muted">Tasas implícitas de los futuros DLR (ROFEX) vs el spot oficial (A3500): mayorista (DLR/…M) y minorista (DLR/…). Más un panel de Dólar Linked soberanos contra la implícita del futuro más cercano. Refresh 5 s.</p>
+    <p class="muted">Tasas implícitas de los futuros DLR vs el spot oficial (A3500) — mayorista y minorista. <strong>Click en un contrato</strong> para ver la profundidad. Abajo, Dólar Linked soberanos con su tasa <strong>sintética</strong> (bono + futuro más cercano a su duration). Refresh 5 s.</p>
   </header>
 
-  <div id="fut-table" hx-get="/futuros/table" hx-trigger="every 5s" hx-swap="innerHTML">
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <label class="field">
+          <span>Spot A3500 <small class="muted">(override)</small></span>
+          <input type="text" inputmode="decimal" name="spot_override" value="{{ spot_override }}" placeholder="auto (oficial)" autocomplete="off"
+                 hx-get="/futuros/table" hx-trigger="keyup changed delay:400ms, change" hx-target="#fut-table" hx-swap="innerHTML">
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div id="fut-table" hx-get="/futuros/table" hx-trigger="every 5s" hx-swap="innerHTML" hx-include="[name=spot_override]">
     {% include "partials/futuros_table.html" %}
   </div>
+
+  <div id="fut-book" class="mercado-book"></div>
 </section>
 {% endblock %}

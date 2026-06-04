@@ -82,10 +82,11 @@ def _impl(px: Optional[float], sp: Optional[float], dias: Optional[int]) -> Tupl
         return None, None, None
 
 
-def rows(canal: str = "may") -> List[Dict[str, Any]]:
-    """Filas de futuros con su tasa implícita, ordenadas por vencimiento."""
+def rows(canal: str = "may", spot_v: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Filas de futuros con su tasa implícita, ordenadas por vencimiento.
+    `spot_v` overridea el spot oficial (para el input de la pestaña)."""
     store = marketdata_store.get_store()
-    sp = spot()
+    sp = spot_v if (spot_v and spot_v > 0) else spot()
     today = date.today()
     out: List[Dict[str, Any]] = []
     for sym in symbols(canal):

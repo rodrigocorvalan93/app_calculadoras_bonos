@@ -47,4 +47,27 @@ async def test_futuros_endpoint() -> None:
         p = await ac.get("/futuros")
         t = await ac.get("/futuros/table")
     assert p.status_code == 200 and "Spot A3500" in p.text and "Mayorista" in p.text
-    assert t.status_code == 200
+    # futuros arriba del panel DLK; columna Código presente
+    assert t.status_code == 200 and "Código" in t.text
+    if "Dólar Linked soberanos" in t.text:
+        assert t.text.find("Mayorista") < t.text.find("Dólar Linked soberanos")
+
+
+@pytest.mark.asyncio
+async def test_futuros_override_and_book() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import marketdata_store as mds
+
+    sym = fut.symbols("may")[0]
+    sp = fut.spot() or 1410.0
+    mds.get_store().update_from_md(sym, {
+        "LA": {"price": sp * 1.03},
+        "BI": [{"price": sp * 1.02, "size": 100}],
+        "OF": [{"price": sp * 1.04, "size": 50}]})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        ov = await ac.get("/futuros/table?spot_override=1500")
+        bk = await ac.get("/futuros/book", params={"code": sym})
+    assert ov.status_code == 200 and "1.500,00" in ov.text       # usó el override
+    assert bk.status_code == 200 and "Profundidad" in bk.text and "Compras" in bk.text
