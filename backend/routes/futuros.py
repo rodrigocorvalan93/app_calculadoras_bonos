@@ -6,6 +6,7 @@ Lee todo de cache (store + official_fx + curva DLK) → sub-50 ms.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from typing import Any, Dict, List, Optional
 
@@ -49,30 +50,60 @@ async def _ctx(spot_override: str = "") -> Dict[str, Any]:
     near = next((r for r in may_rows if r["dias"] and r["dias"] > 0 and r["tna"] is not None), None) \
         or next((r for r in min_rows if r["dias"] and r["dias"] > 0 and r["tna"] is not None), None)
 
-    # Dólar Linked soberanos + tasa sintética contra el futuro más cercano a su
-    # duration: TIR sint = (1+TIR_bono)·(1+TEA_fut)−1 ; TNA sint = TNA_bono + TNA_fut.
+    # Curvas DLK + Todos ARS en paralelo (cada una usa el threadpool por dentro).
     try:
         from backend.routes.curves import _rows_for
-        dlk_rows, _meta = await _rows_for("dolarlinked", "24hs", False, "native")
+        dlk_rows, ars_rows = await asyncio.gather(
+            _rows_for("dolarlinked", "24hs", False, "native"),
+            _rows_for("todos_ars_proyectado", "24hs", False, "native"),
+        )
+        dlk_rows, ars_rows = dlk_rows[0], ars_rows[0]
     except Exception:  # noqa: BLE001
-        dlk_rows = []
+        dlk_rows, ars_rows = [], []
+
     matchable = [r for r in may_rows if r["dias"] and r["dias"] > 0 and r.get("td") is not None]
+
+    def _match(dur: Optional[float]):
+        if not matchable or not dur:
+            return None
+        m = min(matchable, key=lambda f: abs(f["dias"] - dur * 365.0))
+        return m, (1.0 + m["td"]) ** (365.0 / m["dias"]) - 1.0   # (futuro, TEA implícita)
+
+    # 1) DLK soberanos → sintético PESO: (1+TIR_bono)·(1+TEA_fut)−1 ; TNA_bono + TNA_fut.
     dlk: List[Dict[str, Any]] = []
     for r in dlk_rows:
         tirea, dur = r.get("tirea"), r.get("duration")
         if tirea is None:
             continue
         b: Dict[str, Any] = {"code": r["code"], "tirea": tirea, "duration": dur, "last": r.get("last")}
-        m = min(matchable, key=lambda f: abs(f["dias"] - (dur or 0) * 365.0)) if (matchable and dur) else None
-        if m:
-            tea_fut = (1.0 + m["td"]) ** (365.0 / m["dias"]) - 1.0
-            b["fut_label"], b["fut_code"], b["fut_tna"], b["fut_tea"] = m["label"], m["code"], m["tna"], tea_fut
-            b["tir_sint"] = (1.0 + tirea) * (1.0 + tea_fut) - 1.0
-            b["tna_sint"] = _bond_tna(tirea) + (m["tna"] or 0.0) if m["tna"] is not None else None
+        mm = _match(dur)
+        if mm:
+            m, tea_fut = mm
+            b.update({"fut_label": m["label"], "fut_code": m["code"], "fut_tna": m["tna"], "fut_tea": tea_fut,
+                      "tir_sint": (1.0 + tirea) * (1.0 + tea_fut) - 1.0,
+                      "tna_sint": (_bond_tna(tirea) + m["tna"]) if m["tna"] is not None else None})
         dlk.append(b)
     dlk.sort(key=lambda x: (x["duration"] if x["duration"] is not None else 9999.0))
+
+    # 2) Curva ARS (≤1.5y dur) → sintético DÓLAR LINKED (al revés): le sacamos la
+    #    deval del futuro. TIR sint = (1+TIR_ars)/(1+TEA_fut)−1 ; TNA sint = TNA_ars − TNA_fut.
+    ars: List[Dict[str, Any]] = []
+    for r in ars_rows:
+        tirea, dur, tna = r.get("tirea"), r.get("duration"), r.get("tna")
+        if tirea is None or dur is None or dur > 1.5:
+            continue
+        a: Dict[str, Any] = {"code": r["code"], "tirea": tirea, "tna": tna, "duration": dur, "last": r.get("last")}
+        mm = _match(dur)
+        if mm:
+            m, tea_fut = mm
+            a.update({"fut_label": m["label"], "fut_tna": m["tna"], "fut_tea": tea_fut,
+                      "tir_sint": (1.0 + tirea) / (1.0 + tea_fut) - 1.0,
+                      "tna_sint": (tna - m["tna"]) if (tna is not None and m["tna"] is not None) else None})
+        ars.append(a)
+    ars.sort(key=lambda x: x["duration"])
+
     return {"may_rows": may_rows, "min_rows": min_rows, "spot": spot, "near": near,
-            "dlk": dlk, "spot_override": spot_override or ""}
+            "dlk": dlk, "ars": ars, "spot_override": spot_override or ""}
 
 
 @router.get("/futuros", response_class=HTMLResponse)
