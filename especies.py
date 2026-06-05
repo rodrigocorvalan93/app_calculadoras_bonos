@@ -450,7 +450,7 @@ S31G6 = {
 S15S6 = {
     "Nombre Security": "Letra del Tesoro Nacional en Pesos Capitalizable Vto 15 09 2026",
     "Código": "S15S6",
-    "ISIN": "S15S6",
+    "ISIN": "AR0614758420",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -473,7 +473,7 @@ S15S6 = {
     "Días Lag índice hasta inc": 0, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": (1+0.02)**((106/360)*12), # Factor de ajuste, por defecto 1
+    "Factor Capitalización": (1+0.0199)**((106/360)*12), # Factor de ajuste, por defecto 1
     "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": 0,
     "Fechas de cupón": ['15/09/2026'], # Lista de fechas como ejemplo

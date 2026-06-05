@@ -31,7 +31,7 @@ DEFAULT_DEPTH = 3
 # Constantes
 # =============================================================================
 BASE_URL = "https://api.latinsecurities.matrizoms.com.ar/"
-# BASE_URL = "https://api.lbo.xoms.com.ar/"
+
 # =============================================================================
 # Conexión / Instrumentos
 # =============================================================================
@@ -935,7 +935,7 @@ def main():
         [cer_24hs_prices_df, lecap_24hs_prices_df, tamar_24hs_prices_df, global_24hs_prices_df,
          bonar_24hs_prices_df, cerproyectado_24hs_prices_df,
          dual_fija_24hs_prices_df, dual_cer_24hs_prices_df, dual_cer_proyectado_24hs_prices_df,
-         dual_24hs_prices_df, bopreal_24hs_prices_df, dlksob_24hs_prices_df],
+         dual_24hs_prices_df, bopreal_24hs_prices_df],
         ignore_index=True
     )
     df_combined["fecha_hoy"] = datetime.today().date()
@@ -1008,6 +1008,9 @@ if __name__ == '__main__':
 #     tamar_tea       = 0.2532,   # TEA actual de TAMAR
 #     df_futuros      = futuros_minorista,
 #     vcp_data_path   = os.getenv("VCP_DATA_PATH"),
+#     tamar_proy_nom  = {'TTJ26': 0.222, 'M31G6': 0.215, 'TTS26': 0.216, 'TTD26': 0.225},
+#     tamar_proy_real = {'TTJ26': 0.050, 'M31G6': 0.045, 'TTS26': 0.040, 'TTD26': 0.038},
+
 # )
 
 
