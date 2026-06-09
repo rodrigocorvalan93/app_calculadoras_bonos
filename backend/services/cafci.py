@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
 _last_check: float = 0.0
+_dir_cache: Optional[str] = None         # carpeta CAFCI ya resuelta (evita re-crawl de OneDrive)
 # El archivo es diario (AAAMMDD.xlsx). NO releemos el Excel en cada request: sólo
 # re-escaneamos la carpeta cada _RECHECK_SEC y, si apareció uno más nuevo, lo
 # cargamos (una vez por día en la práctica). El read pesado va en threadpool.
@@ -83,6 +84,9 @@ def _dir_candidates(d: str) -> List[str]:
 # El layout real es …\Inversiones - Documentos\{Delta Bases, Equipo RF\Precios
 # Cafci}: CAFCI es una rama vecina, un nivel más abajo → hace falta depth 2.
 _DISCOVER_DEPTH = 2
+# Cota dura de carpetas a listar en el crawl: en OneDrive un árbol grande podría
+# colgar el descubrimiento. Con esto termina sí o sí (y se cachea, corre 1 vez).
+_DISCOVER_MAX_DIRS = 400
 
 
 def _discover_dirs() -> List[str]:
@@ -113,12 +117,16 @@ def _discover_dirs() -> List[str]:
     add_root(os.getenv("DELTA_ESPECIES_PATH"), is_file=True)
 
     found: List[str] = []
+    budget = [_DISCOVER_MAX_DIRS]                   # cota dura: no crawlear OneDrive entero
 
     def scan(d: str, depth: int) -> None:
+        if budget[0] <= 0:
+            return
         try:
             entries = sorted(os.listdir(d))
         except OSError:                            # inexistente / sin permiso
             return
+        budget[0] -= 1
         subdirs: List[str] = []
         for name in entries:
             if name.startswith((".", "$", "~")):   # ignorar ocultas / del sistema
@@ -133,7 +141,7 @@ def _discover_dirs() -> List[str]:
         if depth > 0:
             for sd in subdirs:
                 scan(sd, depth - 1)
-                if found:
+                if found or budget[0] <= 0:
                     return
 
     for root in roots:
@@ -143,27 +151,34 @@ def _discover_dirs() -> List[str]:
     return found
 
 
+def _cafci_dir() -> Optional[str]:
+    """Carpeta del vector CAFCI. `DELTA_CAFCI_DIR` si está seteada; si no, la
+    auto-descubierta — CACHEADA en `_dir_cache` para que el crawl de OneDrive
+    (caro) corra UNA sola vez por proceso, no en cada carga."""
+    global _dir_cache
+    env_dir = os.getenv("DELTA_CAFCI_DIR")
+    if env_dir:
+        return os.path.expandvars(os.path.expanduser(env_dir))
+    if _dir_cache and os.path.isdir(_dir_cache):
+        return _dir_cache
+    for d in _discover_dirs():
+        if _dir_candidates(d):                    # carpeta con al menos un .xlsx fechado
+            _dir_cache = d
+            return d
+    return None
+
+
 def _resolve_candidates() -> List[str]:
     """Archivos .xlsx candidatos al vector CAFCI, en orden de prioridad.
-    DELTA_CAFCI_PATH (archivo puntual) gana; si no, DELTA_CAFCI_DIR; si no,
-    la carpeta auto-descubierta. Dentro de una carpeta, ver `_dir_candidates`."""
+    DELTA_CAFCI_PATH (archivo puntual) gana; si no, la carpeta CAFCI
+    (`_cafci_dir`). Dentro de una carpeta, ver `_dir_candidates`."""
     env = os.getenv("DELTA_CAFCI_PATH")
     if env:
         env = os.path.expandvars(os.path.expanduser(env))
         if os.path.isfile(env):
             return [env]
-    env_dir = os.getenv("DELTA_CAFCI_DIR")
-    if env_dir:
-        cands = _dir_candidates(os.path.expandvars(os.path.expanduser(env_dir)))
-        if cands:
-            return cands
-    # Sin DELTA_CAFCI_* explícito: descubrir 'Precios Cafci' junto a las
-    # carpetas Delta ya configuradas (cero config para el caso normal).
-    for d in _discover_dirs():
-        cands = _dir_candidates(d)
-        if cands:
-            return cands
-    return []
+    d = _cafci_dir()
+    return _dir_candidates(d) if d else []
 
 
 def _resolve_path() -> Optional[str]:
@@ -178,35 +193,45 @@ def _parse_cafci(path: str) -> Optional[Dict[str, Any]]:
     """Parsea un .xlsx CAFCI (hojas `fx…` / `vector…`). Devuelve None si el
     archivo NO es el vector CAFCI — sin hojas fx/vector, o con ellas vacías —
     para que el caller pruebe el siguiente candidato (p.ej. una planilla
-    distinta con la misma fecha en el nombre: '20260608_Planilla_Diaria.xlsx')."""
+    distinta con la misma fecha en el nombre: '20260608_Planilla_Diaria.xlsx').
+
+    Perf: abre el workbook UNA sola vez (`xl.parse`, no `pd.read_excel(path…)`
+    que re-parsea el archivo entero por hoja) e itera columnas como listas
+    (no `iterrows`). El vector tiene ~6k filas → esto baja la carga de ~3-4 s
+    a ~1 s.
+    """
     import pandas as pd
-    xl = pd.ExcelFile(path)
-    fx_sheet = next((s for s in xl.sheet_names if str(s).lower().startswith("fx")), None)
-    vec_sheet = next((s for s in xl.sheet_names if str(s).lower().startswith("vector")), None)
+    xl = pd.ExcelFile(path)                                  # 1 sola apertura
+    names = xl.sheet_names
+    fx_sheet = next((s for s in names if str(s).lower().startswith("fx")), None)
+    vec_sheet = next((s for s in names if str(s).lower().startswith("vector")), None)
     if fx_sheet is None and vec_sheet is None:
-        return None                                     # no es el vector CAFCI
+        return None                                          # no es el vector CAFCI
     m = _DATE_RE.search(str(vec_sheet or os.path.basename(path)))
     fecha = m.group(1) if m else None
 
     fx: Dict[str, float] = {}
     if fx_sheet is not None:
-        fxdf = pd.read_excel(path, sheet_name=fx_sheet, header=None)
-        for _, r in fxdf.iterrows():
-            k, v = str(r.iloc[0]).strip().upper(), _num(r.iloc[1])
-            if k.isalpha() and 2 <= len(k) <= 4 and v is not None:   # USD/USB/USM/… (no índices)
-                fx[k] = v
+        fxdf = xl.parse(fx_sheet, header=None)               # reusa el workbook abierto
+        if fxdf.shape[1] >= 2:
+            for k, v in zip(fxdf.iloc[:, 0], fxdf.iloc[:, 1]):
+                ks, vv = str(k).strip().upper(), _num(v)
+                if ks.isalpha() and 2 <= len(ks) <= 4 and vv is not None:   # USD/USB/USM/… (no índices)
+                    fx[ks] = vv
 
     rows: List[Dict[str, Any]] = []
     if vec_sheet is not None:
-        vdf = pd.read_excel(path, sheet_name=vec_sheet)
-        cols = set(vdf.columns)
+        vdf = xl.parse(vec_sheet)                            # reusa el workbook abierto
+        present = [(col, key) for col, key in _FIELDS if col in vdf.columns]
         _txt = {"isin", "byma", "cafci", "moneda"}
-        for _, r in vdf.iterrows():
+        # Columnas como listas (vectorizado) → iterar en Python plano es mucho
+        # más rápido que iterrows() para ~6k filas.
+        data = {key: vdf[col].tolist() for col, key in present}
+        keys = [key for _, key in present]
+        for i in range(len(vdf)):
             row: Dict[str, Any] = {}
-            for col, key in _FIELDS:
-                if col not in cols:
-                    continue
-                v = r[col]
+            for key in keys:
+                v = data[key][i]
                 if key in _txt:
                     row[key] = str(v).strip() if (v is not None and v == v) else None
                 else:
@@ -218,7 +243,7 @@ def _parse_cafci(path: str) -> Optional[Dict[str, Any]]:
             rows.append(row)
 
     if not rows and not fx:
-        return None                                     # hojas fx/vector vacías → no sirve
+        return None                                          # hojas fx/vector vacías → no sirve
     return {"loaded": True, "error": None, "path": path, "fecha": fecha,
             "fx": fx, "rows": rows, "n": len(rows)}
 

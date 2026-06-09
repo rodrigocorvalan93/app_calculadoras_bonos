@@ -26,6 +26,15 @@ _CAFCI_ENV = ("DELTA_CAFCI_PATH", "DELTA_CAFCI_DIR", "DELTA_BASES_DIR",
               "DELTA_HISTORICO_DIR", "DELTA_HISTORICO_PATH", "DELTA_ESPECIES_PATH")
 
 
+@pytest.fixture(autouse=True)
+def _reset_dir_cache():
+    """`_dir_cache` es un global de proceso (cachea la carpeta descubierta para
+    no re-crawlear OneDrive). Reseteo entre tests para que no se filtre."""
+    cafci._dir_cache = None
+    yield
+    cafci._dir_cache = None
+
+
 def test_resolve_dir_tolera_nombres(tmp_path) -> None:
     """DELTA_CAFCI_DIR toma el .xlsx con la fecha más nueva, sin importar el
     nombrado, e ignora lock files ~$ y archivos no-excel."""
