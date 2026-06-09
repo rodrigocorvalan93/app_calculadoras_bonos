@@ -86,7 +86,9 @@ def _dir_candidates(d: str) -> List[str]:
 _DISCOVER_DEPTH = 2
 # Cota dura de carpetas a listar en el crawl: en OneDrive un árbol grande podría
 # colgar el descubrimiento. Con esto termina sí o sí (y se cachea, corre 1 vez).
-_DISCOVER_MAX_DIRS = 400
+# Ahora el crawl sólo lista niveles que revelan el nombre objetivo (no las hojas),
+# así que el costo real es ~#carpetas top-level del árbol; holgado.
+_DISCOVER_MAX_DIRS = 1500
 
 
 def _discover_dirs() -> List[str]:
@@ -119,7 +121,11 @@ def _discover_dirs() -> List[str]:
     found: List[str] = []
     budget = [_DISCOVER_MAX_DIRS]                   # cota dura: no crawlear OneDrive entero
 
-    def scan(d: str, depth: int) -> None:
+    def scan(d: str, level: int) -> None:
+        # Una carpeta '*cafci*' a profundidad N se DESCUBRE listando a su padre
+        # (nivel N-1): el nombre ya aparece ahí. Por eso NO listamos las hojas
+        # (sería gastar presupuesto de más y no aporta) — sólo bajamos mientras
+        # listar el próximo nivel siga revelando nombres dentro de _DISCOVER_DEPTH.
         if budget[0] <= 0:
             return
         try:
@@ -138,16 +144,21 @@ def _discover_dirs() -> List[str]:
                 found.append(full)
                 return                             # match en este nivel → listo
             subdirs.append(full)
-        if depth > 0:
+        if level + 1 < _DISCOVER_DEPTH:
             for sd in subdirs:
-                scan(sd, depth - 1)
+                scan(sd, level + 1)
                 if found or budget[0] <= 0:
                     return
 
     for root in roots:
-        scan(root, _DISCOVER_DEPTH)
+        scan(root, 0)
         if found:
             break
+    if found:
+        logger.info("[cafci] carpeta auto-descubierta: %s", found[0])
+    else:
+        logger.warning("[cafci] no encontré carpeta '*cafci*' bajo: %s "
+                       "(seteá DELTA_CAFCI_DIR para evitar el descubrimiento)", roots)
     return found
 
 

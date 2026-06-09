@@ -218,14 +218,48 @@ def test_macro_snapshot_reuses_cache() -> None:
         historico._cache = saved
 
 
+def test_macro_refresh_is_time_gated(monkeypatch) -> None:
+    """`macro_maybe_refresh` re-lee como mucho 1x por horario/día, no en cada
+    llamada (el riel pega cada 15s)."""
+    from datetime import datetime
+
+    from backend.services import historico
+
+    calls = {"n": 0}
+    saved_slot = historico._macro_slot
+    monkeypatch.setattr(historico, "refresh", lambda: calls.__setitem__("n", calls["n"] + 1))
+    historico._macro_slot = None
+    try:
+        class _FakeDT:
+            @staticmethod
+            def now():
+                return datetime(2026, 6, 9, 9, 0)      # antes de las 11 → no refresca
+        monkeypatch.setattr(historico, "datetime", _FakeDT)
+        historico.macro_maybe_refresh()
+        assert calls["n"] == 0
+
+        _FakeDT.now = staticmethod(lambda: datetime(2026, 6, 9, 12, 0))  # pasó 11:00
+        historico.macro_maybe_refresh()
+        historico.macro_maybe_refresh()                # 2da llamada misma franja → no re-refresca
+        assert calls["n"] == 1
+
+        _FakeDT.now = staticmethod(lambda: datetime(2026, 6, 9, 16, 0))  # pasó 15:30
+        historico.macro_maybe_refresh()
+        assert calls["n"] == 2                          # nueva franja → 1 refresh más
+    finally:
+        historico._macro_slot = saved_slot
+
+
 @pytest.mark.asyncio
-async def test_rail_renders_macro() -> None:
+async def test_rail_renders_macro(monkeypatch) -> None:
     from httpx import ASGITransport, AsyncClient
 
     from backend.main import app
     from backend.services import historico
 
     saved = historico._cache
+    # Bloquear el refresh programado para que no pise el cache sintético.
+    monkeypatch.setattr(historico, "refresh", lambda: historico._cache)
     historico._cache = _FAKE_HIST
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:

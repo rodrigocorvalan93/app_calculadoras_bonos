@@ -12,12 +12,19 @@ import json
 import logging
 import os
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("backend.historico")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# La data macro del BCRA cambia ~1x/día. NO se re-lee en cada request (el riel
+# pega cada 15s): sólo se re-lee el backup al cruzar estos horarios (hora local),
+# que es cuando se actualiza el archivo. Como mucho 2 re-lecturas por día.
+_MACRO_REFRESH_TIMES = ((11, 0), (15, 30))
+_macro_slot: Optional[Tuple[Any, int]] = None
 
 # key del json → (columna interna, label de display)
 _SERIES_META: Dict[str, Tuple[str, str]] = {
@@ -113,13 +120,35 @@ def series_list() -> List[Dict[str, Any]]:
     return [{"key": k, "label": v["label"], "n": len(v["points"])} for k, v in c["series"].items()]
 
 
+def macro_maybe_refresh() -> None:
+    """Re-lee el backup BCRA (barato; NO toca la API del BCRA) sólo cuando se
+    cruza un horario programado (11:00 / 15:30 hora local). Idempotente: dispara
+    como mucho 1 re-lectura por horario por día, aunque el riel pegue cada 15s.
+    """
+    global _macro_slot
+    now = datetime.now()
+    idx = None
+    for i, (h, m) in enumerate(_MACRO_REFRESH_TIMES):
+        if (now.hour, now.minute) >= (h, m):
+            idx = i                                   # último horario ya cruzado hoy
+    if idx is None:
+        return
+    key = (now.date(), idx)
+    with _lock:
+        if _macro_slot == key:
+            return
+        _macro_slot = key
+    refresh()                                          # fuera del lock (refresh lo toma)
+
+
 def macro_snapshot() -> List[Dict[str, Any]]:
     """Resumen macro para el riel del dólar: última observación (valor + fecha)
     de cada serie YA cacheada, más 'aplicable' (promedio de los últimos N días
     hábiles, igual que el legacy `indices.py`) para TAMAR/BADLAR.
 
-    Reusa los puntos en memoria → NO hace ninguna I/O nueva ni fetch al BCRA;
-    se puede llamar en cada refresh del riel (cada 15s) sin costo.
+    Reusa los puntos en memoria → NO hace fetch al BCRA; el riel lo puede pedir
+    cada 15s sin costo. La re-lectura del backup la dispara `macro_maybe_refresh`
+    (a las 11:00 / 15:30), no esta función — que queda pura (sin side-effects).
 
     Cada item: {key, label, fmt, value, date, aplicable?}
       fmt = 'pct' (el valor ya viene en %, formatear con ar_pct_pp) |
