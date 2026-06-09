@@ -186,3 +186,53 @@ async def test_dolares_endpoints() -> None:
             r = await ac.get(url)
             assert r.status_code == 200, url
             assert r.text  # non-empty HTML
+
+
+# ── Macro en el riel (TAMAR/BADLAR/CER/UVA/inflación, reusando el cache) ──────
+_FAKE_HIST = {
+    "loaded": True, "error": None, "path": "x",
+    "series": {
+        # TAMAR: aplicable = promedio de los últimos 5 = (30+30+30+30+35)/5 = 31,0
+        "tamar": {"label": "TAMAR (%)", "points": [("2026-06-01", 30.0), ("2026-06-02", 30.0),
+                                                    ("2026-06-03", 30.0), ("2026-06-04", 30.0), ("2026-06-05", 35.0)]},
+        "badlar": {"label": "BADLAR (%)", "points": [("2026-06-05", 28.0)]},
+        "CER": {"label": "CER", "points": [("2026-06-09", 787.02)]},
+        "UVA": {"label": "UVA", "points": [("2026-06-09", 1985.84)]},
+        "inflamom": {"label": "infl", "points": [("2026-04-30", 2.6)]},
+    },
+}
+
+
+def test_macro_snapshot_reuses_cache() -> None:
+    from backend.services import historico
+    saved = historico._cache
+    historico._cache = _FAKE_HIST
+    try:
+        by = {m["key"]: m for m in historico.macro_snapshot()}
+        assert by["tamar"]["value"] == 35.0 and by["tamar"]["date"] == "05/06/2026"
+        assert abs(by["tamar"]["aplicable"] - 31.0) < 1e-9 and by["tamar"]["fmt"] == "pct"
+        assert by["cer"]["fmt"] == "num" and by["cer"]["value"] == 787.02
+        assert "aplicable" not in by["cer"]                 # sólo TAMAR/BADLAR
+        assert set(by) == {"tamar", "badlar", "cer", "uva", "inflamom"}
+    finally:
+        historico._cache = saved
+
+
+@pytest.mark.asyncio
+async def test_rail_renders_macro() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import historico
+
+    saved = historico._cache
+    historico._cache = _FAKE_HIST
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            r = await ac.get("/dolares/rail")
+        assert r.status_code == 200
+        for tok in ("📈 Macro", "TAMAR", "BADLAR", "CER", "UVA",
+                    "aplicable", "35,00%", "31,00%"):     # último y aplicable de TAMAR
+            assert tok in r.text, tok
+    finally:
+        historico._cache = saved

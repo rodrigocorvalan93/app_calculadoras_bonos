@@ -113,6 +113,55 @@ def series_list() -> List[Dict[str, Any]]:
     return [{"key": k, "label": v["label"], "n": len(v["points"])} for k, v in c["series"].items()]
 
 
+def macro_snapshot() -> List[Dict[str, Any]]:
+    """Resumen macro para el riel del dólar: última observación (valor + fecha)
+    de cada serie YA cacheada, más 'aplicable' (promedio de los últimos N días
+    hábiles, igual que el legacy `indices.py`) para TAMAR/BADLAR.
+
+    Reusa los puntos en memoria → NO hace ninguna I/O nueva ni fetch al BCRA;
+    se puede llamar en cada refresh del riel (cada 15s) sin costo.
+
+    Cada item: {key, label, fmt, value, date, aplicable?}
+      fmt = 'pct' (el valor ya viene en %, formatear con ar_pct_pp) |
+            'num' (índice/$, formatear con ar_num).
+    """
+    series = ensure_loaded()["series"]
+
+    def _last(key: str) -> Optional[Tuple[str, float]]:
+        s = series.get(key)
+        return s["points"][-1] if s and s["points"] else None
+
+    def _tail_mean(key: str, n: int) -> Optional[float]:
+        s = series.get(key)
+        if not s or not s["points"]:
+            return None
+        vals = [v for _, v in s["points"][-n:]]
+        return sum(vals) / len(vals) if vals else None
+
+    def _ar_date(iso: str) -> str:
+        return f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]}" if iso and len(iso) >= 10 else iso
+
+    # (key del json, label, formato, ventana 'aplicable' o None)
+    specs = [
+        ("tamar", "TAMAR", "pct", 5),
+        ("badlar", "BADLAR", "pct", 5),
+        ("CER", "CER", "num", None),
+        ("UVA", "UVA", "num", None),
+        ("inflamom", "Inflación m/m", "pct", None),
+    ]
+    out: List[Dict[str, Any]] = []
+    for key, label, fmt, n in specs:
+        p = _last(key)
+        if not p:
+            continue
+        item: Dict[str, Any] = {"key": key.lower(), "label": label, "fmt": fmt,
+                                "value": p[1], "date": _ar_date(p[0])}
+        if n:
+            item["aplicable"] = _tail_mean(key, n)
+        out.append(item)
+    return out
+
+
 def series_points(key: str, days: Optional[int] = None,
                   desde: Optional[str] = None, hasta: Optional[str] = None) -> Dict[str, Any]:
     """Puntos de una serie. Si se pasan `desde`/`hasta` (ISO 'YYYY-MM-DD') se
