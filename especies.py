@@ -5,6 +5,130 @@ from utils import *
 
 a3500_override = refresh_a3500_in_rentafija()   # MAE → BYMA → serie → default
 
+#%% ════════════════ GUÍA DE CARGA DE ESPECIES · cheat-sheet ════════════════
+'''
+Cómo dar de alta cada instrumento y CÓMO IMPACTA en las clasificaciones de
+Curvas (backend/services/curves.py) y de Posiciones (backend/routes/posiciones.py).
+
+Cada bono es un dict de ~33 claves; casi todas son propias del papel (fechas,
+cupones, amortización). Las que DEFINEN la clasificación son pocas:
+
+  "Clasificación"        "Soberano" | "Sub-soberano" | "Corporativo <tipo>"
+  "Industria"            etiqueta de tipo (string EXACTO — ver abajo)
+  "Moneda"               "ARS" | "USD" (cable) | "USB" (MEP)
+  "Ajuste sobre Capital" None | "CER" | "CER PROYECTADO" | "UVA" | "A3500" | "A3500 PROYECTADO"
+  "Tipo Tasa Interés"    "FIJA" | "VARIABLE" | "VARIABLE_CAP"
+  "Index"                None | "TAMAR" | "BADLAR"
+  "Convención Base"      360 | 365     (afecta la convención TNA — ver tabla en CLAUDE.md)
+  "Step-up"              True | False
+
+⚠️ Los strings de "Industria" y "Clasificación" se matchean EXACTO (mayúsculas,
+   tildes y barras incluidas). Un typo manda el bono a otra curva o lo deja sin
+   clasificar.
+
+CÓMO SE USA CADA CAMPO
+  • CURVAS:
+      – SOBERANOS  → la curva se elige por "Industria" (a veces + Clasificación
+        "Soberano" y la cotización CLEAN/DIRTY).
+      – CORPORATIVOS (ON) → la curva se elige por "Clasificación" ("Corporativo …").
+        En un ON la "Industria" es el sector GICS (Energy, Financials, Utilities,
+        Materials, Communications…) y NO define la curva (es sólo informativa).
+  • POSICIONES (4 divisiones del resumen de composición):
+      – "Categoría"  = Dual(Industria) → CER/UVA(Ajuste) → USD-Linked(A3500)
+                       → USD/USB(Moneda) → ARS Fija/TAMAR/BADLAR/Step Up(Tasa).
+      – "Tasa"       = Dual(Industria) → Step Up → TAMAR/BADLAR/Variable(Tipo+Index)
+                       → Fija.
+      – "Calificación" = "Soberano" si Clasificación contiene "Soberano"; si no, la nota.
+      – "Clase de Activo" = viene del Excel de cartera, NO de especies.
+
+════════ SOBERANOS · la CURVA sale de "Industria" (Clasificación="Soberano") ════════
+
+Soberano USD — Global (ley NY/extranjera)
+    Industria "Soberano USD Ley Extranjera"  · Moneda USD · Ajuste None · FIJA · Base 360
+    Se carga 1 ficha CLEAN de referencia (GD30, sin sufijo) + 2 patas DIRTY que
+    cotizan: …C (cable, USD) y …D (MEP, USB). Ver "FX legs" en CLAUDE.md.
+    → Curva: globales (sólo las patas DIRTY).   → Pos: Categoría USD · Tasa Fija/Step Up.
+
+Soberano USB — Bonar (ley argentina)
+    base "Soberano USD Ley Argentina" + pata "Soberano USD Ley Argentina D"
+    Moneda USB · Ajuste None · FIJA · Step-up True · Base 360
+    → Curva: bonares (la pata …D, DIRTY).        → Pos: Categoría USB · Tasa Step Up.
+
+Soberano USB — Bopreal (BCRA, ley argentina)   ← distinto de un Bonar
+    base "Soberanos USD BCRA" + pata "Soberanos USD BCRA D" · Moneda USB · FIJA · Base 360
+    → Curva: bopreales.                          → Pos: Categoría USB · Tasa Fija.
+
+Soberano Dólar-Linked
+    Industria "Soberanos Dolar Linked" · Moneda ARS · Ajuste "A3500" · FIJA · Base 360
+    → Curva: dolarlinked.                        → Pos: Categoría USD-Linked · Tasa Fija.
+
+Soberano ARS Tasa Fija (BONCAP / BONTE)
+    Industria "Soberano ARS Tasa Fija" · Clasificación "Soberano" · Moneda ARS · Ajuste None · FIJA · Base 365
+    → Curva: lecap ("LECAP / Tasa Fija").        → Pos: Categoría ARS Fija · Tasa Fija.
+    (⚠ si Clasificación ≠ "Soberano" NO entra a la curva lecap.)
+
+Soberano Letra Zero-Cupón (LEDE / LECAP)
+    Industria "Soberano Letras Zero Cupón (Ledes y Letes)" · Moneda ARS · Ajuste None · FIJA · Base 360
+    → Curva: lecap.                              → Pos: Categoría ARS Fija · Tasa Fija.
+
+Soberano CER (BONCER / LECER)
+    Industria "Soberano Inflación" · Moneda ARS · Ajuste "CER" · FIJA · Base 360
+    → Curva: cer.                                → Pos: Categoría CER · Tasa Fija.
+    Variante proyectada (misma especie, ficha 'j'): Industria "Soberano Inflación
+    Proyectado" + Ajuste "CER PROYECTADO"  → Curva cerproy.
+
+Soberano ARS Tasa Variable — TAMAR
+    Industria "Soberano ARS TAMAR" · Moneda ARS · Ajuste None · VARIABLE_CAP · Index "TAMAR" · Base 360
+    → Curva: tamar.                              → Pos: Categoría ARS TAMAR · Tasa TAMAR.
+    (TAMAR puro/variable = "VARIABLE"; el soberano que capitaliza c/32d = "VARIABLE_CAP".)
+
+DUALES SOBERANOS — se cargan como DOS fichas (el motor toma el máximo de las patas):
+    • Dual Tasa fija / TAMAR   (TTS26, TTJ26, TTD26)
+        base   "Soberano ARS Dual Fija/Tamar"   · Ajuste None · FIJA
+        pata v "Soberano ARS Dual Tamar/Fija"   · Ajuste None · VARIABLE_CAP · Index TAMAR
+        → Curvas: dualfija (base) + dualtamar (pata 'v').
+        → Pos: Categoría y Tasa = "Dual Fija / TAMAR".
+    • Dual CER / TAMAR         (TXMD8/9, TXMJ0/8/9)
+        base   "Soberano ARS Dual CER/Tamar"             · Ajuste "CER"            · FIJA
+        proy   "Soberano ARS Dual CER/Tamar Proyectado"  · Ajuste "CER PROYECTADO" (ficha 'j')
+        pata v "Soberano ARS Dual Tamar/CER"             · Ajuste None · VARIABLE_CAP · Index TAMAR
+        → Curvas: dualcer (base) + dualtamar (pata 'v').
+        → Pos: Categoría y Tasa = "Dual CER / TAMAR".
+    Detección del dual en Posiciones = "Industria" contiene "Dual" y "Tamar"
+    (y "CER" → CER/TAMAR; si no → Fija/TAMAR). NO hay lista de tickers: un dual
+    nuevo entra solo con esa convención de nombre en "Industria".
+
+    • Dual Dólar-Linked / CER → NO soportado todavía. Hoy no hay curva ni
+      detección en Posiciones. Para sumarlo hace falta: (a) una "Industria"
+      nueva + su pata, (b) un bucket de curva en curves.py y (c) extender
+      _dual_label (hoy exige "Tamar"). Pedímelo y lo agrego.
+
+═══════ CORPORATIVOS (ON) y SUBSOBERANOS · la CURVA sale de "Clasificación" ═══════
+(En un ON la "Industria" es el sector GICS y es sólo informativa.)
+
+    ON ARS Tasa fija         Clasificación "Corporativo Tasa Fija"    · Ajuste None · FIJA            → corp_tasafija · Pos: ARS Fija / Fija
+    ON ARS Variable TAMAR    Clasificación "Corporativo TAMAR"        · Ajuste None · VARIABLE · TAMAR → corp_tamar    · Pos: ARS TAMAR / TAMAR
+    ON ARS Variable BADLAR   Clasificación "Corporativo BADLAR"       · Ajuste None · VARIABLE · BADLAR→ corp_badlar   · Pos: ARS BADLAR / BADLAR
+    ON ARS UVA               Clasificación "Corporativo UVA"          · Ajuste "UVA" · FIJA · Base 365 → corp_uva      · Pos: UVA / Fija
+    ON CER                   Clasificación "Corporativo UVA"          · Ajuste "CER" · FIJA           → corp_uva      · Pos: CER / Fija
+                             (no existe "Corporativo CER": CER y UVA comparten el bucket "Corp. UVA/CER")
+    ON Dólar-Linked          Clasificación "Corporativo Dolar Linked" · Moneda ARS · Ajuste "A3500"   → corp_dlk      · Pos: USD-Linked / Fija
+    ON USD hard-dollar       Clasificación "Corporativo Hard Dolar"     · Moneda USD · Base 360        → corp_hdcable  · Pos: USD / Fija
+       (ley ext, cable)        (cotiza CLEAN ref + pata …C DIRTY, igual que un global)
+    ON USB hard-dollar MEP   Clasificación "Corporativo Hard Dolar MEP" · Moneda USB · Base 365        → corp_hdmep    · Pos: USB / Fija
+       (ley local)
+
+    SUBSOBERANOS (provinciales): Clasificación "Sub-soberano". OJO: hoy NO caen
+    en ningún bucket de curva (las curvas soberanas piden Clasificación="Soberano"
+    y las corp piden "Corporativo …"). En Posiciones se clasifican igual por
+    Ajuste/Moneda/Tasa, y en "Calificación" muestran su nota (no "Soberano").
+
+CATEGORÍAS QUE PODRÍAN SUMARSE (no están hoy, requieren código):
+    • Dual Dólar-Linked / CER (ver arriba).
+    • Curvas de Subsoberanos por moneda/ajuste (hoy quedan fuera de Curvas).
+    • "Corporativo CER" propio (hoy comparte clasif y curva con UVA).
+'''
+
 #%% Overrides
 '''
 # ------Override A3500 hoy ------:
