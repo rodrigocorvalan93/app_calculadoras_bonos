@@ -9,6 +9,9 @@ Config (secrets.txt → os.environ vía OMSsecrets, igual que delta_especies):
   DELTA_CAFCI_PATH  → ruta completa a un .xlsx puntual, o
   DELTA_CAFCI_DIR   → carpeta; toma el .xlsx cuyo nombre contiene la fecha
                       AAAMMDD más nueva (acepta prefijos/sufijos).
+Si no se setea ninguna, se auto-descubre la carpeta 'Precios Cafci' al lado de
+las bases Delta ya configuradas (DELTA_BASES_DIR / histórico / especies) → en
+el layout normal del OneDrive del equipo anda sin tocar nada.
 """
 from __future__ import annotations
 
@@ -51,6 +54,60 @@ def _empty(error: Optional[str] = None) -> Dict[str, Any]:
     return {"loaded": False, "error": error, "path": None, "fecha": None, "fx": {}, "rows": [], "n": 0}
 
 
+def _latest_in_dir(d: str) -> Optional[str]:
+    """El .xlsx cuyo nombre contiene la fecha AAAMMDD más nueva dentro de `d`.
+
+    Acepta cualquier nombre que CONTENGA la fecha (20260605.xlsx,
+    'CAFCI 20260605.xlsx', vector_20260605.xlsx, …) y saltea los lock files
+    ~$ que crea Excel mientras el archivo está abierto.
+    """
+    if not os.path.isdir(d):
+        return None
+    cands = []
+    for fn in os.listdir(d):
+        if fn.startswith("~$") or not fn.lower().endswith((".xlsx", ".xls")):
+            continue
+        m = _DATE_RE.search(fn)
+        if m:
+            cands.append((m.group(1), os.path.join(d, fn)))
+    return max(cands)[1] if cands else None     # el de fecha (AAAMMDD) más reciente
+
+
+def _discover_dirs() -> List[str]:
+    """Carpetas candidatas a 'Precios Cafci', derivadas de las rutas Delta que
+    el usuario YA tiene configuradas (DELTA_BASES_DIR/Carteras, histórico,
+    especies). Así CAFCI anda sin setear DELTA_CAFCI_* si la carpeta es vecina
+    de las otras bases Delta — que es el layout normal del OneDrive del equipo.
+    """
+    roots: List[str] = []
+
+    def add_root(p: Optional[str], *, is_file: bool = False) -> None:
+        if not p:
+            return
+        p = os.path.expandvars(os.path.expanduser(p)).rstrip("\\/")
+        base = os.path.dirname(p) if is_file else p
+        for r in (base, os.path.dirname(base)):   # la carpeta y un nivel arriba
+            if r and r not in roots:
+                roots.append(r)
+
+    add_root(os.getenv("DELTA_BASES_DIR"))
+    add_root(os.getenv("DELTA_HISTORICO_DIR"))
+    add_root(os.getenv("DELTA_HISTORICO_PATH"), is_file=True)
+    add_root(os.getenv("DELTA_ESPECIES_PATH"), is_file=True)
+
+    out: List[str] = []
+    for root in roots:
+        try:
+            for name in os.listdir(root):
+                if "cafci" in name.lower():
+                    full = os.path.join(root, name)
+                    if os.path.isdir(full) and full not in out:
+                        out.append(full)
+        except OSError:                            # root inexistente / sin permiso
+            continue
+    return out
+
+
 def _resolve_path() -> Optional[str]:
     env = os.getenv("DELTA_CAFCI_PATH")
     if env:
@@ -59,27 +116,24 @@ def _resolve_path() -> Optional[str]:
             return env
     env_dir = os.getenv("DELTA_CAFCI_DIR")
     if env_dir:
-        env_dir = os.path.expandvars(os.path.expanduser(env_dir))
-        if os.path.isdir(env_dir):
-            cands = []
-            for fn in os.listdir(env_dir):
-                # Saltear lock files de Excel (~$AAAMMDD.xlsx mientras está abierto).
-                if fn.startswith("~$") or not fn.lower().endswith((".xlsx", ".xls")):
-                    continue
-                # Aceptar cualquier nombre que CONTENGA la fecha AAAMMDD:
-                # 20260605.xlsx, CAFCI 20260605.xlsx, vector_20260605.xlsx, …
-                m = _DATE_RE.search(fn)
-                if m:
-                    cands.append((m.group(1), os.path.join(env_dir, fn)))
-            if cands:
-                return max(cands)[1]          # el de fecha (AAAMMDD) más reciente
+        hit = _latest_in_dir(os.path.expandvars(os.path.expanduser(env_dir)))
+        if hit:
+            return hit
+    # Sin DELTA_CAFCI_* explícito: descubrir 'Precios Cafci' junto a las
+    # carpetas Delta ya configuradas (cero config para el caso normal).
+    for d in _discover_dirs():
+        hit = _latest_in_dir(d)
+        if hit:
+            return hit
     return None
 
 
 def _load() -> Dict[str, Any]:
     path = _resolve_path()
     if not path:
-        return _empty("No se encontró el Excel CAFCI (configurá DELTA_CAFCI_PATH o DELTA_CAFCI_DIR).")
+        return _empty("No se encontró el Excel CAFCI. Se buscó una carpeta 'Precios Cafci' "
+                      "junto a tus bases Delta y no apareció — configurá DELTA_CAFCI_DIR "
+                      "(carpeta) o DELTA_CAFCI_PATH (archivo) en secrets.txt.")
     try:
         import pandas as pd
         xl = pd.ExcelFile(path)
