@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}CAFCI{% endblock %}
+{% block tab_cafci %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>CAFCI · Vector de precios</h1>
+    <p class="muted">Valuación de activos de la Cámara Argentina de FCI (t-1 hábil). Buscá por ISIN, ticker BYMA o código CAFCI — se muestran los matches (el vector tiene miles de filas).</p>
+  </header>
+
+  {% if status and not status.loaded %}
+    <div class="alert">CAFCI no disponible: {{ status.error }}</div>
+  {% else %}
+  <div class="mae-strip" style="margin-bottom:12px">
+    <span class="mae-tag">CAFCI{% if status.fecha %} {{ status.fecha[6:8] }}/{{ status.fecha[4:6] }}/{{ status.fecha[0:4] }}{% endif %}</span>
+    {% if status.fx %}{% for k, v in status.fx.items() %}<span>{{ k }} <b>{{ v | ar_num(2) }}</b></span>{% endfor %}{% endif %}
+    <span class="muted">· {{ status.n }} activos</span>
+  </div>
+  {% endif %}
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <label class="field field-bond">
+          <span>Buscar <small class="muted">ISIN / BYMA / CAFCI</small></span>
+          <input type="search" name="q" value="{{ q }}" placeholder="ej. AL30 / AR0…" autocomplete="off"
+                 hx-get="/cafci/table" hx-trigger="keyup changed delay:250ms, change" hx-target="#cafci-table" hx-swap="innerHTML">
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div id="cafci-table">
+    {% include "partials/cafci_table.html" %}
+  </div>
+</section>
+{% endblock %}

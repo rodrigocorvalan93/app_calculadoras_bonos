@@ -1,0 +1,38 @@
+{% if not rows %}
+  <div class="alert">{% if q %}Sin resultados para "{{ q }}".{% else %}Sin activos CAFCI cargados.{% endif %}</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>Vector CAFCI</span>
+    <span class="card-title-aux">{{ rows | length }}{% if total > rows | length %} de {{ total }}{% endif %} activos{% if total > rows | length %} · refiná la búsqueda{% endif %}</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr>
+            <th style="text-align:left">BYMA</th><th style="text-align:left">ISIN</th><th>Mon.</th>
+            <th>Cdo.</th><th>Var%</th><th>Mod.Dur</th><th>TIR</th><th>TNA</th><th>Spread</th><th>Z-Spread</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.byma or r.cafci or "—" }}</td>
+              <td style="text-align:left;color:var(--text-muted);font-size:11px">{{ r.isin or "—" }}</td>
+              <td>{{ r.moneda or "—" }}</td>
+              <td style="font-weight:600">{{ r.cdo | ar_num(2) }}</td>
+              <td class="{{ 'var-up' if (r.var_cdo is number and r.var_cdo > 0) else ('var-down' if (r.var_cdo is number and r.var_cdo < 0) else '') }}">{{ r.var_cdo | ar_num(2) }}{% if r.var_cdo is number %}%{% endif %}</td>
+              <td>{{ r.mod_dur | ar_num(2) }}</td>
+              <td style="font-weight:600">{{ r.tir | ar_num(2) }}{% if r.tir is number %}%{% endif %}</td>
+              <td>{{ r.tna | ar_num(2) }}{% if r.tna is number %}%{% endif %}</td>
+              <td>{{ r.spread | ar_num(2) }}{% if r.spread is number %}%{% endif %}</td>
+              <td>{{ r.zspread | ar_num(2) }}{% if r.zspread is number %}%{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
