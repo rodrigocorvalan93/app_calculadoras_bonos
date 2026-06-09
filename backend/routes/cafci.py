@@ -27,7 +27,9 @@ async def _ctx(q: str) -> Dict[str, Any]:
 
 
 @router.get("/cafci", response_class=HTMLResponse)
-async def cafci_page(request: Request, q: str = "") -> HTMLResponse:
+async def cafci_page(request: Request, q: str = "", refresh: bool = False) -> HTMLResponse:
+    if refresh:                                  # botón "Actualizar" → relee el Excel
+        await asyncio.get_running_loop().run_in_executor(None, cafci.refresh)
     return _render(request, "cafci.html", **(await _ctx(q)))
 
 

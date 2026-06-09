@@ -14,12 +14,18 @@ import math
 import os
 import re
 import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
+_last_check: float = 0.0
+# El archivo es diario (AAAMMDD.xlsx). NO releemos el Excel en cada request: sólo
+# re-escaneamos la carpeta cada _RECHECK_SEC y, si apareció uno más nuevo, lo
+# cargamos (una vez por día en la práctica). El read pesado va en threadpool.
+_RECHECK_SEC = 300.0
 
 # (columna en el Excel, key de salida)
 _FIELDS = [
@@ -111,18 +117,29 @@ def _load() -> Dict[str, Any]:
 
 
 def ensure_loaded() -> Dict[str, Any]:
-    global _cache
-    if _cache is None:
-        with _lock:
-            if _cache is None:
-                _cache = _load()
-    return _cache
+    global _cache, _last_check
+    c = _cache
+    now = time.time()
+    # Fast path: cache caliente y chequeado hace poco → sin tocar disco.
+    if c is not None and (now - _last_check) < _RECHECK_SEC:
+        return c
+    with _lock:
+        if _cache is not None and (time.time() - _last_check) < _RECHECK_SEC:
+            return _cache
+        _last_check = time.time()
+        latest = _resolve_path()
+        # Recargar sólo si es la 1ª vez o apareció un archivo más nuevo (otro día).
+        if _cache is None or (latest and latest != _cache.get("path")):
+            _cache = _load()
+        return _cache
 
 
 def refresh() -> Dict[str, Any]:
-    global _cache
+    """Refresh manual (botón): relee el Excel ya mismo."""
+    global _cache, _last_check
     with _lock:
         _cache = _load()
+        _last_check = time.time()
     return _cache
 
 

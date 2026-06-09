@@ -27,6 +27,8 @@
           <input type="search" name="q" value="{{ q }}" placeholder="ej. AL30 / AR0…" autocomplete="off"
                  hx-get="/cafci/table" hx-trigger="keyup changed delay:250ms, change" hx-target="#cafci-table" hx-swap="innerHTML">
         </label>
+        <a class="btn-primary" style="align-self:flex-end" href="/cafci?refresh=1{% if q %}&q={{ q | urlencode }}{% endif %}"
+           title="Releer el Excel del día (se actualiza solo 1×/día; esto fuerza ya)">↻ Actualizar</a>
       </div>
     </div>
   </div>
