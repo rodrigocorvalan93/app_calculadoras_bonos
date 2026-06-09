@@ -73,11 +73,22 @@ def _latest_in_dir(d: str) -> Optional[str]:
     return max(cands)[1] if cands else None     # el de fecha (AAAMMDD) más reciente
 
 
+# Profundidad máxima al buscar una carpeta '*cafci*' bajo las bases Delta.
+# El layout real es …\Inversiones - Documentos\{Delta Bases, Equipo RF\Precios
+# Cafci}: CAFCI es una rama vecina, un nivel más abajo → hace falta depth 2.
+_DISCOVER_DEPTH = 2
+
+
 def _discover_dirs() -> List[str]:
     """Carpetas candidatas a 'Precios Cafci', derivadas de las rutas Delta que
     el usuario YA tiene configuradas (DELTA_BASES_DIR/Carteras, histórico,
-    especies). Así CAFCI anda sin setear DELTA_CAFCI_* si la carpeta es vecina
-    de las otras bases Delta — que es el layout normal del OneDrive del equipo.
+    especies). Así CAFCI anda sin setear DELTA_CAFCI_* si la carpeta cuelga del
+    mismo árbol de OneDrive del equipo — aunque sea una rama vecina.
+
+    Búsqueda acotada: desde cada raíz (la carpeta y un nivel arriba) baja hasta
+    `_DISCOVER_DEPTH` niveles buscando una subcarpeta cuyo nombre contenga
+    'cafci', con early-exit al primer match. Corre como mucho 1×/`_RECHECK_SEC`
+    y fuera del path caliente, así que no afecta el target de 50 ms.
     """
     roots: List[str] = []
 
@@ -95,17 +106,35 @@ def _discover_dirs() -> List[str]:
     add_root(os.getenv("DELTA_HISTORICO_PATH"), is_file=True)
     add_root(os.getenv("DELTA_ESPECIES_PATH"), is_file=True)
 
-    out: List[str] = []
-    for root in roots:
+    found: List[str] = []
+
+    def scan(d: str, depth: int) -> None:
         try:
-            for name in os.listdir(root):
-                if "cafci" in name.lower():
-                    full = os.path.join(root, name)
-                    if os.path.isdir(full) and full not in out:
-                        out.append(full)
-        except OSError:                            # root inexistente / sin permiso
-            continue
-    return out
+            entries = sorted(os.listdir(d))
+        except OSError:                            # inexistente / sin permiso
+            return
+        subdirs: List[str] = []
+        for name in entries:
+            if name.startswith((".", "$", "~")):   # ignorar ocultas / del sistema
+                continue
+            full = os.path.join(d, name)
+            if not os.path.isdir(full):
+                continue
+            if "cafci" in name.lower():
+                found.append(full)
+                return                             # match en este nivel → listo
+            subdirs.append(full)
+        if depth > 0:
+            for sd in subdirs:
+                scan(sd, depth - 1)
+                if found:
+                    return
+
+    for root in roots:
+        scan(root, _DISCOVER_DEPTH)
+        if found:
+            break
+    return found
 
 
 def _resolve_path() -> Optional[str]:

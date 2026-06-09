@@ -72,6 +72,32 @@ def test_autodiscovery_junto_a_bases_delta(tmp_path) -> None:
                 os.environ[k] = v
 
 
+def test_autodiscovery_layout_real(tmp_path) -> None:
+    """Layout real del equipo: 'Equipo RF\\Precios Cafci' es una rama VECINA de
+    'Delta Bases' (un nivel más abajo), no una subcarpeta. Discovery depth-2 la
+    encuentra desde DELTA_HISTORICO_DIR sin setear DELTA_CAFCI_*."""
+    saved = {k: os.environ.get(k) for k in _CAFCI_ENV}
+    for k in _CAFCI_ENV:
+        os.environ.pop(k, None)
+    try:
+        docs = tmp_path / "Inversiones - Documentos"
+        (docs / "Delta Bases" / "Carteras").mkdir(parents=True)
+        (docs / "Codes" / "app").mkdir(parents=True)              # ruido
+        cafci_dir = docs / "Equipo RF" / "Precios Cafci"
+        cafci_dir.mkdir(parents=True)
+        (cafci_dir / "20260608.xlsx").write_bytes(b"")
+        # Igual que el secrets.txt real: histórico apunta a 'Delta Bases'.
+        os.environ["DELTA_HISTORICO_DIR"] = str(docs / "Delta Bases")
+        got = cafci._resolve_path()
+        assert got == str(cafci_dir / "20260608.xlsx")
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def test_search() -> None:
     saved = cafci._cache
     cafci._cache = dict(_FAKE)
