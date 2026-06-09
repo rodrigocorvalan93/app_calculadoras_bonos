@@ -1,0 +1,46 @@
+{% if not rows %}
+  <div class="alert">{% if status and status.available %}Sin emisores para el filtro elegido.{% else %}Sin datos de créditos.{% endif %}</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>Scoring crediticio</span>
+    <span class="card-title-aux">{{ rows | length }} emisores · click para ver ONs</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr>
+            <th style="text-align:left">Emisor</th><th style="text-align:left">Ticker</th><th style="text-align:left">Sector</th>
+            <th>Score</th><th>Solv.</th><th>Liq.</th>
+            <th>ND/EBITDA</th><th>EBITDA/Int</th><th>Curr.Ratio</th><th>Pasivo/PN</th>
+            <th>DFN USD M</th><th>EBITDA USD M</th><th>ONs</th><th>Last Q</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            {% set sc = r["Score"] %}
+            <tr style="cursor:pointer" title="Ver ONs del emisor"
+                hx-get="/creditos/detail?ticker={{ r['Ticker'] | urlencode }}" hx-target="#cred-detail" hx-swap="innerHTML">
+              <td style="text-align:left;font-size:11.5px">{{ r["Emisor"] }}</td>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r["Ticker"] }}</td>
+              <td style="text-align:left;color:var(--text-muted);font-size:11px">{{ r["Sector"] }}</td>
+              <td class="{{ 'var-up' if (sc is number and sc >= 4) else ('var-down' if (sc is number and sc < 2.5) else 'px-flat') }}" style="font-weight:700">{{ sc | ar_num(1) }}</td>
+              <td>{{ r["Solvencia"] | ar_num(1) }}</td>
+              <td>{{ r["Liquidez"] | ar_num(1) }}</td>
+              <td>{{ r["Net Debt/EBITDA"] | ar_num(2) }}</td>
+              <td>{{ r["EBITDA/Interest"] | ar_num(2) }}</td>
+              <td>{{ r["Current Ratio"] | ar_num(2) }}</td>
+              <td>{{ r["Pasivo/PN"] | ar_num(2) }}</td>
+              <td>{{ r["DFN (USD M)"] | ar_num(0) }}</td>
+              <td>{{ r["EBITDA (USD M)"] | ar_num(0) }}</td>
+              <td>{{ r["ONs cargadas"] | ar_int }}</td>
+              <td style="color:var(--text-muted);font-size:11px">{{ r["Last Q"] }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
