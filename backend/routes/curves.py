@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.locale_ar import fmt_pct
 from backend.services import bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
@@ -264,10 +264,21 @@ async def _rows_for(
     # native / USD / USB legs price straight off their own ticker.
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
     loop = asyncio.get_running_loop()
-    raw: list[dict | None] = await asyncio.gather(
-        *(loop.run_in_executor(_row_pool, _row_for_code, code, plazo, leg, fx, book, fuente) for code in codes)
+
+    # Construimos las filas en chunks (round-robin) en vez de 1 tarea por bono:
+    # para curvas anchas (corp_hdmep ~131) eso evitaba ~130 dispatches al pool en
+    # cada request (warm p95 ~120 ms). Con N_WORKERS chunks secuenciales se
+    # mantiene el paralelismo del path frío con una fracción del overhead.
+    n_workers = max(1, getattr(_row_pool, "_max_workers", 8))
+
+    def _build_chunk(chunk: list[str]) -> list[dict | None]:
+        return [_row_for_code(c, plazo, leg, fx, book, fuente) for c in chunk]
+
+    chunks = [codes[i::n_workers] for i in range(n_workers)]
+    parts: list[list[dict | None]] = await asyncio.gather(
+        *(loop.run_in_executor(_row_pool, _build_chunk, ch) for ch in chunks if ch)
     )
-    rows = [r for r in raw if r is not None]
+    rows = [r for part in parts for r in part if r is not None]
     quoting = sum(1 for r in rows if _has_quote(r))
     store_empty = quoting == 0
 
@@ -729,13 +740,24 @@ def _chart_data(rows: list[dict], width: int = 940, height: int = 480) -> dict:
         points.append({"code": code, "cx": sx(d), "cy": sy(t), "dur": d, "tirea": t, "color": color})
     points.sort(key=lambda p: p["cx"])
 
+    # Overlay de la regresión Nelson-Siegel-Svensson (Duration → TIREA), si hay
+    # puntos suficientes. Se mapea con el mismo sx/sy que el scatter.
+    nss_path = None
+    try:
+        from backend.services import nss as nss_svc
+        sm = nss_svc.sample(xs, ys)
+        if sm:
+            nss_path = "M " + " L ".join(f"{sx(x)},{sy(y)}" for x, y in sm)
+    except Exception:  # noqa: BLE001
+        nss_path = None
+
     def ticks(lo, hi, n=5):
         return [lo + (hi - lo) / n * i for i in range(n + 1)]
 
     xticks = [{"x": sx(v), "v": round(v, 1)} for v in ticks(xmin, xmax)]
     yticks = [{"y": sy(v), "v": round(v, 1)} for v in ticks(ymin, ymax)]
     return {
-        "points": points, "xticks": xticks, "yticks": yticks,
+        "points": points, "xticks": xticks, "yticks": yticks, "nss_path": nss_path,
         "width": width, "height": height, "ml": ml, "mt": mt, "pw": pw, "ph": ph,
         "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph, "n": len(pts),
     }
@@ -782,3 +804,78 @@ async def graficos_svg(
         chart=chart, selected_def=curves.curve_def(curve),
         plazo=plazo, only_quoting=only_quoting, leg=leg,
     )
+
+
+@graficos_router.get("/graficos/estimate", response_class=HTMLResponse)
+async def graficos_estimate(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+    duration: str = "",
+) -> HTMLResponse:
+    """Estima TIR / TEM / TNAs a una `duration` dada con la regresión NSS de la
+    curva (Duration → TIREA). El fit corre en threadpool (CPU, scipy)."""
+    from backend.services import nss as nss_svc
+
+    try:
+        d = float(str(duration).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        d = None
+    est = None
+    if d is not None:
+        rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
+        pts = [(r["duration"], r["tirea"] * 100.0) for r in rows
+               if r.get("duration") is not None and r["duration"] == r["duration"]
+               and r.get("tirea") is not None and r["tirea"] == r["tirea"]]
+        if len(pts) >= 4:
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            loop = asyncio.get_running_loop()
+            est = await loop.run_in_executor(None, nss_svc.estimate, d, xs, ys)
+    return _render(request, "partials/graficos_estimate.html",
+                   est=est, duration=duration, n=len(rows) if d is not None else 0)
+
+
+@graficos_router.get("/graficos/data")
+async def graficos_data(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+) -> JSONResponse:
+    """Datos JSON para el chart de Gráficos (uPlot): scatter ARS/USD por leg +
+    la curva NSS evaluada en un grid fino. Eje x = Duration (años)."""
+    import numpy as np
+
+    from backend.services import nss as nss_svc
+
+    rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
+    pts = [(r["code"], float(r["duration"]), float(r["tirea"]) * 100.0, (r.get("moneda") or "").upper())
+           for r in rows
+           if r.get("duration") is not None and r["duration"] == r["duration"]
+           and r.get("tirea") is not None and r["tirea"] == r["tirea"]]
+    if not pts:
+        return JSONResponse({"n": 0, "xs": [], "ars": [], "usd": [], "nss": [], "codes": []})
+
+    bond_x = sorted({p[1] for p in pts})
+    xs_set = set(bond_x)
+    if len(pts) >= 4 and bond_x[-1] > bond_x[0]:
+        xs_set |= set(float(v) for v in np.linspace(bond_x[0], bond_x[-1], 80))
+    xs = sorted(xs_set)
+    ars_at: Dict[float, float] = {}
+    usd_at: Dict[float, float] = {}
+    code_at: Dict[float, str] = {}
+    for code, d, t, mon in pts:
+        (usd_at if mon in ("USD", "USB") else ars_at)[d] = t
+        code_at[d] = code
+    nss_y = nss_svc.eval_at([p[1] for p in pts], [p[2] for p in pts], xs) if len(pts) >= 4 else None
+    return JSONResponse({
+        "n": len(pts), "xs": xs,
+        "ars": [ars_at.get(x) for x in xs],
+        "usd": [usd_at.get(x) for x in xs],
+        "codes": [code_at.get(x) for x in xs],
+        "nss": nss_y or [],
+    })

@@ -28,15 +28,13 @@
         <div class="row-fields">
           <label class="field">
             <span>Variable</span>
-            <select name="serie" hx-get="/historicos/svg" hx-trigger="change" hx-target="#hist-svg" hx-swap="innerHTML"
-                    hx-include="#hm-ctrls [name=rango], #hm-ctrls [name=desde], #hm-ctrls [name=hasta]">
+            <select name="serie">
               {% for s in series %}<option value="{{ s.key }}" {% if s.key == selected %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
             </select>
           </label>
           <label class="field">
             <span>Rango</span>
-            <select name="rango" hx-get="/historicos/svg" hx-trigger="change" hx-target="#hist-svg" hx-swap="innerHTML"
-                    hx-include="#hm-ctrls [name=serie], #hm-ctrls [name=desde], #hm-ctrls [name=hasta]">
+            <select name="rango">
               {% for r, lbl in [("1m","1M"),("3m","3M"),("6m","6M"),("1a","1A"),("3a","3A"),("5a","5A"),("todo","Todo")] %}
                 <option value="{{ r }}" {% if r == rango %}selected{% endif %}>{{ lbl }}</option>
               {% endfor %}
@@ -44,21 +42,19 @@
           </label>
           <label class="field">
             <span>Desde</span>
-            <input type="date" name="desde" value="{{ desde }}" hx-get="/historicos/svg" hx-trigger="change" hx-target="#hist-svg" hx-swap="innerHTML"
-                   hx-include="#hm-ctrls [name=serie], #hm-ctrls [name=rango], #hm-ctrls [name=hasta]">
+            <input type="date" name="desde" value="{{ desde }}">
           </label>
           <label class="field">
             <span>Hasta</span>
-            <input type="date" name="hasta" value="{{ hasta }}" hx-get="/historicos/svg" hx-trigger="change" hx-target="#hist-svg" hx-swap="innerHTML"
-                   hx-include="#hm-ctrls [name=serie], #hm-ctrls [name=rango], #hm-ctrls [name=desde]">
+            <input type="date" name="hasta" value="{{ hasta }}">
           </label>
           <a class="btn-primary" style="align-self:flex-end" href="/historicos?refresh=1&serie={{ selected }}&rango={{ rango }}">↻ Actualizar</a>
         </div>
-        <p class="muted" style="font-size:11px;margin-top:6px">Desde/Hasta tienen prioridad sobre el preset de Rango. Vaciá las fechas para volver a los presets.</p>
+        <p class="muted" style="font-size:11px;margin-top:6px">Desde/Hasta tienen prioridad sobre el preset de Rango. Interactivo (uPlot): zoom arrastrando, doble click reset.</p>
       </div>
     </div>
-    <div id="hist-svg">
-      {% include "partials/historico_svg.html" %}
+    <div id="hist-macro-uplot" style="min-height:300px">
+      <p class="muted" style="padding:10px">Cargando gráfico…</p>
     </div>
   </div>
 

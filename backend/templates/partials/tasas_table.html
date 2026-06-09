@@ -40,6 +40,31 @@
   </div>
 
   <div class="dolar-tbl">
+    <div class="dolar-tbl-h">🔁 Cauciones BYMA US$ · por plazo</div>
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr><th style="text-align:left">Plazo</th><th>Tasa</th><th>Bid</th><th>Offer</th><th>Var</th><th>Volumen</th></tr>
+        </thead>
+        <tbody>
+          {% for r in byma_cauciones_usd %}
+            <tr>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}</td>
+              <td style="font-weight:600">{{ r.tasa | ar_num(2) }}</td>
+              <td class="{{ fx.vcls(r.var) }}">{{ r.bid | ar_num(2) }}</td>
+              <td>{{ r.offer | ar_num(2) }}</td>
+              <td>{{ r.var | ar_num(2) }}</td>
+              <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="muted" style="text-align:center">Sin caución BYMA US$ en el store.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="dolar-tbl">
     <div class="dolar-tbl-h">🔁 Cauciones MAE · por plazo</div>
     <div class="table-scroll">
       <table class="cashflows curve-table mercado-table">

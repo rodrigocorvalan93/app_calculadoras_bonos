@@ -203,19 +203,28 @@ def _extract_ust(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             last = _pos(r.get("precioUltimo"))
             if last is None:
                 continue
-            var = r.get("variacion")
+            # 'variacion' de MAE viene como NÚMERO en % (0,28 = 0,28%) — es lo que
+            # muestra A3 y el dato confiable. El cierre previo se DERIVA de ahí:
+            # close = last / (1 + var). OJO: precioCierreAnterior NO es el cierre
+            # real del spot SIOPEL (suele venir el A3500, ~1410 vs ~1426 real), así
+            # que daba la variación mal (1,40% en vez de 0,28%).
             try:
-                var = float(var)
+                vfrac = float(r.get("variacion")) / 100.0
             except (TypeError, ValueError):
-                var = None
-            close = (last / (1.0 + var)) if (var is not None and (1.0 + var) != 0) else None
+                vfrac = None
+            if vfrac is not None and (1.0 + vfrac) > 0:
+                var_pct = vfrac
+                close = last / (1.0 + vfrac)
+            else:                                   # sin variacion → fallback al campo de cierre
+                close = _pos(r.get("precioCierreAnterior")) or _pos(r.get("cierreAyer"))
+                var_pct = _var(last, close)
             best = {
                 "last": last,
                 "bid": _pos(r.get("precioCompra")),
                 "offer": _pos(r.get("precioVenta")),
-                "var_pct": var,
+                "var_pct": var_pct,
                 "close": close,
-                "volume": _pos(r.get("volumenOperado")),
+                "volume": _pos(r.get("volumenOperado")) or _pos(r.get("volumenAcumulado")),
                 "hora": r.get("horaUltima"),
                 "plazo": r.get("plazo"),
             }

@@ -108,6 +108,12 @@ def _warm_code(code: str, plazo: str) -> bool:
         return False
     try:
         pricing.metrics_for_market_price(code, snap.last)
+        # Mercado (book) además calcula la TIR de bid y offer. Calentarlas evita
+        # que, en polling sostenido, el vencimiento del TTL dispare un recálculo
+        # masivo de la curva ancha en una sola request (los spikes p99).
+        for px in (snap.bid, snap.offer):
+            if px is not None and px != snap.last:
+                pricing.metrics_for_market_price(code, px)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.debug("[warmup] warm %s failed: %s", code, exc)

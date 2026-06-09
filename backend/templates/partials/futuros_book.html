@@ -1,0 +1,36 @@
+{% if not snap %}
+  <div class="alert" style="margin-top:14px">Sin profundidad para <strong>{{ code }}</strong> (¿no operó o broker offline?).</div>
+{% else %}
+<div class="card" style="margin-top:14px">
+  <div class="card-title">
+    <span>Profundidad · {{ label }} <span class="muted" style="font-size:11px">{{ code }}</span></span>
+    <span class="card-title-aux">
+      {% if dias %}{{ dias }}d · {% endif %}Last <b>{{ snap.last | ar_num(2) }}</b>{% if tna_last is not none %} · TNA impl {{ tna_last | ar_pct(2) }}{% endif %} · spot {{ spot | ar_num(2) }}
+    </span>
+  </div>
+  <div class="card-body">
+    <div class="dolar-tables">
+      <div class="dolar-tbl">
+        <div class="dolar-tbl-h">Compras (bids)</div>
+        <div class="table-scroll"><table class="cashflows curve-table mercado-table">
+          <thead><tr><th>Precio</th><th>Size</th><th>TNA impl</th></tr></thead>
+          <tbody>
+            {% for l in bids %}<tr><td style="color:var(--accent);font-weight:600">{{ l.price | ar_num(2) }}</td><td>{{ l.size | ar_int }}</td><td>{{ l.tna | ar_pct(2) }}</td></tr>
+            {% else %}<tr><td colspan="3" class="muted" style="text-align:center">— sin puntas</td></tr>{% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+      <div class="dolar-tbl">
+        <div class="dolar-tbl-h">Ventas (offers)</div>
+        <div class="table-scroll"><table class="cashflows curve-table mercado-table">
+          <thead><tr><th>Precio</th><th>Size</th><th>TNA impl</th></tr></thead>
+          <tbody>
+            {% for l in offers %}<tr><td style="color:var(--accent);font-weight:600">{{ l.price | ar_num(2) }}</td><td>{{ l.size | ar_int }}</td><td>{{ l.tna | ar_pct(2) }}</td></tr>
+            {% else %}<tr><td colspan="3" class="muted" style="text-align:center">— sin puntas</td></tr>{% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

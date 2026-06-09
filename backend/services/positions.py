@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import threading
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("backend.positions")
@@ -199,14 +200,26 @@ def _fondo_names() -> Dict[int, str]:
 
 
 # ── carga ──────────────────────────────────────────────────────────────────
+def _file_asof(path: Optional[str]) -> Optional[str]:
+    """Fecha/hora de última modificación del archivo → 'DD/MM/AAAA HH:MM'
+    (proxy de 'última cartera', no hay columna de fecha en la composición)."""
+    if not path:
+        return None
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d/%m/%Y %H:%M")
+    except OSError:
+        return None
+
+
 def _load() -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "loaded": False, "error": None, "holdings": [], "pn": {}, "fondos": {},
-        "paths": {},
+        "paths": {}, "asof": None,
     }
     comp_path = _resolve(_COMPOSICION_FILE, "DELTA_COMPOSICION_PATH")
     pn_path = _resolve(_PN_FILE, "DELTA_PN_PATH")
     out["paths"] = {"composicion": comp_path, "pn": pn_path}
+    out["asof"] = _file_asof(comp_path)
     if comp_path is None:
         out["error"] = ("No se encontró Delta_Composicion.xlsx — configurá "
                         "DELTA_BASES_DIR o DELTA_COMPOSICION_PATH en secrets.txt.")
@@ -302,7 +315,8 @@ def refresh() -> Dict[str, Any]:
 def status() -> Dict[str, Any]:
     c = ensure_loaded()
     return {"loaded": c["loaded"], "error": c["error"], "paths": c["paths"],
-            "n_holdings": len(c["holdings"]), "n_fondos_pn": len(c["pn"])}
+            "n_holdings": len(c["holdings"]), "n_fondos_pn": len(c["pn"]),
+            "asof": c.get("asof")}
 
 
 def fondo_label(cod: int) -> str:

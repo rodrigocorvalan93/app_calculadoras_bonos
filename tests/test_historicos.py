@@ -47,8 +47,12 @@ async def test_macro_custom_range() -> None:
     series = historico.series_list()
     key = series[0]["key"] if series else "a3500"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        r = await ac.get(f"/historicos/svg?serie={key}&desde=2025-01-01&hasta=2025-06-01")
-    assert r.status_code == 200
+        page = await ac.get("/historicos")
+        data = await ac.get(f"/historicos/data?serie={key}&desde=2025-01-01&hasta=2025-06-01")
+    assert page.status_code == 200 and 'id="hist-macro-uplot"' in page.text
+    assert data.status_code == 200
+    j = data.json()
+    assert "x" in j and "y" in j and len(j["x"]) == len(j["y"])
 
 
 @pytest.mark.asyncio
@@ -60,13 +64,18 @@ async def test_curva_history_view() -> None:
     ck, codes, days = _inject_synthetic()
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            # partial: controles + contenedor uPlot (el chart se dibuja client-side)
             r = await ac.get(f"/historicos/curva?curve={ck}&metric=TIREA")
-            rp = await ac.get(f"/historicos/curva?curve={ck}&metric=Paridad&desde={days[5]}&hasta={days[15]}")
+            # data: JSON multilínea para uPlot
+            jd = await ac.get(f"/historicos/curva/data?curve={ck}&metric=TIREA")
+            jp = await ac.get(f"/historicos/curva/data?curve={ck}&metric=Paridad&desde={days[5]}&hasta={days[15]}")
         assert r.status_code == 200
-        assert "<path" in r.text and "bps" in r.text          # líneas + delta en bps
-        assert "Prom" in r.text and "Mín" in r.text            # bandas de referencia
-        assert rp.status_code == 200 and "pp" in rp.text       # paridad → delta en pp
-        # service: una línea por código, ordenadas por último valor
+        assert 'id="hist-curva-uplot"' in r.text and 'id="hc-ctrls"' in r.text
+        j = jd.json()
+        assert j["loaded"] and len(j["series"]) == len(codes)        # una serie por bono
+        assert len(j["x"]) and j["bands"] and j["bands"]["mean"] is not None
+        assert all(len(s["y"]) == len(j["x"]) for s in j["series"])  # alineadas a la unión de fechas
+        assert jp.status_code == 200 and jp.json()["loaded"]
         cs = historico_byma.curve_series(ck, "TIREA")
         assert cs["loaded"] and len(cs["lines"]) == len(codes)
     finally:

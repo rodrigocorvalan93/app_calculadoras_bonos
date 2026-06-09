@@ -51,14 +51,16 @@ CURVES: List[CurveDef] = [
 # Aggregate curves are unions of other curves. They show up as
 # `<curve_key>` whose codes = sorted union of the listed sub-keys.
 AGGREGATES: Dict[str, List[str]] = {
-    "todos_ars_proyectado": ["cerproy", "tamar", "lecap"],
+    # Todos los ARS por tipo de ajuste (proyectados): TAMAR + CER Proyectado +
+    # Tasa Fija, incluyendo los duales en su bucket (dual TAMAR/CER/Fija).
+    "todos_ars_proyectado": ["cerproy", "tamar", "lecap", "dualfija", "dualtamar", "dualcer"],
 }
 
 
-# Curve key → calc-code suffix. Same table as OMSweb_app.CURVE_EVAL_SUFFIX
-# so the universe lookup matches the legacy bond instances.
+# Curve key → calc-code suffix para derivar la variante desde el código BASE.
+# Sólo dualtamar lo necesita (TTD26 → TTD26v); cerproy NO va acá porque la
+# industria "…Proyectado" ya devuelve los códigos con 'j' (ver build_curve_codes).
 CURVE_EVAL_SUFFIX: Dict[str, str] = {
-    "cerproy": "j",
     "dualtamar": "v",
 }
 
@@ -135,8 +137,11 @@ def build_curve_codes() -> Dict[str, List[str]]:
 
     dolarlinked = sorted({c for c, _, _ in _all("Soberanos Dolar Linked")})
 
+    # Los códigos de la industria "…Proyectado" ya vienen con la 'j' (TX26j),
+    # así que NO se les aplica sufijo — antes salían "TX26jj", que no existe en
+    # el universo y dejaba la curva CER Proyectado vacía.
     cerproy = sorted({
-        _apply_curve_suffix("cerproy", c)
+        c
         for c, clas, _ in _all("Soberano Inflación Proyectado")
         if clas == "Soberano"
     })

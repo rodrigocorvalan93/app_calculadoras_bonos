@@ -1008,6 +1008,9 @@ if __name__ == '__main__':
 #     tamar_tea       = 0.2532,   # TEA actual de TAMAR
 #     df_futuros      = futuros_minorista,
 #     vcp_data_path   = os.getenv("VCP_DATA_PATH"),
+#     tamar_proy_nom  = {'TTJ26': 0.222, 'M31G6': 0.215, 'TTS26': 0.216, 'TTD26': 0.225},
+#     tamar_proy_real = {'TTJ26': 0.050, 'M31G6': 0.045, 'TTS26': 0.040, 'TTD26': 0.038},
+
 # )
 
 

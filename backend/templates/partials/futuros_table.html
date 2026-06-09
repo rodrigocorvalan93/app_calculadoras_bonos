@@ -1,0 +1,113 @@
+{% import "partials/_fx_macros.html" as fx %}
+<div class="mae-strip" style="margin-bottom:12px">
+  <span class="mae-tag">Spot A3500{% if spot_override %} (override){% endif %}</span>
+  <span><b>{{ spot | ar_num(2) if spot is not none else "—" }}</b></span>
+  {% if near %}
+    <span>· más cercano <b>{{ near.label }}</b> ({{ near.dias }}d): TNA impl
+      <b class="{{ 'px-up' if (near.tna and near.tna > 0) else '' }}">{{ near.tna | ar_pct(2) }}</b>
+      · TEM {{ near.tem | ar_pct(2) }}</span>
+  {% endif %}
+</div>
+
+{# ── Futuros arriba: mayorista + minorista ── #}
+<div class="dolar-tables">
+  {% for title, rws in [("📈 Mayorista (DLR/…M)", may_rows), ("📈 Minorista (DLR/…)", min_rows)] %}
+  <div class="dolar-tbl">
+    <div class="dolar-tbl-h">{{ title }}</div>
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr><th style="text-align:left">Contrato</th><th style="text-align:left">Código</th><th>Días</th><th>Last</th><th>Var%</th><th>TNA impl</th><th>TEM</th><th>Bid TNA</th><th>Offer TNA</th><th>Vol</th></tr>
+        </thead>
+        <tbody>
+          {% for r in rws %}
+            <tr style="cursor:pointer" title="Ver profundidad"
+                hx-get="/futuros/book?code={{ r.code | urlencode }}" hx-target="#fut-book" hx-swap="innerHTML"
+                hx-include="[name=spot_override]">
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.label }}</td>
+              <td style="text-align:left;color:var(--text-muted);font-size:11px">{{ r.code }}</td>
+              <td>{{ r.dias }}</td>
+              <td style="font-weight:600">{{ r.last | ar_num(2) }}</td>
+              <td class="{{ fx.vcls(r.var_pct) }}">{% if r.var_pct is not none %}{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}{% else %}—{% endif %}</td>
+              <td style="font-weight:600">{{ r.tna | ar_pct(2) }}</td>
+              <td>{{ r.tem | ar_pct(2) }}</td>
+              <td>{{ r.tna_bid | ar_pct(2) }}</td>
+              <td>{{ r.tna_offer | ar_pct(2) }}</td>
+              <td style="color:var(--text-muted)">{{ r.volume | ar_hum }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="10" class="muted" style="text-align:center">Sin futuros en el store (¿broker offline u horario cerrado?).</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# ── Dólar Linked soberanos abajo: tasa sintética vs futuro @ duration ── #}
+{% if dlk %}
+<div class="card" style="margin-top:14px">
+  <div class="card-title">
+    <span>Dólar Linked soberanos · tasa sintética</span>
+    <span class="card-title-aux">{{ dlk | length }} bonos · sint = (1+TIR bono)·(1+TEA fut@dur)−1 · TNA sint = TNA bono + TNA fut</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr><th style="text-align:left">Bono</th><th>Last</th><th>TIREA</th><th>Duration</th><th>Futuro @ dur</th><th>TEA fut</th><th>TIR sintética</th><th>TNA sintética</th></tr>
+        </thead>
+        <tbody>
+          {% for b in dlk %}
+            <tr>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ b.code }}</td>
+              <td>{{ b.last | ar_num(2) }}</td>
+              <td>{{ b.tirea | ar_pct(2) }}</td>
+              <td>{{ b.duration | ar_num(2) }}</td>
+              <td style="color:var(--text-muted)">{{ b.fut_label if b.fut_label else "—" }}</td>
+              <td>{{ b.fut_tea | ar_pct(2) if b.fut_tea is not none else "—" }}</td>
+              <td style="font-weight:600;color:var(--accent)">{{ b.tir_sint | ar_pct(2) if b.tir_sint is not none else "—" }}</td>
+              <td style="font-weight:600">{{ b.tna_sint | ar_pct(2) if b.tna_sint is not none else "—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── Curva ARS (≤1,5y) → sintético Dólar Linked (al revés del DLK) ── #}
+{% if ars %}
+<div class="card" style="margin-top:14px">
+  <div class="card-title">
+    <span>Curva ARS (≤1,5y) · sintético Dólar Linked</span>
+    <span class="card-title-aux">{{ ars | length }} bonos · sint = (1+TIR ARS)/(1+TEA fut@dur)−1 · TNA sint = TNA ARS − TNA fut</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+      <table class="cashflows curve-table mercado-table">
+        <thead>
+          <tr><th style="text-align:left">Bono</th><th>Last</th><th>TIREA</th><th>TNA</th><th>Duration</th><th>Futuro @ dur</th><th>TEA fut</th><th>TIR sint DLK</th><th>TNA sint DLK</th></tr>
+        </thead>
+        <tbody>
+          {% for b in ars %}
+            <tr>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ b.code }}</td>
+              <td>{{ b.last | ar_num(2) }}</td>
+              <td>{{ b.tirea | ar_pct(2) }}</td>
+              <td>{{ b.tna | ar_pct(2) }}</td>
+              <td>{{ b.duration | ar_num(2) }}</td>
+              <td style="color:var(--text-muted)">{{ b.fut_label if b.fut_label else "—" }}</td>
+              <td>{{ b.fut_tea | ar_pct(2) if b.fut_tea is not none else "—" }}</td>
+              <td style="font-weight:600;color:var(--cyan)">{{ b.tir_sint | ar_pct(2) if b.tir_sint is not none else "—" }}</td>
+              <td style="font-weight:600">{{ b.tna_sint | ar_pct(2) if b.tna_sint is not none else "—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}

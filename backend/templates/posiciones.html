@@ -7,6 +7,9 @@
   <header class="yas-header">
     <h1>Posiciones</h1>
     <p class="muted">Tenencias por fondo (Delta). Lectura única al inicio + cache — tocá <strong>Actualizar</strong> para releer.</p>
+    {% if status and status.asof %}
+      <p class="muted" style="font-size:11px;opacity:.7;margin-top:-6px">Última cartera: {{ status.asof }}</p>
+    {% endif %}
   </header>
 
   {% if status and not status.loaded %}

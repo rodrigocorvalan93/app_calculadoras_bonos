@@ -5485,7 +5485,12 @@ def main():
         print(f"[main] {label} @ +{_dur:.0f}ms", flush=True)
         _main_start = _t_now
 
-    st.set_page_config(page_title=APP_TITLE, layout="wide")
+    _favicon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon_streamlit.png")
+    st.set_page_config(
+        page_title=APP_TITLE,
+        page_icon=_favicon if os.path.exists(_favicon) else "📊",
+        layout="wide",
+    )
     st.title(APP_TITLE)
     _lap("after set_page_config+title")
 

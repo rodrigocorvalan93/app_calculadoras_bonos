@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Calculadora de Bonos{% endblock %}</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', path='favicon.ico') }}?v={{ asset_v }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', path='favicon.png') }}?v={{ asset_v }}">
   <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ asset_v }}">
   <script>
     // Tiny pre-paint theme bootstrap. Reads the user's choice from
@@ -18,6 +20,8 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js" defer></script>
 </head>
 <body hx-boost="false"
       x-data="{ railOpen: (function(){ try { return localStorage.getItem('fx_rail') !== '0'; } catch (e) { return true; } })() }">
@@ -38,6 +42,7 @@
       <a class="tab {% block tab_posiciones %}{% endblock %}" href="/posiciones">Posiciones</a>
       <a class="tab {% block tab_matriz %}{% endblock %}" href="/matriz">Matriz</a>
       <a class="tab {% block tab_forwards %}{% endblock %}" href="/forwards">Forwards</a>
+      <a class="tab {% block tab_futuros %}{% endblock %}" href="/futuros">Futuros</a>
       <a class="tab {% block tab_graficos %}{% endblock %}" href="/graficos">Gráficos</a>
       <a class="tab {% block tab_historicos %}{% endblock %}" href="/historicos">Históricos</a>
     </nav>
@@ -85,5 +90,6 @@
   </script>
 
   <script src="{{ url_for('static', path='js/app.js') }}?v={{ asset_v }}" defer></script>
+  <script src="{{ url_for('static', path='js/charts.js') }}?v={{ asset_v }}" defer></script>
 </body>
 </html>

@@ -25,6 +25,7 @@ from backend.locale_ar import JINJA_FILTERS
 from backend.routes.comparador import router as comparador_router
 from backend.routes.curves import forwards_router, graficos_router, mercado_router, router as curves_router
 from backend.routes.dolares import router as dolares_router
+from backend.routes.futuros import router as futuros_router
 from backend.routes.mae import router as tasas_router
 from backend.routes.historico import router as historico_router
 from backend.routes.market import router as market_router
@@ -79,6 +80,12 @@ def _initial_symbols() -> list[str]:
         seed.update(cauc_svc.symbols("DOLAR"))
     except Exception:  # noqa: BLE001
         logger.exception("[main] caución seed failed")
+    # Futuros de dólar (DLR/MMMYY + …M): tasas implícitas en la pestaña Futuros.
+    try:
+        from backend.services import futuros as fut_svc
+        seed.update(fut_svc.all_symbols())
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] futuros seed failed")
     return sorted(seed)
 
 
@@ -209,6 +216,7 @@ def create_app() -> FastAPI:
     app.include_router(forwards_router)
     app.include_router(graficos_router)
     app.include_router(dolares_router)
+    app.include_router(futuros_router)
     app.include_router(tasas_router)
     app.include_router(historico_router)
     app.include_router(posiciones_router)
