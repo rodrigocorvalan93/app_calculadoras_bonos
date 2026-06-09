@@ -67,4 +67,22 @@
   {% endif %}
 </div>
 
+{% if macro %}
+<div class="rail-head rail-macro-head">
+  <span>📈 Macro</span>
+  <span class="muted">BCRA · 11 / 15:30 h</span>
+</div>
+{% for m in macro %}
+<div class="rail-item rail-macro">
+  <div class="rail-l">{{ m.label }}{% if m.date %} · <span class="muted">{{ m.date }}</span>{% endif %}</div>
+  <div class="rail-v">
+    {% if m.fmt == 'pct' %}{{ m.value | ar_pct_pp(2) }}{% else %}{{ m.value | ar_num(2) }}{% endif %}
+  </div>
+  {% if m.aplicable is defined and m.aplicable is not none %}
+    <div class="rail-s muted">aplicable {{ m.aplicable | ar_pct_pp(2) }} <span class="muted">· prom. 5d</span></div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
 <div class="rail-foot muted">plazo {{ summary.plazo }} · actualiza cada 15s</div>

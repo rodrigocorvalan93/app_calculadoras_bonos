@@ -186,3 +186,87 @@ async def test_dolares_endpoints() -> None:
             r = await ac.get(url)
             assert r.status_code == 200, url
             assert r.text  # non-empty HTML
+
+
+# ── Macro en el riel (TAMAR/BADLAR/CER/UVA/inflación, reusando el cache) ──────
+_FAKE_HIST = {
+    "loaded": True, "error": None, "path": "x",
+    "series": {
+        # TAMAR: aplicable = promedio de los últimos 5 = (30+30+30+30+35)/5 = 31,0
+        "tamar": {"label": "TAMAR (%)", "points": [("2026-06-01", 30.0), ("2026-06-02", 30.0),
+                                                    ("2026-06-03", 30.0), ("2026-06-04", 30.0), ("2026-06-05", 35.0)]},
+        "badlar": {"label": "BADLAR (%)", "points": [("2026-06-05", 28.0)]},
+        "CER": {"label": "CER", "points": [("2026-06-09", 787.02)]},
+        "UVA": {"label": "UVA", "points": [("2026-06-09", 1985.84)]},
+        "inflamom": {"label": "infl", "points": [("2026-04-30", 2.6)]},
+    },
+}
+
+
+def test_macro_snapshot_reuses_cache() -> None:
+    from backend.services import historico
+    saved = historico._cache
+    historico._cache = _FAKE_HIST
+    try:
+        by = {m["key"]: m for m in historico.macro_snapshot()}
+        assert by["tamar"]["value"] == 35.0 and by["tamar"]["date"] == "05/06/2026"
+        assert abs(by["tamar"]["aplicable"] - 31.0) < 1e-9 and by["tamar"]["fmt"] == "pct"
+        assert by["cer"]["fmt"] == "num" and by["cer"]["value"] == 787.02
+        assert "aplicable" not in by["cer"]                 # sólo TAMAR/BADLAR
+        assert set(by) == {"tamar", "badlar", "cer", "uva", "inflamom"}
+    finally:
+        historico._cache = saved
+
+
+def test_macro_refresh_is_time_gated(monkeypatch) -> None:
+    """`macro_maybe_refresh` re-lee como mucho 1x por horario/día, no en cada
+    llamada (el riel pega cada 15s)."""
+    from datetime import datetime
+
+    from backend.services import historico
+
+    calls = {"n": 0}
+    saved_slot = historico._macro_slot
+    monkeypatch.setattr(historico, "refresh", lambda: calls.__setitem__("n", calls["n"] + 1))
+    historico._macro_slot = None
+    try:
+        class _FakeDT:
+            @staticmethod
+            def now():
+                return datetime(2026, 6, 9, 9, 0)      # antes de las 11 → no refresca
+        monkeypatch.setattr(historico, "datetime", _FakeDT)
+        historico.macro_maybe_refresh()
+        assert calls["n"] == 0
+
+        _FakeDT.now = staticmethod(lambda: datetime(2026, 6, 9, 12, 0))  # pasó 11:00
+        historico.macro_maybe_refresh()
+        historico.macro_maybe_refresh()                # 2da llamada misma franja → no re-refresca
+        assert calls["n"] == 1
+
+        _FakeDT.now = staticmethod(lambda: datetime(2026, 6, 9, 16, 0))  # pasó 15:30
+        historico.macro_maybe_refresh()
+        assert calls["n"] == 2                          # nueva franja → 1 refresh más
+    finally:
+        historico._macro_slot = saved_slot
+
+
+@pytest.mark.asyncio
+async def test_rail_renders_macro(monkeypatch) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import historico
+
+    saved = historico._cache
+    # Bloquear el refresh programado para que no pise el cache sintético.
+    monkeypatch.setattr(historico, "refresh", lambda: historico._cache)
+    historico._cache = _FAKE_HIST
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            r = await ac.get("/dolares/rail")
+        assert r.status_code == 200
+        for tok in ("📈 Macro", "TAMAR", "BADLAR", "CER", "UVA",
+                    "aplicable", "35,00%", "31,00%"):     # último y aplicable de TAMAR
+            assert tok in r.text, tok
+    finally:
+        historico._cache = saved

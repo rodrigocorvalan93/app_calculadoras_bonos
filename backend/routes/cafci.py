@@ -27,12 +27,16 @@ async def _ctx(q: str) -> Dict[str, Any]:
 
 
 @router.get("/cafci", response_class=HTMLResponse)
-async def cafci_page(request: Request, q: str = "", refresh: bool = False) -> HTMLResponse:
-    if refresh:                                  # botón "Actualizar" → relee el Excel
-        await asyncio.get_running_loop().run_in_executor(None, cafci.refresh)
-    return _render(request, "cafci.html", **(await _ctx(q)))
+async def cafci_page(request: Request, q: str = "") -> HTMLResponse:
+    # Shell instantáneo: NO toca ensure_loaded (la 1ª carga del Excel, o el
+    # descubrimiento de carpeta en OneDrive, puede tardar). El vector se carga
+    # lazy vía htmx (#cafci-body hx-trigger=load) → la pestaña abre al toque y
+    # muestra "Cargando…" mientras tanto, nunca se congela.
+    return _render(request, "cafci.html", q=q)
 
 
 @router.get("/cafci/table", response_class=HTMLResponse)
-async def cafci_table(request: Request, q: str = "") -> HTMLResponse:
+async def cafci_table(request: Request, q: str = "", refresh: bool = False) -> HTMLResponse:
+    if refresh:                                  # botón "Actualizar" → relee el Excel
+        await asyncio.get_running_loop().run_in_executor(None, cafci.refresh)
     return _render(request, "partials/cafci_table.html", **(await _ctx(q)))

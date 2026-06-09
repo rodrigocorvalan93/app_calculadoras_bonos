@@ -124,6 +124,17 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] historico load failed")
 
+    # CAFCI: vector de precios (~6k filas; read ~1 s + posible descubrimiento de
+    # carpeta). Lo calentamos en un thread aparte para NO demorar el arranque;
+    # cuando el usuario abra la pestaña ya está cacheado (abre instantáneo). El
+    # lock interno evita doble-carga si llega un request mientras calienta.
+    try:
+        import threading
+        from backend.services import cafci
+        threading.Thread(target=cafci.ensure_loaded, name="cafci-warm", daemon=True).start()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] cafci warm failed to start")
+
     ws = get_ws_client()
     if settings.primary_user and settings.primary_pass:
         try:
