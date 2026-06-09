@@ -27,9 +27,32 @@ def _bono(code: Optional[str]):
     return bond_universe.get(code) if code else None
 
 
+def _dual_label(obj) -> Optional[str]:
+    """Etiqueta de bono dual, leída del campo `Industria` de la especie (p.ej.
+    'Soberano ARS Dual CER/Tamar' o '… Dual Fija/Tamar'). None si no es dual.
+
+    Detección por CONVENCIÓN DE NOMBRE, NO por lista de tickers: cualquier dual
+    nuevo que emita el Tesoro entra solo, siempre que su `Industria` diga
+    'Dual … Tamar'. No hay nada hardcodeado por código de especie.
+    """
+    if obj is None:
+        return None
+    ind = (getattr(obj, "industria", "") or "").upper()
+    if "DUAL" not in ind or "TAMAR" not in ind:
+        return None
+    if "CER" in ind:
+        return "Dual CER / TAMAR"
+    if "FIJA" in ind:
+        return "Dual Fija / TAMAR"
+    return "Dual / TAMAR"                       # fallback para algún dual futuro
+
+
 def _tasa(obj) -> str:
     if obj is None:
         return "(sin clasif.)"
+    dual = _dual_label(obj)                     # dual = fija + variable (TAMAR)
+    if dual:
+        return dual
     if getattr(obj, "step_up", False):
         return "Step Up"
     tipo = (getattr(obj, "tipo_tasa_interes", "") or "").upper()
@@ -44,6 +67,12 @@ def _tasa(obj) -> str:
 def _categoria(obj) -> str:
     if obj is None:
         return "(sin clasif.)"
+    # Duales primero (antes del chequeo de CER): aunque ajustan por CER, los
+    # queremos agrupados como duales. Sólo afecta esta categoría/display — NO el
+    # pricing (TNA/TIREA siguen saliendo de ajuste/tipo_tasa, sin cambios).
+    dual = _dual_label(obj)
+    if dual:
+        return dual
     aj = (getattr(obj, "ajuste_sobre_capital", "") or "").upper()
     mon = (getattr(obj, "moneda", "") or "").upper()
     if "CER" in aj:
