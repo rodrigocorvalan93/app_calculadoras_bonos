@@ -1,3 +1,12 @@
+{% if status and not status.loaded %}
+  <div class="alert">CAFCI no disponible: {{ status.error }}</div>
+{% else %}
+<div class="mae-strip" style="margin-bottom:12px">
+  <span class="mae-tag">CAFCI{% if status.fecha %} {{ status.fecha[6:8] }}/{{ status.fecha[4:6] }}/{{ status.fecha[0:4] }}{% endif %}</span>
+  {% if status.fx %}{% for k, v in status.fx.items() %}<span>{{ k }} <b>{{ v | ar_num(2) }}</b></span>{% endfor %}{% endif %}
+  <span class="muted">· {{ status.n }} activos</span>
+</div>
+
 {% if not rows %}
   <div class="alert">{% if q %}Sin resultados para "{{ q }}".{% else %}Sin activos CAFCI cargados.{% endif %}</div>
 {% else %}
@@ -35,4 +44,5 @@
     </div>
   </div>
 </div>
+{% endif %}
 {% endif %}

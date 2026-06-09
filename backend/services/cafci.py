@@ -89,6 +89,11 @@ _DISCOVER_DEPTH = 2
 # Ahora el crawl sólo lista niveles que revelan el nombre objetivo (no las hojas),
 # así que el costo real es ~#carpetas top-level del árbol; holgado.
 _DISCOVER_MAX_DIRS = 1500
+# Tope de tiempo de pared: en OneDrive cada listdir de una carpeta "online-only"
+# pega a la red y puede tardar. Sin esto, listar muchas carpetas top-level
+# cuelga la pestaña. Si se agota, degradamos a "no disponible" (rápido) y el
+# usuario setea DELTA_CAFCI_DIR. No bloquea: el vector se carga lazy en la UI.
+_DISCOVER_MAX_SECONDS = 4.0
 
 
 def _discover_dirs() -> List[str]:
@@ -120,13 +125,17 @@ def _discover_dirs() -> List[str]:
 
     found: List[str] = []
     budget = [_DISCOVER_MAX_DIRS]                   # cota dura: no crawlear OneDrive entero
+    deadline = time.monotonic() + _DISCOVER_MAX_SECONDS
+
+    def _stop() -> bool:
+        return budget[0] <= 0 or time.monotonic() > deadline
 
     def scan(d: str, level: int) -> None:
         # Una carpeta '*cafci*' a profundidad N se DESCUBRE listando a su padre
         # (nivel N-1): el nombre ya aparece ahí. Por eso NO listamos las hojas
         # (sería gastar presupuesto de más y no aporta) — sólo bajamos mientras
         # listar el próximo nivel siga revelando nombres dentro de _DISCOVER_DEPTH.
-        if budget[0] <= 0:
+        if _stop():
             return
         try:
             entries = sorted(os.listdir(d))
@@ -147,15 +156,22 @@ def _discover_dirs() -> List[str]:
         if level + 1 < _DISCOVER_DEPTH:
             for sd in subdirs:
                 scan(sd, level + 1)
-                if found or budget[0] <= 0:
+                if found or _stop():
                     return
 
+    timed_out = False
     for root in roots:
         scan(root, 0)
         if found:
             break
+        if _stop():
+            timed_out = True
+            break
     if found:
         logger.info("[cafci] carpeta auto-descubierta: %s", found[0])
+    elif timed_out:
+        logger.warning("[cafci] descubrimiento cortado a los %ss (OneDrive lento). "
+                       "Seteá DELTA_CAFCI_DIR en secrets.txt para ir directo.", _DISCOVER_MAX_SECONDS)
     else:
         logger.warning("[cafci] no encontré carpeta '*cafci*' bajo: %s "
                        "(seteá DELTA_CAFCI_DIR para evitar el descubrimiento)", roots)
