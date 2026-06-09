@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Créditos{% endblock %}
+{% block tab_creditos %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Análisis de créditos · Corporativos</h1>
+    <p class="muted">Score interno (1-5) por solvencia y liquidez (último balance disponible). Fuente: Research RV — Delta. Click en un emisor para ver sus ONs con métricas live.</p>
+  </header>
+
+  {% if status and not status.available %}
+    <div class="alert">Sin datos de créditos: {{ status.error }} <span class="muted">(el resto de la app funciona igual)</span></div>
+  {% endif %}
+
+  <div id="cred-ctrls" class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <label class="field">
+          <span>Sector</span>
+          <select name="sector" hx-get="/creditos/table" hx-trigger="change" hx-target="#cred-table" hx-swap="innerHTML"
+                  hx-include="#cred-ctrls [name=score_min], #cred-ctrls [name=solo_ons]">
+            <option value="">Todos</option>
+            {% for s in sectors %}<option value="{{ s }}" {% if s in sector %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Score mínimo</span>
+          <select name="score_min" hx-get="/creditos/table" hx-trigger="change" hx-target="#cred-table" hx-swap="innerHTML"
+                  hx-include="#cred-ctrls [name=sector], #cred-ctrls [name=solo_ons]">
+            {% for v in [1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0] %}<option value="{{ v }}" {% if v == score_min %}selected{% endif %}>{{ v }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+          <input type="checkbox" name="solo_ons" value="true" {% if solo_ons %}checked{% endif %}
+                 hx-get="/creditos/table" hx-trigger="change" hx-target="#cred-table" hx-swap="innerHTML"
+                 hx-include="#cred-ctrls [name=sector], #cred-ctrls [name=score_min]">
+          Solo con ONs cargadas
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div id="cred-table">
+    {% include "partials/creditos_table.html" %}
+  </div>
+
+  <div id="cred-detail" style="margin-top:14px"></div>
+</section>
+{% endblock %}

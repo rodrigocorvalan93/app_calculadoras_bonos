@@ -1,0 +1,36 @@
+{% if not credit %}
+  <div class="alert">Sin datos para el emisor {{ ticker }}.</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ credit.compania or ticker }}</span>
+    <span class="card-title-aux">{{ credit.sector }}{% if credit.score is not none %} · Score {{ credit.score | ar_num(1) }}{% endif %}{% if credit.last_q %} · {{ credit.last_q }}{% endif %}</span>
+  </div>
+  <div class="card-body">
+    {% if credit.comentario %}<p class="muted" style="margin-top:0">💬 {{ credit.comentario }}</p>{% endif %}
+    {% if bonds %}
+      <div class="muted" style="font-size:11px;margin-bottom:4px">ONs cargadas ({{ bonds | length }}) · métricas live</div>
+      <div class="table-scroll">
+        <table class="cashflows curve-table mercado-table">
+          <thead><tr><th style="text-align:left">ON</th><th style="text-align:left">Nombre</th><th>Last</th><th>TIREA</th><th>TNA</th><th>Duration</th><th>Paridad</th></tr></thead>
+          <tbody>
+            {% for b in bonds %}
+              <tr>
+                <td style="text-align:left;color:var(--accent);font-weight:600">{{ b.code }}</td>
+                <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ b.nombre }}</td>
+                <td>{{ b.last | ar_num(2) }}</td>
+                <td style="font-weight:600">{{ b.tirea | ar_pct(2) }}</td>
+                <td>{{ b.tna | ar_pct(2) }}</td>
+                <td>{{ b.duration | ar_num(2) }}</td>
+                <td>{{ (b.paridad * 100) | ar_pct_pp(1) if (b.paridad is number) else "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Sin ONs cargadas en especies.py para este emisor.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
