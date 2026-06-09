@@ -5,7 +5,10 @@ Lee el Excel diario que genera el bot en la carpeta `Precios Cafci/AAAMMDD.xlsx`
 activos. Resuelve el más reciente, lo pre-indexa para búsqueda server-side (el
 vector tiene ~6k filas: NO se renderiza entero) → sub-50 ms.
 
-Config (secrets.txt): DELTA_CAFCI_PATH (archivo) o DELTA_CAFCI_DIR (carpeta).
+Config (secrets.txt → os.environ vía OMSsecrets, igual que delta_especies):
+  DELTA_CAFCI_PATH  → ruta completa a un .xlsx puntual, o
+  DELTA_CAFCI_DIR   → carpeta; toma el .xlsx cuyo nombre contiene la fecha
+                      AAAMMDD más nueva (acepta prefijos/sufijos).
 """
 from __future__ import annotations
 
@@ -60,11 +63,16 @@ def _resolve_path() -> Optional[str]:
         if os.path.isdir(env_dir):
             cands = []
             for fn in os.listdir(env_dir):
-                m = _DATE_RE.fullmatch(os.path.splitext(fn)[0])
-                if m and fn.lower().endswith((".xlsx", ".xls")):
+                # Saltear lock files de Excel (~$AAAMMDD.xlsx mientras está abierto).
+                if fn.startswith("~$") or not fn.lower().endswith((".xlsx", ".xls")):
+                    continue
+                # Aceptar cualquier nombre que CONTENGA la fecha AAAMMDD:
+                # 20260605.xlsx, CAFCI 20260605.xlsx, vector_20260605.xlsx, …
+                m = _DATE_RE.search(fn)
+                if m:
                     cands.append((m.group(1), os.path.join(env_dir, fn)))
             if cands:
-                return max(cands)[1]          # el de fecha más reciente
+                return max(cands)[1]          # el de fecha (AAAMMDD) más reciente
     return None
 
 
