@@ -98,6 +98,70 @@ def test_autodiscovery_layout_real(tmp_path) -> None:
                 os.environ[k] = v
 
 
+def _write_cafci_xlsx(path, *, valid: bool) -> None:
+    """Escribe un .xlsx tipo CAFCI (hojas fx…/vector… con datos) si valid, o
+    una planilla cualquiera (sin esas hojas) si no."""
+    pd = pytest.importorskip("pandas")
+    with pd.ExcelWriter(path) as xw:
+        if valid:
+            pd.DataFrame([["USD", 1520.0], ["USB", 1466.0]]).to_excel(
+                xw, sheet_name="fx20260608", header=False, index=False)
+            pd.DataFrame([{"ISIN": "ARP1", "BYMA": "AL30", "CAFCI": "1", "Valuación": "ARS",
+                           "Cdo.": 941.3, "TIR [%]": 7.23, "TNA [%]": 7.49,
+                           "Mod. Duration": 1.9}]).to_excel(
+                xw, sheet_name="vector20260608", index=False)
+        else:
+            pd.DataFrame([{"Concepto": "x", "Valor": 1}]).to_excel(
+                xw, sheet_name="Resumen", index=False)
+
+
+def test_prefiere_canonico_sobre_planilla(tmp_path) -> None:
+    """Carpeta con el vector real ('20260608.xlsx') y una planilla con la misma
+    fecha ('20260608_Planilla_Diaria.xlsx'): carga el vector, no la planilla."""
+    saved = {k: os.environ.get(k) for k in _CAFCI_ENV}
+    saved_cache = cafci._cache
+    for k in _CAFCI_ENV:
+        os.environ.pop(k, None)
+    try:
+        _write_cafci_xlsx(tmp_path / "20260608.xlsx", valid=True)
+        _write_cafci_xlsx(tmp_path / "20260608_Planilla_Diaria.xlsx", valid=False)
+        os.environ["DELTA_CAFCI_DIR"] = str(tmp_path)
+        c = cafci.refresh()
+        assert c["loaded"] and c["n"] == 1
+        assert os.path.basename(c["path"]) == "20260608.xlsx"
+    finally:
+        cafci._cache = saved_cache
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_saltea_archivo_sin_hojas_cafci(tmp_path) -> None:
+    """Si el candidato de mayor prioridad NO es un vector CAFCI, prueba el
+    siguiente. Acá el canónico '20260608.xlsx' es una planilla y el válido está
+    decorado → igual lo encuentra."""
+    saved = {k: os.environ.get(k) for k in _CAFCI_ENV}
+    saved_cache = cafci._cache
+    for k in _CAFCI_ENV:
+        os.environ.pop(k, None)
+    try:
+        _write_cafci_xlsx(tmp_path / "20260608.xlsx", valid=False)            # canónico pero NO cafci
+        _write_cafci_xlsx(tmp_path / "20260608_vector_cafci.xlsx", valid=True)
+        os.environ["DELTA_CAFCI_DIR"] = str(tmp_path)
+        c = cafci.refresh()
+        assert c["loaded"] and c["n"] == 1
+        assert os.path.basename(c["path"]) == "20260608_vector_cafci.xlsx"
+    finally:
+        cafci._cache = saved_cache
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def test_search() -> None:
     saved = cafci._cache
     cafci._cache = dict(_FAKE)

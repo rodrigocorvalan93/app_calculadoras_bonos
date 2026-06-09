@@ -51,26 +51,32 @@ def _num(v: Any) -> Optional[float]:
 
 
 def _empty(error: Optional[str] = None) -> Dict[str, Any]:
-    return {"loaded": False, "error": error, "path": None, "fecha": None, "fx": {}, "rows": [], "n": 0}
+    return {"loaded": False, "error": error, "path": None, "resolved": None,
+            "fecha": None, "fx": {}, "rows": [], "n": 0}
 
 
-def _latest_in_dir(d: str) -> Optional[str]:
-    """El .xlsx cuyo nombre contiene la fecha AAAMMDD más nueva dentro de `d`.
-
-    Acepta cualquier nombre que CONTENGA la fecha (20260605.xlsx,
-    'CAFCI 20260605.xlsx', vector_20260605.xlsx, …) y saltea los lock files
-    ~$ que crea Excel mientras el archivo está abierto.
+def _dir_candidates(d: str) -> List[str]:
+    """Rutas .xlsx con fecha AAAMMDD en `d`, ordenadas por prioridad:
+      1) fecha más nueva,
+      2) ante la MISMA fecha, nombre canónico (stem == AAAMMDD) antes que
+         decorados → '20260608.xlsx' gana a '20260608_Planilla_Diaria.xlsx',
+      3) y luego el nombre más corto (menos 'ruido').
+    Saltea lock files ~$ y archivos no-excel. El caller prueba en orden y se
+    queda con el primero que tenga hojas CAFCI reales (ver `_parse_cafci`).
     """
     if not os.path.isdir(d):
-        return None
-    cands = []
+        return []
+    scored = []
     for fn in os.listdir(d):
         if fn.startswith("~$") or not fn.lower().endswith((".xlsx", ".xls")):
             continue
         m = _DATE_RE.search(fn)
-        if m:
-            cands.append((m.group(1), os.path.join(d, fn)))
-    return max(cands)[1] if cands else None     # el de fecha (AAAMMDD) más reciente
+        if not m:
+            continue
+        exact = 1 if os.path.splitext(fn)[0] == m.group(1) else 0
+        scored.append(((m.group(1), exact, -len(fn)), os.path.join(d, fn)))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [p for _, p in scored]
 
 
 # Profundidad máxima al buscar una carpeta '*cafci*' bajo las bases Delta.
@@ -137,74 +143,110 @@ def _discover_dirs() -> List[str]:
     return found
 
 
-def _resolve_path() -> Optional[str]:
+def _resolve_candidates() -> List[str]:
+    """Archivos .xlsx candidatos al vector CAFCI, en orden de prioridad.
+    DELTA_CAFCI_PATH (archivo puntual) gana; si no, DELTA_CAFCI_DIR; si no,
+    la carpeta auto-descubierta. Dentro de una carpeta, ver `_dir_candidates`."""
     env = os.getenv("DELTA_CAFCI_PATH")
     if env:
         env = os.path.expandvars(os.path.expanduser(env))
         if os.path.isfile(env):
-            return env
+            return [env]
     env_dir = os.getenv("DELTA_CAFCI_DIR")
     if env_dir:
-        hit = _latest_in_dir(os.path.expandvars(os.path.expanduser(env_dir)))
-        if hit:
-            return hit
+        cands = _dir_candidates(os.path.expandvars(os.path.expanduser(env_dir)))
+        if cands:
+            return cands
     # Sin DELTA_CAFCI_* explícito: descubrir 'Precios Cafci' junto a las
     # carpetas Delta ya configuradas (cero config para el caso normal).
     for d in _discover_dirs():
-        hit = _latest_in_dir(d)
-        if hit:
-            return hit
-    return None
+        cands = _dir_candidates(d)
+        if cands:
+            return cands
+    return []
+
+
+def _resolve_path() -> Optional[str]:
+    """Mejor candidato (el primero). Lo usa `ensure_loaded` para detectar el
+    archivo del día nuevo de forma estable, independiente de cuál termine
+    cargando `_load` si el mejor resultara no ser un vector CAFCI."""
+    cands = _resolve_candidates()
+    return cands[0] if cands else None
+
+
+def _parse_cafci(path: str) -> Optional[Dict[str, Any]]:
+    """Parsea un .xlsx CAFCI (hojas `fx…` / `vector…`). Devuelve None si el
+    archivo NO es el vector CAFCI — sin hojas fx/vector, o con ellas vacías —
+    para que el caller pruebe el siguiente candidato (p.ej. una planilla
+    distinta con la misma fecha en el nombre: '20260608_Planilla_Diaria.xlsx')."""
+    import pandas as pd
+    xl = pd.ExcelFile(path)
+    fx_sheet = next((s for s in xl.sheet_names if str(s).lower().startswith("fx")), None)
+    vec_sheet = next((s for s in xl.sheet_names if str(s).lower().startswith("vector")), None)
+    if fx_sheet is None and vec_sheet is None:
+        return None                                     # no es el vector CAFCI
+    m = _DATE_RE.search(str(vec_sheet or os.path.basename(path)))
+    fecha = m.group(1) if m else None
+
+    fx: Dict[str, float] = {}
+    if fx_sheet is not None:
+        fxdf = pd.read_excel(path, sheet_name=fx_sheet, header=None)
+        for _, r in fxdf.iterrows():
+            k, v = str(r.iloc[0]).strip().upper(), _num(r.iloc[1])
+            if k.isalpha() and 2 <= len(k) <= 4 and v is not None:   # USD/USB/USM/… (no índices)
+                fx[k] = v
+
+    rows: List[Dict[str, Any]] = []
+    if vec_sheet is not None:
+        vdf = pd.read_excel(path, sheet_name=vec_sheet)
+        cols = set(vdf.columns)
+        _txt = {"isin", "byma", "cafci", "moneda"}
+        for _, r in vdf.iterrows():
+            row: Dict[str, Any] = {}
+            for col, key in _FIELDS:
+                if col not in cols:
+                    continue
+                v = r[col]
+                if key in _txt:
+                    row[key] = str(v).strip() if (v is not None and v == v) else None
+                else:
+                    row[key] = _num(v)
+            # sólo activos con algún identificador
+            if not (row.get("isin") or row.get("byma") or row.get("cafci")):
+                continue
+            row["_key"] = " ".join(str(row.get(k) or "") for k in ("isin", "byma", "cafci")).lower()
+            rows.append(row)
+
+    if not rows and not fx:
+        return None                                     # hojas fx/vector vacías → no sirve
+    return {"loaded": True, "error": None, "path": path, "fecha": fecha,
+            "fx": fx, "rows": rows, "n": len(rows)}
 
 
 def _load() -> Dict[str, Any]:
-    path = _resolve_path()
-    if not path:
+    cands = _resolve_candidates()
+    if not cands:
         return _empty("No se encontró el Excel CAFCI. Se buscó una carpeta 'Precios Cafci' "
                       "junto a tus bases Delta y no apareció — configurá DELTA_CAFCI_DIR "
                       "(carpeta) o DELTA_CAFCI_PATH (archivo) en secrets.txt.")
-    try:
-        import pandas as pd
-        xl = pd.ExcelFile(path)
-        fx_sheet = next((s for s in xl.sheet_names if str(s).lower().startswith("fx")), None)
-        vec_sheet = next((s for s in xl.sheet_names if str(s).lower().startswith("vector")), None)
-        m = _DATE_RE.search(str(vec_sheet or os.path.basename(path)))
-        fecha = m.group(1) if m else None
-
-        fx: Dict[str, float] = {}
-        if fx_sheet is not None:
-            fxdf = pd.read_excel(path, sheet_name=fx_sheet, header=None)
-            for _, r in fxdf.iterrows():
-                k, v = str(r.iloc[0]).strip().upper(), _num(r.iloc[1])
-                if k.isalpha() and 2 <= len(k) <= 4 and v is not None:   # USD/USB/USM/… (no índices)
-                    fx[k] = v
-
-        rows: List[Dict[str, Any]] = []
-        if vec_sheet is not None:
-            vdf = pd.read_excel(path, sheet_name=vec_sheet)
-            cols = set(vdf.columns)
-            _txt = {"isin", "byma", "cafci", "moneda"}
-            for _, r in vdf.iterrows():
-                row: Dict[str, Any] = {}
-                for col, key in _FIELDS:
-                    if col not in cols:
-                        continue
-                    v = r[col]
-                    if key in _txt:
-                        row[key] = str(v).strip() if (v is not None and v == v) else None
-                    else:
-                        row[key] = _num(v)
-                # sólo activos con algún identificador
-                if not (row.get("isin") or row.get("byma") or row.get("cafci")):
-                    continue
-                row["_key"] = " ".join(str(row.get(k) or "") for k in ("isin", "byma", "cafci")).lower()
-                rows.append(row)
-        logger.info("[cafci] %s · %d fx · %d filas", os.path.basename(path), len(fx), len(rows))
-        return {"loaded": bool(rows or fx), "error": None, "path": path, "fecha": fecha,
-                "fx": fx, "rows": rows, "n": len(rows)}
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("[cafci] load falló")
-        return _empty(f"Error leyendo el Excel CAFCI: {exc}")
+    resolved = cands[0]
+    tried: List[str] = []
+    for path in cands:
+        try:
+            parsed = _parse_cafci(path)
+        except Exception as exc:  # noqa: BLE001  — archivo corrupto / bloqueado
+            logger.warning("[cafci] no pude leer %s: %s", os.path.basename(path), exc)
+            tried.append(os.path.basename(path))
+            continue
+        if parsed is not None:
+            parsed["resolved"] = resolved
+            logger.info("[cafci] %s · %d fx · %d filas", os.path.basename(path), len(parsed["fx"]), parsed["n"])
+            return parsed
+        tried.append(os.path.basename(path))            # tenía fecha pero no es el vector
+    out = _empty("Encontré archivos en la carpeta pero ninguno tiene las hojas CAFCI "
+                 "(fx… / vector…): " + ", ".join(tried[:6]) + ". ¿Es la carpeta correcta?")
+    out["resolved"] = resolved
+    return out
 
 
 def ensure_loaded() -> Dict[str, Any]:
@@ -219,8 +261,10 @@ def ensure_loaded() -> Dict[str, Any]:
             return _cache
         _last_check = time.time()
         latest = _resolve_path()
-        # Recargar sólo si es la 1ª vez o apareció un archivo más nuevo (otro día).
-        if _cache is None or (latest and latest != _cache.get("path")):
+        # Recargar sólo si es la 1ª vez o apareció un archivo más nuevo (otro
+        # día). Comparo contra `resolved` (mejor candidato), no contra el path
+        # cargado: así no recargo en loop si el mejor no es un vector CAFCI.
+        if _cache is None or (latest and latest != _cache.get("resolved")):
             _cache = _load()
         return _cache
 
