@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
+from backend.routes.breakeven import router as breakeven_router
 from backend.routes.cafci import router as cafci_router
 from backend.routes.comparador import router as comparador_router
 from backend.routes.credito import router as creditos_router
@@ -226,6 +227,7 @@ def create_app() -> FastAPI:
     app.include_router(comparador_router)
     app.include_router(creditos_router)
     app.include_router(cafci_router)
+    app.include_router(breakeven_router)
     app.include_router(curves_router)
     app.include_router(mercado_router)
     app.include_router(forwards_router)

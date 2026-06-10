@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Break-even{% endblock %}
+{% block tab_breakeven %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Break-even inflación</h1>
+    <p class="muted">
+      Inflación implícita por paridad de Fisher: TIREA nominal (curva tasa fija /
+      LECAP interpolada a la duration del bono CER) vs TIREA real (CER).
+      BE anual = (1+nom)/(1+real) − 1 · BE TEM = (1+BE)^(30/360) − 1.
+      Método directo, no iterativo — no modifica las proyecciones de inflación.
+    </p>
+  </header>
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <fieldset class="field field-mode" id="be-plazo">
+          <legend>Plazo</legend>
+          <label><input type="radio" name="plazo" value="24hs" {% if plazo == "24hs" %}checked{% endif %}
+                 hx-get="/breakeven/table" hx-target="#be-table" hx-swap="innerHTML" hx-trigger="change"> 24hs</label>
+          <label><input type="radio" name="plazo" value="CI" {% if plazo == "CI" %}checked{% endif %}
+                 hx-get="/breakeven/table" hx-target="#be-table" hx-swap="innerHTML" hx-trigger="change"> CI</label>
+        </fieldset>
+      </div>
+    </div>
+  </div>
+
+  <div id="be-table" data-flash-scope
+       hx-get="/breakeven/table" hx-trigger="md-update from:body, every 30s"
+       hx-swap="innerHTML" hx-include="[name=plazo]">
+    {% include "partials/breakeven_table.html" %}
+  </div>
+</section>
+{% endblock %}
