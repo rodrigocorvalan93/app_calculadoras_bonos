@@ -99,6 +99,12 @@ tests/__pycache__/
 # Config raíz para el harness de tests
 !pytest.ini
 
+# ── Skills de Claude Code (versionadas para el equipo) ──────
+# Sólo .claude/skills/ va al repo; settings locales / estado de sesión NO.
+!.claude/
+!.claude/skills/
+!.claude/skills/**
+
 
 # ======================================================================
 # RECORDATORIOS DE SEGURIDAD (lo que queda ignorado por el `*`)
