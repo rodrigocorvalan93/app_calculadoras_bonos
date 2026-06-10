@@ -95,6 +95,16 @@
     </div>
   </div>
 
+  {# Toggles de columnas (Alpine + localStorage, default TODO visible). El
+     estado vive FUERA del swap de htmx, así sobrevive los refrescos live. #}
+  <div x-data="{ oclh: (function(){ try { return localStorage.getItem('m_oclh') !== '0'; } catch(e){ return true; } })(),
+                 mae:  (function(){ try { return localStorage.getItem('m_mae')  !== '0'; } catch(e){ return true; } })() }"
+       :class="{ 'hide-oclh': !oclh, 'hide-mae': !mae }">
+  <div class="table-tools muted">
+    <span>Columnas:</span>
+    <label><input type="checkbox" x-model="oclh" @change="try{localStorage.setItem('m_oclh', oclh?'1':'0')}catch(e){}"> OCLH</label>
+    <label><input type="checkbox" x-model="mae" @change="try{localStorage.setItem('m_mae', mae?'1':'0')}catch(e){}"> MAE</label>
+  </div>
   <div
     id="mercado-table"
     data-flash-scope
@@ -104,6 +114,7 @@
     hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente]"
   >
     {% include "partials/mercado_table.html" %}
+  </div>
   </div>
 
   <p class="muted" style="margin-top:14px">Clickeá una fila para ver el libro (profundidad).</p>

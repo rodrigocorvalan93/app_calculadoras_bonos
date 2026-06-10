@@ -100,6 +100,34 @@ def _calif(obj) -> str:
     return cal or "(sin clasif.)"
 
 
+def _cat_for(h: Dict[str, Any], obj) -> str:
+    """Categoría de la tenencia. Bonos → `_categoria(obj)`; especies fuera del
+    universo (acciones, CEDEARs, FCI…) → se infiere de la 'Clase de Activo' del
+    Excel de cartera, así no caen en '(sin clasif.)'."""
+    if obj is not None:
+        return _categoria(obj)
+    cl = (h.get("clase") or "").lower()
+    if "cedear" in cl:
+        return "CEDEARs"
+    if "accion" in cl or "acción" in cl or "equity" in cl:
+        return "Acciones"
+    if "fondo" in cl or "fci" in cl:
+        return "FCI"
+    if "caucion" in cl or "caución" in cl or "plazo fijo" in cl:
+        return "Liquidez"
+    return h.get("clase") or "(sin clasif.)"
+
+
+def _emisor_for(code: Optional[str], obj) -> Optional[str]:
+    """Emisor: del Excel Delta-Especies (cacheado, lookup µs); soberanos sin
+    ficha ahí → 'Tesoro Nacional'."""
+    from backend.services import delta_especies
+    em = (delta_especies.info(code) or {}).get("Emisor / Sponsor") if code else None
+    if not em and obj is not None and "Soberano" in (getattr(obj, "clasificacion", "") or ""):
+        em = "Tesoro Nacional"
+    return em
+
+
 def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float]) -> Dict[str, List[Dict[str, Any]]]:
     groups: Dict[str, Dict[str, float]] = {
         "Clase de Activo": {}, "Categoría": {}, "Tasa": {}, "Calificación": {},
@@ -109,7 +137,7 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float]) -> Dict[
         obj = _bono(h.get("cod_delta"))
         keys = {
             "Clase de Activo": h.get("clase") or "(sin clasif.)",
-            "Categoría": _categoria(obj),
+            "Categoría": _cat_for(h, obj),
             "Tasa": _tasa(obj),
             "Calificación": _calif(obj),
         }
@@ -128,12 +156,21 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
     rows: List[Dict[str, Any]] = []
     for h in hs:
         code = h.get("cod_delta")
+        obj = _bono(code)
         m = _row_for_code(code, plazo) if code else None
         valor = h.get("valor")
+        cant = h.get("cantidad")
+        # Precio al que está valuada la tenencia (monto / VN). El retorno del
+        # día (vs Last, editable) se calcula EN EL NAVEGADOR — cero requests.
+        px_val = (valor / cant) if (valor and cant) else None
         rows.append({
             **h,
             "in_universe": m is not None,
             "pct_pn": (valor / pn) if (valor is not None and pn and pn > 0) else None,
+            "emisor": _emisor_for(code, obj),
+            "categoria": _cat_for(h, obj),
+            "rating": _calif(obj) if obj is not None else "—",
+            "px_val": px_val,
             "tirea": (m or {}).get("tirea"),
             "tna": (m or {}).get("tna"),
             "tna_convention_label": (m or {}).get("tna_convention_label"),
@@ -183,7 +220,9 @@ def _fondo_ctx(selected: Optional[int], plazo: str) -> Dict[str, Any]:
 
 
 @router.get("/posiciones/table", response_class=HTMLResponse)
-async def posiciones_table(request: Request, fondo: int, plazo: str = "24hs") -> HTMLResponse:
+async def posiciones_table(request: Request, fondo: Optional[int] = None, plazo: str = "24hs") -> HTMLResponse:
+    # `fondo` opcional: el poll live (md-update) puede llegar sin selección
+    # (sin carteras cargadas) y no debe romper con 422.
     bond_universe.ensure_loaded()
     return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **_fondo_ctx(fondo, plazo))
 

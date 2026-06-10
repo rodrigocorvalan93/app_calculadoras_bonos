@@ -7,29 +7,53 @@
       <span>{{ nombre }} · tenencias</span>
       <span class="card-title-aux">
         {{ rows | length }} especies · Valor {{ total_valor | ar_int }}{% if pn %} · {{ (total_valor / pn * 100) | ar_pct_pp(1) }} del PN{% endif %}
+        · <span id="pos-day-ret" class="pos-day-ret" title="Σ (peso por valor × retorno Last vs Px val). Editá un Last para simular.">Ret. día —</span>
       </span>
     </div>
     <div class="card-body" style="padding:0">
       <div class="table-scroll">
-      <table class="cashflows curve-table">
+      {# data-sortable: click en un th[data-sort] ordena client-side (app.js).
+         El Last es un input editable: el retorno por fila y el del fondo se
+         recalculan EN EL NAVEGADOR (cero requests); data-pxval/data-valor
+         alimentan ese cálculo. #}
+      <table id="pos-tbl" class="cashflows curve-table" data-sortable>
         <thead>
           <tr>
-            <th>Especie</th><th>Clase</th><th>VN</th><th>Valor</th><th>% PN</th>
-            <th>Last</th><th>TIREA</th><th>TNA</th><th>Dur</th><th>P.Src</th>
+            <th data-sort style="text-align:left">Especie</th>
+            <th data-sort style="text-align:left">Emisor</th>
+            <th data-sort style="text-align:left">Categoría</th>
+            <th data-sort>Rating</th>
+            <th data-sort>VN</th>
+            <th data-sort>Valor</th>
+            <th data-sort>% PN</th>
+            <th data-sort class="grp" title="Precio de valuación = Valor / VN">Px val</th>
+            <th title="Last BYMA — editable para simular">Last ✎</th>
+            <th data-sort title="Last vs Px val (escala auto)">Ret. día</th>
+            <th data-sort class="grp">TIREA</th>
+            <th data-sort>TNA</th>
+            <th data-sort>Dur</th>
+            <th>P.Src</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
-            <tr>
+            <tr data-esp="{{ r.especie }}"
+                data-pxval="{{ r.px_val if r.px_val is not none else '' }}"
+                data-valor="{{ r.valor if r.valor is not none else '' }}">
               <td style="text-align:left;color:var(--accent);font-weight:600">
                 {% if r.in_universe %}<a href="/yas?code={{ r.cod_delta }}" title="Abrir en YAS">{{ r.especie }}</a>{% else %}{{ r.especie }}{% endif %}
               </td>
-              <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ r.clase or "—" }}</td>
+              <td style="text-align:left;font-size:11px;color:var(--text-soft);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.emisor or '' }}">{{ r.emisor or "—" }}</td>
+              <td style="text-align:left;font-size:11px">{{ r.categoria }}</td>
+              <td style="font-size:11px;color:var(--text-muted)">{{ r.rating }}</td>
               <td>{{ r.cantidad | ar_int }}</td>
               <td>{{ r.valor | ar_int }}</td>
               <td>{{ (r.pct_pn * 100) | ar_pct_pp(2) if r.pct_pn is not none else "—" }}</td>
-              <td>{{ r.last | ar_num(2) }}</td>
-              <td>{{ r.tirea | ar_pct(2) }}</td>
+              <td class="grp" style="font-weight:600">{{ r.px_val | ar_num(4) }}</td>
+              <td class="pos-last-cell"><input class="pos-last cell-edit" type="text" inputmode="decimal"
+                     value="{{ r.last | ar_num(2) if r.last is not none else '' }}" placeholder="—"></td>
+              <td class="pos-ret">—</td>
+              <td class="grp">{{ r.tirea | ar_pct(2) }}</td>
               <td>
                 {{ r.tna | ar_pct(2) }}
                 {% if r.tna_convention_label and r.tirea is not none %}<span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ r.tna_convention_label }}</span>{% endif %}

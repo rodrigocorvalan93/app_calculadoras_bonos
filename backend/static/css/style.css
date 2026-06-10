@@ -881,3 +881,35 @@ select {
   .tick-up, .tick-down, .live-dot[data-state="live"] { animation: none !important; }
   .tab::after, .card, .btn-primary, button { transition: none !important; }
 }
+
+/* ── Mercado: bloques con separador + columnas ocultables ───────────── */
+.mercado-table th.grp, .mercado-table td.grp,
+.curve-table th.grp, .curve-table td.grp {
+  border-left: 2px solid var(--border);
+}
+.hide-oclh .col-oclh { display: none; }
+.hide-mae  .col-mae  { display: none; }
+.table-tools {
+  display: flex; gap: 14px; align-items: center;
+  font-size: 12px; margin: 0 0 6px; padding: 0 2px;
+}
+.table-tools label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+
+/* ── Tablas ordenables (th clickeable) ──────────────────────────────── */
+th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
+th[data-sort]:hover { color: var(--accent); }
+th[data-sort]::after { content: " ↕"; opacity: 0.35; font-size: 9px; }
+th[data-sort].sort-asc::after  { content: " ▲"; opacity: 0.9; color: var(--accent); }
+th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--accent); }
+
+/* ── Posiciones: Last editable + chip de retorno del día ────────────── */
+.cell-edit {
+  width: 76px; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 6px; font: inherit; font-size: 12.5px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cell-edit:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.pos-day-ret { font-weight: 650; font-variant-numeric: tabular-nums; }
+.var-up { color: var(--green); }
+.var-down { color: var(--red); }
