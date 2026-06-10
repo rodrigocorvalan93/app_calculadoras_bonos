@@ -945,3 +945,14 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
 .news-item:hover { color: var(--text); text-decoration: none; }
 .news-src { color: var(--accent); font-weight: 600; font-size: 10.5px; margin-right: 4px; }
 @media (prefers-reduced-motion: reduce) { .news-track { animation: none; } }
+
+/* ── Tape deslizante + noticias arriba (v2) ─────────────────────────── */
+.tape { overflow: hidden; }                /* pisa el overflow-x:auto inicial */
+.tape-track {
+  display: inline-flex; gap: 26px; white-space: nowrap;
+  animation: tape-scroll 55s linear infinite; will-change: transform;
+}
+.tape:hover .tape-track { animation-play-state: paused; }
+@keyframes tape-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.news-top { border-top: 0; border-bottom: 1px solid var(--border-soft); }
+@media (prefers-reduced-motion: reduce) { .tape-track { animation: none; } }

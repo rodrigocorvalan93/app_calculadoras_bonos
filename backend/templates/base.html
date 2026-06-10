@@ -63,8 +63,16 @@
     </div>
   </header>
 
+  {# La animación corre en #tape-track (htmx sólo swapea su contenido → el
+     deslizamiento NO se reinicia con cada refresh live). #}
   <div id="tape" class="tape" data-flash-scope
-       hx-get="/tape" hx-trigger="load, md-update from:body, every 60s" hx-swap="innerHTML"></div>
+       hx-get="/tape" hx-trigger="load, md-update from:body, every 60s"
+       hx-target="#tape-track" hx-swap="innerHTML">
+    <div id="tape-track" class="tape-track"></div>
+  </div>
+
+  <div id="news-marquee" class="news-marquee news-top"
+       hx-get="/news/marquee" hx-trigger="load, every 180s" hx-swap="innerHTML"></div>
 
   <div class="layout" :class="{ 'rail-closed': !railOpen }">
     <aside class="fx-rail" x-show="railOpen" x-cloak data-flash-scope
@@ -75,9 +83,6 @@
       {% block content %}{% endblock %}
     </main>
   </div>
-
-  <div id="news-marquee" class="news-marquee"
-       hx-get="/news/marquee" hx-trigger="load, every 180s" hx-swap="innerHTML"></div>
 
   <footer class="footer">
     <span>FastAPI rewrite · sub-50 ms p95 target</span>
