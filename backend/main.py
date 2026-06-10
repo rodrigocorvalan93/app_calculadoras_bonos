@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
+from backend.routes.breakeven import router as breakeven_router
 from backend.routes.cafci import router as cafci_router
 from backend.routes.comparador import router as comparador_router
 from backend.routes.credito import router as creditos_router
@@ -32,6 +33,7 @@ from backend.routes.mae import router as tasas_router
 from backend.routes.historico import router as historico_router
 from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
+from backend.routes.tape import router as tape_router
 from backend.routes.yas import router as yas_router
 from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, symbols as syms
 from backend.services.primary_client import get_client
@@ -43,6 +45,20 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger("backend.main")
+
+
+class _QuietPolls(logging.Filter):
+    """Silencia el access-log de los endpoints de polling (1 req/s): /market/seq
+    y los partials live. Costo-0: menos I/O de log y consola legible; los
+    endpoints 'reales' se siguen logueando igual."""
+    _NOISY = ("/market/seq", "/tape", "/dolares/rail", "/news/marquee")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(p in msg for p in self._NOISY)
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietPolls())
 
 BACKEND_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BACKEND_DIR / "templates"
@@ -82,6 +98,12 @@ def _initial_symbols() -> list[str]:
         seed.update(cauc_svc.symbols("DOLAR"))
     except Exception:  # noqa: BLE001
         logger.exception("[main] caución seed failed")
+    # Acciones + CEDEARs (panel Mercado y barra superior): precio puro, sin TIR.
+    try:
+        from backend.services import equities
+        seed.update(equities.all_symbols())
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] equities seed failed")
     # Futuros de dólar (DLR/MMMYY + …M): tasas implícitas en la pestaña Futuros.
     try:
         from backend.services import futuros as fut_svc
@@ -177,6 +199,13 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] MAE poller start failed")
 
+    # Noticias (RSS): poller en thread daemon — el request sólo lee cache.
+    try:
+        from backend.services import news
+        news.start()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] news poller start failed")
+
     yield
 
     logger.info("[main] shutting down")
@@ -226,6 +255,7 @@ def create_app() -> FastAPI:
     app.include_router(comparador_router)
     app.include_router(creditos_router)
     app.include_router(cafci_router)
+    app.include_router(breakeven_router)
     app.include_router(curves_router)
     app.include_router(mercado_router)
     app.include_router(forwards_router)
@@ -236,6 +266,7 @@ def create_app() -> FastAPI:
     app.include_router(historico_router)
     app.include_router(posiciones_router)
     app.include_router(market_router)
+    app.include_router(tape_router)
 
     @app.get("/")
     async def index() -> RedirectResponse:

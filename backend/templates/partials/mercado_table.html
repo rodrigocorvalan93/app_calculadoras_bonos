@@ -19,32 +19,37 @@
   </div>
   <div class="card-body" style="padding:0">
     <div class="table-scroll">
+    {# Clases de columna: `grp` = barra separadora a la izquierda (inicio de
+       bloque); `col-oclh` / `col-mae` = ocultables con los toggles de la
+       página (CSS puro, el default muestra todo). Bloques: OCLH | Var |
+       bid (sz+px+tirea) | last (px+vwap+tirea) | offer (px+tirea+sz) |
+       vol | MAE | fuente. #}
     <table class="cashflows curve-table mercado-table">
       <thead>
         <tr>
           <th>Código</th>
           <th>Dur</th>
-          <th>Open</th>
-          <th>Close</th>
-          <th>Low</th>
-          <th>High</th>
-          <th>Var %</th>
+          <th class="col-oclh grp">Open</th>
+          <th class="col-oclh">Close</th>
+          <th class="col-oclh">Low</th>
+          <th class="col-oclh">High</th>
+          <th class="grp">Var %</th>
           <th>Var px</th>
-          <th>Bid sz</th>
+          <th class="grp">Bid sz</th>
           <th>Bid</th>
           <th>Bid TIREA</th>
-          <th>Last</th>
+          <th class="grp">Last</th>
           <th>VWAP</th>
           <th>TIREA@Last</th>
-          <th>Offer</th>
+          <th class="grp">Offer</th>
           <th>Offer TIREA</th>
           <th>Offer sz</th>
-          <th>Vol (VN)</th>
-          <th title="Último operado en MAE (OTC)">MAE últ</th>
-          <th title="Variación MAE">MAE var</th>
-          <th title="Volumen operado en MAE (VN)">Vol MAE</th>
-          <th title="Volumen total VN: BYMA + MAE">Vol tot</th>
-          <th>P.Src</th>
+          <th class="grp">Vol (VN)</th>
+          <th class="col-mae grp" title="Último operado en MAE (OTC)">MAE últ</th>
+          <th class="col-mae" title="Variación MAE">MAE var</th>
+          <th class="col-mae" title="Volumen operado en MAE (VN)">Vol MAE</th>
+          <th class="col-mae" title="Volumen total VN: BYMA + MAE">Vol tot</th>
+          <th class="grp">P.Src</th>
           <th>P.Date</th>
         </tr>
       </thead>
@@ -58,27 +63,27 @@
               title="Ver libro de {{ r.code }}">
             <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
             <td>{{ r.duration | ar_num(2) }}</td>
-            <td>{{ r.open | ar_num(2) }}</td>
-            <td>{{ r.close | ar_num(2) }}</td>
-            <td>{{ r.low | ar_num(2) }}</td>
-            <td>{{ r.high | ar_num(2) }}</td>
-            <td style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
+            <td class="col-oclh grp">{{ r.open | ar_num(2) }}</td>
+            <td class="col-oclh">{{ r.close | ar_num(2) }}</td>
+            <td class="col-oclh">{{ r.low | ar_num(2) }}</td>
+            <td class="col-oclh">{{ r.high | ar_num(2) }}</td>
+            <td class="grp" style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td class="{{ vcls }}">{{ r.var_px | ar_num(2) }}</td>
-            <td style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
+            <td class="grp" style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
             <td class="{{ r.bid_cls }}">{{ r.bid | ar_num(2) }}</td>
             <td style="color:var(--cyan)">{{ r.tirea_bid | ar_pct(2) }}</td>
-            <td class="{{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
+            <td class="grp {{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
             <td>{{ r.vwap | ar_num(2) }}</td>
             <td style="color:var(--accent);font-weight:600">{{ r.tirea_last | ar_pct(2) }}</td>
-            <td class="{{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>
+            <td class="grp {{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>
             <td style="color:var(--cyan)">{{ r.tirea_offer | ar_pct(2) }}</td>
             <td style="color:var(--text-muted)">{{ r.offer_size | ar_int }}</td>
-            <td>{{ r.nominal | ar_hum }}</td>
-            <td class="{{ 'var-up' if (r.mae and r.mae.var_pct is not none and r.mae.var_pct >= 0) else ('var-down' if (r.mae and r.mae.var_pct is not none) else '') }}">{{ r.mae.last | ar_num(2) if r.mae else "·" }}</td>
-            <td>{{ r.mae.var_pct | ar_num(2) if (r.mae and r.mae.var_pct is not none) else "·" }}</td>
-            <td style="color:var(--text-muted)">{{ r.mae.volumen | ar_hum if (r.mae and r.mae.volumen is not none) else "·" }}</td>
-            <td style="color:var(--text-soft)">{{ r.vol_total | ar_hum if r.vol_total is not none else "·" }}</td>
-            <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
+            <td class="grp">{{ r.nominal | ar_hum }}</td>
+            <td class="col-mae grp {{ 'var-up' if (r.mae and r.mae.var_pct is not none and r.mae.var_pct >= 0) else ('var-down' if (r.mae and r.mae.var_pct is not none) else '') }}">{{ r.mae.last | ar_num(2) if r.mae else "·" }}</td>
+            <td class="col-mae">{{ r.mae.var_pct | ar_num(2) if (r.mae and r.mae.var_pct is not none) else "·" }}</td>
+            <td class="col-mae" style="color:var(--text-muted)">{{ r.mae.volumen | ar_hum if (r.mae and r.mae.volumen is not none) else "·" }}</td>
+            <td class="col-mae" style="color:var(--text-soft)">{{ r.vol_total | ar_hum if r.vol_total is not none else "·" }}</td>
+            <td class="grp" style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
             <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_date | ar_ts }}</td>
           </tr>
         {% endfor %}

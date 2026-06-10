@@ -13,6 +13,16 @@
     <div class="card-body">
       <div class="row-fields">
         <label class="field">
+          <span>Panel</span>
+          <select name="panel"
+                  hx-get="/mercado/table" hx-trigger="change" hx-target="#mercado-table" hx-swap="innerHTML"
+                  hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente]">
+            <option value="rf" selected>Renta Fija</option>
+            <option value="lideres">Acciones</option>
+            <option value="cedears">CEDEARs</option>
+          </select>
+        </label>
+        <label class="field">
           <span>Curva</span>
           <select
             name="curve"
@@ -95,15 +105,26 @@
     </div>
   </div>
 
+  {# Toggles de columnas (Alpine + localStorage, default TODO visible). El
+     estado vive FUERA del swap de htmx, así sobrevive los refrescos live. #}
+  <div x-data="{ oclh: (function(){ try { return localStorage.getItem('m_oclh') !== '0'; } catch(e){ return true; } })(),
+                 mae:  (function(){ try { return localStorage.getItem('m_mae')  !== '0'; } catch(e){ return true; } })() }"
+       :class="{ 'hide-oclh': !oclh, 'hide-mae': !mae }">
+  <div class="table-tools muted">
+    <span>Columnas:</span>
+    <label><input type="checkbox" x-model="oclh" @change="try{localStorage.setItem('m_oclh', oclh?'1':'0')}catch(e){}"> OCLH</label>
+    <label><input type="checkbox" x-model="mae" @change="try{localStorage.setItem('m_mae', mae?'1':'0')}catch(e){}"> MAE</label>
+  </div>
   <div
     id="mercado-table"
     data-flash-scope
     hx-get="/mercado/table"
     hx-trigger="md-update from:body, every 30s"
     hx-swap="innerHTML"
-    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente]"
+    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel]"
   >
     {% include "partials/mercado_table.html" %}
+  </div>
   </div>
 
   <p class="muted" style="margin-top:14px">Clickeá una fila para ver el libro (profundidad).</p>

@@ -1,0 +1,50 @@
+{% if not rows %}
+  <div class="alert">Sin bonos CER con cotización para despejar el break-even (¿broker offline?).</div>
+{% else %}
+{% if resumen %}
+<div class="mae-strip" style="margin-bottom:12px">
+  <span class="mae-tag">BE Fisher</span>
+  <span>BE anual prom <b>{{ resumen.be_anual_prom | ar_pct(2) }}</b></span>
+  <span>BE TEM prom <b>{{ resumen.be_tem_prom | ar_pct(2) }}</b></span>
+  <span class="muted">rango {{ resumen.be_anual_min | ar_pct(2) }} – {{ resumen.be_anual_max | ar_pct(2) }} · {{ resumen.n }} bonos · {{ n_lecap }} tasa fija · plazo {{ plazo }}</span>
+</div>
+{% endif %}
+<div class="card">
+  <div class="card-title">
+    <span>Break-even por bono CER</span>
+    <span class="card-title-aux">nominal = TIREA tasa fija interpolada a la misma duration</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+    <table id="be-tbl" class="cashflows curve-table" data-sortable>
+      <thead>
+        <tr>
+          <th data-sort style="text-align:left">Bono CER</th>
+          <th data-sort>Dur</th>
+          <th data-sort>TIREA real</th>
+          <th data-sort>TIREA nominal</th>
+          <th data-sort class="grp">BE anual</th>
+          <th data-sort>BE TEM</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td style="text-align:left;color:var(--accent);font-weight:600">
+              <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a>
+            </td>
+            <td>{{ r.duration | ar_num(2) }}</td>
+            <td style="color:var(--cyan)">{{ r.tirea_real | ar_pct(2) }}</td>
+            <td>{{ r.tirea_nom | ar_pct(2) }}</td>
+            <td class="grp" style="font-weight:650;color:var(--accent)">{{ r.be_anual | ar_pct(2) }}</td>
+            <td style="font-weight:600">{{ r.be_tem | ar_pct(2) }}</td>
+            <td class="muted" style="font-size:10.5px">{% if r.extrapolado %}extrap.{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}

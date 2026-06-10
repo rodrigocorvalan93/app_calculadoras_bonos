@@ -44,7 +44,9 @@
     </div>
   </div>
 
-  <div id="pos-fondo">
+  <div id="pos-fondo" data-flash-scope
+       hx-get="/posiciones/table" hx-trigger="md-update from:body, every 30s"
+       hx-swap="innerHTML" hx-include="[name=fondo], [name=plazo]">
     {% include "partials/posiciones_fondo.html" %}
   </div>
 </section>

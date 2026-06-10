@@ -881,3 +881,67 @@ select {
   .tick-up, .tick-down, .live-dot[data-state="live"] { animation: none !important; }
   .tab::after, .card, .btn-primary, button { transition: none !important; }
 }
+
+/* ── Mercado: bloques con separador + columnas ocultables ───────────── */
+.mercado-table th.grp, .mercado-table td.grp,
+.curve-table th.grp, .curve-table td.grp {
+  border-left: 2px solid var(--border);
+}
+.hide-oclh .col-oclh { display: none; }
+.hide-mae  .col-mae  { display: none; }
+.table-tools {
+  display: flex; gap: 14px; align-items: center;
+  font-size: 12px; margin: 0 0 6px; padding: 0 2px;
+}
+.table-tools label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+
+/* ── Tablas ordenables (th clickeable) ──────────────────────────────── */
+th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
+th[data-sort]:hover { color: var(--accent); }
+th[data-sort]::after { content: " ↕"; opacity: 0.35; font-size: 9px; }
+th[data-sort].sort-asc::after  { content: " ▲"; opacity: 0.9; color: var(--accent); }
+th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--accent); }
+
+/* ── Posiciones: Last editable + chip de retorno del día ────────────── */
+.cell-edit {
+  width: 76px; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 6px; font: inherit; font-size: 12.5px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cell-edit:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.pos-day-ret { font-weight: 650; font-variant-numeric: tabular-nums; }
+.var-up { color: var(--green); }
+.var-down { color: var(--red); }
+
+/* ── Barra de activos (tape) ────────────────────────────────────────── */
+.tape {
+  display: flex; gap: 22px; align-items: center;
+  padding: 5px 18px; overflow-x: auto; white-space: nowrap;
+  background: var(--panel); border-bottom: 1px solid var(--border-soft);
+  font-size: 12.5px; scrollbar-width: thin;
+  position: sticky; top: 47px; z-index: 9;
+}
+.tape-item { display: inline-flex; gap: 7px; align-items: baseline; flex: 0 0 auto; }
+.tape-code { color: var(--text-muted); font-weight: 600; font-size: 11px; letter-spacing: 0.02em; }
+.tape-fx .tape-code { color: var(--accent); }
+.tape-usd .tape-code { color: var(--cyan); }
+.tape-px { font-weight: 650; font-variant-numeric: tabular-nums; }
+.tape-var { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* ── Marquesina de noticias ─────────────────────────────────────────── */
+.news-marquee {
+  overflow: hidden; border-top: 1px solid var(--border-soft);
+  background: var(--panel); font-size: 12px;
+}
+.news-marquee:empty { display: none; }
+.news-track {
+  display: inline-flex; gap: 36px; padding: 6px 0; white-space: nowrap;
+  animation: news-scroll 90s linear infinite; will-change: transform;
+}
+.news-marquee:hover .news-track { animation-play-state: paused; }
+@keyframes news-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.news-item { color: var(--text-soft); }
+.news-item:hover { color: var(--text); text-decoration: none; }
+.news-src { color: var(--accent); font-weight: 600; font-size: 10.5px; margin-right: 4px; }
+@media (prefers-reduced-motion: reduce) { .news-track { animation: none; } }

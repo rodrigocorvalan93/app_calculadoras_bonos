@@ -37,6 +37,7 @@
       <a class="tab {% block tab_comparador %}{% endblock %}" href="/comparador">Comparador</a>
       <a class="tab {% block tab_curves %}{% endblock %}" href="/curves">Curvas</a>
       <a class="tab {% block tab_mercado %}{% endblock %}" href="/mercado">Mercado</a>
+      <a class="tab {% block tab_breakeven %}{% endblock %}" href="/breakeven">Break-even</a>
       <a class="tab {% block tab_dolares %}{% endblock %}" href="/dolares">Dólares</a>
       <a class="tab {% block tab_tasas %}{% endblock %}" href="/tasas">Tasas</a>
       <a class="tab {% block tab_posiciones %}{% endblock %}" href="/posiciones">Posiciones</a>
@@ -62,6 +63,9 @@
     </div>
   </header>
 
+  <div id="tape" class="tape" data-flash-scope
+       hx-get="/tape" hx-trigger="load, md-update from:body, every 60s" hx-swap="innerHTML"></div>
+
   <div class="layout" :class="{ 'rail-closed': !railOpen }">
     <aside class="fx-rail" x-show="railOpen" x-cloak data-flash-scope
            hx-get="/dolares/rail" hx-trigger="load, md-update from:body, every 30s" hx-swap="innerHTML">
@@ -71,6 +75,9 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  <div id="news-marquee" class="news-marquee"
+       hx-get="/news/marquee" hx-trigger="load, every 180s" hx-swap="innerHTML"></div>
 
   <footer class="footer">
     <span>FastAPI rewrite · sub-50 ms p95 target</span>

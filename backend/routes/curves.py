@@ -398,8 +398,16 @@ async def mercado_table_partial(
     only_quoting: bool = True,
     leg: str = "native",
     fuente: str = "byma",
+    panel: str = "rf",
 ) -> HTMLResponse:
     """HTMX partial: blotter body for the requested curve."""
+    # Panel Acciones / CEDEARs: precio puro desde el store (sin TIR ni
+    # calculadora) — cada fila es un lookup en memoria, sin pasar por pricing.
+    if panel in ("lideres", "cedears"):
+        from backend.services import equities
+        eq_rows = equities.panel_rows(panel, plazo)
+        return _render(request, "partials/equities_table.html",
+                       rows=eq_rows, panel=panel, plazo=plazo)
     rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
     return _render(
         request,
