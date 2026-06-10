@@ -48,9 +48,15 @@ pedí OK antes de escribir, y validá después.**
 
 7. **Insertá** sólo tras el OK — las **3 partes** por ficha (ver *Las 3 ediciones*).
 
-8. **Validá**: `python .claude/skills/nueva-especie/preview.py <TICKER> [...]`
-   (desde la raíz del repo). Confirmá que carga y cae donde esperabas. Si dice
-   "no está en el universo", faltó alguna de las 3 ediciones.
+8. **Validá con los dos helpers** (desde la raíz del repo) y pegale la salida al
+   usuario:
+   - `python .claude/skills/nueva-especie/preview.py <TICKER> [...]` — confirma
+     que carga y cae en la Curva/Posición esperada. Si dice "no está en el
+     universo", faltó alguna de las 3 ediciones.
+   - `python .claude/skills/nueva-especie/compare.py <TICKER> <COMPARABLE>` —
+     confirma que la **estructura** quedó idéntica al comparable (clasificación,
+     ajuste, tasa, convenciones, lags) y que los campos propios (código / ISIN /
+     nombre / vto) **difieren**. Si marca `[X]`, hay error de carga → corregí.
 
 ---
 
@@ -191,17 +197,34 @@ Ubicá las inserciones **al lado del comparable** en cada una de las 3 secciones
 
 ## Formato de la previsualización (paso 6)
 
-Antes de escribir, mostrale al usuario algo así:
+Antes de escribir, mostrale al usuario una **tabla de control** para que verifique
+de un vistazo, marcando la FUENTE de cada dato (aviso / convención / espejo del
+comparable). Así el usuario chequea contra el PDF sin leer el dict:
 
 ```
-Voy a cargar 3 fichas para el Boncer TX31 (Dual CER/TAMAR):
-  • TX31   (base, CER, FIJA)        → Curva dualcer  · Pos: Dual CER / TAMAR
-  • TX31j  (CER proyectado)         → Curva cerproy/dualcer
-  • TX31v  (pata TAMAR, VAR_CAP)    → Curva dualtamar
-Comparable espejado: TXMJ9 / TXMJ9j / TXMJ9v.
-Asumido (confirmá): lag CER -10, base 360, calificación CCC-, t+1.
-Campos del aviso: emisión 30/06/2026, vto 30/06/2031, cupón CER+X%, bullet.
+Boncer TX31 — Dual CER/TAMAR. Comparable espejado: TXMJ9 (3 fichas).
+
+Campo                 Valor              Fuente
+────────────────────  ─────────────────  ─────────────────────────
+Vencimiento           30/06/2031         aviso (pág. 9)
+Emisión               12/06/2026         aviso (pág. 9)
+ISIN                  ARxxxxxxx          aviso ⚠ confirmar (no figura claro)
+Moneda                ARS                aviso
+Ajuste sobre Capital  CER (base)         aviso (máx CER / TAMAR)
+Tipo Tasa / Index     FIJA / —           espejo TXMJ9
+Margen TAMAR (pata v) +3,00%             aviso (pág. 10)
+Convención Base       360 (30/360)       aviso
+Amortización          BULLET             aviso (íntegra al vto)
+Lag CER               -10                convención (= comparable)
+Calificación          CCC-               espejo TXMJ9 ⚠ asumido
+
+Fichas a crear (3):
+  • TX31   base CER, FIJA          → Curva dualcer    · Pos: Dual CER / TAMAR
+  • TX31j  CER proyectado          → Curva cerproy/dualcer
+  • TX31v  pata TAMAR, VARIABLE_CAP → Curva dualtamar
 ¿Lo cargo?
 ```
 
-Recién con el OK, hacé las ediciones y corré el `preview.py` para verificar.
+Recién con el OK, hacé las 3 ediciones por ficha y **validá con los dos helpers**
+(`preview.py` = landing en curva/posición, `compare.py TX31 TXMJ9` = estructura
+idéntica al comparable). Pegale ambas salidas al usuario.
