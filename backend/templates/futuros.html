@@ -21,7 +21,7 @@
     </div>
   </div>
 
-  <div id="fut-table" hx-get="/futuros/table" hx-trigger="every 5s" hx-swap="innerHTML" hx-include="[name=spot_override]">
+  <div id="fut-table" data-flash-scope hx-get="/futuros/table" hx-trigger="md-update from:body, every 30s" hx-swap="innerHTML" hx-include="[name=spot_override]">
     {% include "partials/futuros_table.html" %}
   </div>
 

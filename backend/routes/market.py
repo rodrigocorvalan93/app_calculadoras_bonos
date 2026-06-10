@@ -15,10 +15,19 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from fastapi import APIRouter, Query
+from fastapi.responses import PlainTextResponse
 
 from backend.services import fx as fx_svc, marketdata_store as mds, primary_ws, symbols as syms
 
 router = APIRouter(prefix="/market", tags=["market"])
+
+
+@router.get("/seq", response_class=PlainTextResponse)
+async def seq() -> PlainTextResponse:
+    """Secuencia global del store (texto plano, ~µs). El front la sondea cada
+    1 s y dispara `md-update` sólo cuando avanza → los paneles vivos se
+    re-renderizan únicamente con ticks reales (ver static/js/app.js)."""
+    return PlainTextResponse(str(mds.get_store().seq()))
 
 
 @router.get("/diag")

@@ -816,3 +816,68 @@ select {
 
 .fx-calc-res { border-top: 1px solid var(--border-soft); padding-top: 10px; }
 .fx-calc-tc { font-size: 14px; }
+
+/* ─────────────────────────────────────────────────────────────────────
+   LIVE — motor de mercado en vivo (flashes de tick + indicador de feed).
+   Estética de terminal de ALyC: cuando un valor cambia, la celda
+   flashea verde/rojo y se desvanece. Todo CSS puro (GPU, costo ~0);
+   las clases las pone app.js diffeando los swaps de htmx.
+   ───────────────────────────────────────────────────────────────────── */
+
+@keyframes tick-up {
+  0%   { background-color: color-mix(in srgb, var(--green) 32%, transparent); }
+  100% { background-color: transparent; }
+}
+@keyframes tick-down {
+  0%   { background-color: color-mix(in srgb, var(--red) 30%, transparent); }
+  100% { background-color: transparent; }
+}
+.tick-up   { animation: tick-up   0.9s ease-out; border-radius: 3px; }
+.tick-down { animation: tick-down 0.9s ease-out; border-radius: 3px; }
+/* En el riel el valor es grande: flash también en el color del número. */
+.rail-v.tick-up   { color: var(--green); transition: color 1.2s ease 0.4s; }
+.rail-v.tick-down { color: var(--red);   transition: color 1.2s ease 0.4s; }
+
+/* Dot de estado del feed (topbar): live = pulso verde, idle = gris,
+   off = ámbar (sin conexión con /market/seq). */
+.live-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--text-muted); display: inline-block; flex: 0 0 auto;
+  transition: background 0.3s ease;
+}
+.live-dot[data-state="live"] {
+  background: var(--green);
+  animation: live-pulse 1.6s ease-out infinite;
+}
+.live-dot[data-state="idle"] { background: var(--text-muted); animation: none; }
+.live-dot[data-state="off"]  { background: var(--yellow); animation: none; }
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); }
+  70%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* Mientras un panel vivo está re-renderizando, atenuación sutil (sin layout). */
+[data-flash-scope].htmx-request { opacity: 0.93; transition: opacity 0.12s ease; }
+
+/* ── Micro-polish (hover/transiciones, costo cero) ──────────────────── */
+.card { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
+.card:hover { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.tab { position: relative; }
+.tab::after {
+  content: ""; position: absolute; left: 10px; right: 10px; bottom: 2px;
+  height: 2px; border-radius: 2px; background: var(--accent);
+  transform: scaleX(0); transform-origin: left; transition: transform 0.18s ease;
+}
+.tab.active::after { transform: scaleX(1); }
+.curve-table tbody tr, .cashflows tbody tr { transition: background 0.12s ease; }
+.curve-table tbody tr:hover { background: var(--accent-soft); }
+.btn-primary, button { transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease; }
+.btn-primary:active { transform: translateY(1px); }
+.var-up, .var-down { transition: color 0.25s ease; }
+
+/* Accesibilidad: si el usuario pide menos movimiento, todo quieto. */
+@media (prefers-reduced-motion: reduce) {
+  .tick-up, .tick-down, .live-dot[data-state="live"] { animation: none !important; }
+  .tab::after, .card, .btn-primary, button { transition: none !important; }
+}

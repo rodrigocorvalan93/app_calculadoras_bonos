@@ -12,7 +12,7 @@
     </p>
   </header>
 
-  <div id="tasas-table" hx-get="/tasas/table" hx-trigger="every 20s" hx-swap="innerHTML">
+  <div id="tasas-table" data-flash-scope hx-get="/tasas/table" hx-trigger="md-update from:body, every 20s" hx-swap="innerHTML">
     {% include "partials/tasas_table.html" %}
   </div>
 </section>

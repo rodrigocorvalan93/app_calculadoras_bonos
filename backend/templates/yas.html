@@ -93,8 +93,9 @@
 
   <div
     id="yas-market-card"
+    data-flash-scope
     hx-get="/yas/market"
-    hx-trigger="load, every 3s, change from:#yas-form"
+    hx-trigger="load, md-update from:body, every 15s, change from:#yas-form"
     hx-include="[name=code], [name=plazo]"
     hx-swap="innerHTML"
   >

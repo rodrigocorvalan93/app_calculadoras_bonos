@@ -102,6 +102,25 @@ everywhere; numbers use `tabular-nums` instead of monospace. Dark
 default with `[data-theme="light"]` available. No frameworks (no
 Tailwind / Bootstrap / Google Fonts / JS libs beyond htmx + Alpine).
 
+## Live engine (paneles de mercado)
+
+`static/js/app.js` sondea `/market/seq` (entero plano, ~0,5 ms) cada 1 s y
+dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
+(pausa con la pestaña oculta). Un panel con data de mercado se declara:
+
+    <div id="…" data-flash-scope
+         hx-get="/…" hx-trigger="md-update from:body, every 30s" …>
+
+- `md-update from:body` → re-render ~1 s después de un tick real; el
+  `every 20-30s` queda como fallback (datos que no pasan por el store,
+  p. ej. pollers MAE). **No usar `every 3-5s` fijo**: con el seq el panel
+  refresca más rápido y carga menos.
+- `data-flash-scope` activa el diff de celdas post-swap (key = tabla +
+  1ª celda de la fila + columna; en el riel, `.rail-l`→`.rail-v`) que pone
+  `.tick-up` / `.tick-down` (flash CSS verde/rojo estilo terminal).
+- El dot `#live-dot` de la topbar muestra el estado del feed
+  (live/idle/off). Todo vanilla JS — sin librerías nuevas.
+
 ## Tests
 
 `pytest -q` at the repo root. New backend features need a smoke test
