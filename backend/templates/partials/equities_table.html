@@ -1,0 +1,61 @@
+{% if not rows %}
+  <div class="alert">Sin cotizaciones de {{ "CEDEARs" if panel == "cedears" else "acciones" }} (¿broker offline o panel no suscripto?).</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ "CEDEARs" if panel == "cedears" else "Acciones · Panel líderes" }} · Mercado</span>
+    <span class="card-title-aux">{{ rows | length }} especies · plazo {{ plazo }} · sólo precios (sin TIR)</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-scroll">
+    <table id="eq-tbl" class="cashflows curve-table mercado-table" data-sortable>
+      <thead>
+        <tr>
+          <th data-sort style="text-align:left">Código</th>
+          <th data-sort class="grp">Open</th>
+          <th data-sort>Close</th>
+          <th data-sort>Low</th>
+          <th data-sort>High</th>
+          <th data-sort class="grp">Var %</th>
+          <th data-sort>Var px</th>
+          <th data-sort class="grp">Bid sz</th>
+          <th data-sort>Bid</th>
+          <th data-sort class="grp">Last</th>
+          <th data-sort>VWAP</th>
+          <th data-sort class="grp">Offer</th>
+          <th data-sort>Offer sz</th>
+          <th data-sort class="grp">Vol $</th>
+          <th data-sort>Vol VN</th>
+          <th class="grp">Últ. op</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
+          <tr style="cursor:pointer"
+              hx-get="/mercado/book/{{ r.code }}?plazo={{ plazo }}" hx-target="#mercado-book" hx-swap="innerHTML"
+              title="Ver libro de {{ r.code }}">
+            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
+            <td class="grp">{{ r.open | ar_num(2) }}</td>
+            <td>{{ r.close | ar_num(2) }}</td>
+            <td>{{ r.low | ar_num(2) }}</td>
+            <td>{{ r.high | ar_num(2) }}</td>
+            <td class="grp {{ vcls }}" style="font-weight:650">{{ r.var_pct | ar_pct_pp(2) }}</td>
+            <td class="{{ vcls }}">{{ r.var_px | ar_num(2) }}</td>
+            <td class="grp" style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
+            <td>{{ r.bid | ar_num(2) }}</td>
+            <td class="grp" style="font-weight:650">{{ r.last | ar_num(2) }}</td>
+            <td>{{ r.vwap | ar_num(2) }}</td>
+            <td class="grp">{{ r.offer | ar_num(2) }}</td>
+            <td style="color:var(--text-muted)">{{ r.offer_size | ar_int }}</td>
+            <td class="grp">{{ r.volume | ar_hum }}</td>
+            <td style="color:var(--text-muted)">{{ r.nominal | ar_hum }}</td>
+            <td class="grp" style="font-size:10.5px;color:var(--text-muted)">{{ r.last_ts | ar_ts }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}

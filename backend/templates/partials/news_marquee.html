@@ -1,0 +1,12 @@
+{% if items %}
+{# Contenido duplicado para loop continuo (la animación corre -50%). #}
+<div class="news-track">
+  {% for dup in range(2) %}
+    {% for n in items %}
+      <a class="news-item" href="{{ n.link }}" target="_blank" rel="noopener">
+        <span class="news-src">{{ n.source }}</span> {{ n.title }}
+      </a>
+    {% endfor %}
+  {% endfor %}
+</div>
+{% endif %}

@@ -13,6 +13,16 @@
     <div class="card-body">
       <div class="row-fields">
         <label class="field">
+          <span>Panel</span>
+          <select name="panel"
+                  hx-get="/mercado/table" hx-trigger="change" hx-target="#mercado-table" hx-swap="innerHTML"
+                  hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente]">
+            <option value="rf" selected>Renta Fija</option>
+            <option value="lideres">Acciones</option>
+            <option value="cedears">CEDEARs</option>
+          </select>
+        </label>
+        <label class="field">
           <span>Curva</span>
           <select
             name="curve"
@@ -111,7 +121,7 @@
     hx-get="/mercado/table"
     hx-trigger="md-update from:body, every 30s"
     hx-swap="innerHTML"
-    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente]"
+    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel]"
   >
     {% include "partials/mercado_table.html" %}
   </div>

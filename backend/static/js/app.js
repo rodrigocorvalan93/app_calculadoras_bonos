@@ -111,6 +111,11 @@
       var v = items[k].querySelector('.rail-v');
       if (l && v) map['rail|' + (l.textContent || '').trim()] = (v.textContent || '').trim();
     }
+    // genérico: cualquier valor con [data-fl="clave"] (barra de activos, etc.)
+    var fls = root.querySelectorAll('[data-fl]');
+    for (var f = 0; f < fls.length; f++) {
+      map['fl|' + fls[f].getAttribute('data-fl')] = (fls[f].textContent || '').trim();
+    }
     return map;
   }
 
@@ -164,6 +169,13 @@
       var now2 = num((v.textContent || '').trim());
       if (was2 === null || now2 === null || was2 === now2) continue;
       flash(v, now2 > was2 ? 'tick-up' : 'tick-down');
+    }
+    var fls = t.querySelectorAll('[data-fl]');
+    for (var q = 0; q < fls.length; q++) {
+      var was3 = num(old['fl|' + fls[q].getAttribute('data-fl')]);
+      var now3 = num((fls[q].textContent || '').trim());
+      if (was3 === null || now3 === null || was3 === now3) continue;
+      flash(fls[q], now3 > was3 ? 'tick-up' : 'tick-down');
     }
   });
 })();

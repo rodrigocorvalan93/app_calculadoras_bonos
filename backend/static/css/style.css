@@ -913,3 +913,35 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
 .pos-day-ret { font-weight: 650; font-variant-numeric: tabular-nums; }
 .var-up { color: var(--green); }
 .var-down { color: var(--red); }
+
+/* ── Barra de activos (tape) ────────────────────────────────────────── */
+.tape {
+  display: flex; gap: 22px; align-items: center;
+  padding: 5px 18px; overflow-x: auto; white-space: nowrap;
+  background: var(--panel); border-bottom: 1px solid var(--border-soft);
+  font-size: 12.5px; scrollbar-width: thin;
+  position: sticky; top: 47px; z-index: 9;
+}
+.tape-item { display: inline-flex; gap: 7px; align-items: baseline; flex: 0 0 auto; }
+.tape-code { color: var(--text-muted); font-weight: 600; font-size: 11px; letter-spacing: 0.02em; }
+.tape-fx .tape-code { color: var(--accent); }
+.tape-usd .tape-code { color: var(--cyan); }
+.tape-px { font-weight: 650; font-variant-numeric: tabular-nums; }
+.tape-var { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* ── Marquesina de noticias ─────────────────────────────────────────── */
+.news-marquee {
+  overflow: hidden; border-top: 1px solid var(--border-soft);
+  background: var(--panel); font-size: 12px;
+}
+.news-marquee:empty { display: none; }
+.news-track {
+  display: inline-flex; gap: 36px; padding: 6px 0; white-space: nowrap;
+  animation: news-scroll 90s linear infinite; will-change: transform;
+}
+.news-marquee:hover .news-track { animation-play-state: paused; }
+@keyframes news-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.news-item { color: var(--text-soft); }
+.news-item:hover { color: var(--text); text-decoration: none; }
+.news-src { color: var(--accent); font-weight: 600; font-size: 10.5px; margin-right: 4px; }
+@media (prefers-reduced-motion: reduce) { .news-track { animation: none; } }

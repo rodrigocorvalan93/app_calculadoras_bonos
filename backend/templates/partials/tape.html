@@ -1,0 +1,11 @@
+{% for it in items %}
+<span class="tape-item{% if it.kind == 'fx' %} tape-fx{% elif it.kind == 'usd' %} tape-usd{% endif %}">
+  <b class="tape-code">{{ it.code }}</b>
+  <span class="tape-px" data-fl="{{ it.code }}">{{ it.px | ar_num(2) }}</span>
+  {% if it.var is not none %}
+    <span class="tape-var {{ 'var-up' if it.var >= 0 else 'var-down' }}">{{ '▲' if it.var >= 0 else '▼' }} {{ it.var | ar_pct(2) }}</span>
+  {% endif %}
+</span>
+{% else %}
+<span class="muted" style="font-size:11.5px">Sin cotizaciones todavía…</span>
+{% endfor %}

@@ -63,6 +63,9 @@
     </div>
   </header>
 
+  <div id="tape" class="tape" data-flash-scope
+       hx-get="/tape" hx-trigger="load, md-update from:body, every 60s" hx-swap="innerHTML"></div>
+
   <div class="layout" :class="{ 'rail-closed': !railOpen }">
     <aside class="fx-rail" x-show="railOpen" x-cloak data-flash-scope
            hx-get="/dolares/rail" hx-trigger="load, md-update from:body, every 30s" hx-swap="innerHTML">
@@ -72,6 +75,9 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  <div id="news-marquee" class="news-marquee"
+       hx-get="/news/marquee" hx-trigger="load, every 180s" hx-swap="innerHTML"></div>
 
   <footer class="footer">
     <span>FastAPI rewrite · sub-50 ms p95 target</span>
