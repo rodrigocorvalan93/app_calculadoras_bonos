@@ -97,8 +97,9 @@
 
   <div
     id="mercado-table"
+    data-flash-scope
     hx-get="/mercado/table"
-    hx-trigger="every 5s"
+    hx-trigger="md-update from:body, every 30s"
     hx-swap="innerHTML"
     hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente]"
   >

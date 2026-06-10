@@ -185,6 +185,13 @@ class MarketDataStore:
         with self._lock:
             return sorted(self._data.keys())
 
+    def seq(self) -> int:
+        """Secuencia global de updates (monótona). La UI la sondea (~1/s, costo
+        ~µs) y sólo re-renderiza los paneles vivos cuando avanzó — así un tick
+        llega a pantalla en ~1 s y, sin mercado, no se re-renderiza nada."""
+        with self._lock:
+            return self._updates
+
     def stats(self) -> Dict[str, Any]:
         with self._lock:
             return {

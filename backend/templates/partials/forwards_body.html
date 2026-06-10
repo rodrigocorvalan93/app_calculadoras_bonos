@@ -27,8 +27,9 @@
   </div>
 
   <div id="forwards-matrix"
+       data-flash-scope
        hx-get="/forwards/table"
-       hx-trigger="every 5s, change from:#forwards-filter delay:200ms"
+       hx-trigger="md-update from:body, every 30s, change from:#forwards-filter delay:200ms"
        hx-include="[name=curve],[name=plazo],[name=leg],[name=only_quoting],#forwards-filter"
        hx-swap="innerHTML">
     {% include "partials/forwards_table.html" %}

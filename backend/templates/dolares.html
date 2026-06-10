@@ -15,7 +15,7 @@
   </header>
 
   {# ── 1. Oficial (SIOPEL / A3500) ─────────────────────────────────── #}
-  <div id="dolar-oficial" hx-get="/dolares/oficial" hx-trigger="load, every 15s" hx-swap="innerHTML">
+  <div id="dolar-oficial" data-flash-scope hx-get="/dolares/oficial" hx-trigger="md-update from:body, every 20s" hx-swap="innerHTML">
     {% include "partials/dolares_oficial.html" %}
   </div>
 
@@ -37,7 +37,7 @@
     </div>
   </div>
 
-  <div id="dolar-tables" hx-get="/dolares/tables" hx-trigger="every 15s"
+  <div id="dolar-tables" data-flash-scope hx-get="/dolares/tables" hx-trigger="md-update from:body, every 30s"
        hx-swap="innerHTML" hx-include="#plazo-sel">
     {% include "partials/dolares_tables.html" %}
   </div>

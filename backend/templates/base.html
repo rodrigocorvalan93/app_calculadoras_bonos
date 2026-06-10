@@ -49,6 +49,7 @@
       <a class="tab {% block tab_cafci %}{% endblock %}" href="/cafci">CAFCI</a>
     </nav>
     <div class="topbar-meta">
+      <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
       <button type="button" class="rail-toggle" :class="{ active: railOpen }"
               @click="railOpen = !railOpen; try { localStorage.setItem('fx_rail', railOpen ? '1' : '0'); } catch (e) {}"
               title="Mostrar/ocultar el monitor de dólar">💵</button>
@@ -62,8 +63,8 @@
   </header>
 
   <div class="layout" :class="{ 'rail-closed': !railOpen }">
-    <aside class="fx-rail" x-show="railOpen" x-cloak
-           hx-get="/dolares/rail" hx-trigger="load, every 15s" hx-swap="innerHTML">
+    <aside class="fx-rail" x-show="railOpen" x-cloak data-flash-scope
+           hx-get="/dolares/rail" hx-trigger="load, md-update from:body, every 30s" hx-swap="innerHTML">
       <div class="muted" style="padding:12px;font-size:12px">Cargando dólar…</div>
     </aside>
     <main class="content">
