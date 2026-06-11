@@ -2,7 +2,7 @@
 """Preview de clasificación de una especie — verificación post-alta.
 
 Uso (desde la raíz del repo):
-    python .claude/skills/nueva-especie/preview.py <TICKER> [<TICKER> ...]
+    python .claude/skills/carga-bonos-rentafija/scripts/preview.py <TICKER> [<TICKER> ...]
 
 Carga el universo (especies.py) y, por cada ticker, muestra los campos
 discriminantes + a qué Curva(s) y a qué Categoría/Tasa/Calificación de
@@ -20,7 +20,7 @@ import sys
 # Al correr un script por ruta, Python pone en sys.path la carpeta del script
 # (.claude/skills/nueva-especie), no la raíz del repo. Agregamos la raíz (3
 # niveles arriba) para poder importar `backend` y `especies` sin importar el cwd.
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
@@ -43,8 +43,18 @@ def main(argv) -> int:
     bond_universe.ensure_loaded()
     groups = curves.build_curve_codes()
 
-    rc = 0
+    # Expandir cada ticker a sus fichas hermanas presentes ('', j, v, C, D):
+    # el olvido de una hermana es el error de alta más común.
+    expanded = []
     for code in argv:
+        sibs = [code + s for s in ("", "j", "v", "C", "D")
+                if bond_universe.get(code + s) is not None]
+        expanded.extend(sibs or [code])
+        if len(sibs) > 1:
+            print(f"[i] {code}: {len(sibs)} fichas hermanas → {', '.join(sibs)}")
+
+    rc = 0
+    for code in expanded:
         o = bond_universe.get(code)
         if o is None:
             rc = 1
