@@ -37,25 +37,70 @@ BASE_URL = "https://api.latinsecurities.matrizoms.com.ar/"
 # =============================================================================
 def login_xoms(username: str, password: str) -> requests.Session:
     """
-    Inicia sesión en la API de la alyc y retorna una sesión autenticada.
+    Inicia sesión en la API de la alyc (Spring Security form-login por cookie)
+    y devuelve una sesión REALMENTE autenticada.
+
+    Spring devuelve HTTP 200 aunque las credenciales fallen (te reenvía a la
+    página de login), así que `response.ok` no alcanza: si confiáramos en él,
+    devolveríamos una sesión muerta que después revienta con un JSONDecodeError
+    críptico en el primer GET. Acá validamos que el login no haya rebotado a
+    /login?error y que la sesión quede con cookie; si algo no cierra, error
+    claro al instante.
     """
+    if not username or not password:
+        raise ValueError(
+            "login_xoms: falta usuario o contraseña — ¿cargaste secrets.txt / las env vars?"
+        )
     session = requests.Session()
     url = BASE_URL + "j_spring_security_check"
     credentials = {"j_username": username, "j_password": password}
     response = session.post(url, data=credentials)
-    if response.ok:
-        print("Autenticación exitosa en Cocos")
-        return session
-    raise Exception(f"Autenticación fallida: {response.status_code} {response.text}")
+    final_url = (response.url or "").lower()
+    if not response.ok or "login" in final_url or "error" in final_url:
+        raise RuntimeError(
+            f"Autenticación fallida (HTTP {response.status_code}, URL final {response.url}). "
+            f"Revisá usuario/clave y que BASE_URL apunte al server vigente ({BASE_URL}) — "
+            "el broker tiene dos hosts (latinsecurities.matrizoms y lbo.xoms)."
+        )
+    if not session.cookies:
+        raise RuntimeError(
+            "Login sin cookie de sesión: el server aceptó el POST pero no autenticó "
+            "(credenciales incorrectas o el endpoint de login cambió)."
+        )
+    print("Autenticación exitosa en Cocos")
+    return session
+
+
+def _get_json(session: requests.Session, path: str) -> dict:
+    """GET a un endpoint REST + parseo JSON con diagnóstico claro.
+
+    Centraliza el chequeo que evita el `JSONDecodeError: Expecting value` cuando
+    el server devuelve vacío/HTML (sesión vencida o rechazada, endpoint movido):
+    en vez del traceback críptico, dice exactamente qué pasó y qué hacer.
+    """
+    url = BASE_URL + path
+    r = session.get(url)
+    if r.status_code != 200:
+        raise RuntimeError(f"{path} → HTTP {r.status_code}: {r.text[:300]}")
+    if not r.text.strip():
+        raise RuntimeError(
+            f"{path} → respuesta VACÍA (HTTP 200). Sesión vencida/rechazada o endpoint "
+            "movido: volvé a correr login_xoms y verificá BASE_URL."
+        )
+    try:
+        return r.json()
+    except ValueError as e:
+        raise RuntimeError(
+            f"{path} → no devolvió JSON (HTTP {r.status_code}, "
+            f"content-type {r.headers.get('content-type')!r}): {r.text[:300]}"
+        ) from e
 
 
 def get_segments(session: requests.Session) -> pd.DataFrame:
     """
     Obtiene la lista de segmentos y retorna un DataFrame con la columna 'marketSegmentId'.
     """
-    url = BASE_URL + "rest/segment/all"
-    response = session.get(url)
-    segments_dict = response.json()
+    segments_dict = _get_json(session, "rest/segment/all")
     segments_df = pd.DataFrame(segments_dict.get("segments", []))
     return segments_df[["marketSegmentId"]] if "marketSegmentId" in segments_df.columns else segments_df
 
@@ -66,9 +111,7 @@ def get_instruments(session: requests.Session) -> tuple[pd.DataFrame, pd.DataFra
       - instruments_df: DataFrame original.
       - instruments_df2: DataFrame con el campo 'instrumentId' desanidado.
     """
-    url = BASE_URL + "rest/instruments/all"
-    response = session.get(url)
-    instruments_dict = response.json()
+    instruments_dict = _get_json(session, "rest/instruments/all")
     instruments_df = pd.DataFrame(instruments_dict.get("instruments", []))
     if "instrumentId" in instruments_df.columns:
         instruments_df2 = pd.concat(
