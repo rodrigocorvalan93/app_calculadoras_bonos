@@ -276,3 +276,90 @@
     if (e.target && e.target.id === "hist-curva") initHistCurva();
   });
 })();
+
+// ── 📍 Ubicación en la curva (YAS / Comparador) ────────────────────────────
+// Tras cada swap de htmx, busca [data-locate] y dibuja un mini-scatter de la
+// curva del bono (puntos ARS/USD + línea NSS, vía /graficos/data que ya está
+// cacheado server-side ~2ms) con el/los bonos del usuario resaltados (rojo /
+// verde) a SU precio. El JSON de la curva se cachea 4s client-side para no
+// re-pedirlo en recomputes seguidos.
+(function () {
+  function cssVar(name, fb) {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fb;
+  }
+  function fmtPct(v) { return (v == null) ? "" : (v.toFixed(2).replace(".", ",") + "%"); }
+  var HL_COLORS = ["#ef4444", "#22c55e", "#a78bfa"];
+  var cache = {};   // curva|plazo -> {t, data}
+
+  function getData(curve, plazo) {
+    var key = curve + "|" + plazo;
+    var hit = cache[key];
+    if (hit && Date.now() - hit.t < 4000) return Promise.resolve(hit.data);
+    return fetch("/graficos/data?curve=" + encodeURIComponent(curve) + "&plazo=" + encodeURIComponent(plazo))
+      .then(function (r) { return r.json(); })
+      .then(function (d) { cache[key] = { t: Date.now(), data: d }; return d; });
+  }
+
+  function draw(el) {
+    if (typeof uPlot === "undefined") return;
+    var curve = el.dataset.curve, plazo = el.dataset.plazo || "24hs";
+    var pts;
+    try { pts = JSON.parse(el.dataset.pts || "[]"); } catch (e) { pts = []; }
+    if (!curve || !pts.length) return;
+    getData(curve, plazo).then(function (d) {
+      if (!d || !d.n) { el.innerHTML = '<p class="muted" style="font-size:12px">Sin puntos con cotización en la curva.</p>'; return; }
+      // Merge: eje x = xs de la curva + las durations de los bonos resaltados.
+      var xs = d.xs.slice();
+      var ars = d.ars.slice(), usd = d.usd.slice(), nss = (d.nss || []).slice();
+      var hls = pts.map(function () { return xs.map(function () { return null; }); });
+      pts.forEach(function (p, i) {
+        var j = xs.findIndex(function (x) { return x >= p.d; });
+        if (j === -1) j = xs.length;
+        xs.splice(j, 0, p.d);
+        ars.splice(j, 0, null); usd.splice(j, 0, null);
+        if (nss.length) nss.splice(j, 0, null);
+        hls.forEach(function (h, k) { h.splice(j, 0, k === i ? p.t : null); });
+      });
+      var sc = function (label, color, size) {
+        return { label: label, stroke: color, paths: function () { return null; },
+                 points: { show: true, size: size || 6, fill: color, stroke: color },
+                 value: function (u, v) { return fmtPct(v); } };
+      };
+      var series = [ {},
+        sc("ARS", cssVar("--accent", "#ff9f00")),
+        sc("USD", cssVar("--cyan", "#4cc9f0")) ];
+      if (nss.length) series.push({ label: "NSS", stroke: cssVar("--cyan", "#4cc9f0"), width: 1.5,
+                                    dash: [4, 3], points: { show: false },
+                                    value: function (u, v) { return fmtPct(v); } });
+      pts.forEach(function (p, i) { series.push(sc(p.c, HL_COLORS[i % HL_COLORS.length], 10)); });
+      var data = [xs, ars, usd];
+      if (nss.length) data.push(nss);
+      hls.forEach(function (h) { data.push(h); });
+      if (el.__u) { el.__u.destroy(); el.__u = null; }
+      el.innerHTML = "";
+      el.__u = new uPlot({
+        width: Math.max(el.clientWidth || 600, 320), height: 240,
+        legend: { show: true },
+        scales: { x: { time: false } },
+        axes: [
+          { label: "Duration (años)", stroke: cssVar("--text-muted", "#999"), grid: { stroke: cssVar("--border-soft", "#222") } },
+          { label: "TIREA %", stroke: cssVar("--text-muted", "#999"), grid: { stroke: cssVar("--border-soft", "#222") },
+            values: function (u, vals) { return vals.map(fmtPct); } },
+        ],
+        series: series,
+      }, data, el);
+    }).catch(function () { /* red caída: sin chart, sin ruido */ });
+  }
+
+  function scan(root) {
+    if (!root || !root.querySelectorAll) return;
+    var els = root.querySelectorAll("[data-locate]");
+    for (var i = 0; i < els.length; i++) draw(els[i]);
+    if (root.hasAttribute && root.hasAttribute("data-locate")) draw(root);
+  }
+  document.body.addEventListener("htmx:afterSwap", function (evt) { scan(evt.detail.target); });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { scan(document); });
+  } else { scan(document); }
+})();

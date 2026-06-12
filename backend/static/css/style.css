@@ -1037,3 +1037,8 @@ html, body, .topbar, .card, .fx-rail, .tape, .news-marquee, .footer {
 /* Selección de texto temática. */
 ::selection { background: var(--accent-soft); }
 @media (prefers-reduced-motion: reduce) { .rango i { transition: none; } }
+
+/* ── 📍 Ubicación en la curva (YAS / Comparador) ───────────────────── */
+.locate-card { margin-top: 12px; }
+.locate-box { min-height: 240px; }
+.locate-box .u-legend { font-size: 11px; }

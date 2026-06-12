@@ -233,6 +233,25 @@ def build_curve_codes() -> Dict[str, List[str]]:
     return out
 
 
+_rev_cache: Dict[str, str] | None = None
+
+
+def curve_key_for(code: str) -> str | None:
+    """Curva ESPECÍFICA a la que pertenece `code` (exacto, j/v incluidos);
+    None si no está en ninguna (acciones, etc.). Excluye agregados. Cacheado
+    junto al particionado — lookup O(1) tras el primer uso."""
+    global _rev_cache
+    if _rev_cache is None:
+        rev: Dict[str, str] = {}
+        for key, codes in build_curve_codes().items():
+            if key in AGGREGATES:
+                continue
+            for c in codes:
+                rev.setdefault(c, key)
+        _rev_cache = rev
+    return _rev_cache.get(code)
+
+
 def curve_def(key: str) -> CurveDef | None:
     for c in CURVES:
         if c.key == key:
