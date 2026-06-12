@@ -51,7 +51,11 @@ def row_for(code: str, plazo: str = "24hs") -> Optional[Dict[str, Any]]:
     if snap is None:
         return None
     var = _var(snap.last, snap.close)
+    range_pos = None
+    if snap.last is not None and snap.low is not None and snap.high is not None and snap.high > snap.low:
+        range_pos = max(0.0, min(1.0, (snap.last - snap.low) / (snap.high - snap.low)))
     return {
+        "range_pos": range_pos,
         "code": code,
         "open": snap.open, "close": snap.close, "low": snap.low, "high": snap.high,
         "bid": snap.bid, "bid_size": snap.bid_size,

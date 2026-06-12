@@ -175,9 +175,18 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         estreno = emis is not None and (date.today() - emis).days <= 5
     except TypeError:
         pass
+    # Posición del Last dentro del rango del día (0=Low, 1=High) para la
+    # barrita de rango — usa datos que ya están en la fila, costo ~ns.
+    range_pos = None
+    try:
+        if last is not None and low is not None and high is not None and high > low:
+            range_pos = max(0.0, min(1.0, (last - low) / (high - low)))
+    except TypeError:
+        pass
     row.update(
         {
             "estreno": estreno,
+            "range_pos": range_pos,
             "code": code,                # ticker BYMA = nombre de variable
             "symbol": symbol,
             "leg": leg,

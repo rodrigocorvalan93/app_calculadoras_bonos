@@ -33,6 +33,7 @@
           <th class="col-oclh">Close</th>
           <th class="col-oclh">Low</th>
           <th class="col-oclh">High</th>
+          <th class="col-oclh" title="Posición del Last en el rango Low–High del día">Rango</th>
           <th class="grp">Var %</th>
           <th>Var px</th>
           <th class="grp">Bid sz</th>
@@ -67,6 +68,7 @@
             <td class="col-oclh">{{ r.close | ar_num(2) }}</td>
             <td class="col-oclh">{{ r.low | ar_num(2) }}</td>
             <td class="col-oclh">{{ r.high | ar_num(2) }}</td>
+            <td class="col-oclh">{% if r.range_pos is not none %}<div class="rango" title="Last en el {{ (r.range_pos*100)|round(0)|int }}% del rango del día"><i style="left:{{ (r.range_pos*100)|round(1) }}%"></i></div>{% else %}<span class="muted">·</span>{% endif %}</td>
             <td class="grp" style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td class="{{ vcls }}">{{ r.var_px | ar_num(2) }}</td>
             <td class="grp" style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
