@@ -47,6 +47,12 @@ async def test_ordenes_endpoints() -> None:
 
     from backend.main import app
 
+    # Sembrar la referencia de mercado: otros tests dejan AL30 con last≈87 en
+    # el store global y la banda fat-finger (±10%) rechazaría el ticket — que
+    # es exactamente lo que debe hacer; acá fijamos la ref para el caso feliz.
+    from backend.services import marketdata_store as mds, symbols as syms
+    mds.get_store().update_from_md(syms.md_symbol("AL30", "24hs"), {"LA": {"price": 941.3}})
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         p = await ac.get("/ordenes")
         assert p.status_code == 200 and "PAPER" in p.text and "KILL" in p.text
