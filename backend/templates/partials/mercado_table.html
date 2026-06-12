@@ -80,7 +80,7 @@
             <td class="grp {{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>
             <td style="color:var(--cyan)">{{ r.tirea_offer | ar_pct(2) }}</td>
             <td style="color:var(--text-muted)">{{ r.offer_size | ar_int }}</td>
-            <td class="grp">{{ r.nominal | ar_hum }}</td>
+            <td class="grp vol-cell" style="--vf:{{ ((r.nominal_frac or 0)*100)|round(0)|int }}%">{{ r.nominal | ar_hum }}</td>
             <td class="col-mae grp {{ 'var-up' if (r.mae and r.mae.var_pct is not none and r.mae.var_pct >= 0) else ('var-down' if (r.mae and r.mae.var_pct is not none) else '') }}">{{ r.mae.last | ar_num(2) if r.mae else "·" }}</td>
             <td class="col-mae">{{ r.mae.var_pct | ar_num(2) if (r.mae and r.mae.var_pct is not none) else "·" }}</td>
             <td class="col-mae" style="color:var(--text-muted)">{{ r.mae.volumen | ar_hum if (r.mae and r.mae.volumen is not none) else "·" }}</td>

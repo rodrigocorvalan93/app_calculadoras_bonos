@@ -299,6 +299,13 @@ async def _rows_for(
         *(loop.run_in_executor(_row_pool, _build_chunk, ch) for ch in chunks if ch)
     )
     rows = [r for part in parts for r in part if r is not None]
+    # Fracción de volumen vs el máximo de la tabla → barrita de fondo en la
+    # celda (degradé). O(n) sobre filas ya construidas, costo ~µs.
+    vmax = max((r.get("volume") or 0.0) for r in rows) if rows else 0.0
+    nmax = max((r.get("nominal") or 0.0) for r in rows) if rows else 0.0
+    for r in rows:
+        r["volume_frac"] = (r.get("volume") or 0.0) / vmax if vmax > 0 else 0.0
+        r["nominal_frac"] = (r.get("nominal") or 0.0) / nmax if nmax > 0 else 0.0
     quoting = sum(1 for r in rows if _has_quote(r))
     store_empty = quoting == 0
 
