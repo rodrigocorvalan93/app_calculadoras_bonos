@@ -37,21 +37,33 @@
     el.title = title || '';
   }
 
+  var advances = [];   // timestamps de avances (ventana 60s) → ticks/min
+  function meta(rtt) {
+    var el = document.getElementById('live-meta');
+    if (!el) return;
+    var now = Date.now();
+    while (advances.length && now - advances[0] > 60000) advances.shift();
+    el.textContent = advances.length ? (advances.length + ' t/min · ' + Math.round(rtt) + ' ms') : '';
+  }
   function poll() {
     if (document.hidden) return; // visibilitychange re-arma
+    var t0 = performance.now();
     fetch('/market/seq', { cache: 'no-store' })
       .then(function (r) { return r.text(); })
       .then(function (txt) {
         failures = 0;
+        var rtt = performance.now() - t0;
         var seq = parseInt(txt, 10);
         if (isNaN(seq)) return;
         if (lastSeq !== null && seq !== lastSeq) {
           lastAdvance = Date.now();
+          advances.push(lastAdvance);
           dot('live', 'En vivo — tick hace instantes');
           if (window.htmx) { window.htmx.trigger(document.body, 'md-update'); }
         } else if (Date.now() - lastAdvance > QUIET_AFTER_MS) {
           dot('idle', 'Sin operaciones recientes');
         }
+        meta(rtt);
         lastSeq = seq;
       })
       .catch(function () {
