@@ -27,6 +27,7 @@
           <th data-sort title="Última inflación mensual que este BE captura (CER fix = vto + lag hábiles; metodología INDEC)">Infla. hasta</th>
           <th data-sort>TIREA real</th>
           <th data-sort>TIREA nominal</th>
+          <th data-sort title="Letra de tasa fija emparejada por vencimiento (±45 días); si no hay, interpolación NSS-lineal a la misma duration">vs</th>
           <th data-sort class="grp">BE anual</th>
           <th data-sort>BE TEM</th>
           <th></th>
@@ -42,6 +43,7 @@
             <td style="color:var(--cyan);font-weight:600">{{ r.mes_ref or "—" }}</td>
             <td style="color:var(--cyan)">{{ r.tirea_real | ar_pct(2) }}</td>
             <td>{{ r.tirea_nom | ar_pct(2) }}</td>
+            <td style="color:var(--cyan);font-size:11px">{{ r.par or "interp." }}</td>
             <td class="grp" style="font-weight:650;color:var(--accent)">{{ r.be_anual | ar_pct(2) }}</td>
             <td style="font-weight:600">{{ r.be_tem | ar_pct(2) }}</td>
             <td class="muted" style="font-size:10.5px">{% if r.extrapolado %}extrap.{% endif %}</td>

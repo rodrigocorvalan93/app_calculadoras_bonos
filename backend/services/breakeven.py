@@ -94,11 +94,31 @@ def compute_fisher(cer_rows: List[Dict[str, Any]],
     """Tabla break-even por bono CER + resumen. Todo en fracción (0.07 = 7%)."""
     lecap = _clean_points(lecap_rows)
     cer = _clean_points(cer_rows)
+
+    def _pair(venc):
+        """Letra de tasa fija con vencimiento más cercano (±45 días) — el par
+        natural del usuario (TZXO6 ↔ S30O6): mismos cashflows en fecha, mismo
+        horizonte. Si no hay match cercano, se cae a la interpolación."""
+        if venc is None:
+            return None
+        best, bd = None, 46
+        for q in lecap:
+            if q.get("venc") is None:
+                continue
+            d = abs((q["venc"] - venc).days)
+            if d < bd:
+                best, bd = q, d
+        return best
+
     rows: List[Dict[str, Any]] = []
     bes: List[float] = []
     for p in cer:
         dur, tir_real, code = p["d"], p["t"], p["code"]
-        tir_nom, extrap = _interp(lecap, dur)
+        par = _pair(p.get("venc"))
+        if par is not None:
+            tir_nom, extrap = par["t"], False
+        else:
+            tir_nom, extrap = _interp(lecap, dur)
         be_anual = be_tem = None
         if tir_nom is not None and (1.0 + tir_real) != 0.0:
             be_anual = (1.0 + tir_nom) / (1.0 + tir_real) - 1.0
@@ -108,6 +128,7 @@ def compute_fisher(cer_rows: List[Dict[str, Any]],
             "code": code, "duration": dur,
             "tirea_real": tir_real, "tirea_nom": tir_nom,
             "be_anual": be_anual, "be_tem": be_tem, "extrapolado": extrap,
+            "par": par["code"] if par is not None else None,
             "mes_ref": mes_referencia(p.get("venc"), p.get("lag")),
         })
     rows.sort(key=lambda r: r["duration"])
