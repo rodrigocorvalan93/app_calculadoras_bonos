@@ -52,6 +52,17 @@ def _leg_symbol(code: str, plazo: str, leg: str, store) -> tuple[str, str]:
     return syms.md_symbol(code, plazo), ""  # native
 
 
+def _depth_frac(levels):
+    """Fracción del acumulado por nivel (vs el total de la punta) → degradé
+    de profundidad estilo DOM en el book. O(niveles)≤5, costo ~ns."""
+    if not levels:
+        return levels
+    total = levels[-1].get("cum") or 0.0
+    for lvl in levels:
+        lvl["frac"] = (lvl.get("cum") or 0.0) / total if total > 0 else 0.0
+    return levels
+
+
 def _tirea_at(code: str, price_pct, settle=None):
     """TIREA at an arbitrary price (cached). None if no/invalid price."""
     if price_pct is None:
@@ -478,6 +489,8 @@ async def mercado_book(
             px, sz = lvl.get("price"), lvl.get("size")
             cum += (sz or 0.0)
             out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px))})
+        # Fracción del acumulado (se normaliza después contra el máx de ambas
+        # puntas) → degradé de profundidad estilo DOM en el template.
         return out
 
     row = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente)   # fila (BYMA o MAE)
@@ -495,8 +508,8 @@ async def mercado_book(
         row=row,
         position=positions.position_for(code),                  # tenencia (desplegable)
         instr=await instruments.detail(symbol),                 # lámina mínima / tick / límites
-        bids=with_yield(snap.bids if snap else None),
-        offers=with_yield(snap.offers if snap else None),
+        bids=_depth_frac(with_yield(snap.bids if snap else None)),
+        offers=_depth_frac(with_yield(snap.offers if snap else None)),
         fuente=fuente,
     )
 
