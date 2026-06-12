@@ -31,6 +31,7 @@ from backend.routes.curves import forwards_router, graficos_router, mercado_rout
 from backend.routes.dolares import router as dolares_router
 from backend.routes.futuros import router as futuros_router
 from backend.routes.mae import router as tasas_router
+from backend.routes.ordenes import router as ordenes_router
 from backend.routes.historico import router as historico_router
 from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
@@ -274,6 +275,7 @@ def create_app() -> FastAPI:
     app.include_router(dolares_router)
     app.include_router(futuros_router)
     app.include_router(tasas_router)
+    app.include_router(ordenes_router)
     app.include_router(historico_router)
     app.include_router(posiciones_router)
     app.include_router(market_router)

@@ -1,0 +1,46 @@
+{% if error %}
+  <div class="alert">⚠️ {{ error }}</div>
+{% elif result %}
+  <div class="card" style="border-color:{{ 'var(--green)' if result.status in ('PAPER','OK') else 'var(--red)' }}">
+    <div class="card-title"><span>Resultado: <b>{{ result.status }}</b></span>
+      <span class="card-title-aux">{{ result.client_order_id }}</span></div>
+    <div class="card-body" style="font-size:13px">
+      {{ result.side|upper }} {{ result.qty | ar_int }} VN {{ result.code }} @ {{ result.price | ar_num(2) }}
+      · cta {{ result.account }} · {{ result.motivo or '' }}
+      {% if result.broker %}<pre style="font-size:11px;overflow:auto">{{ result.broker }}</pre>{% endif %}
+    </div>
+  </div>
+{% elif p %}
+  <div class="card" style="border-color:var(--accent)">
+    <div class="card-title"><span>⚠️ Confirmá la orden {{ '(LIVE — viaja al broker)' if live else '(paper)' }}</span></div>
+    <div class="card-body">
+      <p style="font-size:15px;margin:0 0 10px">
+        <b style="color:{{ 'var(--green)' if p.side == 'buy' else 'var(--red)' }}">{{ 'COMPRA' if p.side == 'buy' else 'VENTA' }}</b>
+        de <b>{{ p.qty | ar_int }} VN</b> de <b>{{ p.code }}</b> @ <b>{{ p.price | ar_num(2) }}</b> ({{ p.plazo }})
+        · comitente <b>{{ p.account }}</b>
+        · notional ≈ <b>{{ p.notional | ar_int }} ARS</b>
+        {% if p.ref %}· ref. mercado {{ p.ref | ar_num(2) }}{% endif %}
+      </p>
+      <form hx-post="/ordenes/confirmar" hx-target="#orden-result" hx-swap="innerHTML" style="display:inline">
+        <input type="hidden" name="token" value="{{ token }}">
+        <button type="submit" class="btn-primary" style="background:{{ 'var(--red)' if live else 'var(--accent)' }}">
+          {{ '🔴 ENVIAR AL BROKER' if live else 'Confirmar (paper)' }}</button>
+      </form>
+      <span class="muted" style="font-size:11px;margin-left:10px">token de un solo uso · vence en 90 s</span>
+    </div>
+  </div>
+{% endif %}
+{% if audit %}
+<div class="card" style="margin-top:12px">
+  <div class="card-title"><span>Audit log</span><span class="card-title-aux">últimos {{ audit | length }} · oms_audit.jsonl</span></div>
+  <div class="card-body" style="padding:0"><div class="table-scroll" style="max-height:220px">
+    <table class="cashflows" style="font-size:11.5px"><tbody>
+      {% for a in audit %}
+        <tr><td style="text-align:left;color:var(--text-muted)">{{ a.ts }}</td>
+            <td style="text-align:left;font-weight:600">{{ a.event }}</td>
+            <td style="text-align:left">{{ a.get('code','') }} {{ a.get('side','') }} {{ a.get('qty','') }} @ {{ a.get('price','') }} {{ a.get('motivo','') }}</td></tr>
+      {% endfor %}
+    </tbody></table>
+  </div></div>
+</div>
+{% endif %}

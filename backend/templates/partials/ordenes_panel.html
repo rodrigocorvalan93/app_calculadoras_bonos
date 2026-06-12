@@ -1,0 +1,35 @@
+{% if err %}
+  <div class="alert">Broker (lectura): {{ err }}<br>
+    <span class="muted" style="font-size:11.5px">¿Sesión REST sin login? Reconectá en <a href="/conexion">🔌 Conexión</a>.
+    Si el endpoint no existe en tu deployment, este texto crudo nos dice cuál usar.</span></div>
+{% else %}
+<div class="card">
+  <div class="card-title"><span>Comitentes</span>
+    <span class="card-title-aux">{{ accounts | length }} cuentas</span></div>
+  <div class="card-body" style="font-size:12.5px">
+    {% for a in accounts %}
+      <button type="button" class="btn-primary" style="font-size:11px;margin:2px"
+              onclick="document.getElementById('acct-input').value='{{ a.get('name', a.get('accountName', a.get('id',''))) }}'">
+        {{ a.get('name', a.get('accountName', a.get('id','?'))) }}</button>
+    {% else %}<span class="muted">Sin cuentas (¿login REST pendiente?).</span>{% endfor %}
+  </div>
+</div>
+{% if account %}
+<div class="card" style="margin-top:10px">
+  <div class="card-title"><span>Órdenes vivas · {{ account }}</span></div>
+  <div class="card-body" style="padding:0"><div class="table-scroll">
+    <table class="cashflows curve-table" style="font-size:12px">
+      <thead><tr><th>ID</th><th>Especie</th><th>Lado</th><th>Cant</th><th>Precio</th><th>Estado</th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+        <tr><td>{{ o.get('clOrdId', o.get('clientId','—')) }}</td>
+            <td>{{ (o.get('instrumentId') or {}).get('symbol', o.get('symbol','—')) }}</td>
+            <td>{{ o.get('side','—') }}</td><td>{{ o.get('orderQty','—') }}</td>
+            <td>{{ o.get('price','—') }}</td><td>{{ o.get('status','—') }}</td></tr>
+      {% else %}<tr><td colspan="6" class="muted" style="text-align:center">Sin órdenes vivas.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div></div>
+</div>
+{% endif %}
+{% endif %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Órdenes{% endblock %}
+{% block tab_ordenes %}active{% endblock %}
+
+{% block content %}
+<section class="curves" style="max-width:980px">
+  <header class="yas-header">
+    <h1>Órdenes
+      {% if live %}<span class="badge-new" style="background:rgba(239,68,68,.15);color:var(--red);border-color:var(--red)">LIVE</span>
+      {% else %}<span class="badge-new">PAPER</span>{% endif %}
+      {% if kill %}<span class="badge-new" style="color:var(--red);border-color:var(--red)">KILL-SWITCH</span>{% endif %}
+    </h1>
+    <p class="muted">
+      {% if live %}⚠️ <b>Modo LIVE</b>: las órdenes confirmadas viajan al broker.
+      {% else %}Modo <b>paper</b> (OMS_LIVE=0): todo se valida, confirma y audita, pero <b>nada viaja al broker</b>.{% endif %}
+      Límites: tope {{ max_notional | ar_int }} ARS por orden · banda ±{{ band | ar_num(0) }}% vs referencia.
+      Todo queda en <code>oms_audit.jsonl</code>.
+    </p>
+  </header>
+
+  <div class="card">
+    <div class="card-title"><span>🎫 Ticket</span>
+      <span class="card-title-aux">
+        <form hx-post="/ordenes/kill" hx-target="#orden-result" hx-swap="innerHTML" style="display:inline">
+          <input type="hidden" name="on" value="{{ '0' if kill else '1' }}">
+          <button type="submit" class="btn-primary" style="background:{{ 'var(--green)' if kill else 'var(--red)' }};font-size:11px">
+            {{ '▶ Reactivar envíos' if kill else '⛔ KILL-SWITCH' }}</button>
+        </form>
+      </span>
+    </div>
+    <div class="card-body">
+      <form hx-post="/ordenes/ticket" hx-target="#orden-result" hx-swap="innerHTML" hx-indicator="#ord-spin">
+        <div class="form-row">
+          <label class="field"><span>Especie</span>
+            <input type="text" name="code" value="{{ code }}" placeholder="AL30" autocomplete="off" style="text-transform:uppercase"></label>
+          <fieldset class="field field-mode"><legend>Lado</legend>
+            <label><input type="radio" name="side" value="buy" {% if side != 'sell' %}checked{% endif %}> Compra</label>
+            <label><input type="radio" name="side" value="sell" {% if side == 'sell' %}checked{% endif %}> Venta</label>
+          </fieldset>
+          <label class="field"><span>Cantidad (VN)</span>
+            <input type="text" name="qty" inputmode="decimal" placeholder="100.000"></label>
+          <label class="field"><span>Precio</span>
+            <input type="text" name="price" inputmode="decimal" value="{{ px }}"></label>
+          <label class="field"><span>Plazo</span>
+            <select name="plazo"><option value="24hs" {% if plazo=='24hs' %}selected{% endif %}>24hs</option>
+              <option value="CI" {% if plazo=='CI' %}selected{% endif %}>CI</option></select></label>
+          <label class="field"><span>Comitente</span>
+            <input type="text" name="account" id="acct-input" placeholder="elegila del panel →"></label>
+          <button type="submit" class="btn-primary" style="align-self:flex-end">Armar ticket</button>
+          <span id="ord-spin" class="htmx-indicator muted" style="align-self:flex-end">validando…</span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="orden-result"></div>
+
+  {# Etapa A — lectura: cuentas + órdenes vivas del broker (sólo mientras la
+     página está abierta; carga on-demand, no toca el path caliente). #}
+  <div id="ordenes-panel" hx-get="/ordenes/panel" hx-trigger="load, every 15s"
+       hx-include="#acct-input" hx-swap="innerHTML" style="margin-top:12px">
+    <p class="muted" style="font-size:12px">Cargando cuentas del broker…</p>
+  </div>
+</section>
+{% endblock %}
