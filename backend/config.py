@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     metrics_ttl_seconds: int = 5
     metrics_cache_max: int = 4096
 
+    # OMS (cursado de órdenes). SEGURIDAD: oms_live arranca APAGADO — en False
+    # toda orden se registra como PAPER (simulada) y NUNCA viaja al broker.
+    # Para operar en serio: OMS_LIVE=1 en secrets.txt/env, con límites abajo.
+    oms_live: bool = False
+    oms_max_notional: float = 100_000_000.0   # tope ARS por orden
+    oms_price_band_pct: float = 10.0          # banda vs last/close (fat-finger)
+
     # Phase 2 warmup daemon. Interval must stay under the curve metrics
     # cache TTL (20 s) so a sweep refreshes every bucket before it expires
     # and the curves table never hits a cold cache mid-session.

@@ -20,6 +20,9 @@ from backend.services import curves as curves_svc, bond_universe, delta_especies
 
 router = APIRouter(tags=["comparador"])
 
+from backend.cache import LockedTTLCache  # noqa: E402
+_cmp_cache = LockedTTLCache(maxsize=512, ttl=5)
+
 # modo del comparador → modo de compute_metrics (mismos 4 que YAS)
 _MODE = {"precio": "precio", "tir": "tir", "tna": "tna", "margen": "margen"}
 # métricas (decimales) con diferencia B−A comparable
@@ -146,8 +149,16 @@ async def comparador_result(
         m["margen_na"] = margen_na
         return m
 
-    ma = metrics(a, val_a)
-    mb = metrics(b, val_b)
+    # Cache TTL corto sobre el par (código, modo, valor): el cálculo legacy es
+    # GIL-bound (paralelizar en threads NO ayuda — medido), pero el comparador
+    # re-renderiza con los mismos inputs en cada retoque → los repeats pasan de
+    # ~27 ms a ~1 ms. 5 s de TTL = mismo criterio que el resto de la app.
+    def _cached(code: str, val: str):
+        key = (code, cm_mode, (val or "").strip(), plazo)
+        return _cmp_cache.get_or_compute(key, lambda: metrics(code, val))
+
+    ma = _cached(a, val_a)
+    mb = _cached(b, val_b)
 
     deltas: Dict[str, float] = {}
     swap: Optional[Dict[str, Any]] = None

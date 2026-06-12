@@ -63,6 +63,20 @@ class PrimaryClient:
             logger.info("[primary] login OK as %s", username)
             return True
 
+    async def get_json(self, path: str, params: dict | None = None) -> dict:
+        """GET autenticado → dict. Errores con texto accionable (sesión vencida,
+        endpoint inexistente en este deployment, etc.)."""
+        client = await self._ensure_client()
+        r = await client.get(path, params=params or {})
+        if r.status_code != 200:
+            raise RuntimeError(f"{path} → HTTP {r.status_code}: {r.text[:200]}")
+        if not r.text.strip():
+            raise RuntimeError(f"{path} → respuesta vacía (¿sesión vencida? Reconectá en /conexion).")
+        try:
+            return r.json()
+        except ValueError as e:
+            raise RuntimeError(f"{path} → no devolvió JSON: {r.text[:200]}") from e
+
     async def close(self) -> None:
         if self._client is not None:
             await self._client.aclose()
