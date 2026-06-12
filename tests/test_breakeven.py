@@ -88,3 +88,17 @@ async def test_breakeven_chart_y_columna() -> None:
     assert p.status_code == 200 and 'name="be-metric"' in p.text and 'id="be-chart"' in p.text
     assert t.status_code == 200 and 'id="be-data"' in t.text
     assert ("Infla. hasta" in t.text) == ("be-tbl" in t.text)   # columna sólo con filas
+
+
+def test_fisher_empareja_por_vencimiento() -> None:
+    """TZXO6 (31/10) se compara contra la letra que vence el 30/10, no contra
+    la interpolación; sin letra cercana (±45d) cae a interpolación."""
+    from datetime import date
+    lecap = [{**_row("S30O6", 0.38, 0.42), "vencimiento": date(2026, 10, 30)},
+             {**_row("S31L6", 0.15, 0.35), "vencimiento": date(2026, 7, 31)}]
+    cer = [{**_row("TZXO6", 0.37, 0.08), "vencimiento": date(2026, 10, 31), "lag": -10},
+           {**_row("TX29", 2.8, 0.07), "vencimiento": date(2029, 6, 30), "lag": -10}]
+    out = compute_fisher(cer, lecap)
+    by = {r["code"]: r for r in out["rows"]}
+    assert by["TZXO6"]["par"] == "S30O6" and abs(by["TZXO6"]["tirea_nom"] - 0.42) < 1e-12
+    assert by["TX29"]["par"] is None                      # lejos de toda letra → interp/clamp
