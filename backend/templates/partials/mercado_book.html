@@ -51,7 +51,7 @@
         <thead><tr><th>Bid TIREA</th><th>Acum</th><th>Cant</th><th>Bid</th></tr></thead>
         <tbody>
           {% for l in bids %}
-          <tr>
+          <tr class="depth-bid" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
             <td style="color:var(--cyan)">{{ l.tirea | ar_pct(2) }}</td>
             <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
             <td>{{ l.size | ar_int }}</td>
@@ -64,7 +64,7 @@
         <thead><tr><th>Offer</th><th>Cant</th><th>Acum</th><th>Offer TIREA</th></tr></thead>
         <tbody>
           {% for l in offers %}
-          <tr>
+          <tr class="depth-ask" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
             <td class="px-down" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
             <td>{{ l.size | ar_int }}</td>
             <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
