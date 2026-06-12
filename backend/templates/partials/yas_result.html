@@ -77,5 +77,21 @@
         {% include "partials/yas_cashflows.html" %}
       </div>
     </div>
+
+    {% if curve_key and metrics.error is none and metrics.duration is not none
+          and metrics.duration == metrics.duration
+          and metrics.tirea is not none and metrics.tirea == metrics.tirea %}
+    {# Ubicación en la curva: charts.js (initLocate) busca [data-locate] tras
+       cada swap, trae /graficos/data (cacheado, ~2ms) y dibuja el scatter +
+       NSS con ESTE bono en rojo a su precio actual. #}
+    <div class="card locate-card">
+      <div class="card-title"><span>📍 Ubicación en la curva · {{ curve_label or curve_key }}</span>
+        <span class="card-title-aux">{{ metrics.codigo }} a tu precio — punto rojo</span></div>
+      <div class="card-body">
+        <div class="locate-box" data-locate data-curve="{{ curve_key }}" data-plazo="{{ plazo }}"
+             data-pts='[{"c":"{{ metrics.codigo }}","d":{{ metrics.duration }},"t":{{ metrics.tirea * 100 }}}]'></div>
+      </div>
+    </div>
+    {% endif %}
   </section>
 </div>

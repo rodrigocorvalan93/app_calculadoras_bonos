@@ -13,7 +13,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from backend.config import settings
-from backend.services import bond_universe, delta_especies, marketdata_store, positions, pricing, symbols as syms
+from backend.services import bond_universe, curves as curves_svc, delta_especies, marketdata_store, positions, pricing, symbols as syms
 
 router = APIRouter(prefix="/yas", tags=["yas"])
 
@@ -113,6 +113,8 @@ async def yas_recompute(
         request,
         "partials/yas_result.html",
         metrics=metrics,
+        curve_key=curves_svc.curve_key_for(code),
+        curve_label=(curves_svc.curve_def(curves_svc.curve_key_for(code) or "") or None) and curves_svc.curve_def(curves_svc.curve_key_for(code)).label,
         ticket=ticket,
         meta=pricing.bond_meta(code),
         mode=mode,

@@ -155,3 +155,20 @@
   {% endif %}
 </div>
 {% endif %}
+
+{% if locate_curve and ma and mb and ma.error is none and mb.error is none
+      and ma.duration is not none and ma.duration == ma.duration
+      and mb.duration is not none and mb.duration == mb.duration
+      and ma.tirea is not none and ma.tirea == ma.tirea
+      and mb.tirea is not none and mb.tirea == mb.tirea %}
+{# Sólo si AMBOS bonos pertenecen a la MISMA curva (cer vs cer, dual vs dual):
+   scatter + NSS con los dos bonos resaltados en colores distintos. #}
+<div class="card locate-card">
+  <div class="card-title"><span>📍 Ambos en la curva · {{ locate_label or locate_curve }}</span>
+    <span class="card-title-aux"><b style="color:#ef4444">●</b> {{ ma.codigo }} · <b style="color:#22c55e">●</b> {{ mb.codigo }}</span></div>
+  <div class="card-body">
+    <div class="locate-box" data-locate data-curve="{{ locate_curve }}" data-plazo="{{ plazo }}"
+         data-pts='[{"c":"{{ ma.codigo }}","d":{{ ma.duration }},"t":{{ ma.tirea * 100 }}},{"c":"{{ mb.codigo }}","d":{{ mb.duration }},"t":{{ mb.tirea * 100 }}}]'></div>
+  </div>
+</div>
+{% endif %}
