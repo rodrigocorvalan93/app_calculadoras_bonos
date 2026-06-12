@@ -21,18 +21,52 @@ from typing import Any, Dict, List, Optional, Tuple
 # real plausible entre -90% y +200%.
 _TIR_MIN, _TIR_MAX = -0.90, 2.0
 
+_MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 
-def _clean_points(rows: List[Dict[str, Any]]) -> List[Tuple[float, float, str]]:
-    """(duration, tirea, code) de las filas con duration>0 y TIREA finita/plausible."""
-    out: List[Tuple[float, float, str]] = []
+
+def mes_referencia(venc, lag_habiles=-10) -> Optional[str]:
+    """Último mes de inflación que el break-even del bono CER realmente captura.
+
+    Metodología INDEC/CER: el bono fija su CER `lag` días HÁBILES antes del
+    vencimiento (lag de la especie, típ. −10). El CER de un día D incorpora la
+    inflación del mes M según la regla de publicación: entre el 16 de X y el
+    15 de X+1, el CER devenga la inflación de X−1 (el dato de mayo sale ~11/6
+    y corre en el CER del 16/6 al 15/7). Entonces:
+        fix = venc + lag hábiles
+        mes_ref = fix.month − 1  si fix.day ≥ 16   (año ajustado)
+                  fix.month − 2  si fix.day ≤ 15
+    Ej.: TZXO6 vence 31/10/26 → fix 19/10 → BE captura inflación HASTA sep-26
+    (no "fines de octubre"). Devuelve 'sep-26' o None si no se puede calcular.
+    """
+    if venc is None:
+        return None
+    try:
+        from dias_habiles import n_dias_laborales
+        f = n_dias_laborales(venc, int(lag_habiles or -10))
+    except Exception:  # noqa: BLE001 — sin módulo de feriados: aprox 5/7
+        from datetime import timedelta
+        f = venc + timedelta(days=round(int(lag_habiles or -10) * 7 / 5))
+    m = f.month - (1 if f.day >= 16 else 2)
+    y = f.year
+    while m <= 0:
+        m += 12
+        y -= 1
+    return f"{_MESES[m - 1]}-{str(y)[2:]}"
+
+
+def _clean_points(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filas limpias (duration>0, TIREA finita/plausible) como dicts ordenados
+    por duration; conserva vencimiento/lag para el mes de referencia."""
+    out: List[Dict[str, Any]] = []
     for r in rows:
         d, t = r.get("duration"), r.get("tirea")
         if d is None or t is None or d != d or t != t:   # None / NaN
             continue
         if d <= 0 or not (_TIR_MIN < t < _TIR_MAX):
             continue
-        out.append((float(d), float(t), r.get("code", "")))
-    out.sort(key=lambda p: p[0])
+        out.append({"d": float(d), "t": float(t), "code": r.get("code", ""),
+                    "venc": r.get("vencimiento"), "lag": r.get("lag")})
+    out.sort(key=lambda p: p["d"])
     return out
 
 
@@ -42,17 +76,17 @@ def _interp(pts: List[Tuple[float, float, str]], x: float) -> Tuple[Optional[flo
     extremos: fuera del rango usa el punto del borde y marca extrapolado."""
     if not pts:
         return None, False
-    if x <= pts[0][0]:
-        return pts[0][1], x < pts[0][0]
-    if x >= pts[-1][0]:
-        return pts[-1][1], x > pts[-1][0]
+    if x <= pts[0]["d"]:
+        return pts[0]["t"], x < pts[0]["d"]
+    if x >= pts[-1]["d"]:
+        return pts[-1]["t"], x > pts[-1]["d"]
     for i in range(1, len(pts)):
-        x1, y1 = pts[i][0], pts[i][1]
+        x1, y1 = pts[i]["d"], pts[i]["t"]
         if x <= x1:
-            x0, y0 = pts[i - 1][0], pts[i - 1][1]
+            x0, y0 = pts[i - 1]["d"], pts[i - 1]["t"]
             t = (x - x0) / (x1 - x0) if x1 > x0 else 0.0
             return y0 + t * (y1 - y0), False
-    return pts[-1][1], True
+    return pts[-1]["t"], True
 
 
 def compute_fisher(cer_rows: List[Dict[str, Any]],
@@ -62,7 +96,8 @@ def compute_fisher(cer_rows: List[Dict[str, Any]],
     cer = _clean_points(cer_rows)
     rows: List[Dict[str, Any]] = []
     bes: List[float] = []
-    for dur, tir_real, code in cer:
+    for p in cer:
+        dur, tir_real, code = p["d"], p["t"], p["code"]
         tir_nom, extrap = _interp(lecap, dur)
         be_anual = be_tem = None
         if tir_nom is not None and (1.0 + tir_real) != 0.0:
@@ -73,6 +108,7 @@ def compute_fisher(cer_rows: List[Dict[str, Any]],
             "code": code, "duration": dur,
             "tirea_real": tir_real, "tirea_nom": tir_nom,
             "be_anual": be_anual, "be_tem": be_tem, "extrapolado": extrap,
+            "mes_ref": mes_referencia(p.get("venc"), p.get("lag")),
         })
     rows.sort(key=lambda r: r["duration"])
     resumen = None
