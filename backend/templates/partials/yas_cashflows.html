@@ -23,6 +23,24 @@
     {% endfor %}
   </tbody>
 </table>
+
+{# Barras del cashflow (CSS puro, datos ya en contexto → costo cero):
+   cupón en ámbar + amortización·ajuste en cyan apiladas, alto ∝ pago máximo. #}
+{% set ns = namespace(maxt=0.0) %}
+{% for cf in metrics.cashflows %}{% if cf.total and cf.total == cf.total and cf.total > ns.maxt %}{% set ns.maxt = cf.total %}{% endif %}{% endfor %}
+{% if ns.maxt > 0 %}
+<div class="cf-bars" title="Perfil de pagos: ámbar = intereses · cyan = amortización (con ajuste)">
+  {% for cf in metrics.cashflows %}
+    {% set tot = cf.total if (cf.total and cf.total == cf.total) else 0 %}
+    {% set inte = cf.intereses if (cf.intereses and cf.intereses == cf.intereses) else 0 %}
+    <div class="cf-bar" title="{{ cf.fecha_pmt | ar_date }} · total {{ cf.total | ar_num(4) }} (int {{ cf.intereses | ar_num(4) }})">
+      <i class="cf-cap" style="height:{{ (((tot - inte) / ns.maxt) * 100) | round(1) }}%"></i>
+      <i class="cf-int" style="height:{{ ((inte / ns.maxt) * 100) | round(1) }}%"></i>
+      <span>{{ cf.fecha_pmt.strftime("%m/%y") if cf.fecha_pmt else "" }}</span>
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
 {% else %}
 <p class="muted">Sin cashflows post-settlement.</p>
 {% endif %}
