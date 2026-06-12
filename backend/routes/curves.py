@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -165,8 +166,18 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         var_bg = f"background-color: rgba({rgb},{alpha:.2f})"
 
     row = dict(meta)
+    # Estreno: emitido hace ≤5 días (o liquida en estos días). Exime del filtro
+    # "solo con cotización" — un bono nuevo no operó todavía y desaparecía de
+    # Curvas/Mercado hasta su primer trade. Costo: una resta de fechas.
+    emis = meta.get("emision")
+    estreno = False
+    try:
+        estreno = emis is not None and (date.today() - emis).days <= 5
+    except TypeError:
+        pass
     row.update(
         {
+            "estreno": estreno,
             "code": code,                # ticker BYMA = nombre de variable
             "symbol": symbol,
             "leg": leg,
@@ -285,7 +296,7 @@ async def _rows_for(
     # Filter only when the user asked AND there's at least one live
     # quote to filter against (avoid blanking the table in dev).
     do_filter = only_quoting and not store_empty
-    visible = [r for r in rows if _has_quote(r)] if do_filter else rows
+    visible = [r for r in rows if _has_quote(r) or r.get("estreno")] if do_filter else rows
     # Orden por defecto: por duration (los sin duration al final). La duration
     # ya se calcula sobre el precio de referencia (last si operó, si no cierre).
     visible.sort(key=_dur_sort_key)

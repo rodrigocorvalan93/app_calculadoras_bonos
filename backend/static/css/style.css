@@ -956,3 +956,53 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
 @keyframes tape-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .news-top { border-top: 0; border-bottom: 1px solid var(--border-soft); }
 @media (prefers-reduced-motion: reduce) { .tape-track { animation: none; } }
+
+/* ── Cosas lindas v3 (CSS puro, costo 0) ────────────────────────────── */
+
+/* Badge NUEVO para estrenos (emisión ≤5 días): pulso ámbar sutil. */
+.badge-new {
+  display: inline-block; font-size: 8.5px; font-weight: 700;
+  letter-spacing: 0.06em; padding: 1px 5px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  vertical-align: 1px; animation: badge-pulse 2.2s ease-in-out infinite;
+}
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; opacity: 1; }
+  50%      { box-shadow: 0 0 6px 0 color-mix(in srgb, var(--accent) 40%, transparent); opacity: 0.85; }
+}
+
+/* Entrada suave del contenido al navegar entre pestañas. */
+.content { animation: page-in 0.22s ease-out; }
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Cross-fade al cambiar de tema (sólo afecta el instante del switch). */
+html, body, .topbar, .card, .fx-rail, .tape, .news-marquee, .footer {
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+}
+
+/* Scrollbars finitas y tematizadas (look terminal). */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { height: 8px; width: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Tape: hover con mini-lift y código que toma color. */
+.tape-item { transition: transform 0.12s ease; }
+.tape-item:hover { transform: translateY(-1px); }
+.tape-item:hover .tape-code { color: var(--accent); }
+
+/* Precios por punta: el cambio de color (sube/baja/flat) transiciona suave. */
+.px-up, .px-down, .px-flat { transition: color 0.3s ease; }
+
+/* Noticias: subrayado acento al hover. */
+.news-item:hover .news-src { text-decoration: underline; }
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-new { animation: none; }
+  .content { animation: none; }
+}

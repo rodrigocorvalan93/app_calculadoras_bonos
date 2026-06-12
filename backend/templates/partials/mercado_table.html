@@ -61,7 +61,7 @@
               hx-target="#mercado-book"
               hx-swap="innerHTML"
               title="Ver libro de {{ r.code }}">
-            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
+            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}{% if r.estreno %} <span class="badge-new">NUEVO</span>{% endif %}</td>
             <td>{{ r.duration | ar_num(2) }}</td>
             <td class="col-oclh grp">{{ r.open | ar_num(2) }}</td>
             <td class="col-oclh">{{ r.close | ar_num(2) }}</td>
