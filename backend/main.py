@@ -98,6 +98,15 @@ def _initial_symbols() -> list[str]:
         seed.update(cauc_svc.symbols("DOLAR"))
     except Exception:  # noqa: BLE001
         logger.exception("[main] caución seed failed")
+    # Tickers de las carteras (Posiciones): lo que el fondo TIENE siempre se
+    # suscribe — así las acciones fuera del panel curado también levantan Last.
+    try:
+        from backend.services import positions
+        for code in positions.especies_universe():
+            seed.add(syms.md_symbol(code, "24hs"))
+            seed.add(syms.md_symbol(code, "CI"))
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] positions seed failed")
     # Acciones + CEDEARs (panel Mercado y barra superior): precio puro, sin TIR.
     try:
         from backend.services import equities

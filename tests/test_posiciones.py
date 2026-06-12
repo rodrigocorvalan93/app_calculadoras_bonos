@@ -65,3 +65,20 @@ async def test_posiciones_endpoint_ok() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         r = await ac.get("/posiciones")
     assert r.status_code == 200 and r.text          # degrada solo si no hay carteras
+
+
+def test_acciones_levantan_last_del_store() -> None:
+    """Especies fuera del universo de bonos (acciones/CEDEARs) toman el Last
+    directo del store del WS — antes quedaban sin precio en Posiciones."""
+    from backend.routes.posiciones import _enrich
+    from backend.services import marketdata_store as mds, symbols as syms
+
+    mds.get_store().update_from_md(syms.md_symbol("GGAL", "24hs"),
+                                   {"LA": {"price": 5400.0}, "CL": {"price": 5300.0}})
+    rows = _enrich([{"cod_fondo": 1, "cod_delta": "GGAL", "especie": "GGAL",
+                     "cantidad": 1000.0, "valor": 5_350_000.0, "clase": "Acciones"}],
+                   100_000_000.0, "24hs")
+    r = rows[0]
+    assert r["last"] == 5400.0 and r["price_source"] == "LA"
+    assert r["categoria"] == "Acciones" and r["px_val"] == 5350.0
+    assert r["tirea"] is None                      # sin calculadora para equities
