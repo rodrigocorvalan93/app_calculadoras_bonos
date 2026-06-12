@@ -60,12 +60,15 @@ def _items(plazo: str = "24hs") -> List[Dict[str, Any]]:
     for key, label in (("usb", "MEP"), ("usd", "CCL")):
         leg = summ.get(key) or {}
         if leg.get("last") is not None:
+            # summary.var_pct viene en FRACCIÓN (0.004 = 0,4%), igual que en el
+            # riel (que la renderiza con ar_pct ×100). No convertir.
             v = leg.get("var_pct")
-            v = (v / 100.0) if isinstance(v, (int, float)) else None   # summary la da en pp
+            v = v if isinstance(v, (int, float)) else None
             items.append({"code": label, "px": leg["last"], "var": v, "kind": "fx"})
             if key == "usd":
                 ccl_var = v
-    ccl = (summ.get("usd") or {}).get("last") or (fx_svc.get_fx(plazo).ccl if fx_svc.get_fx(plazo) else None)
+    fxq = fx_svc.get_fx(plazo)
+    ccl = (summ.get("usd") or {}).get("last") or (getattr(fxq, "ccl", None) if fxq else None)
 
     def _cable(var_ars: Optional[float]) -> Optional[float]:
         if var_ars is None or ccl_var is None:

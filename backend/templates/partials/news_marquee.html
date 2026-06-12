@@ -1,4 +1,4 @@
-{% if items %}
+{%- if items -%}
 {# Contenido duplicado para loop continuo (la animación corre -50%). #}
 <div class="news-track">
   {% for dup in range(2) %}
@@ -9,4 +9,4 @@
     {% endfor %}
   {% endfor %}
 </div>
-{% endif %}
+{%- endif -%}

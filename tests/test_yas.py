@@ -117,9 +117,17 @@ def test_lecap_runs() -> None:
     chosen = None
     for c in candidates:
         meta = pricing.bond_meta(c)
-        if meta.get("tipo_tasa_interes") == "FIJA" and meta.get("moneda") == "ARS":
-            chosen = c
-            break
+        if meta.get("tipo_tasa_interes") != "FIJA" or meta.get("moneda") != "ARS":
+            continue
+        # Saltear letras al borde del vencimiento: con settlement t+1 ≥ vto el
+        # motor legacy no puede calcular (el día que vence una S*, este test se
+        # rompía solo — bomba de tiempo). Exigimos ≥5 días de vida.
+        venc = getattr(bond_universe.get(c), "vencimiento", None)
+        from datetime import date, timedelta
+        if venc is None or venc < date.today() + timedelta(days=5):
+            continue
+        chosen = c
+        break
     if chosen is None:
         pytest.skip("No fixed-rate ARS bullet found")
 
