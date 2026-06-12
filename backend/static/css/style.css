@@ -1052,3 +1052,24 @@ html, body, .topbar, .card, .fx-rail, .tape, .news-marquee, .footer {
 /* ── Book DOM: degradé de profundidad por nivel (acum / total punta) ── */
 tr.depth-bid { background: linear-gradient(270deg, color-mix(in srgb, var(--green) 16%, transparent) var(--df, 0%), transparent var(--df, 0%)); }
 tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red) 14%, transparent) var(--df, 0%), transparent var(--df, 0%)); }
+
+/* ── YAS: barras del perfil de cashflows (CSS puro) ─────────────────── */
+.cf-bars {
+  display: flex; align-items: flex-end; gap: 3px;
+  height: 96px; margin-top: 10px; padding: 6px 4px 18px;
+  border-top: 1px solid var(--border-soft); position: relative;
+}
+.cf-bar {
+  flex: 1 1 0; max-width: 34px; min-width: 5px; height: 100%;
+  display: flex; flex-direction: column-reverse; align-items: stretch;
+  position: relative; cursor: default;
+}
+.cf-bar i { display: block; border-radius: 2px 2px 0 0; transition: height 0.3s ease; }
+.cf-bar .cf-int { background: var(--accent); opacity: 0.9; border-radius: 0; }
+.cf-bar .cf-cap { background: var(--cyan); opacity: 0.85; }
+.cf-bar:hover i { filter: brightness(1.25); }
+.cf-bar span {
+  position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
+  font-size: 8.5px; color: var(--text-muted); white-space: nowrap;
+}
+.cf-bar:nth-child(even) span { display: none; }   /* etiquetas alternadas si hay muchas */
