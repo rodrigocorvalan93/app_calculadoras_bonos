@@ -52,6 +52,7 @@
     <div class="topbar-meta">
       <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
       <span id="live-meta" class="live-meta muted"></span>
+      <a class="rail-toggle" href="/conexion" title="Conexión broker (endpoint / credenciales)" style="text-decoration:none">🔌</a>
       <button type="button" class="rail-toggle" :class="{ active: railOpen }"
               @click="railOpen = !railOpen; try { localStorage.setItem('fx_rail', railOpen ? '1' : '0'); } catch (e) {}"
               title="Mostrar/ocultar el monitor de dólar">💵</button>

@@ -1,0 +1,26 @@
+{% if result %}
+  <div class="alert" style="{% if ok %}border-color:var(--green);color:var(--green){% endif %}">
+    {{ "✅" if ok else "⚠️" }} {{ result }}
+  </div>
+{% endif %}
+<div class="card">
+  <div class="card-title">
+    <span>Estado del feed</span>
+    <span class="card-title-aux">
+      {% if authenticated %}<b style="color:var(--green)">● autenticado</b>{% else %}<b style="color:var(--red)">● desconectado</b>{% endif %}
+    </span>
+  </div>
+  <div class="card-body" style="font-size:12.5px">
+    <p style="margin:0 0 6px"><span class="muted">Endpoint:</span> <code>{{ base_url }}</code></p>
+    {% if stats %}
+      <table class="cashflows" style="font-size:12px">
+        <tbody>
+          {% for k, v in stats.items() %}
+            <tr><td style="text-align:left;color:var(--text-muted)">{{ k }}</td>
+                <td style="text-align:left">{{ v }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+</div>

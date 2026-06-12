@@ -411,3 +411,11 @@ def get_ws_client(base_url: str | None = None) -> PrimaryWS:
 
         _singleton = PrimaryWS(base_url or settings.primary_base_url)
     return _singleton
+
+
+def reset_ws_client(base_url: str) -> PrimaryWS:
+    """Reemplaza el singleton por uno nuevo apuntando a `base_url` (reconexión
+    en caliente desde /conexion). El caller debe stop()ear el viejo ANTES."""
+    global _singleton
+    _singleton = PrimaryWS(base_url)
+    return _singleton

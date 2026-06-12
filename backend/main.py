@@ -25,6 +25,7 @@ from backend.locale_ar import JINJA_FILTERS
 from backend.routes.breakeven import router as breakeven_router
 from backend.routes.cafci import router as cafci_router
 from backend.routes.comparador import router as comparador_router
+from backend.routes.conexion import router as conexion_router
 from backend.routes.credito import router as creditos_router
 from backend.routes.curves import forwards_router, graficos_router, mercado_router, router as curves_router
 from backend.routes.dolares import router as dolares_router
@@ -262,6 +263,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(yas_router)
     app.include_router(comparador_router)
+    app.include_router(conexion_router)
     app.include_router(creditos_router)
     app.include_router(cafci_router)
     app.include_router(breakeven_router)
