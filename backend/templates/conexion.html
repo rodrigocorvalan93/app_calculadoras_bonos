@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Conexión{% endblock %}
+
+{% block content %}
+<section class="curves" style="max-width:760px">
+  <header class="yas-header">
+    <h1>Conexión · broker BYMA</h1>
+    <p class="muted">El mismo feed de BYMA lo intermedian varios brokers (XOMS). Elegí el endpoint,
+    poné usuario/clave (si los dejás vacíos se usan los de <code>secrets.txt</code>) y reconectá
+    <strong>sin reiniciar la app</strong>.</p>
+  </header>
+
+  <div class="card" x-data="{ url: '{{ current_url }}' }">
+    <div class="card-title"><span>Endpoint XOMS</span></div>
+    <div class="card-body">
+      <form hx-post="/conexion/login" hx-target="#conn-status" hx-swap="innerHTML"
+            hx-indicator="#conn-spin">
+        <div class="form-row">
+          <label class="field" style="min-width:200px">
+            <span>Broker</span>
+            <select @change="url = $event.target.value">
+              {% for label, u in hosts %}
+                <option value="{{ u }}" {% if u == current_url %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field" style="flex:1;min-width:320px">
+            <span>URL del endpoint <small class="muted">(editable)</small></span>
+            <input type="text" name="url" x-model="url" autocomplete="off" spellcheck="false">
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="field">
+            <span>Usuario</span>
+            <input type="text" name="username" value="{{ current_user }}" autocomplete="username">
+          </label>
+          <label class="field">
+            <span>Clave</span>
+            {# La clave de secrets NUNCA se imprime: vacío ⇒ usa la de secrets.txt #}
+            <input type="password" name="password" autocomplete="current-password"
+                   placeholder="{% if has_secret_pass %}(vacío = la de secrets.txt){% else %}requerida{% endif %}">
+          </label>
+          <button type="submit" class="btn-primary" style="align-self:flex-end">🔌 Conectar</button>
+          <span id="conn-spin" class="htmx-indicator muted" style="align-self:flex-end">conectando…</span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="conn-status">
+    {% include "partials/conexion_status.html" %}
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <div class="card-title"><span>MAE</span>
+      <span class="card-title-aux">{% if mae_on %}<b style="color:var(--green)">token activo</b>{% else %}sin token{% endif %}</span>
+    </div>
+    <div class="card-body muted" style="font-size:12.5px">
+      El acceso a MAE es <strong>directo</strong> (token propio, sin brokers que intermedien) —
+      se configura como <code>MAE_API_KEY</code> en <code>secrets.txt</code> y no se cambia desde acá.
+    </div>
+  </div>
+</section>
+{% endblock %}
