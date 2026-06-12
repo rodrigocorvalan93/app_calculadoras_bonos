@@ -28,6 +28,7 @@
           <th>Mon</th>
           <th>Close</th>
           <th>Last</th>
+          <th title="Posición del Last en el rango Low–High del día">Rango</th>
           <th>Var %</th>
           <th>Δyield</th>
           <th>Bid</th>
@@ -55,6 +56,7 @@
             <td>{{ r.moneda or "—" }}</td>
             <td>{{ r.close | ar_num(2) }}</td>
             <td class="{{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
+            <td>{% if r.range_pos is not none %}<div class="rango" title="Last en el {{ (r.range_pos*100)|round(0)|int }}% del rango del día"><i style="left:{{ (r.range_pos*100)|round(1) }}%"></i></div>{% else %}<span class="muted">·</span>{% endif %}</td>
             <td style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td>{{ r.delta_yield_bps | ar_num(1) }}</td>
             <td class="{{ r.bid_cls }}">{{ r.bid | ar_num(2) }}</td>
