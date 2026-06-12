@@ -27,10 +27,24 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 
 
 async def _ctx(plazo: str) -> Dict[str, Any]:
+    import json
+
     cer_rows, _ = await _rows_for("cer", plazo, only_quoting=True)
     lecap_rows, _ = await _rows_for(_NOMINAL_CURVE, plazo, only_quoting=True)
+    # Lag de ajuste de la especie (típ. −10 hábiles) → mes de referencia.
+    for r in cer_rows:
+        obj = bond_universe.get(r.get("code", ""))
+        r["lag"] = getattr(obj, "dias_lag_ajuste", -10) if obj is not None else -10
     data = be_svc.compute_fisher(cer_rows, lecap_rows)
-    return {**data, "plazo": plazo}
+    # JSON para el gráfico de barras (TEM/TIR en pp, client-side, sin endpoint extra).
+    chart = [r for r in data["rows"] if r.get("be_anual") is not None]
+    be_json = json.dumps({
+        "labels": [r["code"] for r in chart],
+        "mes": [r.get("mes_ref") or "" for r in chart],
+        "tem": [round(r["be_tem"] * 100.0, 4) for r in chart],
+        "anual": [round(r["be_anual"] * 100.0, 4) for r in chart],
+    })
+    return {**data, "plazo": plazo, "be_json": be_json}
 
 
 @router.get("/breakeven", response_class=HTMLResponse)

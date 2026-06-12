@@ -1,3 +1,6 @@
+{# Datos del gráfico de barras: SIEMPRE presente (vacío ⇒ el chart muestra
+   su propio mensaje) — así el JS y los tests no dependen de que haya filas. #}
+<div id="be-data" data-be='{{ be_json }}' style="display:none"></div>
 {% if not rows %}
   <div class="alert">Sin bonos CER con cotización para despejar el break-even (¿broker offline?).</div>
 {% else %}
@@ -21,6 +24,7 @@
         <tr>
           <th data-sort style="text-align:left">Bono CER</th>
           <th data-sort>Dur</th>
+          <th data-sort title="Última inflación mensual que este BE captura (CER fix = vto + lag hábiles; metodología INDEC)">Infla. hasta</th>
           <th data-sort>TIREA real</th>
           <th data-sort>TIREA nominal</th>
           <th data-sort class="grp">BE anual</th>
@@ -35,6 +39,7 @@
               <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a>
             </td>
             <td>{{ r.duration | ar_num(2) }}</td>
+            <td style="color:var(--cyan);font-weight:600">{{ r.mes_ref or "—" }}</td>
             <td style="color:var(--cyan)">{{ r.tirea_real | ar_pct(2) }}</td>
             <td>{{ r.tirea_nom | ar_pct(2) }}</td>
             <td class="grp" style="font-weight:650;color:var(--accent)">{{ r.be_anual | ar_pct(2) }}</td>

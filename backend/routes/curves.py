@@ -880,15 +880,22 @@ async def graficos_data(
 
     from backend.services import nss as nss_svc
 
-    rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
-    pts = [(r["code"], float(r["duration"]), float(r["tirea"]) * 100.0, (r.get("moneda") or "").upper())
+    rows, _meta = await _rows_for(curve, plazo, only_quoting, leg, book=True)
+
+    def _pp(v):                       # fracción → %, NaN/None → None
+        return float(v) * 100.0 if (v is not None and v == v) else None
+
+    pts = [(r["code"], float(r["duration"]), float(r["tirea"]) * 100.0, (r.get("moneda") or "").upper(),
+            _pp(r.get("tirea_bid")), _pp(r.get("tirea_offer")))
            for r in rows
            if r.get("duration") is not None and r["duration"] == r["duration"]
            and r.get("tirea") is not None and r["tirea"] == r["tirea"]]
     if not pts:
-        return JSONResponse({"n": 0, "xs": [], "ars": [], "usd": [], "nss": [], "codes": []})
+        return JSONResponse({"n": 0, "xs": [], "ars": [], "usd": [], "nss": [], "codes": [], "bid": [], "off": []})
 
     bond_x = sorted({p[1] for p in pts})
+    bid_at: Dict[float, float] = {}
+    off_at: Dict[float, float] = {}
     xs_set = set(bond_x)
     if len(pts) >= 4 and bond_x[-1] > bond_x[0]:
         xs_set |= set(float(v) for v in np.linspace(bond_x[0], bond_x[-1], 80))
@@ -896,14 +903,22 @@ async def graficos_data(
     ars_at: Dict[float, float] = {}
     usd_at: Dict[float, float] = {}
     code_at: Dict[float, str] = {}
-    for code, d, t, mon in pts:
+    for code, d, t, mon, tb, to in pts:
         (usd_at if mon in ("USD", "USB") else ars_at)[d] = t
         code_at[d] = code
+        if tb is not None:
+            bid_at[d] = tb
+        if to is not None:
+            off_at[d] = to
+    # La regresión NSS se ajusta SIEMPRE sobre el last (los bid/offer son
+    # series visuales extra, como en OMSweb_app).
     nss_y = nss_svc.eval_at([p[1] for p in pts], [p[2] for p in pts], xs) if len(pts) >= 4 else None
     return JSONResponse({
         "n": len(pts), "xs": xs,
         "ars": [ars_at.get(x) for x in xs],
         "usd": [usd_at.get(x) for x in xs],
+        "bid": [bid_at.get(x) for x in xs],
+        "off": [off_at.get(x) for x in xs],
         "codes": [code_at.get(x) for x in xs],
         "nss": nss_y or [],
     })

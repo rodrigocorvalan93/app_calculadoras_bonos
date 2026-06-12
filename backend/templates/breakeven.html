@@ -28,6 +28,24 @@
     </div>
   </div>
 
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-title"><span>Break-even por bono (barras)</span>
+      <span class="card-title-aux">
+        <label style="margin-right:10px"><input type="radio" name="be-metric" value="tem" checked> TEM</label>
+        <label><input type="radio" name="be-metric" value="anual"> TIR anual</label>
+      </span>
+    </div>
+    <div class="card-body">
+      <div id="be-chart" style="min-height:260px"></div>
+      <p class="muted" style="font-size:11.5px;margin:8px 0 0">
+        Eje X: bono · <b>mes de referencia</b> = última inflación que el BE captura
+        (CER fix = vto + lag hábiles de la especie; el CER del día D devenga la
+        inflación de dos meses atrás si D ≤ 15, o del mes anterior si D ≥ 16 —
+        metodología INDEC). Ej.: TZXO6 (vto 31/10) fija el 19/10 → captura hasta sep.
+      </p>
+    </div>
+  </div>
+
   <div id="be-table" data-flash-scope
        hx-get="/breakeven/table" hx-trigger="md-update from:body, every 30s"
        hx-swap="innerHTML" hx-include="[name=plazo]">

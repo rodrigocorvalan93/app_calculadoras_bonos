@@ -41,11 +41,12 @@
       return new URLSearchParams(p).toString();
     }
 
-    function scatter(label, color) {
+    function scatter(label, color, size) {
       return { label: label, stroke: color, paths: function () { return null; },
-               points: { show: true, size: 7, stroke: color, fill: color },
+               points: { show: true, size: size || 7, stroke: color, fill: color },
                value: function (uu, v) { return fmtPct(v); } };
     }
+    var GREEN = cssVar("--green", "#22c55e"), RED = cssVar("--red", "#ef4444");
 
     function opts() {
       return {
@@ -62,6 +63,8 @@
           { label: "Dur", value: function (uu, v) { return fmtNum(v); } },
           scatter("ARS", ORANGE),
           scatter("USD/USB", CYAN),
+          scatter("Bid", GREEN, 5),
+          scatter("Offer", RED, 5),
           { label: "NSS", stroke: NSSCOL, width: 2, points: { show: false },
             value: function (uu, v) { return fmtPct(v); } },
         ],
@@ -118,7 +121,8 @@
             box.appendChild(e); return;
           }
           var nss = (j.nss && j.nss.length === j.xs.length) ? j.nss : j.xs.map(function () { return null; });
-          var data = [j.xs, j.ars, j.usd, nss];
+          var vac = j.xs.map(function () { return null; });
+          var data = [j.xs, j.ars, j.usd, j.bid || vac, j.off || vac, nss];
           codes = j.codes || [];
           if (recreate || !u) {
             if (u) u.destroy();
@@ -362,4 +366,67 @@
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { scan(document); });
   } else { scan(document); }
+})();
+
+// ── Break-even: barras TEM/TIR por bono (datos embebidos, sin endpoint extra) ──
+(function () {
+  function cssVar(n, fb) { var v = getComputedStyle(document.documentElement).getPropertyValue(n).trim(); return v || fb; }
+  function fmtPct(v) { return (v == null) ? "" : (v.toFixed(2).replace(".", ",") + "%"); }
+  var u = null;
+
+  function metric() {
+    var el = document.querySelector('input[name="be-metric"]:checked');
+    return el ? el.value : "tem";
+  }
+  function draw() {
+    var box = document.getElementById("be-chart");
+    var dd = document.getElementById("be-data");
+    if (!box || !dd || typeof uPlot === "undefined") return;
+    var d;
+    try { d = JSON.parse(dd.dataset.be || "{}"); } catch (e) { return; }
+    if (!d.labels || !d.labels.length) {
+      box.innerHTML = '<p class="muted" style="font-size:12px">Sin break-evens para graficar (¿hay cotización en CER y tasa fija?).</p>';
+      return;
+    }
+    var m = metric();
+    var ys = (m === "anual") ? d.anual : d.tem;
+    var xs = d.labels.map(function (_, i) { return i; });
+    var ACC = cssVar("--accent", "#ff9f00"), MUT = cssVar("--text-muted", "#999"), BORD = cssVar("--border-soft", "#222");
+    if (u) { u.destroy(); u = null; }
+    box.innerHTML = "";
+    u = new uPlot({
+      width: Math.max(box.clientWidth || 700, 320), height: 260,
+      scales: { x: { time: false, range: [-0.6, xs.length - 0.4] } },
+      axes: [
+        { stroke: MUT, grid: { show: false }, ticks: { show: false },
+          values: function (uu, vals) {
+            return vals.map(function (v) {
+              var i = Math.round(v);
+              return (i >= 0 && i < d.labels.length && Math.abs(v - i) < 0.01)
+                ? d.labels[i] + (d.mes[i] ? " · " + d.mes[i] : "") : "";
+            });
+          }, rotate: -35, size: 64, gap: 6 },
+        { stroke: MUT, grid: { stroke: BORD }, label: (m === "anual" ? "BE TIR anual (%)" : "BE TEM (%)"),
+          values: function (uu, vals) { return vals.map(fmtPct); } },
+      ],
+      series: [
+        { label: "Bono", value: function (uu, v) { var i = Math.round(v); return d.labels[i] ? d.labels[i] + " · " + d.mes[i] : ""; } },
+        { label: (m === "anual" ? "BE anual" : "BE TEM"), stroke: ACC, fill: ACC + "55",
+          paths: uPlot.paths.bars({ size: [0.6, 100] }),
+          value: function (uu, v) { return fmtPct(v); } },
+      ],
+      cursor: { focus: { prox: 30 } },
+      legend: { show: true },
+    }, [xs, ys], box);
+  }
+  document.body.addEventListener("change", function (evt) {
+    if (evt.target && evt.target.name === "be-metric") draw();
+  });
+  document.body.addEventListener("htmx:afterSwap", function (evt) {
+    var t = evt.detail.target;
+    if (t && (t.id === "be-table" || (t.querySelector && t.querySelector("#be-data")))) draw();
+  });
+  window.addEventListener("resize", function () { if (document.getElementById("be-chart")) draw(); });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", draw);
+  else draw();
 })();
