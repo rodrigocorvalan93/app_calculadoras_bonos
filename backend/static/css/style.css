@@ -1042,3 +1042,9 @@ html, body, .topbar, .card, .fx-rail, .tape, .news-marquee, .footer {
 .locate-card { margin-top: 12px; }
 .locate-box { min-height: 240px; }
 .locate-box .u-legend { font-size: 11px; }
+
+/* ── Barrita de volumen de fondo en la celda (proporcional al máx) ──── */
+.vol-cell {
+  background: linear-gradient(90deg, var(--accent-soft) var(--vf, 0%), transparent var(--vf, 0%));
+  border-radius: 3px;
+}

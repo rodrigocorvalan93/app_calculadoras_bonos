@@ -72,7 +72,7 @@
             <td>{{ r.tem | ar_pct(2) }}</td>
             <td>{{ (r.paridad * 100) | ar_pct_pp(1) if (r.paridad is not none and r.paridad == r.paridad) else "—" }}</td>
             <td>{{ r.margen_tna | ar_pct(2) }}</td>
-            <td>{{ r.volume | ar_hum }}</td>
+            <td class="vol-cell" style="--vf:{{ ((r.volume_frac or 0)*100)|round(0)|int }}%">{{ r.volume | ar_hum }}</td>
             <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
             <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_date | ar_ts }}</td>
             <td style="text-align:left;font-size:11px;color:var(--text-muted)">

@@ -6,7 +6,10 @@
   <b class="tape-code">{{ it.code }}</b>
   <span class="tape-px" data-fl="{{ it.code }}">{{ it.px | ar_num(2) }}</span>
   {% if it.var is not none %}
-    <span class="tape-var {{ 'var-up' if it.var >= 0 else 'var-down' }}">{{ '▲' if it.var >= 0 else '▼' }} {{ it.var | ar_pct(2) }}</span>
+    <span class="tape-var {{ 'var-up' if it.var >= 0 else 'var-down' }}">{% if it.var_ars is defined and it.var_ars is not none %}US$ {% endif %}{{ '▲' if it.var >= 0 else '▼' }} {{ it.var | ar_pct(2) }}</span>
+  {% endif %}
+  {% if it.var_ars is defined and it.var_ars is not none %}
+    <span class="tape-var {{ 'var-up' if it.var_ars >= 0 else 'var-down' }}">$ {{ '▲' if it.var_ars >= 0 else '▼' }} {{ it.var_ars | ar_pct(2) }}</span>
   {% endif %}
 </span>
 {% endfor %}

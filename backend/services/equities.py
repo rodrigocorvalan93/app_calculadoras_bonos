@@ -26,7 +26,8 @@ CEDEARS: List[str] = [
     "AMZN", "META", "MELI", "KO", "DIS", "BRKB", "JPM", "XOM", "GOLD",
 ]
 # Índice Merval (si el broker lo sirve; símbolo crudo, sin plazo).
-MERVAL_SYMBOLS = ("MERV - XMEV - I.MERVAL - 24hs", "MERV - XMEV - I.MERVAL", "I.MERVAL")
+MERVAL_SYMBOLS = ("MERV - XMEV - I.MERVAL - 24hs", "MERV - XMEV - I.MERVAL - CI",
+                  "MERV - XMEV - I.MERVAL", "I.MERVAL")
 
 
 def all_symbols() -> List[str]:
@@ -71,6 +72,9 @@ def row_for(code: str, plazo: str = "24hs") -> Optional[Dict[str, Any]]:
 def panel_rows(panel: str, plazo: str = "24hs") -> List[Dict[str, Any]]:
     codes = CEDEARS if panel == "cedears" else LIDERES
     rows = [r for c in codes if (r := row_for(c, plazo)) is not None]
+    vmax = max((r.get("volume") or 0.0) for r in rows) if rows else 0.0
+    for r in rows:
+        r["volume_frac"] = (r.get("volume") or 0.0) / vmax if vmax > 0 else 0.0
     # Orden: volumen efectivo descendente; sin volumen al final, alfabético.
     rows.sort(key=lambda r: (-(r["volume"] or 0.0), r["code"]))
     return rows
