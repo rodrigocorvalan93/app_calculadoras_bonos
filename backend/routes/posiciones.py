@@ -158,6 +158,18 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
         code = h.get("cod_delta")
         obj = _bono(code)
         m = _row_for_code(code, plazo) if code else None
+        # Especies fuera del universo de bonos (acciones, CEDEARs): el Last
+        # sale directo del store del WS (lookup en memoria, ~µs) — antes estas
+        # filas quedaban sin precio porque bond_meta(code) es vacío.
+        eq_last = eq_src = None
+        if m is None and code:
+            from backend.services import equities
+            eq = equities.row_for(code, plazo)
+            if eq is not None:
+                if eq.get("last") is not None:
+                    eq_last, eq_src = eq["last"], "LA"
+                elif eq.get("close") is not None:
+                    eq_last, eq_src = eq["close"], "CL"
         valor = h.get("valor")
         cant = h.get("cantidad")
         # Precio al que está valuada la tenencia (monto / VN). El retorno del
@@ -175,8 +187,8 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             "tna": (m or {}).get("tna"),
             "tna_convention_label": (m or {}).get("tna_convention_label"),
             "duration": (m or {}).get("duration"),
-            "last": (m or {}).get("last"),
-            "price_source": (m or {}).get("price_source"),
+            "last": (m or {}).get("last") if m is not None else eq_last,
+            "price_source": (m or {}).get("price_source") if m is not None else eq_src,
         })
     rows.sort(key=lambda r: (r.get("valor") or 0.0), reverse=True)
     return rows
