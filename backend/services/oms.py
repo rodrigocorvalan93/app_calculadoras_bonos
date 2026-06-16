@@ -54,20 +54,75 @@ def audit(event: str, data: Dict[str, Any]) -> None:
             f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
 
 
-def audit_tail(n: int = 30) -> List[Dict[str, Any]]:
+def _tail_lines(n: int) -> List[str]:
+    """Últimas n líneas leyendo SÓLO el final del archivo (el audit crece sin
+    límite; no queremos releer todo en cada blotter/refresh)."""
     try:
-        with open(_AUDIT_PATH, encoding="utf-8") as f:
-            lines = f.readlines()[-n:]
-        return [json.loads(ln) for ln in reversed(lines)]
+        with open(_AUDIT_PATH, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            data = b""
+            while size > 0 and data.count(b"\n") <= n:
+                step = min(8192, size)
+                size -= step
+                f.seek(size)
+                data = f.read(step) + data
+        return data.decode("utf-8", "replace").splitlines()[-n:]
     except FileNotFoundError:
         return []
     except Exception:  # noqa: BLE001
         return []
 
 
-def validate(code: str, side: str, qty: float, price: float,
-             account: str, last_ref: Optional[float]) -> Optional[str]:
-    """Validaciones pre-trade. Devuelve el motivo del rechazo o None si pasa."""
+def audit_tail(n: int = 30) -> List[Dict[str, Any]]:
+    out = []
+    for ln in reversed(_tail_lines(n)):
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            continue
+    return out
+
+
+# Eventos del audit que representan el desenlace de un intento de orden →
+# alimentan el blotter (estado por intento).
+_BLOTTER_STATUS = {
+    "paper_enviada": "PAPER", "live_respuesta": "ENVIADA", "live_error": "ERROR",
+    "rechazada_kill": "RECHAZADA", "rechazada_pretrade": "RECHAZADA",
+    "paper_cancelada": "CANCELADA", "live_cancel_respuesta": "CANCELADA",
+}
+
+
+def blotter(n: int = 60) -> List[Dict[str, Any]]:
+    """Estado de órdenes derivado del audit persistente (más nuevas primero).
+    Funciona en paper y en live — es el registro de lo que pasó por el OMS."""
+    rows: List[Dict[str, Any]] = []
+    for a in audit_tail(400):                      # ya viene del más nuevo al más viejo
+        st = _BLOTTER_STATUS.get(a.get("event"))
+        if st is None:
+            continue
+        rows.append({
+            "ts": a.get("ts"), "status": st,
+            "code": a.get("code"), "side": a.get("side"),
+            "qty": a.get("qty"), "price": a.get("price"),
+            "account": a.get("account"), "ordtype": a.get("ordtype") or "limit",
+            "cid": a.get("client_order_id"),
+            "motivo": a.get("motivo") or a.get("error"),
+        })
+        if len(rows) >= n:
+            break
+    return rows
+
+
+def validate(code: str, side: str, qty: float, price: Optional[float],
+             account: str, last_ref: Optional[float], moneda: str = "ARS",
+             ordtype: str = "limit") -> Optional[str]:
+    """Validaciones pre-trade. Devuelve el motivo del rechazo o None si pasa.
+
+    - Tope de notional EN LA MONEDA DEL BONO: ARS (oms_max_notional) para pesos,
+      USD (oms_max_notional_usd) para hard-dollar (moneda USD/USB).
+    - Banda de precio (fat-finger) sólo para Limit; Market toma lo que haya.
+    """
     if _kill["on"]:
         return "KILL-SWITCH activado: envíos bloqueados."
     if not account:
@@ -78,13 +133,19 @@ def validate(code: str, side: str, qty: float, price: float,
         return "Lado inválido."
     if not qty or qty <= 0:
         return "Cantidad (VN) debe ser > 0."
-    if not price or price <= 0:
-        return "Precio debe ser > 0."
-    notional = qty * price / 100.0   # bonos cotizan por VN 100
-    if notional > settings.oms_max_notional:
-        return (f"Notional estimado {notional:,.0f} supera el tope "
-                f"{settings.oms_max_notional:,.0f} (oms_max_notional).")
-    if last_ref:
+    is_market = ordtype == "market"
+    if not is_market and (not price or price <= 0):
+        return "Precio debe ser > 0 (orden Limit)."
+    is_usd = (moneda or "ARS").upper() in ("USD", "USB")
+    cap = settings.oms_max_notional_usd if is_usd else settings.oms_max_notional
+    unit = "USD" if is_usd else "ARS"
+    ref_px = price if not is_market else last_ref   # market estima con la referencia
+    if ref_px:
+        notional = qty * ref_px / 100.0             # bonos cotizan por VN 100
+        if notional > cap:
+            return (f"Notional estimado {notional:,.0f} {unit} supera el tope "
+                    f"{cap:,.0f} {unit}.")
+    if not is_market and last_ref:
         band = settings.oms_price_band_pct / 100.0
         if abs(price / last_ref - 1.0) > band:
             return (f"Precio {price} fuera de la banda ±{settings.oms_price_band_pct:.0f}% "
@@ -142,17 +203,20 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     audit("live_enviando", rec)
     from backend.services.primary_client import get_client
+    ordtype = payload.get("ordtype", "limit")
+    params = {
+        "marketId": "ROFX",
+        "symbol": payload["symbol"],
+        "side": payload["side"],
+        "orderQty": payload["qty"],
+        "ordType": ordtype,
+        "timeInForce": "Day",
+        "account": payload["account"],
+    }
+    if ordtype != "market":
+        params["price"] = payload["price"]
     try:
-        d = await get_client().get_json("rest/order/newSingleOrder", {
-            "marketId": "ROFX",
-            "symbol": payload["symbol"],
-            "side": payload["side"],
-            "orderQty": payload["qty"],
-            "price": payload["price"],
-            "ordType": "limit",
-            "timeInForce": "Day",
-            "account": payload["account"],
-        })
+        d = await get_client().get_json("rest/order/newSingleOrder", params)
         audit("live_respuesta", {**rec, "broker": d})
         return {"status": d.get("status", "?"), "broker": d, **rec}
     except Exception as exc:  # noqa: BLE001
