@@ -69,3 +69,48 @@ async def test_ordenes_endpoints() -> None:
         # panel degrada sin auth (broker offline) con mensaje claro
         pa = await ac.get("/ordenes/panel")
         assert pa.status_code == 200
+
+
+def test_validate_topes_por_moneda() -> None:
+    """ARS → tope 1.000M ; hard-dollar (USD/USB) → tope 5M USD."""
+    # notional = qty * price / 100. Con precio 100 → notional == qty.
+    # ARS: 2.000M VN @ 100 = 2.000M ARS > 1.000M → rechaza ; 500M ok
+    assert "ARS" in oms.validate("X", "buy", 2_000_000_000, 100.0, "C1", 100.0, "ARS")
+    assert oms.validate("X", "buy", 500_000_000, 100.0, "C1", 100.0, "ARS") is None
+    # USD: 6.000.000 VN @ 100 = 6.000.000 USD > 5M → rechaza ; 1M USD ok
+    assert "USD" in oms.validate("GD", "buy", 6_000_000, 100.0, "C1", 100.0, "USD")
+    assert oms.validate("GD", "buy", 1_000_000, 100.0, "C1", 100.0, "USB") is None
+
+
+def test_validate_market_sin_precio() -> None:
+    """Market: no exige precio ni respeta banda; estima notional con la ref."""
+    assert oms.validate("AL30", "buy", 100, None, "C1", 941.0, "ARS", "market") is None
+    # market sin precio pero con qty 0 → sigue fallando por cantidad
+    assert oms.validate("AL30", "buy", 0, None, "C1", 941.0, "ARS", "market")
+
+
+@pytest.mark.asyncio
+async def test_quote_y_multi_y_blotter() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import marketdata_store as mds, symbols as syms
+
+    mds.get_store().update_from_md(syms.md_symbol("AL30", "24hs"),
+                                   {"LA": {"price": 941.3}, "CL": {"price": 939.0}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        # quote: book + tenencia (reusa el de Mercado)
+        q = await ac.get("/ordenes/quote", params={"code": "AL30", "plazo": "24hs"})
+        assert q.status_code == 200 and "Libro" in q.text
+        # multiorden: 2 comitentes → confirmación batch con token
+        m = await ac.post("/ordenes/multi", data={"code": "AL30", "side": "buy",
+            "ordtype": "limit", "price": "941,30", "plazo": "24hs",
+            "lines": "COMIT-1, 100000\nCOMIT-2, 50000"})
+        assert m.status_code == 200 and "MULTIORDEN" in m.text
+        import re
+        tok = re.search(r'name="token" value="(\w+)"', m.text).group(1)
+        c = await ac.post("/ordenes/multi/confirmar", data={"token": tok})
+        assert c.status_code == 200 and c.text.count("PAPER") >= 2
+        # blotter: refleja las 2 paper recién enviadas
+        b = await ac.get("/ordenes/blotter")
+        assert b.status_code == 200 and "AL30" in b.text and "Blotter" in b.text

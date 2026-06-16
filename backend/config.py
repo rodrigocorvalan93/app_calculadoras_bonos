@@ -66,8 +66,9 @@ class Settings(BaseSettings):
     # toda orden se registra como PAPER (simulada) y NUNCA viaja al broker.
     # Para operar en serio: OMS_LIVE=1 en secrets.txt/env, con límites abajo.
     oms_live: bool = False
-    oms_max_notional: float = 100_000_000.0   # tope ARS por orden
-    oms_price_band_pct: float = 10.0          # banda vs last/close (fat-finger)
+    oms_max_notional: float = 1_000_000_000.0     # tope por orden, bonos ARS
+    oms_max_notional_usd: float = 5_000_000.0     # tope por orden, hard-dollar (USD/USB)
+    oms_price_band_pct: float = 10.0              # banda vs last/close (fat-finger)
 
     # Phase 2 warmup daemon. Interval must stay under the curve metrics
     # cache TTL (20 s) so a sweep refreshes every bucket before it expires

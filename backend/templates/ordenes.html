@@ -3,7 +3,7 @@
 {% block tab_ordenes %}active{% endblock %}
 
 {% block content %}
-<section class="curves" style="max-width:980px">
+<section class="curves" x-data="{ ord: 'limit', multi: false }">
   <header class="yas-header">
     <h1>Órdenes
       {% if live %}<span class="badge-new" style="background:rgba(239,68,68,.15);color:var(--red);border-color:var(--red)">LIVE</span>
@@ -13,53 +13,112 @@
     <p class="muted">
       {% if live %}⚠️ <b>Modo LIVE</b>: las órdenes confirmadas viajan al broker.
       {% else %}Modo <b>paper</b> (OMS_LIVE=0): todo se valida, confirma y audita, pero <b>nada viaja al broker</b>.{% endif %}
-      Límites: tope {{ max_notional | ar_int }} ARS por orden · banda ±{{ band | ar_num(0) }}% vs referencia.
-      Todo queda en <code>oms_audit.jsonl</code>.
+      Topes por orden: <b>{{ max_notional | ar_int }} ARS</b> · <b>{{ max_notional_usd | ar_int }} USD</b> (hard-dollar) ·
+      banda ±{{ band | ar_num(0) }}% vs referencia (Limit).
     </p>
   </header>
 
-  <div class="card">
-    <div class="card-title"><span>🎫 Ticket</span>
-      <span class="card-title-aux">
-        <form hx-post="/ordenes/kill" hx-target="#orden-result" hx-swap="innerHTML" style="display:inline">
-          <input type="hidden" name="on" value="{{ '0' if kill else '1' }}">
-          <button type="submit" class="btn-primary" style="background:{{ 'var(--green)' if kill else 'var(--red)' }};font-size:11px">
-            {{ '▶ Reactivar envíos' if kill else '⛔ KILL-SWITCH' }}</button>
+  <div class="ord-layout">
+    {# ── Ticket (single + multi en el mismo form, 2 botones htmx) ─────────── #}
+    <div class="card">
+      <div class="card-title"><span>🎫 Ticket</span>
+        <span class="card-title-aux">
+          <label style="font-size:11px;margin-right:8px"><input type="checkbox" x-model="multi"> Multi-comitente</label>
+          <form hx-post="/ordenes/kill" hx-target="#orden-result" hx-swap="innerHTML" style="display:inline">
+            <input type="hidden" name="on" value="{{ '0' if kill else '1' }}">
+            <button type="submit" class="btn-primary" style="background:{{ 'var(--green)' if kill else 'var(--red)' }};font-size:11px">
+              {{ '▶ Reactivar' if kill else '⛔ KILL' }}</button>
+          </form>
+        </span>
+      </div>
+      <div class="card-body">
+        <form hx-target="#orden-result" hx-swap="innerHTML" hx-indicator="#ord-spin">
+          <div class="form-row">
+            <label class="field" style="min-width:120px"><span>Especie</span>
+              <input type="text" name="code" id="code-input" value="{{ code }}" placeholder="AL30"
+                     autocomplete="off" style="text-transform:uppercase"
+                     hx-get="/ordenes/quote" hx-target="#orden-quote" hx-swap="innerHTML"
+                     hx-trigger="change, keyup changed delay:350ms" hx-include="[name=plazo]"></label>
+            <fieldset class="field field-mode"><legend>Lado</legend>
+              <label><input type="radio" name="side" value="buy" {% if side != 'sell' %}checked{% endif %}> Compra</label>
+              <label><input type="radio" name="side" value="sell" {% if side == 'sell' %}checked{% endif %}> Venta</label>
+            </fieldset>
+            <fieldset class="field field-mode"><legend>Tipo</legend>
+              <label><input type="radio" name="ordtype" value="limit" x-model="ord"> Limit</label>
+              <label><input type="radio" name="ordtype" value="market" x-model="ord"> Market</label>
+            </fieldset>
+            <label class="field" style="min-width:120px"><span>Precio</span>
+              <input type="text" name="price" id="price-input" inputmode="decimal" value="{{ px }}"
+                     :disabled="ord==='market'" :placeholder="ord==='market' ? 'a mercado' : '0,00'"></label>
+            <label class="field" style="min-width:90px"><span>Plazo</span>
+              <select name="plazo" hx-get="/ordenes/quote" hx-target="#orden-quote" hx-swap="innerHTML"
+                      hx-trigger="change" hx-include="[name=code]">
+                <option value="24hs" {% if plazo=='24hs' %}selected{% endif %}>24hs</option>
+                <option value="CI" {% if plazo=='CI' %}selected{% endif %}>CI</option></select></label>
+          </div>
+
+          {# Single: cantidad + comitente #}
+          <div class="form-row" x-show="!multi">
+            <label class="field"><span>Cantidad (VN)</span>
+              <input type="text" name="qty" inputmode="decimal" placeholder="100.000"></label>
+            <label class="field" style="flex:1;min-width:200px"><span>Comitente</span>
+              <input type="text" name="account" id="acct-input" autocomplete="off" placeholder="elegila del panel ↓"></label>
+            <button type="submit" class="btn-primary" style="align-self:flex-end"
+                    hx-post="/ordenes/ticket">Armar ticket</button>
+            <span id="ord-spin" class="htmx-indicator muted" style="align-self:flex-end">validando…</span>
+          </div>
+
+          {# Multi: una línea por comitente "COMITENTE, CANTIDAD" #}
+          <div class="form-row" x-show="multi" x-cloak style="align-items:flex-start">
+            <label class="field" style="flex:1;min-width:280px">
+              <span>Comitentes (una línea: <code>comitente, cantidad</code>)</span>
+              <textarea name="lines" rows="5" placeholder="COMIT-001, 100000&#10;COMIT-002, 50000&#10;COMIT-003, 250000"
+                        style="font-family:var(--mono);font-size:12px"></textarea></label>
+            <button type="submit" class="btn-primary" style="align-self:flex-start"
+                    hx-post="/ordenes/multi">Previsualizar multiorden</button>
+          </div>
         </form>
-      </span>
+      </div>
     </div>
-    <div class="card-body">
-      <form hx-post="/ordenes/ticket" hx-target="#orden-result" hx-swap="innerHTML" hx-indicator="#ord-spin">
-        <div class="form-row">
-          <label class="field"><span>Especie</span>
-            <input type="text" name="code" value="{{ code }}" placeholder="AL30" autocomplete="off" style="text-transform:uppercase"></label>
-          <fieldset class="field field-mode"><legend>Lado</legend>
-            <label><input type="radio" name="side" value="buy" {% if side != 'sell' %}checked{% endif %}> Compra</label>
-            <label><input type="radio" name="side" value="sell" {% if side == 'sell' %}checked{% endif %}> Venta</label>
-          </fieldset>
-          <label class="field"><span>Cantidad (VN)</span>
-            <input type="text" name="qty" inputmode="decimal" placeholder="100.000"></label>
-          <label class="field"><span>Precio</span>
-            <input type="text" name="price" inputmode="decimal" value="{{ px }}"></label>
-          <label class="field"><span>Plazo</span>
-            <select name="plazo"><option value="24hs" {% if plazo=='24hs' %}selected{% endif %}>24hs</option>
-              <option value="CI" {% if plazo=='CI' %}selected{% endif %}>CI</option></select></label>
-          <label class="field"><span>Comitente</span>
-            <input type="text" name="account" id="acct-input" placeholder="elegila del panel →"></label>
-          <button type="submit" class="btn-primary" style="align-self:flex-end">Armar ticket</button>
-          <span id="ord-spin" class="htmx-indicator muted" style="align-self:flex-end">validando…</span>
-        </div>
-      </form>
+
+    {# ── Quote: book + bid/offer + tenencia (idéntico a Mercado) ──────────── #}
+    <div id="orden-quote">
+      <div class="card"><div class="card-body muted" style="font-size:12px">
+        Tipeá una especie para ver book, bid/offer y tu tenencia. Tocá un precio del libro para cargarlo en el ticket.
+      </div></div>
     </div>
   </div>
 
   <div id="orden-result"></div>
 
-  {# Etapa A — lectura: cuentas + órdenes vivas del broker (sólo mientras la
-     página está abierta; carga on-demand, no toca el path caliente). #}
+  {# ── Blotter (estado de órdenes desde el audit) ─────────────────────────── #}
+  <div id="orden-blotter" hx-get="/ordenes/blotter"
+       hx-trigger="load, every 8s, orden-done from:body" hx-swap="innerHTML" style="margin-top:12px">
+    <p class="muted" style="font-size:12px">Cargando blotter…</p>
+  </div>
+
+  {# ── Comitentes + órdenes vivas del broker ─────────────────────────────── #}
   <div id="ordenes-panel" hx-get="/ordenes/panel" hx-trigger="load, every 15s"
        hx-include="#acct-input" hx-swap="innerHTML" style="margin-top:12px">
     <p class="muted" style="font-size:12px">Cargando cuentas del broker…</p>
   </div>
 </section>
+
+<script>
+  // Click en un precio del libro embebido → carga precio (y lado) en el ticket.
+  // offer (px-down) → compra ; bid (px-up) → venta. Sólo dentro de #orden-quote.
+  (function () {
+    document.body.addEventListener('click', function (e) {
+      var q = document.getElementById('orden-quote');
+      if (!q || !q.contains(e.target)) return;
+      var td = e.target.closest('td.px-up, td.px-down');
+      if (!td) return;
+      var px = document.getElementById('price-input');
+      if (px && !px.disabled) px.value = (td.textContent || '').trim();
+      var sell = td.classList.contains('px-up');   // bid → vender ; offer → comprar
+      var r = document.querySelector('input[name="side"][value="' + (sell ? 'sell' : 'buy') + '"]');
+      if (r) r.checked = true;
+    });
+  })();
+</script>
 {% endblock %}
