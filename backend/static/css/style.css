@@ -1084,3 +1084,12 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 
 /* ── OMS status bar (PAPER/LIVE/KILL + switches) ──────────────────────── */
 .oms-statusbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ── Curvas: creador de combinadas ────────────────────────────────────── */
+.mix-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 14px; }
+.mix-opt { font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+.mix-chip { display: inline-flex; align-items: center; gap: 5px; margin: 4px 6px 0 0; padding: 3px 8px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; }
+.mix-chip a { color: var(--accent); cursor: pointer; }
+.mix-chip button { background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0; }
+.mix-chip button:hover { color: var(--red); }
