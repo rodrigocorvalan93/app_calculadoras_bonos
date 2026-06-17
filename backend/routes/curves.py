@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -27,6 +28,15 @@ router = APIRouter(prefix="/curves", tags=["curves"])
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
+
+
+def _def_or_mix(key: str | None):
+    """CurveDef de una curva normal, o un def sintético para una combinada
+    `mix:a,b,c` (para que el template muestre el label sin tocar nada más)."""
+    if key and key.startswith("mix:"):
+        ks = [k for k in key[4:].split(",") if k]
+        return SimpleNamespace(key=key, label=curves.mix_label(ks), bond_type="_mix")
+    return curves.curve_def(key) if key else None
 
 
 # Leg → cable/MEP ticker suffix. ARS (pesos) is resolved separately because
@@ -287,7 +297,10 @@ async def _rows_for(
     blank and useless. Returns (rows, meta) where meta carries counts
     for the UI badge.
     """
-    codes = curves.build_curve_codes().get(curve_key, [])
+    if curve_key and curve_key.startswith("mix:"):     # combinada ad-hoc de la UI
+        codes = curves.mix_codes([k for k in curve_key[4:].split(",") if k])
+    else:
+        codes = curves.build_curve_codes().get(curve_key, [])
     if not codes:
         return [], {"total": 0, "quoting": 0, "filtered": False, "store_empty": True}
 
@@ -348,7 +361,8 @@ async def curves_page(
     all_curves = curves.list_curves()
     table = curves.build_curve_codes()
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
-    selected_key = curve if (curve and curve in table) else default_key
+    is_mix = bool(curve and curve.startswith("mix:"))
+    selected_key = curve if (curve and (curve in table or is_mix)) else default_key
     rows, row_meta = await _rows_for(selected_key, plazo, only_quoting, leg) if selected_key else ([], {})
     return _render(
         request,
@@ -356,7 +370,7 @@ async def curves_page(
         all_curves=all_curves,
         table=table,
         selected_key=selected_key,
-        selected_def=curves.curve_def(selected_key) if selected_key else None,
+        selected_def=_def_or_mix(selected_key),
         rows=rows,
         row_meta=row_meta,
         plazo=plazo,
@@ -378,7 +392,7 @@ async def curve_table_partial(
     return _render(
         request,
         "partials/curve_table.html",
-        selected_def=curves.curve_def(curve),
+        selected_def=_def_or_mix(curve),
         rows=rows,
         row_meta=row_meta,
         plazo=plazo,

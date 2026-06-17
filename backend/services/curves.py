@@ -57,22 +57,28 @@ AGGREGATES: Dict[str, List[str]] = {
 }
 
 
-# ── Curvas COMBINADAS (unión de curvas existentes) ─────────────────────────
-# Declarativas: una tupla (key, label, [curvas base]) y la combinada aparece
-# sola en TODOS los consumidores del pipeline (Curvas, Mercado, Gráficos,
-# Forwards), porque son AGGREGATES — uniones de códigos YA clasificados. NO
-# crean ni modifican clasificaciones de especies, y `curve_key_for` las ignora
-# (un bono nunca "pertenece" a una combinada), así que Posiciones y el locate
-# de YAS no se tocan. Para crear una nueva, agregá una línea acá.
-COMPOSITES: List[Tuple[str, str, List[str]]] = [
-    ("mix_tamar_total", "TAMAR total (puro + duales + corp)", ["tamar", "dualtamar", "corp_tamar"]),
-    ("mix_fija_cerproy", "Tasa Fija + CER Proyectado", ["lecap", "cerproy"]),
-    ("mix_hd_sob", "Globales + Bonares", ["globales", "bonares"]),
-]
+def mix_codes(keys: List[str]) -> List[str]:
+    """Unión (dedup, en orden) de los códigos de varias curvas — para las
+    combinaciones que arma el usuario AL VUELO desde la UI (`mix:a,b,c`).
 
-for _ck, _clabel, _cparts in COMPOSITES:
-    CURVES.append(CurveDef(_ck, f"⊕ {_clabel}", "_aggregate"))
-    AGGREGATES[_ck] = _cparts
+    No persiste ni clasifica nada: son uniones efímeras de curvas que ya
+    existen. `curve_key_for` ni se entera, así que Posiciones / locate quedan
+    intactos. Acepta cualquier key de `build_curve_codes()` (base o agregada).
+    """
+    table = build_curve_codes()
+    seen: Set[str] = set()
+    out: List[str] = []
+    for k in keys:
+        for c in table.get(k, []):
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+    return out
+
+
+def mix_label(keys: List[str]) -> str:
+    by = {c.key: c.label for c in CURVES}
+    return "Combinada: " + " + ".join(by.get(k, k) for k in keys)
 
 
 # Curve key → calc-code suffix para derivar la variante desde el código BASE.

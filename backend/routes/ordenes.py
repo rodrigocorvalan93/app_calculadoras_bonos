@@ -96,12 +96,19 @@ async def ordenes_panel(request: Request, account: str = "") -> HTMLResponse:
     accs: List[Dict[str, Any]] = []
     orders: List[Dict[str, Any]] = []
     err = None
-    try:
-        accs = await oms.accounts()
-        if account:
-            orders = await oms.live_orders(account)
-    except Exception as exc:  # noqa: BLE001
-        err = str(exc)
+    # Guard: si la sesión REST no está logueada, NO tocamos la red — si no, cada
+    # poll (15 s) colgaría ~5 s en el connect timeout (paper/offline). Mostramos
+    # el aviso y listo; cuando haya login, el panel se enciende solo.
+    from backend.services.primary_client import get_client
+    if not get_client().authenticated:
+        err = "Sesión del broker sin login (paper/offline). Conectá en /conexion."
+    else:
+        try:
+            accs = await oms.accounts()
+            if account:
+                orders = await oms.live_orders(account)
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc)
     return _render(request, "partials/ordenes_panel.html",
                    accounts=accs, orders=orders, account=account, err=err, **_base_ctx())
 

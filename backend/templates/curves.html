@@ -80,6 +80,45 @@
     </div>
   </div>
 
+  {# ── Combinar curvas (armá la tuya) ──────────────────────────────────────
+     Elegís qué curvas juntar; setea el <select name=curve> a 'mix:a,b,c' y
+     dispara el mismo flujo htmx (la combinada también se autorefresca live).
+     Guardás/cargás tus combinaciones en el browser (localStorage). #}
+  <div class="card" x-data="curveMix()" style="margin-bottom:12px">
+    <details>
+      <summary style="cursor:pointer;color:var(--accent);font-weight:600;padding:4px 0">⊕ Combinar curvas (armá la tuya)</summary>
+      <div class="card-body">
+        <div class="mix-grid">
+          {% for c in all_curves %}{% if c.bond_type != "_aggregate" %}
+            {% set count = (table.get(c.key) or []) | length %}
+            <label class="mix-opt {% if count == 0 %}muted{% endif %}">
+              <input type="checkbox" value="{{ c.key }}" x-model="picked" {% if count == 0 %}disabled{% endif %}>
+              {{ c.label }} <span class="muted">({{ count }})</span>
+            </label>
+          {% endif %}{% endfor %}
+        </div>
+        <div class="row-fields" style="margin-top:10px;align-items:center;gap:8px">
+          <button type="button" class="btn-primary" @click="ver()" :disabled="picked.length < 2">
+            Ver combinada (<span x-text="picked.length"></span>)</button>
+          <button type="button" @click="picked = []" x-show="picked.length">Limpiar</button>
+          <span style="flex:1"></span>
+          <input type="text" x-model="name" placeholder="nombre p/ guardar" autocomplete="off"
+                 style="width:140px;font-size:12px;padding:5px 8px">
+          <button type="button" class="btn-primary" @click="save()" :disabled="picked.length < 2 || !name.trim()">Guardar</button>
+        </div>
+        <div style="margin-top:10px" x-show="combos.length" x-cloak>
+          <span class="muted" style="font-size:12px">Mis combinadas:</span>
+          <template x-for="(c, i) in combos" :key="c.name">
+            <span class="mix-chip">
+              <a href="#" @click.prevent="load(c)" x-text="c.name"></a>
+              <button type="button" @click="del(i)" title="Borrar">✕</button>
+            </span>
+          </template>
+        </div>
+      </div>
+    </details>
+  </div>
+
   <div
     id="curve-table"
     data-flash-scope
@@ -91,4 +130,38 @@
     {% include "partials/curve_table.html" %}
   </div>
 </section>
+
+<script>
+  // Aplica una combinada: agrega/actualiza una <option value="mix:a,b,c"> en el
+  // selector de curva, la selecciona y dispara `change` → htmx renderiza la
+  // tabla unión y el refresh live la mantiene (lee [name=curve]).
+  function applyMix(keys) {
+    if (!keys || keys.length < 2) return;
+    var sel = document.querySelector('select[name="curve"]');
+    if (!sel) return;
+    var val = 'mix:' + keys.join(',');
+    var opt = sel.querySelector('option[data-mix]');
+    if (!opt) { opt = document.createElement('option'); opt.dataset.mix = '1'; sel.appendChild(opt); }
+    opt.value = val; opt.textContent = '⊕ Combinada (' + keys.length + ')';
+    sel.value = val;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function curveMix() {
+    return {
+      picked: [], name: '',
+      combos: (function () { try { return JSON.parse(localStorage.getItem('curvas_combos') || '[]'); } catch (e) { return []; } })(),
+      _persist() { try { localStorage.setItem('curvas_combos', JSON.stringify(this.combos)); } catch (e) {} },
+      ver() { applyMix(this.picked); },
+      save() {
+        var n = this.name.trim();
+        if (this.picked.length < 2 || !n) return;
+        this.combos = this.combos.filter(function (c) { return c.name !== n; })
+                          .concat([{ name: n, keys: this.picked.slice() }]);
+        this._persist(); this.name = '';
+      },
+      load(c) { this.picked = c.keys.slice(); applyMix(c.keys); },
+      del(i) { this.combos.splice(i, 1); this._persist(); },
+    };
+  }
+</script>
 {% endblock %}
