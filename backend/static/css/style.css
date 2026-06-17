@@ -1081,3 +1081,6 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 #orden-quote td.px-up:hover, #orden-quote td.px-down:hover { filter: brightness(1.3); text-decoration: underline; }
 .field-mode { gap: 2px; }
 .field-mode label { font-size: 12px; font-weight: 500; margin-right: 8px; white-space: nowrap; }
+
+/* ── OMS status bar (PAPER/LIVE/KILL + switches) ──────────────────────── */
+.oms-statusbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

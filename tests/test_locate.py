@@ -41,3 +41,20 @@ async def test_comparador_locate_solo_misma_curva() -> None:
     assert same.status_code == 200 and cross.status_code == 200
     assert "data-locate" in same.text and 'data-curve="cer"' in same.text   # cer vs cer ✓
     assert "data-locate" not in cross.text                                  # cer vs lecap ✗
+
+
+def test_curvas_combinadas() -> None:
+    """Las combinadas son uniones de curvas base; no afectan el reverse-map."""
+    bond_universe.ensure_loaded()
+    table = curves.build_curve_codes()
+    for k in ("mix_tamar_total", "mix_fija_cerproy", "mix_hd_sob"):
+        assert k in table
+    # unión exacta de las partes (dedup)
+    assert set(table["mix_hd_sob"]) == set(table["globales"]) | set(table["bonares"])
+    # aparece en el selector con su label "⊕ …"
+    labels = {c.key: c.label for c in curves.list_curves()}
+    assert labels.get("mix_fija_cerproy", "").startswith("⊕")
+    # un bono NUNCA pertenece a una combinada (no rompe Posiciones/locate)
+    assert curves.curve_key_for("TX26") == "cer"
+    for code in table["mix_hd_sob"][:5]:
+        assert curves.curve_key_for(code) in ("globales", "bonares")

@@ -114,3 +114,38 @@ async def test_quote_y_multi_y_blotter() -> None:
         # blotter: refleja las 2 paper recién enviadas
         b = await ac.get("/ordenes/blotter")
         assert b.status_code == 200 and "AL30" in b.text and "Blotter" in b.text
+
+
+def test_live_switch_runtime() -> None:
+    """Override en memoria: prende/apaga LIVE sin tocar config; reset → paper."""
+    assert oms.is_live() is False                 # default paper
+    try:
+        assert oms.set_live(True) is True and oms.is_live() is True
+        oms.kill_switch(True)                     # evita tocar la red en el test
+        res = asyncio.run(oms.place({"code": "AL30", "symbol": "X", "side": "buy",
+                                     "qty": 1.0, "price": 100.0, "account": "C1",
+                                     "ordtype": "limit"}))
+        assert res["status"] == "RECHAZADA"       # live, pero kill bloquea
+    finally:
+        oms.kill_switch(False)
+        oms.set_live(None)
+    assert oms.is_live() is False                 # vuelve a seguir la config
+
+
+@pytest.mark.asyncio
+async def test_live_endpoint_requiere_confirmacion() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+            r = await ac.post("/ordenes/live", data={"arm": "1", "confirm": "nope"})
+            assert r.status_code == 200 and oms.is_live() is False     # no se armó
+            r2 = await ac.post("/ordenes/live", data={"arm": "1", "confirm": "LIVE"})
+            assert r2.status_code == 200 and oms.is_live() is True      # armado
+            assert "LIVE" in r2.text
+            r3 = await ac.post("/ordenes/live", data={"arm": "0"})
+            assert r3.status_code == 200 and oms.is_live() is False     # de vuelta paper
+    finally:
+        oms.set_live(None)

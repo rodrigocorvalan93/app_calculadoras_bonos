@@ -59,7 +59,7 @@ def _num_px(s: Any) -> Optional[float]:
 
 
 def _base_ctx() -> Dict[str, Any]:
-    return {"live": settings.oms_live, "kill": oms.kill_switch(),
+    return {"live": oms.is_live(), "kill": oms.kill_switch(),
             "max_notional": settings.oms_max_notional,
             "max_notional_usd": settings.oms_max_notional_usd,
             "band": settings.oms_price_band_pct}
@@ -210,4 +210,23 @@ async def ordenes_multi_confirmar(request: Request, token: str = Form("")) -> HT
 @router.post("/ordenes/kill", response_class=HTMLResponse)
 async def ordenes_kill(request: Request, on: str = Form("1")) -> HTMLResponse:
     oms.kill_switch(on == "1")
-    return _render(request, "partials/orden_confirm.html", trigger="orden-done", **_base_ctx())
+    return _render(request, "partials/oms_status.html", trigger="orden-done", **_base_ctx())
+
+
+@router.post("/ordenes/live", response_class=HTMLResponse)
+async def ordenes_live(request: Request, arm: str = Form("0"),
+                       confirm: str = Form("")) -> HTMLResponse:
+    """Prende/apaga el modo LIVE en caliente. Armar exige escribir 'LIVE'
+    (anti-click accidental); apagar es inmediato. No persiste (reboot→config)."""
+    if arm == "1":
+        if confirm.strip().upper() != "LIVE":
+            return _render(request, "partials/oms_status.html",
+                           live_msg="Para activar LIVE escribí exactamente LIVE y confirmá.",
+                           **_base_ctx())
+        oms.set_live(True)
+    else:
+        oms.set_live(False)
+    return _render(request, "partials/oms_status.html", trigger="orden-done",
+                   live_msg=("⚠️ MODO LIVE activado — las órdenes viajan al broker."
+                             if oms.is_live() else "Modo PAPER — nada viaja al broker."),
+                   **_base_ctx())
