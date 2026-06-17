@@ -33,6 +33,23 @@ _audit_lock = threading.Lock()
 # Kill-switch (en memoria; arranca permitido pero el modo paper ya protege).
 _kill = {"on": False}
 
+# Override de LIVE en runtime. None ⇒ usa settings.oms_live (secrets.txt). Se
+# puede prender/apagar desde la UI SIN reiniciar; NO persiste: al reiniciar
+# vuelve al default de config (paper, salvo OMS_LIVE=1) — un reboot nunca te
+# deja operando en serio por accidente.
+_live_override: Dict[str, Optional[bool]] = {"v": None}
+
+
+def is_live() -> bool:
+    return settings.oms_live if _live_override["v"] is None else _live_override["v"]
+
+
+def set_live(on: Optional[bool]) -> bool:
+    """on True/False ⇒ override; None ⇒ vuelve a seguir la config."""
+    _live_override["v"] = None if on is None else bool(on)
+    audit("oms_live_switch", {"on": is_live()})
+    return is_live()
+
 # Tokens de confirmación: token → (payload, expira). Un solo uso.
 _pending: Dict[str, tuple] = {}
 _pending_lock = threading.Lock()
@@ -48,7 +65,7 @@ def kill_switch(on: Optional[bool] = None) -> bool:
 
 def audit(event: str, data: Dict[str, Any]) -> None:
     rec = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event,
-           "live": settings.oms_live, **data}
+           "live": is_live(), **data}
     with _audit_lock:
         with open(_AUDIT_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
@@ -197,7 +214,7 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     if _kill["on"]:
         audit("rechazada_kill", rec)
         return {"status": "RECHAZADA", "motivo": "kill-switch activado", **rec}
-    if not settings.oms_live:
+    if not is_live():
         audit("paper_enviada", rec)
         return {"status": "PAPER", "motivo": "modo paper (OMS_LIVE=0): NO viajó al broker", **rec}
 
@@ -226,7 +243,7 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 async def cancel(client_order_id: str, proprietary: str = "api") -> Dict[str, Any]:
     rec = {"client_order_id": client_order_id, "proprietary": proprietary}
-    if not settings.oms_live:
+    if not is_live():
         audit("paper_cancelada", rec)
         return {"status": "PAPER", **rec}
     audit("live_cancelando", rec)

@@ -57,6 +57,24 @@ AGGREGATES: Dict[str, List[str]] = {
 }
 
 
+# ── Curvas COMBINADAS (unión de curvas existentes) ─────────────────────────
+# Declarativas: una tupla (key, label, [curvas base]) y la combinada aparece
+# sola en TODOS los consumidores del pipeline (Curvas, Mercado, Gráficos,
+# Forwards), porque son AGGREGATES — uniones de códigos YA clasificados. NO
+# crean ni modifican clasificaciones de especies, y `curve_key_for` las ignora
+# (un bono nunca "pertenece" a una combinada), así que Posiciones y el locate
+# de YAS no se tocan. Para crear una nueva, agregá una línea acá.
+COMPOSITES: List[Tuple[str, str, List[str]]] = [
+    ("mix_tamar_total", "TAMAR total (puro + duales + corp)", ["tamar", "dualtamar", "corp_tamar"]),
+    ("mix_fija_cerproy", "Tasa Fija + CER Proyectado", ["lecap", "cerproy"]),
+    ("mix_hd_sob", "Globales + Bonares", ["globales", "bonares"]),
+]
+
+for _ck, _clabel, _cparts in COMPOSITES:
+    CURVES.append(CurveDef(_ck, f"⊕ {_clabel}", "_aggregate"))
+    AGGREGATES[_ck] = _cparts
+
+
 # Curve key → calc-code suffix para derivar la variante desde el código BASE.
 # Sólo dualtamar lo necesita (TTD26 → TTD26v); cerproy NO va acá porque la
 # industria "…Proyectado" ya devuelve los códigos con 'j' (ver build_curve_codes).

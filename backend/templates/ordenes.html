@@ -5,30 +5,22 @@
 {% block content %}
 <section class="curves" x-data="{ ord: 'limit', multi: false }">
   <header class="yas-header">
-    <h1>Órdenes
-      {% if live %}<span class="badge-new" style="background:rgba(239,68,68,.15);color:var(--red);border-color:var(--red)">LIVE</span>
-      {% else %}<span class="badge-new">PAPER</span>{% endif %}
-      {% if kill %}<span class="badge-new" style="color:var(--red);border-color:var(--red)">KILL-SWITCH</span>{% endif %}
-    </h1>
-    <p class="muted">
-      {% if live %}⚠️ <b>Modo LIVE</b>: las órdenes confirmadas viajan al broker.
-      {% else %}Modo <b>paper</b> (OMS_LIVE=0): todo se valida, confirma y audita, pero <b>nada viaja al broker</b>.{% endif %}
-      Topes por orden: <b>{{ max_notional | ar_int }} ARS</b> · <b>{{ max_notional_usd | ar_int }} USD</b> (hard-dollar) ·
-      banda ±{{ band | ar_num(0) }}% vs referencia (Limit).
-    </p>
+    <h1>Órdenes</h1>
+    <p class="muted">Ticket + multiorden con tenencia y book en vivo. Default <b>PAPER</b> (nada viaja
+      al broker); activá <b>LIVE</b> con el switch de abajo para envío real.</p>
   </header>
+
+  {# Estado del OMS (PAPER/LIVE/KILL + switches) — swappable sin recargar. #}
+  <div id="oms-status" class="card" style="padding:10px 14px;margin-bottom:12px">
+    {% include "partials/oms_status.html" %}
+  </div>
 
   <div class="ord-layout">
     {# ── Ticket (single + multi en el mismo form, 2 botones htmx) ─────────── #}
     <div class="card">
       <div class="card-title"><span>🎫 Ticket</span>
         <span class="card-title-aux">
-          <label style="font-size:11px;margin-right:8px"><input type="checkbox" x-model="multi"> Multi-comitente</label>
-          <form hx-post="/ordenes/kill" hx-target="#orden-result" hx-swap="innerHTML" style="display:inline">
-            <input type="hidden" name="on" value="{{ '0' if kill else '1' }}">
-            <button type="submit" class="btn-primary" style="background:{{ 'var(--green)' if kill else 'var(--red)' }};font-size:11px">
-              {{ '▶ Reactivar' if kill else '⛔ KILL' }}</button>
-          </form>
+          <label style="font-size:11px"><input type="checkbox" x-model="multi"> Multi-comitente</label>
         </span>
       </div>
       <div class="card-body">
