@@ -24,34 +24,34 @@
        página (CSS puro, el default muestra todo). Bloques: OCLH | Var |
        bid (sz+px+tirea) | last (px+vwap+tirea) | offer (px+tirea+sz) |
        vol | MAE | fuente. #}
-    <table class="cashflows curve-table mercado-table">
+    <table id="mercado-tbl" class="cashflows curve-table mercado-table" data-sortable>
       <thead>
         <tr>
-          <th>Código</th>
-          <th>Dur</th>
-          <th class="col-oclh grp">Open</th>
-          <th class="col-oclh">Close</th>
-          <th class="col-oclh">Low</th>
-          <th class="col-oclh">High</th>
+          <th data-sort>Código</th>
+          <th data-sort>Dur</th>
+          <th data-sort class="col-oclh grp">Open</th>
+          <th data-sort class="col-oclh">Close</th>
+          <th data-sort class="col-oclh">Low</th>
+          <th data-sort class="col-oclh">High</th>
           <th class="col-oclh" title="Posición del Last en el rango Low–High del día">Rango</th>
-          <th class="grp">Var %</th>
-          <th>Var px</th>
-          <th class="grp">Bid sz</th>
-          <th>Bid</th>
-          <th>Bid TIREA</th>
-          <th class="grp">Last</th>
-          <th>VWAP</th>
-          <th>TIREA@Last</th>
-          <th class="grp">Offer</th>
-          <th>Offer TIREA</th>
-          <th>Offer sz</th>
-          <th class="grp">Vol (VN)</th>
-          <th class="col-mae grp" title="Último operado en MAE (OTC)">MAE últ</th>
-          <th class="col-mae" title="Variación MAE">MAE var</th>
-          <th class="col-mae" title="Volumen operado en MAE (VN)">Vol MAE</th>
-          <th class="col-mae" title="Volumen total VN: BYMA + MAE">Vol tot</th>
-          <th class="grp">P.Src</th>
-          <th>P.Date</th>
+          <th data-sort class="grp">Var %</th>
+          <th data-sort>Var px</th>
+          <th data-sort class="grp">Bid sz</th>
+          <th data-sort>Bid</th>
+          <th data-sort>Bid TIREA</th>
+          <th data-sort class="grp">Last</th>
+          <th data-sort>VWAP</th>
+          <th data-sort>TIREA@Last</th>
+          <th data-sort class="grp">Offer</th>
+          <th data-sort>Offer TIREA</th>
+          <th data-sort>Offer sz</th>
+          <th data-sort class="grp">Vol (VN)</th>
+          <th data-sort class="col-mae grp" title="Último operado en MAE (OTC)">MAE últ</th>
+          <th data-sort class="col-mae" title="Variación MAE">MAE var</th>
+          <th data-sort class="col-mae" title="Volumen operado en MAE (VN)">Vol MAE</th>
+          <th data-sort class="col-mae" title="Volumen total VN: BYMA + MAE">Vol tot</th>
+          <th data-sort class="grp">P.Src</th>
+          <th data-sort>P.Date</th>
         </tr>
       </thead>
       <tbody>

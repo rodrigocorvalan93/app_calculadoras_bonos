@@ -76,6 +76,12 @@
           >
           Solo con cotización
         </label>
+
+        <label class="field">
+          <span>Filtrar</span>
+          {# Filtro client-side (oculta filas que no matchean); persiste al refresh live. #}
+          <input type="text" placeholder="ticker…" autocomplete="off" data-table-filter="#curve-tbl">
+        </label>
       </div>
     </div>
   </div>
