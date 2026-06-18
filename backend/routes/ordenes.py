@@ -99,8 +99,8 @@ async def ordenes_panel(request: Request, account: str = "") -> HTMLResponse:
     # Guard: si la sesión REST no está logueada, NO tocamos la red — si no, cada
     # poll (15 s) colgaría ~5 s en el connect timeout (paper/offline). Mostramos
     # el aviso y listo; cuando haya login, el panel se enciende solo.
-    from backend.services.primary_client import get_client
-    if not get_client().authenticated:
+    from backend.services.primary_ws import get_ws_client
+    if not get_ws_client().authenticated:
         err = "Sesión del broker sin login (paper/offline). Conectá en /conexion."
     else:
         try:

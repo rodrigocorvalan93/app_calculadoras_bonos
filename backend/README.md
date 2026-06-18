@@ -66,7 +66,7 @@ backend/
   services/
     bond_universe.py       Enumera bonos desde especies.py (lazy)
     pricing.py             compute_metrics() — port de _ticket_numeric + _bond_obj_copy
-    primary_client.py      httpx.AsyncClient singleton (login broker; WS/REST en Fase 2+)
+    primary_ws.py          WS market data + REST autenticado (login broker; lo usa el OMS)
   templates/
     base.html              Layout topbar + content + footer
     yas.html               Página completa: form + result + conv-note

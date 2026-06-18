@@ -133,6 +133,34 @@ def test_live_switch_runtime() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oms_cursa_por_cliente_autenticado_del_ws() -> None:
+    """REGRESIÓN: el OMS debe cursar por el MISMO cliente REST que el login deja
+    con cookies (get_ws_client), no por uno huérfano sin autenticar. Sin sesión,
+    LIVE NO manda la orden a ciegas: get_json_checked levanta error accionable y
+    place() lo registra como ERROR en el blotter (no un None silencioso ni el
+    HTML de login interpretado como envío OK)."""
+    from backend.services import primary_ws
+
+    # Cliente fresco, sin login (sin _http / sin cookies) — estado de "offline".
+    ws = primary_ws.reset_ws_client("https://api.lbo.xoms.com.ar/")
+    assert ws.authenticated is False
+    with pytest.raises(RuntimeError):
+        await ws.get_json_checked("rest/accounts")     # propaga, no devuelve None
+
+    try:
+        oms.set_live(True)                              # LIVE, pero sin sesión
+        res = await oms.place({"code": "AL30", "symbol": "MERV - XMEV - AL30 - 24hs",
+                               "side": "buy", "qty": 1.0, "price": 100.0,
+                               "account": "C1", "ordtype": "limit"})
+        assert res["status"] == "ERROR"                 # no salió a ciegas
+        motivo = (res.get("motivo") or "").lower()
+        assert "sesión" in motivo or "login" in motivo  # error accionable
+        assert any(a["event"] == "live_error" for a in oms.audit_tail(5))
+    finally:
+        oms.set_live(None)
+
+
+@pytest.mark.asyncio
 async def test_live_endpoint_requiere_confirmacion() -> None:
     from httpx import ASGITransport, AsyncClient
 

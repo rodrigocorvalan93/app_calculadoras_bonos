@@ -40,7 +40,6 @@ from backend.routes.posiciones import router as posiciones_router
 from backend.routes.tape import router as tape_router
 from backend.routes.yas import router as yas_router
 from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, symbols as syms
-from backend.services.primary_client import get_client
 from backend.services.primary_ws import get_ws_client
 from backend.services.warmup import get_daemon as get_warmup_daemon
 
@@ -252,10 +251,6 @@ async def lifespan(app: FastAPI):
         await ws.stop()
     except Exception:  # noqa: BLE001
         logger.exception("[main] primary WS stop failed")
-    try:
-        await get_client().close()
-    except Exception:  # noqa: BLE001
-        logger.exception("[main] primary client close failed")
 
 
 def create_app() -> FastAPI:

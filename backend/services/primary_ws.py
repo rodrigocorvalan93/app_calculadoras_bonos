@@ -2,8 +2,8 @@
 
 One singleton lives in the FastAPI process. Workflow:
 
-  1. login via REST (`primary_client.login` → cookies on the httpx
-     AsyncClient).
+  1. login via REST (`PrimaryWS.login` → cookies on the httpx
+     AsyncClient; el mismo cliente cursa luego el REST autenticado del OMS).
   2. open a WS to `wss://<host>/` using those cookies as a `Cookie:`
      header on the handshake.
   3. send the `smd` subscribe payload Primary expects.
@@ -182,6 +182,27 @@ class PrimaryWS:
             return r.json()
         except Exception:  # noqa: BLE001
             return None
+
+    async def get_json_checked(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """GET REST autenticado que PROPAGA el error con texto accionable (sin
+        sesión, sesión vencida → redirect a login.html, endpoint inexistente…).
+
+        Lo usa el OMS: las órdenes deben cursar por ESTE cliente (el que el
+        login deja con cookies de sesión), no por uno sin autenticar. A
+        diferencia de `get_json` (None-on-fail, para lecturas best-effort como
+        instruments/detail), acá el error sube para que el blotter muestre el
+        motivo crudo del broker."""
+        if self._http is None:
+            raise RuntimeError(f"{path} → sin sesión del broker (sin login). Conectá en /conexion.")
+        r = await self._http.get(path, params=params or {})
+        if r.status_code != 200:
+            raise RuntimeError(f"{path} → HTTP {r.status_code}: {r.text[:200]}")
+        if not r.text.strip():
+            raise RuntimeError(f"{path} → respuesta vacía (¿sesión vencida? Reconectá en /conexion).")
+        try:
+            return r.json()
+        except ValueError as e:
+            raise RuntimeError(f"{path} → no devolvió JSON: {r.text[:200]}") from e
 
     async def start(self, symbols: Iterable[str] = ()) -> None:
         """Spawn the reader loop. Idempotent."""
