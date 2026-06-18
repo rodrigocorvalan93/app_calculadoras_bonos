@@ -149,3 +149,45 @@ def estimate(duration: float, xs: List[float], ys: List[float],
         "tnas": {"30": _tna(tirea, 30, 365), "90": _tna(tirea, 90, 365),
                  "180": _tna(tirea, 180, 365), "365": _tna(tirea, 365, 365)},
     }
+
+
+def level_slope_convex(xs: List[float], ys: List[float], anchor: float,
+                       threshold: float = 3.0) -> Optional[tuple]:
+    """(level_pct, slope_bps, convex_bps) por Taylor 2º orden de la NSS alrededor
+    de `anchor` (en años de duration). Sirve para autocompletar la 'curva
+    imaginada' del Total Return (nivel/pendiente/convexidad). Réplica del legacy
+    `OMSweb_app._nss_defaults_level_slope_convex`. None si no fitea."""
+    f = fit(xs, ys, threshold)
+    if f is None:
+        return None
+    popt = f[0]
+    a, h = float(anchor), 0.02
+    g = lambda x: float(model(np.array([x], dtype=np.float64), *popt)[0])  # noqa: E731
+    y0, yp, ym = g(a), g(a + h), g(a - h)
+    slope_bps = (yp - ym) / (2.0 * h) * 100.0
+    convex_bps = (yp - 2.0 * y0 + ym) / (h * h) * 100.0
+    return float(y0), float(slope_bps), float(convex_bps)
+
+
+def params(xs: List[float], ys: List[float], anchor: Optional[float] = None,
+           threshold: float = 3.0) -> Optional[Dict[str, Any]]:
+    """Parámetros NSS fiteados (β0..β3, τ1, τ2) + lecturas legibles + el
+    nivel/pendiente/convexidad en `anchor`. None si no fitea. y de entrada en %."""
+    f = fit(xs, ys, threshold)
+    if f is None:
+        return None
+    popt, x_min, x_max = f
+    b0, b1, b2, b3, t1, t2 = (float(v) for v in popt)
+    if anchor is None:
+        anchor = round((x_min + x_max) / 2.0, 2)
+    lsc = level_slope_convex(xs, ys, anchor, threshold)
+    return {
+        "b0": b0, "b1": b1, "b2": b2, "b3": b3, "t1": t1, "t2": t2,
+        "x_min": x_min, "x_max": x_max, "n": len(xs),
+        "y_corto": float(model(np.array([0.0]), *popt)[0]),   # TIREA @ duration→0
+        "y_largo": b0,                                         # asintótica (β0)
+        "anchor": float(anchor),
+        "level_pct": lsc[0] if lsc else None,
+        "slope_bps": lsc[1] if lsc else None,
+        "convex_bps": lsc[2] if lsc else None,
+    }

@@ -1,0 +1,57 @@
+{% if not rows %}
+  <div class="alert">Sin bonos calculables en esta curva para ese horizonte (¿precios cargados? ¿fecha terminal válida? ¿bonos vencidos antes del terminal?).</div>
+{% else %}
+<div class="card">
+  <div class="card-title"><span>Total Return → {{ terminal }}</span>
+    <span class="card-title-aux">{{ rows | length }} bonos · settle {{ settle }} · {{ dias }} días ·
+      <b>TR = carry + compresión + ajuste</b> · TR real = TR total − ajuste</span></div>
+  <div class="card-body" style="padding:0">
+    {# Recalcular usando las TIR de salida editadas a mano (y1__CODE). Incluye los
+       controles del form + los inputs de la tabla, y manda use_manual=1. #}
+    <form hx-get="/total-return/table" hx-target="#tr-table" hx-swap="innerHTML"
+          hx-include="#tr-form, [name^='y1__']" class="table-tools muted">
+      <input type="hidden" name="use_manual" value="1">
+      <span>Editá la <b>TIR final</b> de cualquier fila y</span>
+      <button type="submit" class="btn-primary" style="font-size:11px">↻ recalcular con mis tasas</button>
+    </form>
+    <div class="table-scroll">
+    <table id="tr-tbl" class="cashflows curve-table" data-sortable>
+      <thead><tr>
+        <th data-sort style="text-align:left">Código</th>
+        <th data-sort>Dur inicial</th>
+        <th data-sort>TIR inicial</th>
+        <th data-sort>Dur final</th>
+        <th data-sort>TIR final</th>
+        <th data-sort>Precio target</th>
+        <th data-sort class="grp">Carry</th>
+        <th data-sort>Compresión</th>
+        <th data-sort>Ajuste</th>
+        <th data-sort class="grp">TR real</th>
+        <th data-sort>TR total</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+        {% set trcls = 'var-up' if r.tr_total >= 0 else 'var-down' %}
+        <tr>
+          <td style="text-align:left;color:var(--accent);font-weight:600">
+            <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a></td>
+          <td>{{ r.dur0 | ar_num(2) }}</td>
+          <td>{{ r.y0 | ar_pct(2) }}</td>
+          <td>{{ r.dur_f | ar_num(2) if r.dur_f is not none else '—' }}</td>
+          <td><input type="text" name="y1__{{ r.code }}" value="{{ (r.y1 * 100) | round(3) }}"
+                     class="cell-edit" style="width:64px" autocomplete="off"
+                     title="TIR de salida (%); editala y apretá recalcular"></td>
+          <td>{{ r.px_target | ar_num(2) }}</td>
+          <td class="grp {{ 'px-up' if r.carry >= 0 else 'px-down' }}">{{ r.carry | ar_pct(2) }}</td>
+          <td class="{{ 'px-up' if r.compresion >= 0 else 'px-down' }}">{{ r.compresion | ar_pct(2) }}</td>
+          <td class="{{ 'px-up' if r.ajuste >= 0 else 'px-down' }}">{{ r.ajuste | ar_pct(2) }}</td>
+          <td class="grp">{{ r.tr_real | ar_pct(2) }}</td>
+          <td class="{{ trcls }}" style="font-weight:650">{{ r.tr_total | ar_pct(2) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,27 @@
+{% if p %}
+<div class="card">
+  <div class="card-title"><span>Curva NSS ajustada</span>
+    <span class="card-title-aux">{{ p.n }} bonos · Nelson-Siegel-Svensson</span></div>
+  <div class="card-body">
+    <div class="nss-params">
+      <div><span>β0 (nivel)</span><b>{{ p.b0 | ar_num(3) }}</b></div>
+      <div><span>β1 (pendiente)</span><b>{{ p.b1 | ar_num(3) }}</b></div>
+      <div><span>β2 (curvatura 1)</span><b>{{ p.b2 | ar_num(3) }}</b></div>
+      <div><span>β3 (curvatura 2)</span><b>{{ p.b3 | ar_num(3) }}</b></div>
+      <div><span>τ1</span><b>{{ p.t1 | ar_num(3) }}</b></div>
+      <div><span>τ2</span><b>{{ p.t2 | ar_num(3) }}</b></div>
+      <div class="grp"><span>TIREA corto (d→0)</span><b>{{ p.y_corto | ar_num(2) }}%</b></div>
+      <div><span>TIREA asintótica (β0)</span><b>{{ p.y_largo | ar_num(2) }}%</b></div>
+      <div><span>Rango fit (años)</span><b>{{ p.x_min | ar_num(2) }} – {{ p.x_max | ar_num(2) }}</b></div>
+    </div>
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0">
+      Forma humana alrededor del anchor {{ p.anchor | ar_num(2) }}:
+      <b>nivel</b> {{ p.level_pct | ar_num(2) }}% · <b>pendiente</b> {{ p.slope_bps | ar_num(0) }} bps/año ·
+      <b>convexidad</b> {{ p.convex_bps | ar_num(0) }} bps/año². Estos tres valores son los que
+      cargás en Total Return para imaginar la curva de salida.
+    </p>
+  </div>
+</div>
+{% elif n is defined and n > 0 %}
+<div class="alert">Hacen falta ≥4 bonos con TIREA y Duration para ajustar NSS ({{ n }} disponibles).</div>
+{% endif %}

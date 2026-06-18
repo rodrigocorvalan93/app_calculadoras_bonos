@@ -902,6 +902,26 @@ async def graficos_estimate(
                    est=est, duration=duration, n=len(rows) if d is not None else 0)
 
 
+@graficos_router.get("/graficos/nss", response_class=HTMLResponse)
+async def graficos_nss(request: Request, curve: str = "", plazo: str = "24hs",
+                       only_quoting: bool = True, leg: str = "native") -> HTMLResponse:
+    """Parámetros de la curva NSS ajustada (β0..β3, τ1, τ2 + nivel/pendiente/
+    convexidad). El fit ya está cacheado en nss.py; corre en threadpool."""
+    from backend.services import nss as nss_svc
+
+    rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
+    pts = [(r["duration"], r["tirea"] * 100.0) for r in rows
+           if r.get("duration") is not None and r["duration"] == r["duration"]
+           and r.get("tirea") is not None and r["tirea"] == r["tirea"]]
+    p = None
+    if len(pts) >= 4:
+        xs = [a for a, _ in pts]
+        ys = [b for _, b in pts]
+        loop = asyncio.get_running_loop()
+        p = await loop.run_in_executor(None, nss_svc.params, xs, ys)
+    return _render(request, "partials/graficos_nss.html", p=p, n=len(pts))
+
+
 @graficos_router.get("/graficos/data")
 async def graficos_data(
     request: Request,
