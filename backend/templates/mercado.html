@@ -114,10 +114,17 @@
     <span>Columnas:</span>
     <label><input type="checkbox" x-model="oclh" @change="try{localStorage.setItem('m_oclh', oclh?'1':'0')}catch(e){}"> OCLH</label>
     <label><input type="checkbox" x-model="mae" @change="try{localStorage.setItem('m_mae', mae?'1':'0')}catch(e){}"> MAE</label>
-    <span style="margin-left:auto"></span>
-    {# Filtro client-side por ticker; persiste al refresh live (vive fuera del swap). #}
-    <input type="text" placeholder="filtrar ticker…" autocomplete="off" data-table-filter="#mercado-tbl"
-           style="font-size:12px;padding:3px 8px;min-width:130px">
+  </div>
+  {# Filtros client-side (cero requests): por ticker (texto) + reglas numéricas
+     ≥/≤ por columna (ej Bid sz ≥ 1.000.000, TIREA@Last ≤ 60). Persisten al refresh. #}
+  <div class="tbl-filters" data-table-filters="#mercado-tbl">
+    <input type="text" data-f-text placeholder="filtrar ticker…" autocomplete="off">
+    <span class="muted" style="font-size:11px">·</span>
+    <select data-f-col title="columna"></select>
+    <select data-f-op title="operador"><option value=">=">≥</option><option value="<=">≤</option></select>
+    <input type="text" data-f-val placeholder="valor (ej 1M, 60)" autocomplete="off" style="width:96px">
+    <button type="button" class="btn-primary" data-f-add style="font-size:11px">+ filtro</button>
+    <span data-f-chips></span>
   </div>
   <div
     id="mercado-table"

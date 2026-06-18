@@ -76,14 +76,20 @@
           >
           Solo con cotización
         </label>
-
-        <label class="field">
-          <span>Filtrar</span>
-          {# Filtro client-side (oculta filas que no matchean); persiste al refresh live. #}
-          <input type="text" placeholder="ticker…" autocomplete="off" data-table-filter="#curve-tbl">
-        </label>
       </div>
     </div>
+  </div>
+
+  {# Filtros client-side (cero requests): por ticker (texto) + reglas numéricas
+     ≥/≤ por columna (ej Bid sz ≥ 1.000.000, TIREA ≤ 60). Persisten al refresh. #}
+  <div class="tbl-filters" data-table-filters="#curve-tbl">
+    <input type="text" data-f-text placeholder="filtrar ticker…" autocomplete="off">
+    <span class="muted" style="font-size:11px">·</span>
+    <select data-f-col title="columna"></select>
+    <select data-f-op title="operador"><option value=">=">≥</option><option value="<=">≤</option></select>
+    <input type="text" data-f-val placeholder="valor (ej 1M, 60)" autocomplete="off" style="width:96px">
+    <button type="button" class="btn-primary" data-f-add style="font-size:11px">+ filtro</button>
+    <span data-f-chips></span>
   </div>
 
   {# ── Combinar curvas (armá la tuya) ──────────────────────────────────────
