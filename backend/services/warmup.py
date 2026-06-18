@@ -100,24 +100,35 @@ def _warm_code(code: str, plazo: str) -> bool:
     """Populate the metrics cache for one code at its current live price.
 
     Mirrors the cached path of `routes.curves._row_for_code` exactly so
-    the cache key lines up: same `md_symbol`, same `snap.last`, settle
-    defaulted to None. Returns True if a live price was present and warmed.
+    the cache key lines up: same `md_symbol`, same precio de referencia,
+    settle defaulted to None. Returns True if a price was present and warmed.
+
+    Clave para curvas anchas y COMBINADAS: la tabla usa `last` si el bono
+    operó hoy, y si no **cae a `close`**. Antes sólo calentábamos `last`, así
+    que los bonos que no operaron (ilíquidos: muchos corporativos) quedaban
+    fríos en CADA render — ~18 ms de cálculo por bono. Ahora calentamos el
+    precio de referencia REAL (last o, si no hay, close), más bid/offer para
+    el libro. Eso saca el cold recurrente de las combinadas de ilíquidos.
     """
     snap = marketdata_store.get_store().get(syms.md_symbol(code, plazo))
-    if snap is None or snap.last is None:
+    if snap is None:
         return False
-    try:
-        pricing.metrics_for_market_price(code, snap.last)
-        # Mercado (book) además calcula la TIR de bid y offer. Calentarlas evita
-        # que, en polling sostenido, el vencimiento del TTL dispare un recálculo
-        # masivo de la curva ancha en una sola request (los spikes p99).
-        for px in (snap.bid, snap.offer):
-            if px is not None and px != snap.last:
-                pricing.metrics_for_market_price(code, px)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("[warmup] warm %s failed: %s", code, exc)
+    if snap.last is not None:
+        prices = [snap.last, snap.bid, snap.offer]
+    elif snap.close is not None:
+        prices = [snap.close]                 # fallback que usa la tabla (CL)
+    else:
         return False
+    warmed = False
+    for px in prices:
+        if px is None:
+            continue
+        try:
+            pricing.metrics_for_market_price(code, px)
+            warmed = True
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[warmup] warm %s @ %s failed: %s", code, px, exc)
+    return warmed
 
 
 async def warm_curves_once(plazo: str = "24hs") -> Dict[str, int]:

@@ -79,3 +79,15 @@ async def test_healthz_exposes_warmup() -> None:
     body = r.json()
     assert "warmup" in body
     assert "primed" in body["warmup"]
+
+
+def test_warm_code_calienta_close_cuando_no_opero() -> None:
+    """Bono sin `last` (no operó hoy) → la curva/combinada cae a `close`. El
+    warmup debe calentar ESE precio; antes devolvía False (last=None) y los
+    ilíquidos quedaban fríos en cada render (combinada ~2,8 s → ~20 ms)."""
+    bond_universe.ensure_loaded()
+    table = curves.build_curve_codes()
+    code = (table.get("cer") or ["TX26"])[0]
+    mds_.get_store().update_from_md(syms_.md_symbol(code, "24hs"), {"CL": {"price": 1450.0}})
+    assert warmup._warm_code(code, "24hs") is True
+    assert pricing.metrics_for_market_price(code, 1450.0) is not None   # quedó cacheado
