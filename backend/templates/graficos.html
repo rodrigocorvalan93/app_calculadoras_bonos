@@ -66,6 +66,11 @@
     <p class="muted" style="padding:10px">Cargando gráfico…</p>
   </div>
 
+  {# Parámetros de la curva NSS ajustada (β/τ + nivel/pendiente/convexidad). #}
+  <div id="grafico-nss" style="margin-top:14px"
+       hx-get="/graficos/nss" hx-trigger="load, change from:#graf-controls delay:200ms"
+       hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]" hx-swap="innerHTML"></div>
+
   <div id="grafico-estimate" style="margin-top:14px"></div>
 </section>
 {% endblock %}

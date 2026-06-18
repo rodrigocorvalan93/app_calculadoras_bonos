@@ -1101,3 +1101,10 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
   border-radius: var(--radius-sm); padding: 4px 7px; font-size: 12px; font-family: inherit;
 }
 .tbl-filters input[data-f-text] { min-width: 140px; }
+
+/* ── Parámetros NSS (Gráficos) ────────────────────────────────────────── */
+.nss-params { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 16px; }
+.nss-params > div { display: flex; flex-direction: column; }
+.nss-params > div.grp { border-top: 1px solid var(--border-soft); padding-top: 6px; margin-top: 2px; }
+.nss-params span { font-size: 11px; color: var(--text-muted); }
+.nss-params b { font-variant-numeric: tabular-nums; }

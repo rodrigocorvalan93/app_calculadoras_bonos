@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Total Return{% endblock %}
+{% block tab_total_return %}active{% endblock %}
+
+{% block content %}
+<section class="curves" x-data="{ mode: 'params' }">
+  <header class="yas-header">
+    <h1>Total Return</h1>
+    <p class="muted">Por curva y horizonte (fecha terminal): total return con descomposición
+      <b>carry + compresión + ajuste</b>. El núcleo es <code>calcula_total_return</code>. La TIR de
+      salida se fija con una curva imaginada (nivel/pendiente/convexidad o NSS), puntos interpolados,
+      o a mano por fila. <b>On-demand</b> — apretá <b>Calcular</b>.</p>
+  </header>
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <form id="tr-form" hx-get="/total-return/table" hx-target="#tr-table" hx-swap="innerHTML"
+            hx-indicator="#tr-spin">
+        <div class="row-fields">
+          <label class="field"><span>Curva</span>
+            <select name="curve">
+              {% for c in all_curves %}{% set count = (table.get(c.key) or []) | length %}
+                <option value="{{ c.key }}" {% if c.key == selected_key %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>{{ c.label }}{% if count %} ({{ count }}){% endif %}</option>
+              {% endfor %}
+            </select></label>
+          <label class="field"><span>Plazo</span>
+            <select name="plazo"><option value="24hs" {% if plazo=='24hs' %}selected{% endif %}>24hs</option>
+              <option value="CI" {% if plazo=='CI' %}selected{% endif %}>CI</option></select></label>
+          <label class="field"><span>Fecha terminal</span>
+            <input type="text" name="terminal" value="{{ terminal }}" placeholder="dd/mm/aaaa" autocomplete="off"></label>
+          <fieldset class="field field-mode"><legend>Curva de salida</legend>
+            <label><input type="radio" name="mode" value="params" x-model="mode"> Nivel/Pend/Conv</label>
+            <label><input type="radio" name="mode" value="nss" x-model="mode"> NSS</label>
+            <label><input type="radio" name="mode" value="points" x-model="mode"> Puntos</label>
+          </fieldset>
+        </div>
+
+        {# Modo paramétrico: nivel/pendiente/convexidad (prefill del NSS actual) #}
+        {% macro pf(v, d=2) %}{{ v | round(d) if (v is not none and v == v) else '' }}{% endmacro %}
+        <div class="row-fields" x-show="mode==='params'">
+          <label class="field"><span>Nivel (TIREA %)</span>
+            <input type="text" name="level" value="{{ pf(nss.level_pct) if nss }}" placeholder="42,00"></label>
+          <label class="field"><span>Pendiente (bps/año)</span>
+            <input type="text" name="slope" value="{{ pf(nss.slope_bps, 0) if nss }}" placeholder="25"></label>
+          <label class="field"><span>Convexidad (bps/año²)</span>
+            <input type="text" name="convex" value="{{ pf(nss.convex_bps, 0) if nss }}" placeholder="15"></label>
+          <label class="field"><span>Anchor (duration)</span>
+            <input type="text" name="anchor" value="{{ pf(nss.anchor) if nss else '1' }}" placeholder="1,00"></label>
+        </div>
+
+        {# Modo NSS: 6 parámetros (prefill del fit actual) #}
+        <div class="row-fields" x-show="mode==='nss'" x-cloak>
+          {% for f in ['b0','b1','b2','b3','t1','t2'] %}
+          <label class="field" style="min-width:90px"><span>{{ f }}</span>
+            <input type="text" name="{{ f }}" value="{{ pf(nss[f], 4) if nss }}"></label>
+          {% endfor %}
+        </div>
+
+        {# Modo puntos: una línea "duration, TIREA%" #}
+        <div class="row-fields" x-show="mode==='points'" x-cloak style="align-items:flex-start">
+          <label class="field" style="flex:1;min-width:260px"><span>Puntos (una línea <code>duration, TIREA%</code>)</span>
+            <textarea name="points" rows="3" placeholder="0.5, 1&#10;2, 4&#10;5, 6" style="font-family:var(--mono);font-size:12px"></textarea></label>
+        </div>
+
+        <div class="row-fields">
+          <button type="submit" class="btn-primary">Calcular</button>
+          <span id="tr-spin" class="htmx-indicator muted" style="align-self:center">calculando…</span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="tr-table"></div>
+</section>
+{% endblock %}
