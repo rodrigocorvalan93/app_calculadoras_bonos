@@ -303,11 +303,21 @@ def tirea_from_tna(
 # ── Bond meta + cashflows ────────────────────────────────────────────────
 
 
+_meta_cache: Dict[str, Dict[str, Any]] = {}
+
+
 def bond_meta(code: str) -> Dict[str, Any]:
+    """Metadata estática del bono (no cambia en runtime). Memoizada: en curvas
+    anchas se llama 1×/fila/refresh y rearmar 16 getattr cada vez era puro
+    overhead. Los callers NO deben mutar el dict — el hot path copia con
+    `dict(meta)`; si hace falta modificar, copiar primero."""
+    cached = _meta_cache.get(code)
+    if cached is not None:
+        return cached
     obj = bond_universe.get(code)
     if obj is None:
         return {}
-    return {
+    meta = {
         "codigo": getattr(obj, "codigo", code),
         "nombre": getattr(obj, "nombre_security", code),
         "moneda": getattr(obj, "moneda", ""),
@@ -325,6 +335,8 @@ def bond_meta(code: str) -> Dict[str, Any]:
         "tipo_amortizacion": getattr(obj, "tipo_amortizacion", ""),
         "legislacion": getattr(obj, "legislacion", ""),
     }
+    _meta_cache[code] = meta
+    return meta
 
 
 def _cashflows_from_obj(obj, limit: int = 40) -> List[Dict[str, Any]]:

@@ -11,6 +11,7 @@ Lifespan:
 """
 from __future__ import annotations
 
+import gc
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -216,6 +217,19 @@ async def lifespan(app: FastAPI):
         news.start()
     except Exception:  # noqa: BLE001
         logger.exception("[main] news poller start failed")
+
+    # GC freeze (truco Instagram): todo el estado de larga vida (universo de
+    # bonos, templates, singletons) ya está alocado. Lo movemos a la generación
+    # "permanente" que el GC NO re-escanea, así las colecciones gen-2 disparadas
+    # por la basura por-request (miles de dicts al armar una tabla ancha) dejan
+    # de pausar ~100 ms. GC sigue activo para los ciclos por-request. El cache de
+    # métricas todavía está vacío acá (el warmup corre después del yield), así
+    # que no congelamos entradas con TTL. Medido: p99 de Mercado 98 → 26 ms.
+    try:
+        gc.collect()
+        gc.freeze()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] gc.freeze failed")
 
     yield
 

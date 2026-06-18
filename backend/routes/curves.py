@@ -309,20 +309,22 @@ async def _rows_for(
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
     loop = asyncio.get_running_loop()
 
-    # Construimos las filas en chunks (round-robin) en vez de 1 tarea por bono:
-    # para curvas anchas (corp_hdmep ~131) eso evitaba ~130 dispatches al pool en
-    # cada request (warm p95 ~120 ms). Con N_WORKERS chunks secuenciales se
-    # mantiene el paralelismo del path frío con una fracción del overhead.
-    n_workers = max(1, getattr(_row_pool, "_max_workers", 8))
+    # El build de filas es GIL-bound (el calc legacy no libera el GIL), así que
+    # abanicar en N chunks NO da paralelismo de CPU — sólo overhead de dispatch
+    # y thrashing del GIL entre threads (medido: cold 8-chunks 2996 ms vs serial
+    # 2594; warm 4,3 vs 2,9). Lo corremos como UNA tarea en el pool: queda fuera
+    # del event loop (que sigue responsivo por el GIL-switch cada ~5 ms) y sin el
+    # overhead del fan-out. El pool con varios workers da paralelismo a nivel
+    # REQUEST (varios paneles a la vez), no intra-tabla.
+    def _build_all() -> list[dict]:
+        out: list[dict] = []
+        for c in codes:
+            r = _row_for_code(c, plazo, leg, fx, book, fuente)
+            if r is not None:
+                out.append(r)
+        return out
 
-    def _build_chunk(chunk: list[str]) -> list[dict | None]:
-        return [_row_for_code(c, plazo, leg, fx, book, fuente) for c in chunk]
-
-    chunks = [codes[i::n_workers] for i in range(n_workers)]
-    parts: list[list[dict | None]] = await asyncio.gather(
-        *(loop.run_in_executor(_row_pool, _build_chunk, ch) for ch in chunks if ch)
-    )
-    rows = [r for part in parts for r in part if r is not None]
+    rows = await loop.run_in_executor(_row_pool, _build_all)
     # Fracción de volumen vs el máximo de la tabla → barrita de fondo en la
     # celda (degradé). O(n) sobre filas ya construidas, costo ~µs.
     vmax = max((r.get("volume") or 0.0) for r in rows) if rows else 0.0
