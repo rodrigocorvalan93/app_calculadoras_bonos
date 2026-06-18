@@ -26,6 +26,8 @@ async def test_curvas_mercado_ordenables_y_filtrables() -> None:
     assert 'id="curve-tbl"' in ct and "data-sortable" in ct and "<thead>" in ct and "th data-sort" in ct
     assert 'id="mercado-tbl"' in mt and "data-sortable" in mt and "<thead>" in mt and "th data-sort" in mt
     assert "data-sortead" not in ct and "data-sortead" not in mt          # no romper el <thead>
-    # filtro client-side en cada página (vive fuera del contenedor que swapea)
-    assert 'data-table-filter="#curve-tbl"' in cp
-    assert 'data-table-filter="#mercado-tbl"' in mp
+    # filtros client-side en cada página (texto + reglas numéricas ≥/≤ por
+    # columna), fuera del contenedor que swapea
+    for page, tbl in ((cp, "#curve-tbl"), (mp, "#mercado-tbl")):
+        assert 'data-table-filters="%s"' % tbl in page
+        assert "data-f-text" in page and "data-f-col" in page and "data-f-add" in page

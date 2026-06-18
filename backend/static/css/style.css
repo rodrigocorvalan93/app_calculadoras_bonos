@@ -1093,3 +1093,11 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .mix-chip a { color: var(--accent); cursor: pointer; }
 .mix-chip button { background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0; }
 .mix-chip button:hover { color: var(--red); }
+
+/* ── Barra de filtros de tabla (Curvas / Mercado) ─────────────────────── */
+.tbl-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0; font-size: 12px; }
+.tbl-filters input[type="text"], .tbl-filters select {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 4px 7px; font-size: 12px; font-family: inherit;
+}
+.tbl-filters input[data-f-text] { min-width: 140px; }

@@ -253,28 +253,98 @@
   });
 })();
 
-// Filtro de texto client-side para tablas live: un <input data-table-filter="#id">
-// oculta las filas del tbody que no contienen el texto (en cualquier celda).
-// Vive FUERA del contenedor que swapea htmx, así el filtro persiste; se
-// re-aplica tras cada swap. Cero requests.
+// Filtros de tabla client-side (texto + reglas numéricas por columna). Un
+// contenedor <div data-table-filters="#id"> con [data-f-text] (filtro por
+// ticker), [data-f-col]/[data-f-op]/[data-f-val]/[data-f-add] (regla numérica
+// ≥/≤ sobre una columna) y [data-f-chips] (reglas activas). Vive FUERA del
+// contenedor que swapea htmx → persiste y se re-aplica tras cada refresh live.
+// Cero requests, sin tocar formatos: parsea los valores ya renderizados
+// (es-AR + sufijos k/M/MM/B de ar_hum).
 (function () {
-  function apply(input) {
-    var table = document.querySelector(input.getAttribute('data-table-filter'));
+  function parseNum(txt) {
+    if (txt == null) return null;
+    var s = String(txt).replace(/[▲▼%]/g, '').trim();
+    if (s === '' || s === '—' || s === '-' || s === '·') return null;
+    var mult = 1, m = s.match(/(MM|B|M|k)\s*$/);   // sufijos de ar_hum (MM antes que M)
+    if (m) { mult = { k: 1e3, M: 1e6, MM: 1e9, B: 1e12 }[m[1]]; s = s.slice(0, m.index); }
+    s = s.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');  // es-AR: '.' miles, ',' decimal
+    var v = parseFloat(s);
+    return isNaN(v) ? null : v * mult;
+  }
+  function cellVal(row, idx) {
+    var c = row.cells[idx]; if (!c) return '';
+    var inp = c.querySelector('input');
+    return inp ? inp.value : (c.textContent || '');
+  }
+  var state = {}; // sel -> { text, rules:[{idx,label,op,val,valTxt}] }
+
+  function st(sel) { return state[sel] || (state[sel] = { text: '', rules: [] }); }
+
+  function buildCols(bar, table) {
+    var colSel = bar.querySelector('[data-f-col]');
+    if (!colSel || colSel.options.length) return;        // ya armado
+    var ths = table.querySelectorAll('thead th'), html = '';
+    for (var i = 0; i < ths.length; i++) {
+      if (!ths[i].hasAttribute('data-sort')) continue;   // sólo columnas de dato
+      html += '<option value="' + i + '">' + (ths[i].textContent || '').trim() + '</option>';
+    }
+    colSel.innerHTML = html;
+  }
+  function chips(bar, sel) {
+    var box = bar.querySelector('[data-f-chips]'); if (!box) return;
+    box.innerHTML = '';
+    st(sel).rules.forEach(function (r, i) {
+      var sp = document.createElement('span'); sp.className = 'mix-chip';
+      sp.appendChild(document.createTextNode(r.label + ' ' + (r.op === '>=' ? '≥' : '≤') + ' ' + r.valTxt + ' '));
+      var b = document.createElement('button'); b.type = 'button'; b.textContent = '✕';
+      b.onclick = function () { st(sel).rules.splice(i, 1); apply(sel); chips(bar, sel); };
+      sp.appendChild(b); box.appendChild(sp);
+    });
+  }
+  function apply(sel) {
+    var s = st(sel), table = document.querySelector(sel);
     if (!table || !table.tBodies[0]) return;
-    var q = (input.value || '').trim().toLowerCase();
-    var rows = table.tBodies[0].rows;
+    var q = (s.text || '').toLowerCase(), rows = table.tBodies[0].rows;
     for (var i = 0; i < rows.length; i++) {
-      var ok = !q || (rows[i].textContent || '').toLowerCase().indexOf(q) >= 0;
-      rows[i].style.display = ok ? '' : 'none';
+      var r = rows[i], ok = !q || (r.textContent || '').toLowerCase().indexOf(q) >= 0;
+      for (var k = 0; ok && k < s.rules.length; k++) {
+        var rule = s.rules[k], v = parseNum(cellVal(r, rule.idx));
+        ok = (v !== null) && (rule.op === '>=' ? v >= rule.val : v <= rule.val);
+      }
+      r.style.display = ok ? '' : 'none';
     }
   }
+  function initAll() {
+    document.querySelectorAll('[data-table-filters]').forEach(function (bar) {
+      var sel = bar.getAttribute('data-table-filters'), table = document.querySelector(sel);
+      if (table) { st(sel); buildCols(bar, table); chips(bar, sel); }
+    });
+  }
   document.body.addEventListener('input', function (e) {
-    if (e.target && e.target.getAttribute && e.target.getAttribute('data-table-filter')) apply(e.target);
+    var t = e.target;
+    if (t && t.hasAttribute && t.hasAttribute('data-f-text')) {
+      var bar = t.closest('[data-table-filters]'), sel = bar.getAttribute('data-table-filters');
+      st(sel).text = t.value; apply(sel);
+    }
+  });
+  document.body.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-f-add]');
+    if (!btn) return;
+    var bar = btn.closest('[data-table-filters]'), sel = bar.getAttribute('data-table-filters');
+    var col = bar.querySelector('[data-f-col]'), op = bar.querySelector('[data-f-op]'), val = bar.querySelector('[data-f-val]');
+    var num = parseNum(val.value);
+    if (num === null || !col.options.length) return;
+    st(sel).rules.push({ idx: +col.value, label: col.options[col.selectedIndex].text, op: op.value, val: num, valTxt: val.value.trim() });
+    val.value = ''; apply(sel); chips(bar, sel);
   });
   document.body.addEventListener('htmx:afterSwap', function () {
-    var ins = document.querySelectorAll('[data-table-filter]');
-    for (var i = 0; i < ins.length; i++) if ((ins[i].value || '').trim()) apply(ins[i]);
+    document.querySelectorAll('[data-table-filters]').forEach(function (bar) {
+      var sel = bar.getAttribute('data-table-filters');
+      if (state[sel] && (state[sel].text || state[sel].rules.length)) apply(sel);
+    });
   });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAll);
+  else initAll();
 })();
 
 // ── Posiciones: Last editable + retorno ponderado del día ────────────────
