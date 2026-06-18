@@ -253,6 +253,30 @@
   });
 })();
 
+// Filtro de texto client-side para tablas live: un <input data-table-filter="#id">
+// oculta las filas del tbody que no contienen el texto (en cualquier celda).
+// Vive FUERA del contenedor que swapea htmx, así el filtro persiste; se
+// re-aplica tras cada swap. Cero requests.
+(function () {
+  function apply(input) {
+    var table = document.querySelector(input.getAttribute('data-table-filter'));
+    if (!table || !table.tBodies[0]) return;
+    var q = (input.value || '').trim().toLowerCase();
+    var rows = table.tBodies[0].rows;
+    for (var i = 0; i < rows.length; i++) {
+      var ok = !q || (rows[i].textContent || '').toLowerCase().indexOf(q) >= 0;
+      rows[i].style.display = ok ? '' : 'none';
+    }
+  }
+  document.body.addEventListener('input', function (e) {
+    if (e.target && e.target.getAttribute && e.target.getAttribute('data-table-filter')) apply(e.target);
+  });
+  document.body.addEventListener('htmx:afterSwap', function () {
+    var ins = document.querySelectorAll('[data-table-filter]');
+    for (var i = 0; i < ins.length; i++) if ((ins[i].value || '').trim()) apply(ins[i]);
+  });
+})();
+
 // ── Posiciones: Last editable + retorno ponderado del día ────────────────
 // Todo client-side: ret_i = Last_ajustado / PxVal − 1 (escala automática por
 // potencias de 10 — el Excel valúa por VN 1 y BYMA cotiza por VN 100), y el

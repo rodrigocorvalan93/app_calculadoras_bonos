@@ -114,6 +114,10 @@
     <span>Columnas:</span>
     <label><input type="checkbox" x-model="oclh" @change="try{localStorage.setItem('m_oclh', oclh?'1':'0')}catch(e){}"> OCLH</label>
     <label><input type="checkbox" x-model="mae" @change="try{localStorage.setItem('m_mae', mae?'1':'0')}catch(e){}"> MAE</label>
+    <span style="margin-left:auto"></span>
+    {# Filtro client-side por ticker; persiste al refresh live (vive fuera del swap). #}
+    <input type="text" placeholder="filtrar ticker…" autocomplete="off" data-table-filter="#mercado-tbl"
+           style="font-size:12px;padding:3px 8px;min-width:130px">
   </div>
   <div
     id="mercado-table"
