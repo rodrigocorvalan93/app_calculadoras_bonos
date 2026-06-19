@@ -196,14 +196,14 @@ def pop_token(tok: str) -> Optional[Dict[str, Any]]:
 
 # ── Broker REST (Etapa A: lectura · Etapa C: envío con OMS_LIVE=1) ─────────
 async def accounts() -> List[Dict[str, Any]]:
-    from backend.services.primary_client import get_client
-    d = await get_client().get_json("rest/accounts")
+    from backend.services.primary_ws import get_ws_client
+    d = await get_ws_client().get_json_checked("rest/accounts")
     return d.get("accounts", []) if isinstance(d, dict) else []
 
 
 async def live_orders(account: str) -> List[Dict[str, Any]]:
-    from backend.services.primary_client import get_client
-    d = await get_client().get_json("rest/order/actives", {"accountId": account})
+    from backend.services.primary_ws import get_ws_client
+    d = await get_ws_client().get_json_checked("rest/order/actives", {"accountId": account})
     return d.get("orders", []) if isinstance(d, dict) else []
 
 
@@ -219,7 +219,7 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "PAPER", "motivo": "modo paper (OMS_LIVE=0): NO viajó al broker", **rec}
 
     audit("live_enviando", rec)
-    from backend.services.primary_client import get_client
+    from backend.services.primary_ws import get_ws_client
     ordtype = payload.get("ordtype", "limit")
     params = {
         "marketId": "ROFX",
@@ -233,7 +233,7 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     if ordtype != "market":
         params["price"] = payload["price"]
     try:
-        d = await get_client().get_json("rest/order/newSingleOrder", params)
+        d = await get_ws_client().get_json_checked("rest/order/newSingleOrder", params)
         audit("live_respuesta", {**rec, "broker": d})
         return {"status": d.get("status", "?"), "broker": d, **rec}
     except Exception as exc:  # noqa: BLE001
@@ -247,9 +247,9 @@ async def cancel(client_order_id: str, proprietary: str = "api") -> Dict[str, An
         audit("paper_cancelada", rec)
         return {"status": "PAPER", **rec}
     audit("live_cancelando", rec)
-    from backend.services.primary_client import get_client
+    from backend.services.primary_ws import get_ws_client
     try:
-        d = await get_client().get_json("rest/order/cancelById", {
+        d = await get_ws_client().get_json_checked("rest/order/cancelById", {
             "clientOrderId": client_order_id, "proprietary": proprietary})
         audit("live_cancel_respuesta", {**rec, "broker": d})
         return {"status": d.get("status", "?"), "broker": d, **rec}
