@@ -1,0 +1,102 @@
+"""Escenario multi-activo — TR EN PESOS por categoría: additividad
+(carry+capital=total), overlay FX hard-dollar (TR_pesos=(1+TR_usd)(1+ccl)−1),
+y columnas multiplicativas neto-fondeo / neto-FX. Núcleo = total_return._bond_tr.
+"""
+from __future__ import annotations
+
+import pytest
+
+from backend.services import bond_universe, curves, escenario as esc, total_return as tr
+
+
+def _dates():
+    bond_universe.ensure_loaded()
+    settle = tr.settle_str("24hs")
+    terminal = "31/10/2026"
+    return settle, terminal, tr._parse_d(settle), tr._parse_d(terminal)
+
+
+def test_helpers_buckets_fx_exit():
+    c = esc.CAT_BY_KEY["cer_medio"]
+    assert esc.in_bucket(c, 1.0) and not esc.in_bucket(c, 0.4) and not esc.in_bucket(c, 1.6)
+    assert esc.fx_of(esc.CAT_BY_KEY["globales"], 0.085, 0.07) == 0.085   # CCL
+    assert esc.fx_of(esc.CAT_BY_KEY["bonares"], 0.085, 0.07) == 0.07     # MEP
+    assert esc.fx_of(esc.CAT_BY_KEY["cer_largo"], 0.085, 0.07) == 0.0    # ARS puro
+    assert esc.fx_of(esc.CAT_BY_KEY["dlk"], 0.085, 0.07) == 0.0          # deva ∈ ajuste
+    assert abs(esc.exit_ytm(0.25, 0, 5.0) - 0.25) < 1e-12               # plano
+    assert abs(esc.exit_ytm(0.25, 200, 2.0, anchor=1.0) - 0.27) < 1e-12  # +200bps·(2−1)
+
+
+def test_ars_fx_cero_y_columnas_neto():
+    """ARS puro: fx=0 ⇒ TR_pesos = TR nativo; neto-fondeo y neto-FX
+    multiplicativos (réplica de la aritmética del Excel)."""
+    settle, terminal, sd, td = _dates()
+    cat = esc.CAT_BY_KEY["cer_corto"]
+    rows = [{"code": "TX26", "tirea": 0.01, "duration": 0.38, "px_calc": 700.0}]
+    cauc, ccl = 0.081, 0.085
+    res = esc.compute_category(cat, rows, {"TX26": 0.03}, fx_proy=0.0, ccl_proy=ccl,
+                               cauc=cauc, terminal=terminal, settle=settle)
+    assert res["n"] == 1
+    r = res["rows"][0]
+    assert abs((r["carry"] + r["capital"]) - r["total"]) < 1e-12          # additivo
+    native = tr._bond_tr("TX26", 0.01, 0.03, terminal, settle, sd, td, 0.38)
+    assert abs(r["total"] - native["tr_total"]) < 1e-9                    # fx=0
+    assert abs(r["neto_fondeo"] - ((1 + r["total"]) / (1 + cauc) - 1)) < 1e-12
+    assert abs(r["neto_fx"] - ((1 + r["total"]) / (1 + ccl) - 1)) < 1e-12
+    # resumen = promedio (1 bono ⇒ igual a la fila)
+    assert abs(res["summary"]["total"] - r["total"]) < 1e-12
+
+
+def test_hard_dollar_overlay_ccl():
+    """Global: TR_pesos = (1+TR_usd)·(1+ccl)−1 ; neto-FX vuelve a USD."""
+    settle, terminal, sd, td = _dates()
+    cat = esc.CAT_BY_KEY["globales"]
+    code = next((c for c in curves.build_curve_codes()["globales"]
+                 if tr._bond_tr(c, 0.10, 0.09, terminal, settle, sd, td, 2.0)), None)
+    if code is None:
+        pytest.skip("sin global calculable en el universo")
+    ccl = 0.085
+    res = esc.compute_category(cat, [{"code": code, "tirea": 0.10, "duration": 2.0}],
+                               {code: 0.09}, fx_proy=ccl, ccl_proy=ccl, cauc=0.081,
+                               terminal=terminal, settle=settle)
+    r = res["rows"][0]
+    native = tr._bond_tr(code, 0.10, 0.09, terminal, settle, sd, td, 2.0)
+    assert abs(native["ajuste"]) < 1e-9                                   # hard-dollar: sin ajuste
+    assert abs(r["total"] - ((1 + native["tr_total"]) * (1 + ccl) - 1)) < 1e-9
+    assert abs(r["carry"] - ((1 + native["carry"]) * (1 + ccl) - 1)) < 1e-9
+    assert abs((r["carry"] + r["capital"]) - r["total"]) < 1e-12
+    assert abs(r["neto_fx"] - native["tr_total"]) < 1e-9                  # (1+peso)/(1+ccl)-1 = TR_usd
+
+
+@pytest.mark.asyncio
+async def test_escenario_endpoints():
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import marketdata_store as mds, symbols as syms
+    bond_universe.ensure_loaded()
+    for curve, px in (("cer", 1000.0), ("lecap", 120.0)):
+        for c in curves.build_curve_codes()[curve]:
+            mds.get_store().update_from_md(syms.md_symbol(c, "24hs"),
+                                           {"LA": {"price": px}, "CL": {"price": px * 0.99}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        pg = await ac.get("/escenario")
+        assert pg.status_code == 200 and "retorno esperado en pesos" in pg.text
+        assert 'name="ccl_deva"' in pg.text and 'name="ytm_cer_corto"' in pg.text
+        tb = await ac.get("/escenario/table?plazo=24hs&terminal=31/12/2026"
+                          "&cauc_tna=20&ccl_deva=11,75&mep_deva=11,75&ytm_cer_corto=5&slope_cer_corto=0")
+        assert tb.status_code == 200
+        assert 'class="tr-chart"' in tb.text                       # gráfico por categoría
+        assert "Total Return" in tb.text and "Neto de FX" in tb.text
+        assert "CER corto" in tb.text and 'name="y1__' in tb.text  # banda + Exit YTM editable
+
+
+def test_chart_from_categories():
+    cats = [
+        {"label": "A", "summary": {"carry": 0.08, "capital": 0.01, "total": 0.09}},
+        {"label": "B", "summary": {"carry": 0.10, "capital": -0.02, "total": 0.08}},
+        {"label": "C", "summary": None, "n": 0},   # sin bonos → se omite
+    ]
+    ch = esc.chart_from_categories(cats)
+    assert ch is not None and len(ch["bars"]) == 2
+    assert ch["bars"][0]["label"] == "A"

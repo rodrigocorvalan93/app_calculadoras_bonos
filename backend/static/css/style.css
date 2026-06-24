@@ -1121,3 +1121,16 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .tr-chart .tr-bar.capital { fill: var(--tr-capital); }
 .tr-chart .tr-dot { fill: var(--text); stroke: var(--panel); stroke-width: 1; }
 .tr-chart .tr-legend text { fill: var(--text-muted); font-size: 11px; }
+
+/* ── Escenario — inputs por categoría + tabla agrupada ─────────────────── */
+.esc-cats { display: grid; gap: 4px; margin: 10px 0 2px; max-width: 560px; }
+.esc-cats-head, .esc-cat-row { display: grid; grid-template-columns: 1fr 120px 120px; gap: 8px; align-items: center; }
+.esc-cats-head { font-size: 11px; color: var(--text-muted); padding: 0 2px; }
+.esc-cat-row input { width: 100%; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 7px;
+  font-size: 12px; font-family: inherit; font-variant-numeric: tabular-nums; }
+.esc-cat-row.is-empty { opacity: .45; }
+.esc-cat-name { font-size: 12px; }
+.esc-tbl .esc-grp td { background: var(--panel-2); font-weight: 650;
+  border-top: 2px solid var(--border); }
+.esc-tbl .esc-grp td:first-child { color: var(--text); }
