@@ -242,3 +242,62 @@ async def test_panel_muestra_comitentes_configuradas_offline() -> None:
     finally:
         settings.oms_comitentes, settings.primary_base_url = orig_cfg, orig_url
         oms._comitentes_all.cache_clear()
+
+
+def test_instrument_match_candidates() -> None:
+    """Dado el universo del broker, sugiere los símbolos del MISMO código (exacto)
+    y, si no hay, los de la misma raíz (4 letras) — para resolver el ticker/plazo."""
+    from backend.services import instruments as inst
+    universe = {
+        "MERV - XMEV - PSSXO - CI",
+        "MERV - XMEV - PSSXO - 24hs - SENEBI",
+        "MERV - XMEV - PSSWO - 24hs",          # otra serie PSA (raíz PSSW, no PSSX)
+        "MERV - XMEV - AL30 - 24hs",
+    }
+    c = inst.match_candidates(universe, "PSSXO")            # exacto PSSXO (CI + SENEBI)
+    assert "MERV - XMEV - PSSXO - CI" in c
+    assert "MERV - XMEV - PSSXO - 24hs - SENEBI" in c
+    assert "MERV - XMEV - AL30 - 24hs" not in c
+    assert "MERV - XMEV - PSSWO - 24hs" not in c
+    # código inexistente con raíz PSSX → cae al fallback por raíz (sólo PSSX*)
+    c2 = inst.match_candidates(universe, "PSSXZ")
+    assert "MERV - XMEV - PSSXO - CI" in c2 and "MERV - XMEV - PSSWO - 24hs" not in c2
+
+
+@pytest.mark.asyncio
+async def test_instrument_resolve_y_guard_pretrade(monkeypatch) -> None:
+    """resolve() detecta el símbolo ausente y place() (LIVE) lo BLOQUEA antes de
+    cursar, con los símbolos/plazos que SÍ existen — el caso real del SELL PSSXO
+    24hs (que en el broker sólo está en SENEBI/CI). Fail-open si no hay lista."""
+    from backend.services import instruments as inst
+
+    universe = {"MERV - XMEV - PSSXO - CI", "MERV - XMEV - PSSXO - 24hs - SENEBI"}
+
+    async def fake_valid() -> set:
+        return universe
+    monkeypatch.setattr(inst, "valid_symbols", fake_valid)
+
+    r = await inst.resolve("PSSXO", "MERV - XMEV - PSSXO - 24hs")     # 24hs continuo: no está
+    assert r["checked"] and not r["exists"] and any("SENEBI" in c for c in r["candidates"])
+    r2 = await inst.resolve("PSSXO", "MERV - XMEV - PSSXO - CI")      # sí está
+    assert r2["checked"] and r2["exists"]
+
+    async def none_valid():
+        return None
+    monkeypatch.setattr(inst, "valid_symbols", none_valid)           # sin lista → fail-open
+    r3 = await inst.resolve("PSSXO", "MERV - XMEV - PSSXO - 24hs")
+    assert r3["checked"] is False
+
+    # Guard en place(): LIVE + símbolo inexistente → ERROR accionable, sin tocar el broker
+    monkeypatch.setattr(inst, "valid_symbols", fake_valid)
+    try:
+        oms.kill_switch(False)
+        oms.set_live(True)
+        res = await oms.place({"code": "PSSXO", "symbol": "MERV - XMEV - PSSXO - 24hs",
+                               "side": "sell", "qty": 402311.0, "price": 204600.0,
+                               "account": "54626", "ordtype": "limit"})
+        assert res["status"] == "ERROR"
+        assert "no tiene el instrumento" in res["motivo"] and "SENEBI" in res["motivo"]
+        assert any(a["event"] == "live_instrumento_inexistente" for a in oms.audit_tail(5))
+    finally:
+        oms.set_live(None)

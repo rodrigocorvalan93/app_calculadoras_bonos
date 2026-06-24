@@ -307,6 +307,26 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     audit("live_enviando", rec)
     from backend.services.primary_ws import get_ws_client
+
+    # Guard pre-trade: no mandes a un símbolo que el broker NO tiene en su
+    # universo (ON que sólo opera SENEBI, plazo inexistente, ticker mal…). En vez
+    # del críptico "Invalid Instrument ... doesn't exist" del broker DESPUÉS de
+    # cursar, avisamos ANTES con los símbolos/plazos que SÍ existen para ese
+    # código. Fail-open: si no se puede traer el universo, sigue como antes.
+    from backend.services import instruments
+    symbol = payload.get("symbol", "")
+    if symbol:
+        chk = await instruments.resolve(payload.get("code", ""), symbol)
+        if chk["checked"] and not chk["exists"]:
+            cands = chk["candidates"]
+            motivo = (f"El broker no tiene el instrumento «{symbol}». "
+                      + (f"Símbolos que SÍ existen para {payload.get('code', '')}: "
+                         + ", ".join(cands) + "." if cands else
+                         "No hay símbolos parecidos en el universo del broker "
+                         "(¿ticker mal o ON que no opera en este broker?)."))
+            audit("live_instrumento_inexistente", {**rec, "candidatos": cands})
+            return {"status": "ERROR", "motivo": motivo, "candidatos": cands, **rec}
+
     ordtype = payload.get("ordtype", "limit")
     params = {
         "marketId": "ROFX",
