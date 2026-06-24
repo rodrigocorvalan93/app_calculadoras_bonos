@@ -193,3 +193,122 @@ def compute_rows(rows: List[Dict[str, Any]], terminal_str: str, settle_str: str,
             out.append(res)
     out.sort(key=lambda x: (x["dur0"] is None, x["dur0"] or 0.0))
     return out, dias
+
+
+# ── gráfico de columnas apiladas (SVG server-side, sin JS) ────────────────────
+def _nice_step(rough: float) -> float:
+    """Paso de eje 'lindo' (1/2/2.5/5 × 10ᵏ) ≥ rough."""
+    import math
+    if not (rough > 0) or not math.isfinite(rough):
+        return 1.0
+    k = math.floor(math.log10(rough))
+    base = 10.0 ** k
+    for m in (1.0, 2.0, 2.5, 5.0):
+        if base * m >= rough:
+            return base * m
+    return base * 10.0
+
+
+def _ticks(lo: float, hi: float, n: int = 5) -> List[float]:
+    """Hasta ~n cortes 'lindos' que cubren [lo, hi] (incluye el 0 si entra)."""
+    import math
+    if hi <= lo:
+        hi = lo + 1.0
+    step = _nice_step((hi - lo) / max(1, n))
+    v = math.floor(lo / step) * step
+    out: List[float] = []
+    while v <= hi + step * 1e-9 and len(out) < 40:
+        out.append(round(v, 10))
+        v += step
+    return out
+
+
+def bar_chart(items: List[Dict[str, Any]], *, width: int = 860, height: int = 308,
+              segments: tuple = (("carry", "carry"), ("capital", "capital"))
+              ) -> Optional[Dict[str, Any]]:
+    """Geometría SVG de columnas apiladas estilo Excel: los segmentos positivos
+    se apilan hacia arriba desde 0 y los negativos hacia abajo; un punto marca el
+    total. Todo se calcula acá (server-side) → el template sólo dibuja.
+
+    `items` = [{"label": str, <segkey>: float, …, "total": float|None}].
+    `segments` = orden/clase CSS de cada segmento. Reutilizable por el cuadro
+    por-curva y por el comparador multi-activo (mismas clases, misma escala)."""
+    items = [it for it in (items or []) if it]
+    if not items:
+        return None
+    pad_l, pad_r, pad_t, pad_b = 48, 14, 14, 62
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+
+    tops: List[float] = [0.0]
+    bots: List[float] = [0.0]
+    for it in items:
+        pos = sum(max(float(it.get(k) or 0.0), 0.0) for k, _ in segments)
+        neg = sum(min(float(it.get(k) or 0.0), 0.0) for k, _ in segments)
+        tot = it.get("total")
+        tops.append(pos)
+        bots.append(neg)
+        if tot is not None and tot == tot:
+            tops.append(float(tot))
+            bots.append(float(tot))
+    ymax, ymin = max(tops), min(bots)
+    span = (ymax - ymin) or 1.0
+    ymax += span * 0.08
+    ymin -= span * 0.08
+
+    def Y(v: float) -> float:
+        return round(pad_t + (ymax - v) / (ymax - ymin) * plot_h, 2)
+
+    n = len(items)
+    slot = plot_w / n
+    bw = min(48.0, slot * 0.62)
+    bars: List[Dict[str, Any]] = []
+    for i, it in enumerate(items):
+        cx = round(pad_l + slot * (i + 0.5), 2)
+        x = round(cx - bw / 2.0, 2)
+        run_pos = run_neg = 0.0
+        segs: List[Dict[str, Any]] = []
+        for key, cls in segments:
+            val = float(it.get(key) or 0.0)
+            if val == 0.0:
+                continue
+            if val > 0:
+                a, b = run_pos, run_pos + val
+                run_pos = b
+            else:
+                a, b = run_neg + val, run_neg
+                run_neg = a
+            segs.append({"x": x, "y": Y(b), "w": round(bw, 2),
+                         "h": round(abs(Y(a) - Y(b)), 2), "cls": cls, "val": val})
+        tot = it.get("total")
+        has_tot = tot is not None and tot == tot
+        dot_y = Y(float(tot)) if has_tot else None
+        top_y = Y(run_pos)
+        bars.append({
+            "label": it.get("label") or "", "x": x, "cx": cx, "w": round(bw, 2),
+            "segs": segs, "total": (float(tot) if has_tot else None), "dot_y": dot_y,
+            "label_y": min(top_y, dot_y) if dot_y is not None else top_y,
+        })
+    yticks = [{"v": v, "y": Y(v)} for v in _ticks(ymin, ymax, 5) if ymin <= v <= ymax]
+    return {
+        "w": width, "h": height, "zero_y": Y(0.0), "x0": pad_l, "x1": width - pad_r,
+        "xlabel_y": height - pad_b + 16, "legend_y": height - 12,
+        "bars": bars, "yticks": yticks,
+    }
+
+
+def chart_from_tr_rows(rows: List[Dict[str, Any]], **kw) -> Optional[Dict[str, Any]]:
+    """Adaptador: filas de `compute_rows` → ítems del gráfico. La descomposición
+    es la misma que ya verifica el test (carry+compresión+ajuste = tr_total):
+
+        Carry (rosa)              = carry + ajuste     (cupón/rolldown + proyección)
+        Ganancia de capital (azul)= compresión         (Δprecio por Δyield, ±)
+        Retorno Total (punto)     = tr_total
+    """
+    items = [{
+        "label": r.get("code"),
+        "carry": (r.get("carry") or 0.0) + (r.get("ajuste") or 0.0),
+        "capital": r.get("compresion") or 0.0,
+        "total": r.get("tr_total"),
+    } for r in rows]
+    return bar_chart(items, **kw)

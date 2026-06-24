@@ -1108,3 +1108,16 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .nss-params > div.grp { border-top: 1px solid var(--border-soft); padding-top: 6px; margin-top: 2px; }
 .nss-params span { font-size: 11px; color: var(--text-muted); }
 .nss-params b { font-variant-numeric: tabular-nums; }
+
+/* ── Total Return — gráfico de columnas apiladas (SVG server-side) ─────── */
+:root { --tr-carry: #cf8d8d; --tr-capital: #5b8ff9; }
+[data-theme="light"] { --tr-carry: #c0736f; --tr-capital: #3d6fd0; }
+.tr-chart { display: block; width: 100%; height: auto; font-variant-numeric: tabular-nums; }
+.tr-chart .tr-grid { stroke: var(--border-soft); stroke-width: 1; }
+.tr-chart .tr-zero { stroke: var(--border); stroke-width: 1.4; }
+.tr-chart .tr-vlabel, .tr-chart .tr-xlabel { fill: var(--text-muted); font-size: 11px; }
+.tr-chart .tr-total { fill: var(--text-soft); font-size: 11px; font-weight: 600; }
+.tr-chart .tr-bar.carry { fill: var(--tr-carry); }
+.tr-chart .tr-bar.capital { fill: var(--tr-capital); }
+.tr-chart .tr-dot { fill: var(--text); stroke: var(--panel); stroke-width: 1; }
+.tr-chart .tr-legend text { fill: var(--text-muted); font-size: 11px; }

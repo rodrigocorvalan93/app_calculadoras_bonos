@@ -153,9 +153,10 @@ async def total_return_table(
     tr_rows, dias = await loop.run_in_executor(
         _row_pool, lambda: _cached_or(key, _compute))
 
+    chart = tr_svc.chart_from_tr_rows(tr_rows)
     return _render(request, "partials/total_return_table.html",
                    rows=tr_rows, dias=dias, terminal=terminal, settle=settle,
-                   curve=curve, mode=mode)
+                   curve=curve, mode=mode, chart=chart)
 
 
 def _cached_or(key, fn):
