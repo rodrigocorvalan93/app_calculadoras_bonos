@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     oms_max_notional_usd: float = 5_000_000.0     # tope por orden, hard-dollar (USD/USB)
     oms_price_band_pct: float = 10.0              # banda vs last/close (fat-finger)
 
+    # Comitentes (cuentas) por broker — números SENSIBLES, fuera de git. JSON
+    # {broker: {etiqueta: nro}}, ej {"lbo": {"PYMES": "54437"}, "cocos": {"PERSO": "27404"}}.
+    # Se carga como secret del entorno (env var OMS_COMITENTES) o en .env/secrets.txt.
+    # Vacío ⇒ el panel usa sólo lo que devuelve el broker por REST (genérico).
+    oms_comitentes: str = ""
+
     # Phase 2 warmup daemon. Interval must stay under the curve metrics
     # cache TTL (20 s) so a sweep refreshes every bucket before it expires
     # and the curves table never hits a cold cache mid-session.

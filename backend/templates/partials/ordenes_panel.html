@@ -9,9 +9,10 @@
   <div class="card-body" style="font-size:12.5px">
     {% for a in accounts %}
       <button type="button" class="btn-primary" style="font-size:11px;margin:2px"
-              onclick="document.getElementById('acct-input').value='{{ a.get('name', a.get('accountName', a.get('id',''))) }}'">
-        {{ a.get('name', a.get('accountName', a.get('id','?'))) }}</button>
-    {% else %}<span class="muted">Sin cuentas (¿login REST pendiente?).</span>{% endfor %}
+              title="comitente {{ a.id }}{% if a.source == 'config' %} · fondo configurado{% endif %}"
+              onclick="document.getElementById('acct-input').value='{{ a.id }}'">
+        {{ a.label }}{% if a.label != a.id %} <span class="muted" style="font-weight:400">{{ a.id }}</span>{% endif %}</button>
+    {% else %}<span class="muted">Sin comitentes (cargá OMS_COMITENTES o conectá el broker).</span>{% endfor %}
   </div>
 </div>
 {% if account %}

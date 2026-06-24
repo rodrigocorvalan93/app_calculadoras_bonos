@@ -96,12 +96,15 @@ async def ordenes_panel(request: Request, account: str = "") -> HTMLResponse:
     accs: List[Dict[str, Any]] = []
     orders: List[Dict[str, Any]] = []
     err = None
-    # Guard: si la sesión REST no está logueada, NO tocamos la red — si no, cada
-    # poll (15 s) colgaría ~5 s en el connect timeout (paper/offline). Mostramos
-    # el aviso y listo; cuando haya login, el panel se enciende solo.
+    # Guard: sin login REST NO tocamos la red (cada poll colgaría ~5 s en el
+    # connect timeout, paper/offline). Igual mostramos las comitentes
+    # configuradas (OMS_COMITENTES): no requieren sesión y sirven para armar
+    # órdenes PAPER. Sólo si tampoco hay configuradas avisamos que falta login.
     from backend.services.primary_ws import get_ws_client
     if not get_ws_client().authenticated:
-        err = "Sesión del broker sin login (paper/offline). Conectá en /conexion."
+        accs = oms.configured_comitentes()
+        if not accs:
+            err = "Sesión del broker sin login (paper/offline). Conectá en /conexion."
     else:
         try:
             accs = await oms.accounts()
@@ -109,6 +112,7 @@ async def ordenes_panel(request: Request, account: str = "") -> HTMLResponse:
                 orders = await oms.live_orders(account)
         except Exception as exc:  # noqa: BLE001
             err = str(exc)
+            accs = oms.configured_comitentes()   # fallback: al menos los configurados
     return _render(request, "partials/ordenes_panel.html",
                    accounts=accs, orders=orders, account=account, err=err, **_base_ctx())
 

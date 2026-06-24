@@ -17,7 +17,9 @@ difiere, el error crudo se muestra en el panel para ajustar el path.
 """
 from __future__ import annotations
 
+import functools
 import json
+import logging
 import threading
 import time
 import uuid
@@ -26,6 +28,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.config import settings
+
+logger = logging.getLogger("oms")
 
 _AUDIT_PATH = Path(__file__).resolve().parents[2] / "oms_audit.jsonl"
 _audit_lock = threading.Lock()
@@ -194,11 +198,94 @@ def pop_token(tok: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
+# ── Comitentes (cuentas) configurables por broker ─────────────────────────
+# El broker suele exponer sólo una comitente genérica por REST, pero el
+# operador maneja muchos fondos cuyos números son SENSIBLES. Se cargan por el
+# secret OMS_COMITENTES (env var / .env / secrets.txt) — NUNCA se commitean —
+# como JSON {broker: {etiqueta: nro}}, ej:
+#   {"lbo": {"PYMES": "54437", ...}, "cocos": {"PERSO": "27404"}}
+# El broker activo se deduce del host (settings.primary_base_url, que /conexion
+# repunta en caliente). `accounts()` hace MERGE de estas con las del broker.
+@functools.lru_cache(maxsize=1)
+def _comitentes_all() -> Dict[str, Dict[str, str]]:
+    """Parsea OMS_COMITENTES una sola vez (el secret no cambia en runtime, sólo
+    el broker activo). {} si está vacío o el JSON no es válido."""
+    raw = (settings.oms_comitentes or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning("OMS_COMITENTES no es JSON válido — se ignora (el panel cae al genérico del broker)")
+        return {}
+    if not isinstance(data, dict):
+        logger.warning("OMS_COMITENTES debe ser un objeto {broker: {etiqueta: nro}} — se ignora")
+        return {}
+    return data
+
+
+def _active_broker_key() -> str:
+    """Clave del broker activo deducida del host (api.LBO/COCOS/LATIN.xoms…)."""
+    host = (settings.primary_base_url or "").lower()
+    for key in ("lbo", "cocos", "latin"):
+        if key in host:
+            return key
+    return "default"
+
+
+def configured_comitentes() -> List[Dict[str, str]]:
+    """Comitentes del secret para el broker activo, en el orden cargado. Sin
+    red → disponibles aunque no haya sesión. [] si no hay nada configurado."""
+    broker_map = _comitentes_all().get(_active_broker_key()) or {}
+    out: List[Dict[str, str]] = []
+    for label, num in broker_map.items():
+        num = str(num).strip()
+        if num:
+            out.append({"id": num, "label": str(label).strip() or num, "source": "config"})
+    return out
+
+
+def _normalize_account(a: Any) -> Dict[str, str]:
+    """Cuenta cruda del broker REST → {id, label, source}. Defensivo con el
+    shape (la API Primary/XOMS varía: id / accountName / name / brokerId)."""
+    if not isinstance(a, dict):
+        return {"id": str(a).strip(), "label": str(a).strip(), "source": "broker"}
+    num = str(a.get("id") or a.get("accountName") or a.get("name") or a.get("brokerId") or "").strip()
+    label = str(a.get("name") or a.get("accountName") or num or "?").strip()
+    return {"id": num, "label": label, "source": "broker"}
+
+
+def _merge_comitentes(cfg: List[Dict[str, str]], broker: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Unión cfg + broker, deduplicada por número de comitente: primero las
+    configuradas (en su orden, con su etiqueta de fondo), después las que sólo
+    expone el broker. Si un número está en ambas, gana la etiqueta de cfg."""
+    seen = {c["id"] for c in cfg if c.get("id")}
+    out = list(cfg)
+    for b in broker:
+        bid = b.get("id", "")
+        if bid and bid not in seen:
+            out.append(b)
+            seen.add(bid)
+    return out
+
+
 # ── Broker REST (Etapa A: lectura · Etapa C: envío con OMS_LIVE=1) ─────────
 async def accounts() -> List[Dict[str, Any]]:
-    from backend.services.primary_ws import get_ws_client
-    d = await get_ws_client().get_json_checked("rest/accounts")
-    return d.get("accounts", []) if isinstance(d, dict) else []
+    """Comitentes para el panel: MERGE de las configuradas (secret, por broker)
+    con las que el broker expone por REST, deduplicadas por número. Si el broker
+    falla pero hay configuradas, se muestran igual (no rompe el panel); sin
+    configuradas, el error del broker se propaga como hasta ahora."""
+    cfg = configured_comitentes()
+    broker: List[Dict[str, str]] = []
+    try:
+        from backend.services.primary_ws import get_ws_client
+        d = await get_ws_client().get_json_checked("rest/accounts")
+        raw = d.get("accounts", []) if isinstance(d, dict) else []
+        broker = [_normalize_account(a) for a in raw]
+    except Exception:  # noqa: BLE001 — best-effort: con cfg seguimos; sin cfg, propaga
+        if not cfg:
+            raise
+    return _merge_comitentes(cfg, broker)
 
 
 async def live_orders(account: str) -> List[Dict[str, Any]]:

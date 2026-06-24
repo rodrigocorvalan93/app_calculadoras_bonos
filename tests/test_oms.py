@@ -177,3 +177,68 @@ async def test_live_endpoint_requiere_confirmacion() -> None:
             assert r3.status_code == 200 and oms.is_live() is False     # de vuelta paper
     finally:
         oms.set_live(None)
+
+
+def test_comitentes_merge_y_broker_activo() -> None:
+    """OMS_COMITENTES (JSON {broker:{etiqueta:nro}}) → comitentes del broker
+    ACTIVO (deducido del host, hot-swappeable), mergeadas con las del broker
+    REST y deduplicadas por número; la etiqueta de cfg gana en el dup."""
+    import json as _json
+    orig_cfg, orig_url = settings.oms_comitentes, settings.primary_base_url
+    try:
+        settings.oms_comitentes = _json.dumps({
+            "lbo": {"PYMES": "54437", "PERSO": "54626"},
+            "cocos": {"OTRO": "27404"},
+        })
+        oms._comitentes_all.cache_clear()                  # el secret cambió: invalidar
+        settings.primary_base_url = "https://api.lbo.xoms.com.ar/"
+        cfg = oms.configured_comitentes()
+        assert [c["id"] for c in cfg] == ["54437", "54626"]        # sólo LBO, en orden
+        assert all(c["source"] == "config" for c in cfg) and cfg[0]["label"] == "PYMES"
+        # Hot-swap de broker → cambian las comitentes sin reiniciar (key no cacheada)
+        settings.primary_base_url = "https://api.cocos.xoms.com.ar/"
+        assert [c["id"] for c in oms.configured_comitentes()] == ["27404"]
+        # Merge: dedupe por número; cfg primero, la del broker que ya está se colapsa
+        settings.primary_base_url = "https://api.lbo.xoms.com.ar/"
+        cfg = oms.configured_comitentes()
+        broker = [oms._normalize_account({"id": "54437", "name": "Generic"}),   # dup
+                  oms._normalize_account({"id": "99999", "name": "Broker-only"})]
+        merged = oms._merge_comitentes(cfg, broker)
+        assert [m["id"] for m in merged] == ["54437", "54626", "99999"]
+        assert merged[0]["label"] == "PYMES"               # gana la etiqueta de cfg
+        assert merged[-1]["source"] == "broker"
+        # JSON inválido → {} (no rompe; cae al genérico del broker)
+        settings.oms_comitentes = "{not json"
+        oms._comitentes_all.cache_clear()
+        assert oms.configured_comitentes() == []
+    finally:
+        settings.oms_comitentes, settings.primary_base_url = orig_cfg, orig_url
+        oms._comitentes_all.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_panel_muestra_comitentes_configuradas_offline() -> None:
+    """Sin login REST el panel igual lista las comitentes de OMS_COMITENTES (no
+    requieren sesión) en vez del cartel 'sin login' — para armar PAPER offline."""
+    import json as _json
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import primary_ws
+
+    orig_cfg, orig_url = settings.oms_comitentes, settings.primary_base_url
+    try:
+        settings.primary_base_url = "https://api.lbo.xoms.com.ar/"
+        settings.oms_comitentes = _json.dumps({"lbo": {"PYMES": "54437"}})
+        oms._comitentes_all.cache_clear()
+        ws = primary_ws.reset_ws_client("https://api.lbo.xoms.com.ar/")
+        assert ws.authenticated is False                          # offline (sin cookies)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+            pa = await ac.get("/ordenes/panel")
+            assert pa.status_code == 200
+            assert "PYMES" in pa.text and "54437" in pa.text       # fondo configurado visible
+            assert "Broker (lectura)" not in pa.text               # NO cae al alert de error
+    finally:
+        settings.oms_comitentes, settings.primary_base_url = orig_cfg, orig_url
+        oms._comitentes_all.cache_clear()
