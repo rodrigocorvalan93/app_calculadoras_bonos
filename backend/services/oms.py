@@ -137,12 +137,18 @@ def blotter(n: int = 60) -> List[Dict[str, Any]]:
 
 def validate(code: str, side: str, qty: float, price: Optional[float],
              account: str, last_ref: Optional[float], moneda: str = "ARS",
-             ordtype: str = "limit") -> Optional[str]:
+             ordtype: str = "limit", theo_ref: Optional[float] = None,
+             confirmed: bool = False) -> Optional[str]:
     """Validaciones pre-trade. Devuelve el motivo del rechazo o None si pasa.
 
     - Tope de notional EN LA MONEDA DEL BONO: ARS (oms_max_notional) para pesos,
       USD (oms_max_notional_usd) para hard-dollar (moneda USD/USB).
-    - Banda de precio (fat-finger) sólo para Limit; Market toma lo que haya.
+    - Banda de precio (fat-finger) sólo para Limit; Market toma lo que haya. La
+      referencia es, en orden: mercado (last/close) → valor técnico `theo_ref`
+      (banda más ancha) → si no hay ninguna, se exige `confirmed` (config
+      `oms_require_ref_confirm`). Esto cierra el agujero del ON ilíquido sin
+      cotización, donde antes NO se chequeaba banda y un precio mal tipeado
+      (p.ej. sub-precio 1000×) pasaba directo.
     """
     if _kill["on"]:
         return "KILL-SWITCH activado: envíos bloqueados."
@@ -160,17 +166,27 @@ def validate(code: str, side: str, qty: float, price: Optional[float],
     is_usd = (moneda or "ARS").upper() in ("USD", "USB")
     cap = settings.oms_max_notional_usd if is_usd else settings.oms_max_notional
     unit = "USD" if is_usd else "ARS"
-    ref_px = price if not is_market else last_ref   # market estima con la referencia
+    ref_px = price if not is_market else (last_ref or theo_ref)  # market estima con la referencia
     if ref_px:
         notional = qty * ref_px / 100.0             # bonos cotizan por VN 100
         if notional > cap:
             return (f"Notional estimado {notional:,.0f} {unit} supera el tope "
                     f"{cap:,.0f} {unit}.")
-    if not is_market and last_ref:
-        band = settings.oms_price_band_pct / 100.0
-        if abs(price / last_ref - 1.0) > band:
-            return (f"Precio {price} fuera de la banda ±{settings.oms_price_band_pct:.0f}% "
-                    f"vs referencia {last_ref} (fat-finger guard).")
+    if not is_market:                               # banda fat-finger sólo para Limit
+        if last_ref:
+            band = settings.oms_price_band_pct / 100.0
+            if abs(price / last_ref - 1.0) > band:
+                return (f"Precio {price} fuera de la banda ±{settings.oms_price_band_pct:.0f}% "
+                        f"vs mercado {last_ref} (fat-finger guard).")
+        elif theo_ref and theo_ref > 0:
+            band = settings.oms_theo_band_pct / 100.0
+            if abs(price / theo_ref - 1.0) > band:
+                return (f"Precio {price} fuera de la banda ±{settings.oms_theo_band_pct:.0f}% "
+                        f"vs valor técnico {theo_ref:,.2f} (sin cotización de mercado; "
+                        f"revisalo o confirmá manualmente).")
+        elif settings.oms_require_ref_confirm and not confirmed:
+            return ("Sin referencia de mercado ni valor técnico para validar el precio. "
+                    "Confirmá manualmente (o usá Market) para enviar.")
     return None
 
 

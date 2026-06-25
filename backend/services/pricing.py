@@ -40,6 +40,7 @@ import copy
 import logging
 import threading
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -51,6 +52,40 @@ from . import bond_universe
 logger = logging.getLogger("backend.pricing")
 
 _bond_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
+
+# fx_override (what-if de FX para DLK/A3500) toca el global `rentafija.inputs`.
+# Serializamos + restauramos para NO corromper el A3500 de todo el proceso.
+_fx_override_lock = threading.Lock()
+
+
+@contextmanager
+def _a3500_override_ctx(fx_override: Optional[float]):
+    """Inyecta `fx_override` en `rentafija.inputs['a3500']` SÓLO durante el
+    cálculo y lo restaura SIEMPRE (early-return o excepción incluidas).
+
+    Antes esto se escribía sin restaurar y con clave string contra un índice de
+    `date` → la serie A3500 global quedaba podrida para TODOS los cálculos
+    DLK/A3500 hasta reiniciar (y encima ni precisaba el bono objetivo). Acá:
+    clave `date` correcta, snapshot+restore en `finally`, y lock para que dos
+    what-if concurrentes no se pisen el snapshot. Como hoy queda al final del
+    índice, `iloc[-1]` (el A3500 'actual' que lee el calc DLK) toma el override."""
+    import rentafija
+    if fx_override is None:
+        yield
+        return
+    with _fx_override_lock:
+        a3500 = rentafija.inputs["a3500"]
+        key = date.today()
+        had = key in a3500.index
+        prev = a3500.at[key, "tca3500"] if had else None
+        try:
+            a3500.at[key, "tca3500"] = float(fx_override)
+            yield
+        finally:
+            if had:
+                a3500.at[key, "tca3500"] = prev
+            else:
+                a3500.drop(index=key, inplace=True, errors="ignore")
 
 NAN_METRICS: Dict[str, float] = {
     "tirea": float("nan"),
@@ -398,8 +433,6 @@ def compute_metrics(
       tna     → value is TNA in decimal, inverted with `tirea_from_tna`
       margen  → spread over benchmark; TNA target = bench/100 + margen
     """
-    import rentafija
-
     base = dict(NAN_METRICS)
     base["codigo"] = code
     base["mode"] = mode
@@ -416,44 +449,38 @@ def compute_metrics(
     canonical_settle = _safe_settle(settle)
     base["fecha_settlement_input"] = canonical_settle
 
-    if fx_override is not None:
+    with _a3500_override_ctx(fx_override):       # what-if FX aislado + restaurado
         try:
-            fecha_hoy = date.today().isoformat()
-            rentafija.inputs["a3500"].loc[fecha_hoy, "tca3500"] = float(fx_override)
+            if mode == "precio":
+                obj.calcula_tirea(float(value) / 100.0, canonical_settle)
+                obj.calcula_intereses_corridos(canonical_settle)
+            elif mode == "tir":
+                obj.calcula_precio(float(value), canonical_settle)
+                obj.calcula_intereses_corridos(canonical_settle)
+            elif mode == "tna":
+                obj.generate_cashflows(canonical_settle)
+                tir = tirea_from_tna(obj, float(value), freq_override, base_override)
+                obj.calcula_precio(tir, canonical_settle)
+                obj.calcula_intereses_corridos(canonical_settle)
+            elif mode == "margen":
+                idx_name = getattr(obj, "index", None)
+                bench_pct = _bench_pct(idx_name)
+                ajuste = bench_pct if np.isfinite(bench_pct) else 0.0
+                tna_target = (ajuste / 100.0) + float(value)
+                obj.generate_cashflows(canonical_settle)
+                tir = tirea_from_tna(obj, tna_target, freq_override, base_override)
+                obj.calcula_precio(tir, canonical_settle)
+                obj.calcula_intereses_corridos(canonical_settle)
+            else:
+                base["error"] = f"Modo desconocido: {mode!r}"
+                return base
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[pricing] fx_override inject failed: %s", exc)
-
-    try:
-        if mode == "precio":
-            obj.calcula_tirea(float(value) / 100.0, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
-        elif mode == "tir":
-            obj.calcula_precio(float(value), canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
-        elif mode == "tna":
-            obj.generate_cashflows(canonical_settle)
-            tir = tirea_from_tna(obj, float(value), freq_override, base_override)
-            obj.calcula_precio(tir, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
-        elif mode == "margen":
-            idx_name = getattr(obj, "index", None)
-            bench_pct = _bench_pct(idx_name)
-            ajuste = bench_pct if np.isfinite(bench_pct) else 0.0
-            tna_target = (ajuste / 100.0) + float(value)
-            obj.generate_cashflows(canonical_settle)
-            tir = tirea_from_tna(obj, tna_target, freq_override, base_override)
-            obj.calcula_precio(tir, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
-        else:
-            base["error"] = f"Modo desconocido: {mode!r}"
+            # debug-level: a single matured or quirky bond on a 100+ row
+            # curve must not flood the logs with stack traces every poll.
+            # YAS callers that need the full trace can re-enable DEBUG.
+            logger.debug("[pricing] %s mode=%s value=%s failed: %s", code, mode, value, exc)
+            base["error"] = f"{type(exc).__name__}: {exc}"
             return base
-    except Exception as exc:  # noqa: BLE001
-        # debug-level: a single matured or quirky bond on a 100+ row
-        # curve must not flood the logs with stack traces every poll.
-        # YAS callers that need the full trace can re-enable DEBUG.
-        logger.debug("[pricing] %s mode=%s value=%s failed: %s", code, mode, value, exc)
-        base["error"] = f"{type(exc).__name__}: {exc}"
-        return base
 
     tirea = float(getattr(obj, "tirea", np.nan))
     tna_raw = float(getattr(obj, "tna", np.nan))

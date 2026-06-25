@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     oms_max_notional: float = 1_000_000_000.0     # tope por orden, bonos ARS
     oms_max_notional_usd: float = 5_000_000.0     # tope por orden, hard-dollar (USD/USB)
     oms_price_band_pct: float = 10.0              # banda vs last/close (fat-finger)
+    # Sin cotización de mercado: banda (más ancha) vs el valor técnico del bono,
+    # y si tampoco hay teórico, exigir confirmación manual antes de enviar en LIVE.
+    oms_theo_band_pct: float = 50.0               # banda vs valor técnico (fallback)
+    oms_require_ref_confirm: bool = True          # bloquear orden sin NINGUNA referencia
 
     # Comitentes (cuentas) por broker — números SENSIBLES, fuera de git. JSON
     # {broker: {etiqueta: nro}}, ej {"lbo": {"PYMES": "54437"}, "cocos": {"PERSO": "27404"}}.

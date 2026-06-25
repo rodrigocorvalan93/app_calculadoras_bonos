@@ -47,6 +47,10 @@
                       hx-trigger="change" hx-include="[name=code]">
                 <option value="24hs" {% if plazo=='24hs' %}selected{% endif %}>24hs</option>
                 <option value="CI" {% if plazo=='CI' %}selected{% endif %}>CI</option></select></label>
+            <label class="field" style="min-width:auto;align-self:flex-end"
+                   title="Habilita enviar aunque no haya cotización de mercado ni valor técnico para validar el precio (salta el guard fat-finger). Usar con cuidado.">
+              <span style="font-size:10px">Sin ref.</span>
+              <input type="checkbox" name="confirm_no_ref" value="1"></label>
           </div>
 
           {# Single: cantidad + comitente #}
