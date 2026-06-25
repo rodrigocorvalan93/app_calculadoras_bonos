@@ -81,6 +81,27 @@ def _cauc_al_plazo(tna: float, dias: int) -> float:
     return (1.0 + tna / 365.0) ** dias - 1.0
 
 
+def _implied_infl_monthly(settle: str, terminal: str) -> Optional[float]:
+    """Inflación mensual implícita en la proyección CER actual (placeholder del
+    input). = (crecimiento CER proyectado)^(1/meses) − 1."""
+    sd, td = _parse_d(settle), _parse_d(terminal)
+    if not sd or not td or td <= sd:
+        return None
+
+    class _O:
+        ajuste_sobre_capital = "CER"
+        dias_lag_ajuste_base = -10
+
+    try:
+        drift = float(tr_svc._index_drift(_O(), sd, td))   # sin override → serie real
+    except Exception:  # noqa: BLE001
+        return None
+    months = (td - sd).days / 30.4375
+    if months <= 0 or drift <= -1.0:
+        return None
+    return (1.0 + drift) ** (1.0 / months) - 1.0
+
+
 async def _cat_rows(cat: esc.Cat, plazo: str) -> List[Dict[str, Any]]:
     """Filas de la curva de la categoría filtradas al bucket de duration y a
     bonos con TIREA + duration válidas."""
@@ -105,9 +126,11 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
         ytm = esc._avg([r.get("tirea") for r in rows])
         cats.append({"key": cat.key, "label": cat.label, "fx": cat.fx,
                      "n": len(rows), "ytm": ytm})
+    infl_pct = _implied_infl_monthly(settle, terminal)  # mensual implícita (placeholder)
     return _render(request, "escenario.html", cats=cats, terminal=terminal, plazo=plazo,
                    settle=settle, dias=dias, deva_pct=deva * 100.0,
-                   cauc_tna_pct=cauc_tna * 100.0, anchor=1.0)
+                   cauc_tna_pct=cauc_tna * 100.0, anchor=1.0,
+                   infl_pct=(infl_pct * 100.0) if infl_pct is not None else None)
 
 
 def _per_cat_params(request: Request) -> Tuple[Dict[str, float], Dict[str, float]]:
@@ -132,7 +155,7 @@ async def escenario_table(
     plazo: str = "24hs", terminal: str = "",
     cauc_tna: str = "", cauc_plazo: str = "",
     ccl_deva: str = "", mep_deva: str = "",
-    anchor: str = "", use_manual: str = "",
+    anchor: str = "", use_manual: str = "", infl: str = "",
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     terminal = (terminal or "").strip() or _default_terminal()
@@ -148,6 +171,8 @@ async def escenario_table(
     cauc = (_num(cauc_plazo) / 100.0) if _num(cauc_plazo) is not None \
         else _cauc_al_plazo(tna, dias)
     anchor_f = _num(anchor) if _num(anchor) is not None else 1.0
+    # Escenario de inflación mensual (%) → CER/UVA. Vacío = usar la proyección real.
+    infl_monthly = (_num(infl) / 100.0) if _num(infl) is not None else None
 
     ytm_by_cat, slope_by_cat = _per_cat_params(request)
     overrides: Dict[str, float] = {}
@@ -181,10 +206,12 @@ async def escenario_table(
                    for r in rows if r.get("code")}
            for (c, rows, y1m, _fx) in prepared}
     key = (plazo, terminal, settle, round(ccl_proy, 6), round(mep_proy, 6), round(cauc, 6),
+           None if infl_monthly is None else round(infl_monthly, 6),
            hashlib.md5(json.dumps(sig, sort_keys=True).encode()).hexdigest())
 
     def _compute() -> List[Dict[str, Any]]:
-        return [esc.compute_category(cat, rows, y1m, fx, ccl_proy, cauc, terminal, settle)
+        return [esc.compute_category(cat, rows, y1m, fx, ccl_proy, cauc, terminal, settle,
+                                     infl_monthly=infl_monthly)
                 for (cat, rows, y1m, fx) in prepared]
 
     loop = asyncio.get_running_loop()
@@ -194,4 +221,5 @@ async def escenario_table(
     tea = (1.0 + tna / 365.0) ** 365 - 1.0
     return _render(request, "partials/escenario_table.html",
                    cats=cats, chart=chart, terminal=terminal, settle=settle, dias=dias,
-                   ccl_proy=ccl_proy, mep_proy=mep_proy, cauc=cauc, tna=tna, tea=tea)
+                   ccl_proy=ccl_proy, mep_proy=mep_proy, cauc=cauc, tna=tna, tea=tea,
+                   infl_monthly=infl_monthly)

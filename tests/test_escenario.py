@@ -159,6 +159,38 @@ def test_bond_tr_want_duration_skips_durf_same_math():
     assert abs(full["carry"] - fast["carry"]) < 1e-12
 
 
+def test_infl_override_cer_solo_mueve_ajuste():
+    """El override de inflación mueve el AJUSTE de CER/UVA = (1+infl)^meses − 1,
+    pero NO la parte cara (carry/tr_real) — esa es real, libre de inflación."""
+    settle, terminal, sd, td = _dates()
+    base = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5, want_duration=False)
+    inf2 = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5,
+                       want_duration=False, infl_monthly=0.02)
+    inf5 = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5,
+                       want_duration=False, infl_monthly=0.05)
+    assert base and inf2 and inf5
+    assert abs(inf2["carry"] - base["carry"]) < 1e-12        # carry no cambia
+    assert abs(inf5["tr_real"] - base["tr_real"]) < 1e-12    # tr_real no cambia
+    assert inf5["ajuste"] > inf2["ajuste"]                   # más inflación → más ajuste
+    months = (td - sd).days / 30.4375
+    drift2 = (1 + inf2["tr_total"]) / (1 + inf2["tr_real"]) - 1
+    assert abs(drift2 - ((1.02) ** months - 1.0)) < 1e-9     # = (1+infl)^meses − 1
+
+
+def test_infl_override_no_toca_dlk():
+    """La inflación NO toca el ajuste de los dollar-linked (A3500 = deva, no CPI)."""
+    settle, terminal, sd, td = _dates()
+    code = next(iter(curves.build_curve_codes().get("dolarlinked", [])), None)
+    if not code:
+        pytest.skip("sin dollar-linked")
+    base = tr._bond_tr(code, 0.05, 0.05, terminal, settle, sd, td, 1.0, want_duration=False)
+    inf = tr._bond_tr(code, 0.05, 0.05, terminal, settle, sd, td, 1.0,
+                      want_duration=False, infl_monthly=0.10)
+    if not base or not inf:
+        pytest.skip("dlk no calculable")
+    assert abs(inf["ajuste"] - base["ajuste"]) < 1e-9        # mismo ajuste (A3500), no inflación
+
+
 def test_chart_from_categories():
     cats = [
         {"label": "A", "summary": {"carry": 0.08, "capital": 0.01, "total": 0.09}},

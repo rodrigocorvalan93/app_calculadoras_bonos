@@ -12,7 +12,8 @@
   <div class="card-title"><span>Escenario base → {{ terminal }}</span>
     <span class="card-title-aux">settle {{ settle }} · {{ dias }} días ·
       caución TNA {{ tna | ar_pct(1) }} / TEA {{ tea | ar_pct(1) }} / al plazo {{ cauc | ar_pct(2) }} ·
-      deva CCL {{ ccl_proy | ar_pct(2) }} / MEP {{ mep_proy | ar_pct(2) }}</span></div>
+      deva CCL {{ ccl_proy | ar_pct(2) }} / MEP {{ mep_proy | ar_pct(2) }}{% if infl_monthly is not none %} ·
+      inflación {{ (infl_monthly * 100) | ar_num(2) }}% mens. → CER/UVA{% endif %}</span></div>
   <div class="card-body" style="padding:0">
     <form hx-get="/escenario/table" hx-target="#esc-table" hx-swap="innerHTML"
           hx-include="#esc-form, [name^='y1__']" class="table-tools muted">

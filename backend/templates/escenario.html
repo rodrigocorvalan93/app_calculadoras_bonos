@@ -33,6 +33,10 @@
         <label class="field"><span>Deva MEP (%)</span>
           <input type="text" name="mep_deva" value="{{ deva_pct | ar_num(2) }}" placeholder="11,75"
                  title="Deva esperada del MEP al horizonte (bonares). Modelá la brecha cargando un valor distinto al CCL / A3500."></label>
+        <label class="field"><span>Inflación mens. (%)</span>
+          <input type="text" name="infl" value="" autocomplete="off"
+                 placeholder="{{ infl_pct | ar_num(2) if infl_pct is not none else 'proy.' }}"
+                 title="Escenario de inflación MENSUAL → pega en CER y UVA (ajuste compuesto sobre el horizonte). Vacío = usar la proyección CER actual ({{ infl_pct | ar_num(2) if infl_pct is not none else '—' }}% implícito)."></label>
         <label class="field"><span>Anchor (duration)</span>
           <input type="text" name="anchor" value="{{ anchor | ar_num(2) }}"
                  title="Duration donde la pendiente no tilta el Exit YTM."></label>

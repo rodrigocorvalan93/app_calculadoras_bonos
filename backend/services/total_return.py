@@ -80,31 +80,46 @@ def _nearest_prior(df, target, col) -> Optional[float]:
         return None
 
 
-def _index_drift(obj, settle_d: date, terminal_d: date) -> float:
-    """Crecimiento del índice proyectado (CER/UVA/A3500) entre settle y terminal,
-    lagueado con `dias_lag_ajuste_base`. 0 para bonos sin ajuste de capital."""
-    ajuste = (getattr(obj, "ajuste_sobre_capital", None) or "").upper()
+def _drift_from_meta(ajuste_raw: Optional[str], lag: int, settle_d: date,
+                     terminal_d: date, infl_monthly: Optional[float] = None) -> float:
+    """Crecimiento del índice (CER/UVA/A3500) entre settle y terminal a partir de
+    los METADATOS del bono (no del objeto) → se aplica sobre una base cacheada sin
+    recopiar el bono. `infl_monthly` (decimal, 0.02 = 2 % mensual): si se pasa, CER
+    y UVA usan inflación COMPUESTA sobre el horizonte en vez de cer/uva_proyectado,
+    sin tocar las series globales. A3500 (deva dollar-linked) no se toca con
+    inflación. 0 para bonos sin ajuste de capital."""
+    ajuste = (ajuste_raw or "").upper()
     if not ajuste:
         return 0.0
+    if infl_monthly is not None and ("CER" in ajuste or "UVA" in ajuste):
+        # El lag corre ambos extremos por igual → el span (meses) no cambia.
+        months = max(0.0, (terminal_d - settle_d).days / 30.4375)
+        return (1.0 + float(infl_monthly)) ** months - 1.0
     import rentafija
-    lag = int(getattr(obj, "dias_lag_ajuste_base", -10) or -10)
     sl = rentafija.n_dias_laborales(settle_d, lag)
     tl = rentafija.n_dias_laborales(terminal_d, lag)
     inputs = rentafija.inputs
 
-    def _drift(key: str, col: str) -> float:
-        df = inputs.get(key)
-        cs = _nearest_prior(df, sl, col)
-        ct = _nearest_prior(df, tl, col)
+    def _d(key: str, col: str) -> float:
+        cs = _nearest_prior(inputs.get(key), sl, col)
+        ct = _nearest_prior(inputs.get(key), tl, col)
         return float(ct / cs - 1.0) if (cs and ct and cs > 0) else 0.0
 
     if "CER" in ajuste:
-        return _drift("cer_proyectado", "CER")
+        return _d("cer_proyectado", "CER")
     if "UVA" in ajuste:
-        return _drift("uva_proyectado", "UVA")
+        return _d("uva_proyectado", "UVA")
     if "A3500" in ajuste:
-        return _drift("a3500_proyectado", "tca3500")
+        return _d("a3500_proyectado", "tca3500")
     return 0.0
+
+
+def _index_drift(obj, settle_d: date, terminal_d: date,
+                 infl_monthly: Optional[float] = None) -> float:
+    """Wrapper de `_drift_from_meta` para llamadas que ya tienen el objeto bono."""
+    return _drift_from_meta(getattr(obj, "ajuste_sobre_capital", None),
+                            int(getattr(obj, "dias_lag_ajuste_base", -10) or -10),
+                            settle_d, terminal_d, infl_monthly)
 
 
 # ── curva de salida (3 modos) → y1 por duration ──────────────────────────────
@@ -135,9 +150,12 @@ def scenario_nss(durations: np.ndarray, popt: List[float]) -> np.ndarray:
 
 
 # ── total return por bono ────────────────────────────────────────────────────
-def _bond_tr_compute(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
-                     settle_d: date, terminal_d: date, dur0: Optional[float],
-                     want_duration: bool = True) -> Optional[Dict[str, Any]]:
+def _bond_tr_base(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
+                  dur0: Optional[float], want_duration: bool = True) -> Optional[Dict[str, Any]]:
+    """Parte CARA y libre de inflación: los 2 `calcula_total_return` (carry/real —
+    en términos REALES para CER/UVA) + dur_f, más los metadatos del ajuste. Para
+    CER/UVA la inflación NO entra acá: entra después en el drift. Por eso se puede
+    cachear por (code,y0,y1,terminal,settle) y reusar al cambiar la inflación."""
     from backend.services import pricing
     obj = pricing._bond_obj_copy(code)
     if obj is None or not hasattr(obj, "calcula_total_return"):
@@ -153,13 +171,9 @@ def _bond_tr_compute(code: str, y0: float, y1: float, terminal_str: str, settle_
         return None
     if tr_real != tr_real or carry != carry:        # NaN
         return None
-    compresion = tr_real - carry
-    drift = _index_drift(obj, settle_d, terminal_d)
-    tr_total = (1.0 + tr_real) * (1.0 + drift) - 1.0
-    ajuste = tr_total - tr_real
-    # Duration a la fecha target (settle = terminal). La ficha CER base NO puede
-    # calcular a un settle futuro (no hay CER observado futuro → KeyError), así
-    # que para la duration final usamos la ficha proyectada `code+'j'` si existe.
+    # Duration a la fecha target. La ficha CER base NO puede calcular a un settle
+    # futuro (sin CER observado futuro → KeyError), así que usamos la proyectada
+    # `code+'j'` si existe.
     dur_f = None
     if want_duration:                               # el comparador no la usa → la saltea
         try:
@@ -173,8 +187,10 @@ def _bond_tr_compute(code: str, y0: float, y1: float, terminal_str: str, settle_
             dur_f = None
     return {
         "code": code, "dur0": dur0, "y0": y0, "dur_f": dur_f, "y1": y1,
-        "px_target": px_target, "carry": carry, "compresion": compresion,
-        "ajuste": ajuste, "tr_real": tr_real, "tr_total": tr_total,
+        "px_target": px_target, "carry": carry, "compresion": tr_real - carry,
+        "tr_real": tr_real,
+        "ajuste_meta": (getattr(obj, "ajuste_sobre_capital", None) or ""),
+        "lag": int(getattr(obj, "dias_lag_ajuste_base", -10) or -10),
     }
 
 
@@ -183,16 +199,27 @@ _bond_tr_cache = LockedTTLCache(maxsize=8192, ttl=20)
 
 def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
              settle_d: date, terminal_d: date, dur0: Optional[float],
-             want_duration: bool = True) -> Optional[Dict[str, Any]]:
-    """Wrapper cacheado (TTL 20 s) de `_bond_tr_compute`. Clave = (code, y0, y1,
-    terminal, settle, want_duration): tocar el Exit YTM de UNA categoría en el
-    comparador re-calcula sólo esa; las demás (mismo y0/y1/terminal) salen del
-    cache, bajando el costo del click de ~900 ms a ~el de una categoría. y0 ya
-    refleja el precio de mercado, así que el TTL corto basta para la frescura."""
+             want_duration: bool = True, infl_monthly: Optional[float] = None
+             ) -> Optional[Dict[str, Any]]:
+    """TR por bono. La parte cara (carry/real/dur_f, libre de inflación) se cachea
+    (TTL 20 s) por (code,y0,y1,terminal,settle,want_duration); el ajuste por índice
+    —con el override de inflación opcional `infl_monthly`— se aplica barato encima.
+    Así tocar el Exit YTM de una categoría recalcula sólo esa, y tocar la inflación
+    NO recalcula nada caro (sólo re-aplica el drift sobre la base cacheada)."""
     key = (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str, want_duration)
-    return _bond_tr_cache.get_or_compute(
-        key, lambda: _bond_tr_compute(code, y0, y1, terminal_str, settle_str,
-                                      settle_d, terminal_d, dur0, want_duration))
+    base = _bond_tr_cache.get_or_compute(
+        key, lambda: _bond_tr_base(code, y0, y1, terminal_str, settle_str, dur0, want_duration))
+    if base is None:
+        return None
+    drift = _drift_from_meta(base["ajuste_meta"], base["lag"], settle_d, terminal_d, infl_monthly)
+    tr_real = base["tr_real"]
+    tr_total = (1.0 + tr_real) * (1.0 + drift) - 1.0
+    return {
+        "code": base["code"], "dur0": base["dur0"], "y0": base["y0"], "dur_f": base["dur_f"],
+        "y1": base["y1"], "px_target": base["px_target"], "carry": base["carry"],
+        "compresion": base["compresion"], "ajuste": tr_total - tr_real,
+        "tr_real": tr_real, "tr_total": tr_total,
+    }
 
 
 def compute_rows(rows: List[Dict[str, Any]], terminal_str: str, settle_str: str,

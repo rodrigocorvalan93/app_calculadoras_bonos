@@ -98,6 +98,7 @@ def compute_category(
     cauc: float,
     terminal: str,
     settle: str,
+    infl_monthly: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Filas de TR EN PESOS por bono de la categoría + fila resumen (promedio
     simple). `rows` = filas de `_rows_for` ya filtradas al bucket de duration."""
@@ -110,7 +111,8 @@ def compute_category(
         if not code or y0 is None or y0 != y0 or y1 is None or y1 != y1:
             continue
         res = tr._bond_tr(code, y0, y1, terminal, settle, sd, td, r.get("duration"),
-                          want_duration=False)   # el comparador no usa dur_f → −1 calc/bono
+                          want_duration=False,   # el comparador no usa dur_f → −1 calc/bono
+                          infl_monthly=infl_monthly)   # escenario de inflación → CER/UVA
         if not res:
             continue
         carry, comp, aj, trn = res["carry"], res["compresion"], res["ajuste"], res["tr_total"]
