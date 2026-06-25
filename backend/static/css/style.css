@@ -1152,3 +1152,16 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .yc-k { font-weight: 600; }
 .yc-k.act { color: var(--text-muted); }
 .yc-k.esp { color: var(--accent); }
+
+/* ── Posiciones · Target vs Actual por categoría ───────────────────────── */
+.tgt-tbl { width: 100%; }
+.tgt-tbl th, .tgt-tbl td { padding: 5px 10px; font-variant-numeric: tabular-nums; }
+.tgt-tbl th:not(:first-child), .tgt-tbl td:not(:first-child) { text-align: right; }
+.tgt-cell { white-space: nowrap; }
+.tgt-in { width: 56px; text-align: right; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 6px;
+  font-size: 12px; font-family: inherit; font-variant-numeric: tabular-nums; }
+.tgt-pct { color: var(--text-muted); font-size: 11px; margin-left: 3px; }
+.tgt-copy { background: var(--panel-2); color: var(--text-muted); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 2px 9px; font-size: 11px; cursor: pointer; }
+.tgt-copy:hover { color: var(--text); border-color: var(--accent); }

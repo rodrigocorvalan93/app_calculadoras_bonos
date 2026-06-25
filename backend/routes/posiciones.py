@@ -246,6 +246,26 @@ async def posiciones_table(request: Request, fondo: Optional[int] = None, plazo:
     return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **_fondo_ctx(fondo, plazo))
 
 
+@router.get("/posiciones/targets", response_class=HTMLResponse)
+async def posiciones_targets(request: Request, fondo: Optional[int] = None,
+                             plazo: str = "24hs") -> HTMLResponse:
+    """Cuadro Target vs Actual por categoría — SEPARADO del panel live (no lleva
+    `md-update` en el trigger) para no pisar la edición de los targets en cada
+    tick. Los targets se guardan en localStorage por fondo (cliente); el server
+    sólo aporta el % actual de cada categoría (snapshot por selección de fondo).
+    Composición barata: suma de Valor por categoría, sin pricing por bono."""
+    bond_universe.ensure_loaded()
+    cat_actual: List[Dict[str, Any]] = []
+    nombre = ""
+    if fondo is not None:
+        summary = _composicion_summary(positions.holdings(fondo), positions.pn_of(fondo))
+        cat_actual = [{"cat": r["cat"], "actual": r["pct"]}
+                      for r in summary.get("Categoría", []) if r.get("pct") is not None]
+        nombre = positions.fondo_label(fondo)
+    return _render(request, "partials/posiciones_targets.html",
+                   cat_actual=cat_actual, fondo=fondo, nombre=nombre)
+
+
 # ── Matriz de tenencias (pestaña aparte) ───────────────────────────────────
 @router.get("/matriz", response_class=HTMLResponse)
 async def matriz_page(request: Request, view: str = "vn", refresh: bool = False) -> HTMLResponse:
