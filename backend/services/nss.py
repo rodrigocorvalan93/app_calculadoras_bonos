@@ -99,6 +99,8 @@ def fit(xs: List[float], ys: List[float], threshold: float = 3.0):
 
 def _tna(tirea: float, freq: float, base: float) -> Optional[float]:
     """TNA bajo convención (freq días/período, base días/año) desde la TIREA."""
+    if not (1.0 + tirea > 0.0):      # TIR ≤ −100% (o NaN) → base negativa = nº complejo, no float
+        return None
     try:
         return ((1.0 + tirea) ** (freq / base) - 1.0) * (base / freq)
     except (ValueError, ZeroDivisionError, OverflowError):
@@ -139,9 +141,12 @@ def estimate(duration: float, xs: List[float], ys: List[float],
     d = float(duration)
     d_used = float(np.clip(d, x_min, x_max)) if clip else d
     tirea = float(model(d_used, *popt)) / 100.0
-    tem = (1.0 + tirea) ** (30.0 / 360.0) - 1.0
+    # TIR ≤ −100% (sobre-extrapolación NSS) → los derivados (potencias fraccionarias
+    # de base negativa) darían número complejo → 500 en json.dumps. Quedan None.
+    pos = (1.0 + tirea) > 0.0
+    tem = (1.0 + tirea) ** (30.0 / 360.0) - 1.0 if pos else None
     # TNA del plazo: rendimiento total sobre D años anualizado lineal (días/365).
-    tna_plazo = (((1.0 + tirea) ** d_used - 1.0) / d_used) if d_used > 0 else None
+    tna_plazo = (((1.0 + tirea) ** d_used - 1.0) / d_used) if (pos and d_used > 0) else None
     return {
         "duration_in": d, "duration_used": d_used, "clamped": (d != d_used),
         "x_min": x_min, "x_max": x_max,

@@ -77,11 +77,13 @@ def _forward_implicit(ma: Dict[str, Any], mb: Dict[str, Any]) -> Optional[Dict[s
         c1, y1, t1, c2, y2, t2 = ma["code"], ya, ta, mb["code"], yb, tb
     else:
         c1, y1, t1, c2, y2, t2 = mb["code"], yb, tb, ma["code"], ya, ta
+    if (1.0 + y1) <= 0.0 or (1.0 + y2) <= 0.0:   # TIR ≤ −100% → potencia compleja, no float
+        return None
     try:
         fwd = ((1.0 + y2) ** t2 / (1.0 + y1) ** t1) ** (1.0 / (t2 - t1)) - 1.0
     except (ValueError, ZeroDivisionError, OverflowError):
         return None
-    if fwd != fwd:
+    if not isinstance(fwd, float) or fwd != fwd:  # descarta complejo/NaN
         return None
     return {"short": c1, "long": c2, "t1": t1, "t2": t2, "y1": y1, "y2": y2, "fwd": fwd}
 
