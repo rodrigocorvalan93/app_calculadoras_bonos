@@ -155,8 +155,13 @@ def build_curve_codes() -> Dict[str, List[str]]:
 
     tamar = sorted({c for c, _, _ in _all("Soberano ARS TAMAR")})
 
+    # Exigir clas == "Soberano" (no sólo la industria) — igual que cer/lecap/
+    # duales/bonares. Sin esto, un sub-soberano mal etiquetado con industria
+    # "Soberano USD Ley Extranjera" (p. ej. un CABA) se colaba en Globales y
+    # rompía Escenarios al leer su precio en pesos como un dirty USD.
     globales = sorted({
-        c for c, _, qpc in _all("Soberano USD Ley Extranjera") if qpc == "DIRTY"
+        c for c, clas, qpc in _all("Soberano USD Ley Extranjera")
+        if clas == "Soberano" and qpc == "DIRTY"
     })
 
     dolarlinked = sorted({c for c, _, _ in _all("Soberanos Dolar Linked")})
