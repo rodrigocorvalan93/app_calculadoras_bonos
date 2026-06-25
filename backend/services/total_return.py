@@ -135,8 +135,9 @@ def scenario_nss(durations: np.ndarray, popt: List[float]) -> np.ndarray:
 
 
 # ── total return por bono ────────────────────────────────────────────────────
-def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
-             settle_d: date, terminal_d: date, dur0: Optional[float]) -> Optional[Dict[str, Any]]:
+def _bond_tr_compute(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
+                     settle_d: date, terminal_d: date, dur0: Optional[float],
+                     want_duration: bool = True) -> Optional[Dict[str, Any]]:
     from backend.services import pricing
     obj = pricing._bond_obj_copy(code)
     if obj is None or not hasattr(obj, "calcula_total_return"):
@@ -160,20 +161,38 @@ def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str
     # calcular a un settle futuro (no hay CER observado futuro → KeyError), así
     # que para la duration final usamos la ficha proyectada `code+'j'` si existe.
     dur_f = None
-    try:
-        from backend.services import bond_universe, pricing as pr
-        dcode = code + "j" if bond_universe.get(code + "j") is not None else code
-        m = pr.compute_metrics(dcode, mode="tir", value=float(y1), settle=terminal_str, include_cashflows=False)
-        d = (m or {}).get("duration") if (m and not m.get("error")) else None
-        if d is not None and d == d:
-            dur_f = float(d)
-    except Exception:  # noqa: BLE001
-        dur_f = None
+    if want_duration:                               # el comparador no la usa → la saltea
+        try:
+            from backend.services import bond_universe, pricing as pr
+            dcode = code + "j" if bond_universe.get(code + "j") is not None else code
+            m = pr.compute_metrics(dcode, mode="tir", value=float(y1), settle=terminal_str, include_cashflows=False)
+            d = (m or {}).get("duration") if (m and not m.get("error")) else None
+            if d is not None and d == d:
+                dur_f = float(d)
+        except Exception:  # noqa: BLE001
+            dur_f = None
     return {
         "code": code, "dur0": dur0, "y0": y0, "dur_f": dur_f, "y1": y1,
         "px_target": px_target, "carry": carry, "compresion": compresion,
         "ajuste": ajuste, "tr_real": tr_real, "tr_total": tr_total,
     }
+
+
+_bond_tr_cache = LockedTTLCache(maxsize=8192, ttl=20)
+
+
+def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
+             settle_d: date, terminal_d: date, dur0: Optional[float],
+             want_duration: bool = True) -> Optional[Dict[str, Any]]:
+    """Wrapper cacheado (TTL 20 s) de `_bond_tr_compute`. Clave = (code, y0, y1,
+    terminal, settle, want_duration): tocar el Exit YTM de UNA categoría en el
+    comparador re-calcula sólo esa; las demás (mismo y0/y1/terminal) salen del
+    cache, bajando el costo del click de ~900 ms a ~el de una categoría. y0 ya
+    refleja el precio de mercado, así que el TTL corto basta para la frescura."""
+    key = (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str, want_duration)
+    return _bond_tr_cache.get_or_compute(
+        key, lambda: _bond_tr_compute(code, y0, y1, terminal_str, settle_str,
+                                      settle_d, terminal_d, dur0, want_duration))
 
 
 def compute_rows(rows: List[Dict[str, Any]], terminal_str: str, settle_str: str,

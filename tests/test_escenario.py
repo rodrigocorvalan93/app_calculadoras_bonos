@@ -147,6 +147,18 @@ async def test_escenario_endpoints():
         assert "CER corto" in tb.text and 'name="y1__' in tb.text  # banda + Exit YTM editable
 
 
+def test_bond_tr_want_duration_skips_durf_same_math():
+    """El comparador llama `_bond_tr(..., want_duration=False)`: ahorra el 3er
+    cálculo (dur_f, que no usa) sin cambiar la matemática de TR."""
+    settle, terminal, sd, td = _dates()
+    full = tr._bond_tr("TX26", 0.01, 0.03, terminal, settle, sd, td, 0.4, want_duration=True)
+    fast = tr._bond_tr("TX26", 0.01, 0.03, terminal, settle, sd, td, 0.4, want_duration=False)
+    assert full and fast
+    assert fast["dur_f"] is None                              # saltea el calc de duration final
+    assert abs(full["tr_total"] - fast["tr_total"]) < 1e-12   # TR idéntico
+    assert abs(full["carry"] - fast["carry"]) < 1e-12
+
+
 def test_chart_from_categories():
     cats = [
         {"label": "A", "summary": {"carry": 0.08, "capital": 0.01, "total": 0.09}},

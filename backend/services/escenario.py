@@ -109,7 +109,8 @@ def compute_category(
         y1 = y1_by_code.get(code)
         if not code or y0 is None or y0 != y0 or y1 is None or y1 != y1:
             continue
-        res = tr._bond_tr(code, y0, y1, terminal, settle, sd, td, r.get("duration"))
+        res = tr._bond_tr(code, y0, y1, terminal, settle, sd, td, r.get("duration"),
+                          want_duration=False)   # el comparador no usa dur_f → −1 calc/bono
         if not res:
             continue
         carry, comp, aj, trn = res["carry"], res["compresion"], res["ajuste"], res["tr_total"]
