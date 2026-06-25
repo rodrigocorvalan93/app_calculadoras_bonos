@@ -128,16 +128,18 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     last_ts = snap.last_ts if snap else None
     close_ts = snap.close_ts if snap else None
 
-    # The ARS leg is the only one that needs the FX (pesos ÷ the bond's
-    # native rate → its own basis). USD/USB/native price straight off the
-    # ticker. `cp()` normalizes any price quoted on this leg before calc.
+    # Toda pata NO nativa se normaliza al básico nativo del bono. ARS = pesos ÷
+    # FX; pero también las CRUZADAS (cable sobre un bono MEP-nativo, o MEP sobre
+    # uno cable-nativo) necesitan ×CCL/MEP — antes se pasaban sin convertir y la
+    # TIR salía corrida por el canje (~3,5%). `normalize_price` deja la pata
+    # nativa como no-op (leg==native) y devuelve None si falta la FX.
     native = (meta.get("moneda") or "USD")
 
     def cp(px):
         if px is None:
             return None
-        if leg_basis == "ARS":
-            return fx_svc.normalize_price(px, "ARS", native, fx)
+        if leg_basis:                    # "ARS"/"USD"/"USB" — nativa ("") es no-op
+            return fx_svc.normalize_price(px, leg_basis, native, fx)
         return px
 
     # Precio de referencia: last (LA) si operó hoy; si no, cierre previo (CL).
@@ -304,9 +306,9 @@ async def _rows_for(
     if not codes:
         return [], {"total": 0, "quoting": 0, "filtered": False, "store_empty": True}
 
-    # Only the ARS leg needs the FX reference (pesos → native basis); the
-    # native / USD / USB legs price straight off their own ticker.
-    fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+    # Toda pata no nativa necesita FX: ARS (÷ nativo) y las CRUZADAS (×CCL/MEP).
+    # Sólo la nativa es FX-free (ticker propio). normalize_price hace el no-op.
+    fx = fx_svc.get_fx(plazo) if leg != "native" else None
     loop = asyncio.get_running_loop()
 
     # El build de filas es GIL-bound (el calc legacy no libera el GIL), así que
@@ -491,7 +493,7 @@ async def mercado_book(
     snap = store.get(symbol)
     meta = pricing.bond_meta(code) or {}
     native = meta.get("moneda") or "USD"
-    fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+    fx = fx_svc.get_fx(plazo) if leg != "native" else None
 
     def cp(px):
         if px is None:
