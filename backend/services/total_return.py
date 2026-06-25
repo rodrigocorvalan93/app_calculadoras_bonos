@@ -80,38 +80,46 @@ def _nearest_prior(df, target, col) -> Optional[float]:
         return None
 
 
-def _drift_from_meta(ajuste_raw: Optional[str], lag: int, settle_d: date,
-                     terminal_d: date, infl_monthly: Optional[float] = None) -> float:
-    """Crecimiento del índice (CER/UVA/A3500) entre settle y terminal a partir de
-    los METADATOS del bono (no del objeto) → se aplica sobre una base cacheada sin
-    recopiar el bono. `infl_monthly` (decimal, 0.02 = 2 % mensual): si se pasa, CER
-    y UVA usan inflación COMPUESTA sobre el horizonte en vez de cer/uva_proyectado,
-    sin tocar las series globales. A3500 (deva dollar-linked) no se toca con
-    inflación. 0 para bonos sin ajuste de capital."""
-    ajuste = (ajuste_raw or "").upper()
-    if not ajuste:
-        return 0.0
-    if infl_monthly is not None and ("CER" in ajuste or "UVA" in ajuste):
+_drift_cache = LockedTTLCache(maxsize=512, ttl=20)
+_DRIFT_SERIES = {"CER": ("cer_proyectado", "CER"), "UVA": ("uva_proyectado", "UVA"),
+                 "A3500": ("a3500_proyectado", "tca3500")}
+
+
+def _drift_compute(kind: str, lag: int, settle_d: date, terminal_d: date,
+                   infl_monthly: Optional[float]) -> float:
+    if infl_monthly is not None and kind in ("CER", "UVA"):
         # El lag corre ambos extremos por igual → el span (meses) no cambia.
         months = max(0.0, (terminal_d - settle_d).days / 30.4375)
         return (1.0 + float(infl_monthly)) ** months - 1.0
     import rentafija
     sl = rentafija.n_dias_laborales(settle_d, lag)
     tl = rentafija.n_dias_laborales(terminal_d, lag)
+    key, col = _DRIFT_SERIES[kind]
     inputs = rentafija.inputs
+    cs = _nearest_prior(inputs.get(key), sl, col)
+    ct = _nearest_prior(inputs.get(key), tl, col)
+    return float(ct / cs - 1.0) if (cs and ct and cs > 0) else 0.0
 
-    def _d(key: str, col: str) -> float:
-        cs = _nearest_prior(inputs.get(key), sl, col)
-        ct = _nearest_prior(inputs.get(key), tl, col)
-        return float(ct / cs - 1.0) if (cs and ct and cs > 0) else 0.0
 
-    if "CER" in ajuste:
-        return _d("cer_proyectado", "CER")
-    if "UVA" in ajuste:
-        return _d("uva_proyectado", "UVA")
-    if "A3500" in ajuste:
-        return _d("a3500_proyectado", "tca3500")
-    return 0.0
+def _drift_from_meta(ajuste_raw: Optional[str], lag: int, settle_d: date,
+                     terminal_d: date, infl_monthly: Optional[float] = None) -> float:
+    """Crecimiento del índice (CER/UVA/A3500) entre settle y terminal desde los
+    METADATOS del bono (no del objeto) → se aplica sobre una base cacheada sin
+    recopiar. `infl_monthly` (decimal): si se pasa, CER y UVA usan inflación
+    COMPUESTA sobre el horizonte en vez de cer/uva_proyectado; A3500 (deva) no se
+    toca. 0 sin ajuste de capital.
+
+    Memoizado (TTL 20 s) por (kind, lag, settle, terminal, infl): el drift es el
+    MISMO para todos los bonos del mismo índice/lag/horizonte → se computa 1 vez,
+    no una búsqueda en el df por bono (los ~65 del escenario comparten ~3 drifts)."""
+    ajuste = (ajuste_raw or "").upper()
+    kind = ("CER" if "CER" in ajuste else "UVA" if "UVA" in ajuste
+            else "A3500" if "A3500" in ajuste else "")
+    if not kind:
+        return 0.0
+    return _drift_cache.get_or_compute(
+        (kind, lag, settle_d, terminal_d, infl_monthly),
+        lambda: _drift_compute(kind, lag, settle_d, terminal_d, infl_monthly))
 
 
 def _index_drift(obj, settle_d: date, terminal_d: date,
@@ -220,6 +228,15 @@ def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str
         "compresion": base["compresion"], "ajuste": tr_total - tr_real,
         "tr_real": tr_real, "tr_total": tr_total,
     }
+
+
+def _bond_tr_touch(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
+                   want_duration: bool = True) -> bool:
+    """Extiende el TTL de la base cacheada de este bono SIN recomputar (keep-warm
+    gentil del daemon: no compite por el GIL). True si estaba caliente. Misma clave
+    que `_bond_tr`, definida en un solo lugar."""
+    key = (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str, want_duration)
+    return _bond_tr_cache.touch(key)
 
 
 def compute_rows(rows: List[Dict[str, Any]], terminal_str: str, settle_str: str,

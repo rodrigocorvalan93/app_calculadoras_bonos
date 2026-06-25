@@ -223,3 +223,45 @@ async def escenario_table(
                    cats=cats, chart=chart, terminal=terminal, settle=settle, dias=dias,
                    ccl_proy=ccl_proy, mep_proy=mep_proy, cauc=cauc, tna=tna, tea=tea,
                    infl_monthly=infl_monthly)
+
+
+async def warm_escenario_default(plazo: str = "24hs", refresh_only: bool = False) -> int:
+    """Mantiene caliente el `_bond_tr_base` del escenario DEFAULT (terminal default,
+    Exit YTM = TIR actual por categoría) → el click del usuario pega cache en la
+    parte cara y baja de ~700 ms a ~render.
+
+    `refresh_only=True` (uso intradía del daemon): SÓLO extiende el TTL de lo que ya
+    estaba caliente (touch, sin recalcular) → no compite por el GIL ni roza los
+    paneles live. `refresh_only=False` (UNA vez, al boot): hace el cálculo frío
+    —spike aceptable en el período de warm-up, igual que el warm de curvas."""
+    bond_universe.ensure_loaded()
+    terminal = _default_terminal()
+    settle = tr_svc.settle_str(plazo)
+    sd, td = _parse_d(settle), _parse_d(terminal)
+    loop = asyncio.get_running_loop()
+    warmed = 0
+    for cat in esc.CATEGORIES:
+        rows = await _cat_rows(cat, plazo)
+        level = esc._avg([r.get("tirea") for r in rows]) or 0.0
+
+        def _warm(rows=rows, level=level) -> int:
+            import time as _t
+            c = 0
+            for i, r in enumerate(rows):
+                code, dur, y0 = r.get("code"), r.get("duration"), r.get("tirea")
+                if not code or dur is None or dur != dur or y0 is None or y0 != y0:
+                    continue
+                y1 = esc.exit_ytm(level, 0.0, dur, 1.0)
+                if refresh_only:                # touch barato, no recalcula
+                    if tr_svc._bond_tr_touch(code, y0, y1, terminal, settle, want_duration=False):
+                        c += 1
+                    continue
+                if tr_svc._bond_tr(code, y0, y1, terminal, settle, sd, td, dur,
+                                   want_duration=False) is not None:
+                    c += 1
+                if i % 3 == 2:                  # soltá el GIL en el warm frío (boot)
+                    _t.sleep(0.0015)
+            return c
+
+        warmed += await loop.run_in_executor(_row_pool, _warm)
+    return warmed

@@ -47,6 +47,20 @@ class LockedTTLCache:
             for k in oldest[: over + self._maxsize // 10 + 1]:
                 self._store.pop(k, None)
 
+    def touch(self, key: Hashable) -> bool:
+        """Extiende el TTL de una entrada YA presente, SIN recomputar. Para un
+        keep-warm gentil (no compite por el GIL recalculando). True si estaba."""
+        now = time.monotonic()
+        ent = self._store.get(key)
+        if ent is None or ent[1] <= now:
+            return False
+        with self._lock:
+            cur = self._store.get(key)
+            if cur is None:
+                return False
+            self._store[key] = (cur[0], now + self._ttl)
+        return True
+
     def invalidate(self, key: Hashable) -> None:
         with self._lock:
             self._store.pop(key, None)
