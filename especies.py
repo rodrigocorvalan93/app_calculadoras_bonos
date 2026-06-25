@@ -25425,7 +25425,7 @@ BDC36 = {
     "Calificación": None,
     "País": "Argentina",
     "Clasificación": "Sub-soberano",
-    "Industria": "Soberano USD Ley Extranjera",
+    "Industria": "Sub-soberano USD Ley Extranjera",
     "Moneda": "USD",
     "Plazo habitual de liquidación: t +": 1.,
     "Emisión": "13/05/2026",
