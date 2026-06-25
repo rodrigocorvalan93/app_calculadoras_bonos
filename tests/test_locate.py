@@ -36,7 +36,8 @@ async def test_comparador_locate_solo_misma_curva() -> None:
     from backend.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
-        same = await ac.get("/comparador/result?a=TX26&b=TZX26&mode=precio&val_a=1450&val_b=1500&plazo=24hs")
+        # TX26 y TX28 son ambos CER (par robusto; TZX26 se reclasificó a lecap).
+        same = await ac.get("/comparador/result?a=TX26&b=TX28&mode=precio&val_a=1450&val_b=1500&plazo=24hs")
         cross = await ac.get("/comparador/result?a=TX26&b=S31L6&mode=precio&val_a=1450&val_b=132&plazo=24hs")
     assert same.status_code == 200 and cross.status_code == 200
     assert "data-locate" in same.text and 'data-curve="cer"' in same.text   # cer vs cer ✓
