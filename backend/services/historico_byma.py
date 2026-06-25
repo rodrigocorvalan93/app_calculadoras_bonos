@@ -172,9 +172,14 @@ def curves_with_history(desde: Optional[str] = None, hasta: Optional[str] = None
 
 
 def _has_in_range(entry: Dict[str, Any], desde: Optional[str], hasta: Optional[str]) -> bool:
+    # ≥2 puntos: `curve_series` descarta los códigos con <2 (no se puede trazar una
+    # línea con uno solo), así que ofrecer la curva con 1 daba un gráfico vacío.
+    n = 0
     for d in entry["dates"]:
         if (not desde or d >= desde) and (not hasta or d <= hasta):
-            return True
+            n += 1
+            if n >= 2:
+                return True
     return False
 
 

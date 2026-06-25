@@ -55,7 +55,8 @@ async def detail(symbol: str) -> Optional[Dict[str, Any]]:
     inst = (data or {}).get("instrument") if isinstance(data, dict) else None
     result = _extract(inst) if isinstance(inst, dict) else None
     with _lock:
-        _cache[symbol] = result
+        if result is not None:           # NO cachear el fallo transitorio (broker offline /
+            _cache[symbol] = result      # pre-login): antes quedaba None fijo hasta reiniciar
     return result
 
 
