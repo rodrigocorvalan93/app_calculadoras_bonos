@@ -177,3 +177,127 @@ async def test_live_endpoint_requiere_confirmacion() -> None:
             assert r3.status_code == 200 and oms.is_live() is False     # de vuelta paper
     finally:
         oms.set_live(None)
+
+
+def test_comitentes_merge_y_broker_activo() -> None:
+    """OMS_COMITENTES (JSON {broker:{etiqueta:nro}}) → comitentes del broker
+    ACTIVO (deducido del host, hot-swappeable), mergeadas con las del broker
+    REST y deduplicadas por número; la etiqueta de cfg gana en el dup."""
+    import json as _json
+    orig_cfg, orig_url = settings.oms_comitentes, settings.primary_base_url
+    try:
+        settings.oms_comitentes = _json.dumps({
+            "lbo": {"PYMES": "54437", "PERSO": "54626"},
+            "cocos": {"OTRO": "27404"},
+        })
+        oms._comitentes_all.cache_clear()                  # el secret cambió: invalidar
+        settings.primary_base_url = "https://api.lbo.xoms.com.ar/"
+        cfg = oms.configured_comitentes()
+        assert [c["id"] for c in cfg] == ["54437", "54626"]        # sólo LBO, en orden
+        assert all(c["source"] == "config" for c in cfg) and cfg[0]["label"] == "PYMES"
+        # Hot-swap de broker → cambian las comitentes sin reiniciar (key no cacheada)
+        settings.primary_base_url = "https://api.cocos.xoms.com.ar/"
+        assert [c["id"] for c in oms.configured_comitentes()] == ["27404"]
+        # Merge: dedupe por número; cfg primero, la del broker que ya está se colapsa
+        settings.primary_base_url = "https://api.lbo.xoms.com.ar/"
+        cfg = oms.configured_comitentes()
+        broker = [oms._normalize_account({"id": "54437", "name": "Generic"}),   # dup
+                  oms._normalize_account({"id": "99999", "name": "Broker-only"})]
+        merged = oms._merge_comitentes(cfg, broker)
+        assert [m["id"] for m in merged] == ["54437", "54626", "99999"]
+        assert merged[0]["label"] == "PYMES"               # gana la etiqueta de cfg
+        assert merged[-1]["source"] == "broker"
+        # JSON inválido → {} (no rompe; cae al genérico del broker)
+        settings.oms_comitentes = "{not json"
+        oms._comitentes_all.cache_clear()
+        assert oms.configured_comitentes() == []
+    finally:
+        settings.oms_comitentes, settings.primary_base_url = orig_cfg, orig_url
+        oms._comitentes_all.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_panel_muestra_comitentes_configuradas_offline() -> None:
+    """Sin login REST el panel igual lista las comitentes de OMS_COMITENTES (no
+    requieren sesión) en vez del cartel 'sin login' — para armar PAPER offline."""
+    import json as _json
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import primary_ws
+
+    orig_cfg, orig_url = settings.oms_comitentes, settings.primary_base_url
+    try:
+        settings.primary_base_url = "https://api.lbo.xoms.com.ar/"
+        settings.oms_comitentes = _json.dumps({"lbo": {"PYMES": "54437"}})
+        oms._comitentes_all.cache_clear()
+        ws = primary_ws.reset_ws_client("https://api.lbo.xoms.com.ar/")
+        assert ws.authenticated is False                          # offline (sin cookies)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+            pa = await ac.get("/ordenes/panel")
+            assert pa.status_code == 200
+            assert "PYMES" in pa.text and "54437" in pa.text       # fondo configurado visible
+            assert "Broker (lectura)" not in pa.text               # NO cae al alert de error
+    finally:
+        settings.oms_comitentes, settings.primary_base_url = orig_cfg, orig_url
+        oms._comitentes_all.cache_clear()
+
+
+def test_instrument_match_candidates() -> None:
+    """Dado el universo del broker, sugiere los símbolos del MISMO código (exacto)
+    y, si no hay, los de la misma raíz (4 letras) — para resolver el ticker/plazo."""
+    from backend.services import instruments as inst
+    universe = {
+        "MERV - XMEV - PSSXO - CI",
+        "MERV - XMEV - PSSXO - 24hs - SENEBI",
+        "MERV - XMEV - PSSWO - 24hs",          # otra serie PSA (raíz PSSW, no PSSX)
+        "MERV - XMEV - AL30 - 24hs",
+    }
+    c = inst.match_candidates(universe, "PSSXO")            # exacto PSSXO (CI + SENEBI)
+    assert "MERV - XMEV - PSSXO - CI" in c
+    assert "MERV - XMEV - PSSXO - 24hs - SENEBI" in c
+    assert "MERV - XMEV - AL30 - 24hs" not in c
+    assert "MERV - XMEV - PSSWO - 24hs" not in c
+    # código inexistente con raíz PSSX → cae al fallback por raíz (sólo PSSX*)
+    c2 = inst.match_candidates(universe, "PSSXZ")
+    assert "MERV - XMEV - PSSXO - CI" in c2 and "MERV - XMEV - PSSWO - 24hs" not in c2
+
+
+@pytest.mark.asyncio
+async def test_instrument_resolve_y_guard_pretrade(monkeypatch) -> None:
+    """resolve() detecta el símbolo ausente y place() (LIVE) lo BLOQUEA antes de
+    cursar, con los símbolos/plazos que SÍ existen — el caso real del SELL PSSXO
+    24hs (que en el broker sólo está en SENEBI/CI). Fail-open si no hay lista."""
+    from backend.services import instruments as inst
+
+    universe = {"MERV - XMEV - PSSXO - CI", "MERV - XMEV - PSSXO - 24hs - SENEBI"}
+
+    async def fake_valid() -> set:
+        return universe
+    monkeypatch.setattr(inst, "valid_symbols", fake_valid)
+
+    r = await inst.resolve("PSSXO", "MERV - XMEV - PSSXO - 24hs")     # 24hs continuo: no está
+    assert r["checked"] and not r["exists"] and any("SENEBI" in c for c in r["candidates"])
+    r2 = await inst.resolve("PSSXO", "MERV - XMEV - PSSXO - CI")      # sí está
+    assert r2["checked"] and r2["exists"]
+
+    async def none_valid():
+        return None
+    monkeypatch.setattr(inst, "valid_symbols", none_valid)           # sin lista → fail-open
+    r3 = await inst.resolve("PSSXO", "MERV - XMEV - PSSXO - 24hs")
+    assert r3["checked"] is False
+
+    # Guard en place(): LIVE + símbolo inexistente → ERROR accionable, sin tocar el broker
+    monkeypatch.setattr(inst, "valid_symbols", fake_valid)
+    try:
+        oms.kill_switch(False)
+        oms.set_live(True)
+        res = await oms.place({"code": "PSSXO", "symbol": "MERV - XMEV - PSSXO - 24hs",
+                               "side": "sell", "qty": 402311.0, "price": 204600.0,
+                               "account": "54626", "ordtype": "limit"})
+        assert res["status"] == "ERROR"
+        assert "no tiene el instrumento" in res["motivo"] and "SENEBI" in res["motivo"]
+        assert any(a["event"] == "live_instrumento_inexistente" for a in oms.audit_tail(5))
+    finally:
+        oms.set_live(None)

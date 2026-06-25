@@ -6,6 +6,7 @@ match the look of the legacy Streamlit app.
 """
 from __future__ import annotations
 
+import math
 from datetime import date, datetime
 from typing import Any
 
@@ -51,6 +52,44 @@ def _is_nan(x: Any) -> bool:
 def _swap_sep(s: str) -> str:
     # 1,234.5678 → 1.234,5678 (US → es-AR)
     return s.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
+def parse_ar_num(s: Any, *, allow_negative: bool = True) -> "float | None":
+    """Parsea un número es-AR a float (o None). Único parser de entrada de la app
+    — reemplaza los ~5 `_num`/`_num_px` divergentes que parseaban distinto.
+
+    Reglas es-AR (punto = miles, coma = decimal) con heurística para el caso
+    ambiguo de sólo-puntos (decidir por la cantidad de dígitos tras el último):
+
+        "1.234,56"  → 1234.56     "98,50" → 98.5        "20"   → 20.0
+        "204.600"   → 204600.0    "11.75" → 11.75       "1.5"  → 1.5
+        "1.000.000" → 1000000.0   "1.000" → 1000.0
+
+    Rechaza vacío, inf y nan. NO usar para fechas. El caso crítico es el precio
+    OMS "204.600": antes `float("204.600")`=204,6 (sub-precio 1000×); acá → 204600.
+    """
+    if _is_missing(s):
+        return None
+    s = str(s).strip().replace(" ", "").replace(" ", "")
+    neg = s.startswith("-")
+    s = s.lstrip("+-")
+    if not s:
+        return None
+    if "," in s:                                   # coma decimal → puntos son miles
+        s = s.replace(".", "").replace(",", ".")
+    elif "." in s:                                 # sólo puntos: ¿miles o decimal?
+        head, _, tail = s.rpartition(".")
+        if s.count(".") > 1 or (len(tail) == 3 and head.isdigit()):
+            s = s.replace(".", "")                 # grupos de 3 → miles (204.600, 1.000)
+        # si no, el punto queda como decimal (11.75, 1.5, 98.50)
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    if not math.isfinite(v):                       # rechaza inf/nan/1e999
+        return None
+    v = -v if neg else v
+    return None if (not allow_negative and v < 0) else v
 
 
 def fmt_pct(x: Any, decimals: int = 4) -> str:

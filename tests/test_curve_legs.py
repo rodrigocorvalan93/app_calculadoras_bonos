@@ -20,12 +20,15 @@ from backend.services import symbols as syms_
 
 
 def _globales_native() -> str:
-    """First globales code (the DIRTY `…C` cable ficha) — skip if none."""
+    """A globales DIRTY `…C` cable ficha — skip if none. Robusto a bonos nuevos
+    en la curva que NO siguen la convención …C (p.ej. BDC36): tomar el 1º que
+    realmente termina en C, no `codes[0]` a secas."""
     bond_universe.ensure_loaded()
     codes = curves.build_curve_codes().get("globales") or []
-    if not codes:
-        pytest.skip("no globales in especies.py")
-    return codes[0]
+    code = next((c for c in codes if c.endswith("C")), None)
+    if code is None:
+        pytest.skip("no globales …C cable ficha in especies.py")
+    return code
 
 
 def test_usd_and_usb_legs_are_fx_free() -> None:

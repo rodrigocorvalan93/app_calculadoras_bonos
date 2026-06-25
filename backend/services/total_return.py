@@ -80,31 +80,54 @@ def _nearest_prior(df, target, col) -> Optional[float]:
         return None
 
 
-def _index_drift(obj, settle_d: date, terminal_d: date) -> float:
-    """Crecimiento del índice proyectado (CER/UVA/A3500) entre settle y terminal,
-    lagueado con `dias_lag_ajuste_base`. 0 para bonos sin ajuste de capital."""
-    ajuste = (getattr(obj, "ajuste_sobre_capital", None) or "").upper()
-    if not ajuste:
-        return 0.0
+_drift_cache = LockedTTLCache(maxsize=512, ttl=20)
+_DRIFT_SERIES = {"CER": ("cer_proyectado", "CER"), "UVA": ("uva_proyectado", "UVA"),
+                 "A3500": ("a3500_proyectado", "tca3500")}
+
+
+def _drift_compute(kind: str, lag: int, settle_d: date, terminal_d: date,
+                   infl_monthly: Optional[float]) -> float:
+    if infl_monthly is not None and kind in ("CER", "UVA"):
+        # El lag corre ambos extremos por igual → el span (meses) no cambia.
+        months = max(0.0, (terminal_d - settle_d).days / 30.4375)
+        return (1.0 + float(infl_monthly)) ** months - 1.0
     import rentafija
-    lag = int(getattr(obj, "dias_lag_ajuste_base", -10) or -10)
     sl = rentafija.n_dias_laborales(settle_d, lag)
     tl = rentafija.n_dias_laborales(terminal_d, lag)
+    key, col = _DRIFT_SERIES[kind]
     inputs = rentafija.inputs
+    cs = _nearest_prior(inputs.get(key), sl, col)
+    ct = _nearest_prior(inputs.get(key), tl, col)
+    return float(ct / cs - 1.0) if (cs and ct and cs > 0) else 0.0
 
-    def _drift(key: str, col: str) -> float:
-        df = inputs.get(key)
-        cs = _nearest_prior(df, sl, col)
-        ct = _nearest_prior(df, tl, col)
-        return float(ct / cs - 1.0) if (cs and ct and cs > 0) else 0.0
 
-    if "CER" in ajuste:
-        return _drift("cer_proyectado", "CER")
-    if "UVA" in ajuste:
-        return _drift("uva_proyectado", "UVA")
-    if "A3500" in ajuste:
-        return _drift("a3500_proyectado", "tca3500")
-    return 0.0
+def _drift_from_meta(ajuste_raw: Optional[str], lag: int, settle_d: date,
+                     terminal_d: date, infl_monthly: Optional[float] = None) -> float:
+    """Crecimiento del índice (CER/UVA/A3500) entre settle y terminal desde los
+    METADATOS del bono (no del objeto) → se aplica sobre una base cacheada sin
+    recopiar. `infl_monthly` (decimal): si se pasa, CER y UVA usan inflación
+    COMPUESTA sobre el horizonte en vez de cer/uva_proyectado; A3500 (deva) no se
+    toca. 0 sin ajuste de capital.
+
+    Memoizado (TTL 20 s) por (kind, lag, settle, terminal, infl): el drift es el
+    MISMO para todos los bonos del mismo índice/lag/horizonte → se computa 1 vez,
+    no una búsqueda en el df por bono (los ~65 del escenario comparten ~3 drifts)."""
+    ajuste = (ajuste_raw or "").upper()
+    kind = ("CER" if "CER" in ajuste else "UVA" if "UVA" in ajuste
+            else "A3500" if "A3500" in ajuste else "")
+    if not kind:
+        return 0.0
+    return _drift_cache.get_or_compute(
+        (kind, lag, settle_d, terminal_d, infl_monthly),
+        lambda: _drift_compute(kind, lag, settle_d, terminal_d, infl_monthly))
+
+
+def _index_drift(obj, settle_d: date, terminal_d: date,
+                 infl_monthly: Optional[float] = None) -> float:
+    """Wrapper de `_drift_from_meta` para llamadas que ya tienen el objeto bono."""
+    return _drift_from_meta(getattr(obj, "ajuste_sobre_capital", None),
+                            int(getattr(obj, "dias_lag_ajuste_base", -10) or -10),
+                            settle_d, terminal_d, infl_monthly)
 
 
 # ── curva de salida (3 modos) → y1 por duration ──────────────────────────────
@@ -135,8 +158,12 @@ def scenario_nss(durations: np.ndarray, popt: List[float]) -> np.ndarray:
 
 
 # ── total return por bono ────────────────────────────────────────────────────
-def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
-             settle_d: date, terminal_d: date, dur0: Optional[float]) -> Optional[Dict[str, Any]]:
+def _bond_tr_base(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
+                  dur0: Optional[float], want_duration: bool = True) -> Optional[Dict[str, Any]]:
+    """Parte CARA y libre de inflación: los 2 `calcula_total_return` (carry/real —
+    en términos REALES para CER/UVA) + dur_f, más los metadatos del ajuste. Para
+    CER/UVA la inflación NO entra acá: entra después en el drift. Por eso se puede
+    cachear por (code,y0,y1,terminal,settle) y reusar al cambiar la inflación."""
     from backend.services import pricing
     obj = pricing._bond_obj_copy(code)
     if obj is None or not hasattr(obj, "calcula_total_return"):
@@ -152,28 +179,64 @@ def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str
         return None
     if tr_real != tr_real or carry != carry:        # NaN
         return None
-    compresion = tr_real - carry
-    drift = _index_drift(obj, settle_d, terminal_d)
-    tr_total = (1.0 + tr_real) * (1.0 + drift) - 1.0
-    ajuste = tr_total - tr_real
-    # Duration a la fecha target (settle = terminal). La ficha CER base NO puede
-    # calcular a un settle futuro (no hay CER observado futuro → KeyError), así
-    # que para la duration final usamos la ficha proyectada `code+'j'` si existe.
+    # Duration a la fecha target. La ficha CER base NO puede calcular a un settle
+    # futuro (sin CER observado futuro → KeyError), así que usamos la proyectada
+    # `code+'j'` si existe.
     dur_f = None
-    try:
-        from backend.services import bond_universe, pricing as pr
-        dcode = code + "j" if bond_universe.get(code + "j") is not None else code
-        m = pr.compute_metrics(dcode, mode="tir", value=float(y1), settle=terminal_str, include_cashflows=False)
-        d = (m or {}).get("duration") if (m and not m.get("error")) else None
-        if d is not None and d == d:
-            dur_f = float(d)
-    except Exception:  # noqa: BLE001
-        dur_f = None
+    if want_duration:                               # el comparador no la usa → la saltea
+        try:
+            from backend.services import bond_universe, pricing as pr
+            dcode = code + "j" if bond_universe.get(code + "j") is not None else code
+            m = pr.compute_metrics(dcode, mode="tir", value=float(y1), settle=terminal_str, include_cashflows=False)
+            d = (m or {}).get("duration") if (m and not m.get("error")) else None
+            if d is not None and d == d:
+                dur_f = float(d)
+        except Exception:  # noqa: BLE001
+            dur_f = None
     return {
         "code": code, "dur0": dur0, "y0": y0, "dur_f": dur_f, "y1": y1,
-        "px_target": px_target, "carry": carry, "compresion": compresion,
-        "ajuste": ajuste, "tr_real": tr_real, "tr_total": tr_total,
+        "px_target": px_target, "carry": carry, "compresion": tr_real - carry,
+        "tr_real": tr_real,
+        "ajuste_meta": (getattr(obj, "ajuste_sobre_capital", None) or ""),
+        "lag": int(getattr(obj, "dias_lag_ajuste_base", -10) or -10),
     }
+
+
+_bond_tr_cache = LockedTTLCache(maxsize=8192, ttl=20)
+
+
+def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
+             settle_d: date, terminal_d: date, dur0: Optional[float],
+             want_duration: bool = True, infl_monthly: Optional[float] = None
+             ) -> Optional[Dict[str, Any]]:
+    """TR por bono. La parte cara (carry/real/dur_f, libre de inflación) se cachea
+    (TTL 20 s) por (code,y0,y1,terminal,settle,want_duration); el ajuste por índice
+    —con el override de inflación opcional `infl_monthly`— se aplica barato encima.
+    Así tocar el Exit YTM de una categoría recalcula sólo esa, y tocar la inflación
+    NO recalcula nada caro (sólo re-aplica el drift sobre la base cacheada)."""
+    key = (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str, want_duration)
+    base = _bond_tr_cache.get_or_compute(
+        key, lambda: _bond_tr_base(code, y0, y1, terminal_str, settle_str, dur0, want_duration))
+    if base is None:
+        return None
+    drift = _drift_from_meta(base["ajuste_meta"], base["lag"], settle_d, terminal_d, infl_monthly)
+    tr_real = base["tr_real"]
+    tr_total = (1.0 + tr_real) * (1.0 + drift) - 1.0
+    return {
+        "code": base["code"], "dur0": base["dur0"], "y0": base["y0"], "dur_f": base["dur_f"],
+        "y1": base["y1"], "px_target": base["px_target"], "carry": base["carry"],
+        "compresion": base["compresion"], "ajuste": tr_total - tr_real,
+        "tr_real": tr_real, "tr_total": tr_total,
+    }
+
+
+def _bond_tr_touch(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
+                   want_duration: bool = True) -> bool:
+    """Extiende el TTL de la base cacheada de este bono SIN recomputar (keep-warm
+    gentil del daemon: no compite por el GIL). True si estaba caliente. Misma clave
+    que `_bond_tr`, definida en un solo lugar."""
+    key = (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str, want_duration)
+    return _bond_tr_cache.touch(key)
 
 
 def compute_rows(rows: List[Dict[str, Any]], terminal_str: str, settle_str: str,
@@ -193,3 +256,210 @@ def compute_rows(rows: List[Dict[str, Any]], terminal_str: str, settle_str: str,
             out.append(res)
     out.sort(key=lambda x: (x["dur0"] is None, x["dur0"] or 0.0))
     return out, dias
+
+
+# ── gráfico de columnas apiladas (SVG server-side, sin JS) ────────────────────
+def _nice_step(rough: float) -> float:
+    """Paso de eje 'lindo' (1/2/2.5/5 × 10ᵏ) ≥ rough."""
+    import math
+    if not (rough > 0) or not math.isfinite(rough):
+        return 1.0
+    k = math.floor(math.log10(rough))
+    base = 10.0 ** k
+    for m in (1.0, 2.0, 2.5, 5.0):
+        if base * m >= rough:
+            return base * m
+    return base * 10.0
+
+
+def _ticks(lo: float, hi: float, n: int = 5) -> List[float]:
+    """Hasta ~n cortes 'lindos' que cubren [lo, hi] (incluye el 0 si entra)."""
+    import math
+    if hi <= lo:
+        hi = lo + 1.0
+    step = _nice_step((hi - lo) / max(1, n))
+    v = math.floor(lo / step) * step
+    out: List[float] = []
+    while v <= hi + step * 1e-9 and len(out) < 40:
+        out.append(round(v, 10))
+        v += step
+    return out
+
+
+def bar_chart(items: List[Dict[str, Any]], *, width: int = 860, height: int = 308,
+              segments: tuple = (("carry", "carry"), ("capital", "capital"))
+              ) -> Optional[Dict[str, Any]]:
+    """Geometría SVG de columnas apiladas estilo Excel: los segmentos positivos
+    se apilan hacia arriba desde 0 y los negativos hacia abajo; un punto marca el
+    total. Todo se calcula acá (server-side) → el template sólo dibuja.
+
+    `items` = [{"label": str, <segkey>: float, …, "total": float|None}].
+    `segments` = orden/clase CSS de cada segmento. Reutilizable por el cuadro
+    por-curva y por el comparador multi-activo (mismas clases, misma escala)."""
+    items = [it for it in (items or []) if it]
+    if not items:
+        return None
+    pad_l, pad_r, pad_t, pad_b = 48, 14, 14, 62
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+
+    import math
+
+    def _fin(x: Any) -> float:
+        """float finito o 0.0 (descarta None/NaN/±inf antes de la geometría)."""
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return 0.0
+        return x if math.isfinite(x) else 0.0
+
+    def _fin_or_none(x: Any) -> Optional[float]:
+        """float finito o None: un total no-finito no dibuja punto ni contamina la escala."""
+        if x is None:
+            return None
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return None
+        return x if math.isfinite(x) else None
+
+    tops: List[float] = [0.0]
+    bots: List[float] = [0.0]
+    for it in items:
+        pos = sum(max(_fin(it.get(k)), 0.0) for k, _ in segments)
+        neg = sum(min(_fin(it.get(k)), 0.0) for k, _ in segments)
+        tot = _fin_or_none(it.get("total"))
+        tops.append(pos)
+        bots.append(neg)
+        if tot is not None:
+            tops.append(tot)
+            bots.append(tot)
+    ymax, ymin = max(tops), min(bots)
+    span = (ymax - ymin) or 1.0
+    ymax += span * 0.08
+    ymin -= span * 0.08
+
+    def Y(v: float) -> float:
+        return round(pad_t + (ymax - v) / (ymax - ymin) * plot_h, 2)
+
+    n = len(items)
+    slot = plot_w / n
+    bw = min(48.0, slot * 0.62)
+    bars: List[Dict[str, Any]] = []
+    for i, it in enumerate(items):
+        cx = round(pad_l + slot * (i + 0.5), 2)
+        x = round(cx - bw / 2.0, 2)
+        run_pos = run_neg = 0.0
+        segs: List[Dict[str, Any]] = []
+        for key, cls in segments:
+            val = _fin(it.get(key))
+            if val == 0.0:
+                continue
+            if val > 0:
+                a, b = run_pos, run_pos + val
+                run_pos = b
+            else:
+                a, b = run_neg + val, run_neg
+                run_neg = a
+            segs.append({"x": x, "y": Y(b), "w": round(bw, 2),
+                         "h": round(abs(Y(a) - Y(b)), 2), "cls": cls, "val": val})
+        tot = _fin_or_none(it.get("total"))
+        has_tot = tot is not None
+        dot_y = Y(tot) if has_tot else None
+        top_y = Y(run_pos)
+        bars.append({
+            "label": it.get("label") or "", "x": x, "cx": cx, "w": round(bw, 2),
+            "segs": segs, "total": tot, "dot_y": dot_y,
+            "label_y": min(top_y, dot_y) if dot_y is not None else top_y,
+        })
+    yticks = [{"v": v, "y": Y(v)} for v in _ticks(ymin, ymax, 5) if ymin <= v <= ymax]
+    return {
+        "w": width, "h": height, "zero_y": Y(0.0), "x0": pad_l, "x1": width - pad_r,
+        "xlabel_y": height - pad_b + 16, "legend_y": height - 12,
+        "bars": bars, "yticks": yticks,
+    }
+
+
+def chart_from_tr_rows(rows: List[Dict[str, Any]], **kw) -> Optional[Dict[str, Any]]:
+    """Adaptador: filas de `compute_rows` → ítems del gráfico. La descomposición
+    es la misma que ya verifica el test (carry+compresión+ajuste = tr_total):
+
+        Carry (rosa)              = carry + ajuste     (cupón/rolldown + proyección)
+        Ganancia de capital (azul)= compresión         (Δprecio por Δyield, ±)
+        Retorno Total (punto)     = tr_total
+    """
+    items = [{
+        "label": r.get("code"),
+        "carry": (r.get("carry") or 0.0) + (r.get("ajuste") or 0.0),
+        "capital": r.get("compresion") or 0.0,
+        "total": r.get("tr_total"),
+    } for r in rows]
+    return bar_chart(items, **kw)
+
+
+def curve_chart(rows: List[Dict[str, Any]], *, width: int = 860, height: int = 300
+                ) -> Optional[Dict[str, Any]]:
+    """Geometría SVG (sin JS) de la curva de tasas: TIR (eje y, %) vs Duration
+    (eje x, años). Dos series por bono, ambas a su duration ACTUAL (`dur0`):
+
+        · 'actual'   = TIR de hoy (`y0`)            → la curva de mercado
+        · 'esperada' = TIR de salida imaginada (`y1`) → la curva que espera el inversor
+
+    El salto vertical entre las dos es el shift de tasas que uno imagina; sirve de
+    referencia visual del escenario. Reusa `_ticks`/`_nice_step` de este módulo."""
+    import math
+
+    def _f(x: Any) -> Optional[float]:
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return None
+        return x if math.isfinite(x) else None
+
+    actual: List[tuple] = []
+    esper: List[tuple] = []
+    for r in rows or []:
+        d = _f(r.get("dur0"))
+        if d is None:
+            continue
+        code = r.get("code") or ""
+        y0, y1 = _f(r.get("y0")), _f(r.get("y1"))
+        if y0 is not None:
+            actual.append((d, y0, code))
+        if y1 is not None:
+            esper.append((d, y1, code))
+    if not actual and not esper:
+        return None
+
+    allp = actual + esper
+    xs = [p[0] for p in allp] + [0.0]
+    ys = [p[1] for p in allp]
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    yspan = (ymax - ymin) or 0.01
+    ymin -= yspan * 0.10
+    ymax += yspan * 0.10
+    xspan = (xmax - xmin) or 1.0
+    xmax += xspan * 0.04
+    pad_l, pad_r, pad_t, pad_b = 46, 12, 12, 44
+    plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
+
+    def X(d: float) -> float:
+        return round(pad_l + (d - xmin) / (xmax - xmin) * plot_w, 2)
+
+    def Y(y: float) -> float:
+        return round(pad_t + (ymax - y) / (ymax - ymin) * plot_h, 2)
+
+    def _series(pts: List[tuple], cls: str) -> Dict[str, Any]:
+        pts = sorted(pts, key=lambda p: p[0])
+        nodes = [{"cx": X(d), "cy": Y(y), "d": d, "y": y, "code": c} for d, y, c in pts]
+        return {"cls": cls, "nodes": nodes,
+                "poly": " ".join(f"{n['cx']},{n['cy']}" for n in nodes)}
+
+    return {
+        "w": width, "h": height, "x0": pad_l, "x1": width - pad_r,
+        "yb": height - pad_b, "xlabel_y": height - pad_b + 15, "legend_y": height - 12,
+        "actual": _series(actual, "act"), "esper": _series(esper, "esp"),
+        "yticks": [{"v": v, "y": Y(v)} for v in _ticks(ymin, ymax, 5) if ymin <= v <= ymax],
+        "xticks": [{"v": v, "x": X(v)} for v in _ticks(xmin, xmax, 6) if xmin <= v <= xmax],
+    }

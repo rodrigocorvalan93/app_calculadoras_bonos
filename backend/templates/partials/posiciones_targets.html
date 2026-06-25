@@ -1,0 +1,34 @@
+{# Target vs Actual por categoría. Los targets viven en localStorage por fondo
+   (no tocan el backend); el % actual viene del server (snapshot por selección).
+   Caja aparte del panel live → editar el target no se pisa con cada tick. #}
+{% if cat_actual %}
+<div class="card" x-data="posTargets({{ fondo | tojson }}, {{ cat_actual | tojson }})" x-cloak>
+  <div class="card-title">
+    <span>Target vs Actual · Categoría{% if nombre %} <i class="muted">· {{ nombre }}</i>{% endif %}</span>
+    <button type="button" class="tgt-copy" @click="copy()" title="Copiar como tabla (pegá en Excel)">
+      <span x-text="copied ? '✓ copiado' : '⧉ copiar'"></span></button>
+  </div>
+  <div class="card-body" style="padding:0">
+    <table class="cashflows tgt-tbl">
+      <thead><tr>
+        <th style="text-align:left">Categoría</th><th>Target</th><th>Actual</th><th>Desvío</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="r in rows" :key="r.cat">
+          <tr>
+            <td style="text-align:left" x-text="r.cat"></td>
+            <td class="tgt-cell"><input type="text" class="tgt-in" x-model="r.target"
+                   @input.debounce.350ms="save()" inputmode="decimal" placeholder="—"
+                   autocomplete="off"><span class="tgt-pct">%</span></td>
+            <td x-text="fpct(r.actual * 100)"></td>
+            <td :class="cls(r)" x-text="fdev(r)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% elif fondo is not none %}
+<div class="card"><div class="card-body muted" style="font-size:12px;padding:10px 14px">
+  Sin composición por categoría para este fondo.</div></div>
+{% endif %}

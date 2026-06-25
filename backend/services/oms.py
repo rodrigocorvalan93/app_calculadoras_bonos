@@ -17,7 +17,9 @@ difiere, el error crudo se muestra en el panel para ajustar el path.
 """
 from __future__ import annotations
 
+import functools
 import json
+import logging
 import threading
 import time
 import uuid
@@ -26,6 +28,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.config import settings
+
+logger = logging.getLogger("oms")
 
 _AUDIT_PATH = Path(__file__).resolve().parents[2] / "oms_audit.jsonl"
 _audit_lock = threading.Lock()
@@ -133,12 +137,18 @@ def blotter(n: int = 60) -> List[Dict[str, Any]]:
 
 def validate(code: str, side: str, qty: float, price: Optional[float],
              account: str, last_ref: Optional[float], moneda: str = "ARS",
-             ordtype: str = "limit") -> Optional[str]:
+             ordtype: str = "limit", theo_ref: Optional[float] = None,
+             confirmed: bool = False) -> Optional[str]:
     """Validaciones pre-trade. Devuelve el motivo del rechazo o None si pasa.
 
     - Tope de notional EN LA MONEDA DEL BONO: ARS (oms_max_notional) para pesos,
       USD (oms_max_notional_usd) para hard-dollar (moneda USD/USB).
-    - Banda de precio (fat-finger) sólo para Limit; Market toma lo que haya.
+    - Banda de precio (fat-finger) sólo para Limit; Market toma lo que haya. La
+      referencia es, en orden: mercado (last/close) → valor técnico `theo_ref`
+      (banda más ancha) → si no hay ninguna, se exige `confirmed` (config
+      `oms_require_ref_confirm`). Esto cierra el agujero del ON ilíquido sin
+      cotización, donde antes NO se chequeaba banda y un precio mal tipeado
+      (p.ej. sub-precio 1000×) pasaba directo.
     """
     if _kill["on"]:
         return "KILL-SWITCH activado: envíos bloqueados."
@@ -156,17 +166,27 @@ def validate(code: str, side: str, qty: float, price: Optional[float],
     is_usd = (moneda or "ARS").upper() in ("USD", "USB")
     cap = settings.oms_max_notional_usd if is_usd else settings.oms_max_notional
     unit = "USD" if is_usd else "ARS"
-    ref_px = price if not is_market else last_ref   # market estima con la referencia
+    ref_px = price if not is_market else (last_ref or theo_ref)  # market estima con la referencia
     if ref_px:
         notional = qty * ref_px / 100.0             # bonos cotizan por VN 100
         if notional > cap:
             return (f"Notional estimado {notional:,.0f} {unit} supera el tope "
                     f"{cap:,.0f} {unit}.")
-    if not is_market and last_ref:
-        band = settings.oms_price_band_pct / 100.0
-        if abs(price / last_ref - 1.0) > band:
-            return (f"Precio {price} fuera de la banda ±{settings.oms_price_band_pct:.0f}% "
-                    f"vs referencia {last_ref} (fat-finger guard).")
+    if not is_market:                               # banda fat-finger sólo para Limit
+        if last_ref:
+            band = settings.oms_price_band_pct / 100.0
+            if abs(price / last_ref - 1.0) > band:
+                return (f"Precio {price} fuera de la banda ±{settings.oms_price_band_pct:.0f}% "
+                        f"vs mercado {last_ref} (fat-finger guard).")
+        elif theo_ref and theo_ref > 0:
+            band = settings.oms_theo_band_pct / 100.0
+            if abs(price / theo_ref - 1.0) > band:
+                return (f"Precio {price} fuera de la banda ±{settings.oms_theo_band_pct:.0f}% "
+                        f"vs valor técnico {theo_ref:,.2f} (sin cotización de mercado; "
+                        f"revisalo o confirmá manualmente).")
+        elif settings.oms_require_ref_confirm and not confirmed:
+            return ("Sin referencia de mercado ni valor técnico para validar el precio. "
+                    "Confirmá manualmente (o usá Market) para enviar.")
     return None
 
 
@@ -194,11 +214,94 @@ def pop_token(tok: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
+# ── Comitentes (cuentas) configurables por broker ─────────────────────────
+# El broker suele exponer sólo una comitente genérica por REST, pero el
+# operador maneja muchos fondos cuyos números son SENSIBLES. Se cargan por el
+# secret OMS_COMITENTES (env var / .env / secrets.txt) — NUNCA se commitean —
+# como JSON {broker: {etiqueta: nro}}, ej:
+#   {"lbo": {"PYMES": "54437", ...}, "cocos": {"PERSO": "27404"}}
+# El broker activo se deduce del host (settings.primary_base_url, que /conexion
+# repunta en caliente). `accounts()` hace MERGE de estas con las del broker.
+@functools.lru_cache(maxsize=1)
+def _comitentes_all() -> Dict[str, Dict[str, str]]:
+    """Parsea OMS_COMITENTES una sola vez (el secret no cambia en runtime, sólo
+    el broker activo). {} si está vacío o el JSON no es válido."""
+    raw = (settings.oms_comitentes or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning("OMS_COMITENTES no es JSON válido — se ignora (el panel cae al genérico del broker)")
+        return {}
+    if not isinstance(data, dict):
+        logger.warning("OMS_COMITENTES debe ser un objeto {broker: {etiqueta: nro}} — se ignora")
+        return {}
+    return data
+
+
+def _active_broker_key() -> str:
+    """Clave del broker activo deducida del host (api.LBO/COCOS/LATIN.xoms…)."""
+    host = (settings.primary_base_url or "").lower()
+    for key in ("lbo", "cocos", "latin"):
+        if key in host:
+            return key
+    return "default"
+
+
+def configured_comitentes() -> List[Dict[str, str]]:
+    """Comitentes del secret para el broker activo, en el orden cargado. Sin
+    red → disponibles aunque no haya sesión. [] si no hay nada configurado."""
+    broker_map = _comitentes_all().get(_active_broker_key()) or {}
+    out: List[Dict[str, str]] = []
+    for label, num in broker_map.items():
+        num = str(num).strip()
+        if num:
+            out.append({"id": num, "label": str(label).strip() or num, "source": "config"})
+    return out
+
+
+def _normalize_account(a: Any) -> Dict[str, str]:
+    """Cuenta cruda del broker REST → {id, label, source}. Defensivo con el
+    shape (la API Primary/XOMS varía: id / accountName / name / brokerId)."""
+    if not isinstance(a, dict):
+        return {"id": str(a).strip(), "label": str(a).strip(), "source": "broker"}
+    num = str(a.get("id") or a.get("accountName") or a.get("name") or a.get("brokerId") or "").strip()
+    label = str(a.get("name") or a.get("accountName") or num or "?").strip()
+    return {"id": num, "label": label, "source": "broker"}
+
+
+def _merge_comitentes(cfg: List[Dict[str, str]], broker: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Unión cfg + broker, deduplicada por número de comitente: primero las
+    configuradas (en su orden, con su etiqueta de fondo), después las que sólo
+    expone el broker. Si un número está en ambas, gana la etiqueta de cfg."""
+    seen = {c["id"] for c in cfg if c.get("id")}
+    out = list(cfg)
+    for b in broker:
+        bid = b.get("id", "")
+        if bid and bid not in seen:
+            out.append(b)
+            seen.add(bid)
+    return out
+
+
 # ── Broker REST (Etapa A: lectura · Etapa C: envío con OMS_LIVE=1) ─────────
 async def accounts() -> List[Dict[str, Any]]:
-    from backend.services.primary_ws import get_ws_client
-    d = await get_ws_client().get_json_checked("rest/accounts")
-    return d.get("accounts", []) if isinstance(d, dict) else []
+    """Comitentes para el panel: MERGE de las configuradas (secret, por broker)
+    con las que el broker expone por REST, deduplicadas por número. Si el broker
+    falla pero hay configuradas, se muestran igual (no rompe el panel); sin
+    configuradas, el error del broker se propaga como hasta ahora."""
+    cfg = configured_comitentes()
+    broker: List[Dict[str, str]] = []
+    try:
+        from backend.services.primary_ws import get_ws_client
+        d = await get_ws_client().get_json_checked("rest/accounts")
+        raw = d.get("accounts", []) if isinstance(d, dict) else []
+        broker = [_normalize_account(a) for a in raw]
+    except Exception:  # noqa: BLE001 — best-effort: con cfg seguimos; sin cfg, propaga
+        if not cfg:
+            raise
+    return _merge_comitentes(cfg, broker)
 
 
 async def live_orders(account: str) -> List[Dict[str, Any]]:
@@ -220,6 +323,26 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     audit("live_enviando", rec)
     from backend.services.primary_ws import get_ws_client
+
+    # Guard pre-trade: no mandes a un símbolo que el broker NO tiene en su
+    # universo (ON que sólo opera SENEBI, plazo inexistente, ticker mal…). En vez
+    # del críptico "Invalid Instrument ... doesn't exist" del broker DESPUÉS de
+    # cursar, avisamos ANTES con los símbolos/plazos que SÍ existen para ese
+    # código. Fail-open: si no se puede traer el universo, sigue como antes.
+    from backend.services import instruments
+    symbol = payload.get("symbol", "")
+    if symbol:
+        chk = await instruments.resolve(payload.get("code", ""), symbol)
+        if chk["checked"] and not chk["exists"]:
+            cands = chk["candidates"]
+            motivo = (f"El broker no tiene el instrumento «{symbol}». "
+                      + (f"Símbolos que SÍ existen para {payload.get('code', '')}: "
+                         + ", ".join(cands) + "." if cands else
+                         "No hay símbolos parecidos en el universo del broker "
+                         "(¿ticker mal o ON que no opera en este broker?)."))
+            audit("live_instrumento_inexistente", {**rec, "candidatos": cands})
+            return {"status": "ERROR", "motivo": motivo, "candidatos": cands, **rec}
+
     ordtype = payload.get("ordtype", "limit")
     params = {
         "marketId": "ROFX",

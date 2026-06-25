@@ -1,0 +1,75 @@
+{% set has = cats | selectattr('n') | list %}
+{% if not has %}
+  <div class="alert">Sin bonos calculables para ese horizonte (¿precios cargados? ¿fecha terminal válida? ¿bonos vencidos antes del terminal?).</div>
+{% else %}
+
+{% with chart_title='Retorno esperado en pesos · Escenario base al ' ~ terminal,
+        chart_aux='Por categoría · Carry + Ganancia de capital = Retorno Total · hard-dollar con overlay de deva CCL/MEP' %}
+  {% include "partials/_bar_chart.html" %}
+{% endwith %}
+
+<div class="card">
+  <div class="card-title"><span>Escenario base → {{ terminal }}</span>
+    <span class="card-title-aux">settle {{ settle }} · {{ dias }} días ·
+      caución TNA {{ tna | ar_pct(1) }} / TEA {{ tea | ar_pct(1) }} / al plazo {{ cauc | ar_pct(2) }} ·
+      deva CCL {{ ccl_proy | ar_pct(2) }} / MEP {{ mep_proy | ar_pct(2) }}{% if infl_monthly is not none %} ·
+      inflación {{ (infl_monthly * 100) | ar_num(2) }}% mens. → CER/UVA{% endif %}</span></div>
+  <div class="card-body" style="padding:0">
+    <form hx-get="/escenario/table" hx-target="#esc-table" hx-swap="innerHTML"
+          hx-include="#esc-form, [name^='y1__']" class="table-tools muted">
+      <input type="hidden" name="use_manual" value="1">
+      <span>Editá el <b>Exit YTM</b> de cualquier bono y</span>
+      <button type="submit" class="btn-primary" style="font-size:11px">↻ recalcular</button>
+    </form>
+    <div class="table-scroll">
+    <table class="cashflows curve-table esc-tbl">
+      <thead><tr>
+        <th style="text-align:left">Categoría / Bono</th>
+        <th>Vencimiento</th>
+        <th>Precio actual</th>
+        <th>YTM actual</th>
+        <th>Duration</th>
+        <th class="grp">Carry</th>
+        <th>Exit YTM</th>
+        <th class="grp">Total Return</th>
+        <th>Neto de fondeo</th>
+        <th>Neto de FX</th>
+      </tr></thead>
+      <tbody>
+        {% for c in cats if c.n %}
+        {% set s = c.summary %}
+        <tr class="esc-grp">
+          <td style="text-align:left">{{ c.label }} <i class="muted">({{ c.n }})</i></td>
+          <td></td><td></td>
+          <td>{{ s.y0 | ar_pct(2) }}</td>
+          <td>{{ s.dur0 | ar_num(2) }}</td>
+          <td class="grp">{{ s.carry | ar_pct(2) }}</td>
+          <td>{{ s.y1 | ar_pct(2) }}</td>
+          <td class="grp {{ 'var-up' if (s.total or 0) >= 0 else 'var-down' }}">{{ s.total | ar_pct(2) }}</td>
+          <td class="{{ 'px-up' if (s.neto_fondeo or 0) >= 0 else 'px-down' }}">{{ s.neto_fondeo | ar_pct(2) }}</td>
+          <td class="{{ 'px-up' if (s.neto_fx or 0) >= 0 else 'px-down' }}">{{ s.neto_fx | ar_pct(2) }}</td>
+        </tr>
+        {% for r in c.rows %}
+        <tr>
+          <td style="text-align:left;color:var(--accent);font-weight:600">
+            <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a></td>
+          <td>{{ r.vto | ar_date }}</td>
+          <td>{{ r.price | ar_num(2) }}</td>
+          <td>{{ r.y0 | ar_pct(2) }}</td>
+          <td>{{ r.dur0 | ar_num(2) }}</td>
+          <td class="grp {{ 'px-up' if r.carry >= 0 else 'px-down' }}">{{ r.carry | ar_pct(2) }}</td>
+          <td><input type="text" name="y1__{{ r.code }}" value="{{ (r.y1 * 100) | ar_num(3) }}"
+                     class="cell-edit" style="width:60px" autocomplete="off"
+                     title="Exit YTM (%); editalo y apretá recalcular"></td>
+          <td class="grp {{ 'var-up' if r.total >= 0 else 'var-down' }}" style="font-weight:650">{{ r.total | ar_pct(2) }}</td>
+          <td class="{{ 'px-up' if (r.neto_fondeo or 0) >= 0 else 'px-down' }}">{{ r.neto_fondeo | ar_pct(2) }}</td>
+          <td class="{{ 'px-up' if (r.neto_fx or 0) >= 0 else 'px-down' }}">{{ r.neto_fx | ar_pct(2) }}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}

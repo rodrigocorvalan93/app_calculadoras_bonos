@@ -46,6 +46,7 @@
       <a class="tab {% block tab_futuros %}{% endblock %}" href="/futuros">Futuros</a>
       <a class="tab {% block tab_graficos %}{% endblock %}" href="/graficos">Gráficos</a>
       <a class="tab {% block tab_total_return %}{% endblock %}" href="/total-return">Total Return</a>
+      <a class="tab {% block tab_escenario %}{% endblock %}" href="/escenario">Escenario</a>
       <a class="tab {% block tab_historicos %}{% endblock %}" href="/historicos">Históricos</a>
       <a class="tab {% block tab_creditos %}{% endblock %}" href="/creditos">Créditos</a>
       <a class="tab {% block tab_cafci %}{% endblock %}" href="/cafci">CAFCI</a>
@@ -93,6 +94,51 @@
   </footer>
 
   <script>
+    // Target vs Actual por categoría (Posiciones). Targets persistidos en
+    // localStorage por fondo; el % actual lo trae el server (snapshot). Desvío
+    // = actual − target (en pp). Botón copiar → TSV para pegar en Excel.
+    function posTargets(fondo, cats) {
+      const KEY = "posTargets:" + fondo;
+      const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } };
+      const ar = (x, d) => x.toLocaleString("es-AR", { minimumFractionDigits: d, maximumFractionDigits: d });
+      return {
+        copied: false,
+        rows: (function () {
+          const saved = load();
+          return (cats || []).map(c => ({
+            cat: c.cat, actual: c.actual,
+            target: Object.prototype.hasOwnProperty.call(saved, c.cat) ? saved[c.cat] : "",
+          }));
+        })(),
+        save() {
+          const m = {};
+          this.rows.forEach(r => { const s = String(r.target).trim(); if (s !== "") m[r.cat] = s; });
+          try { localStorage.setItem(KEY, JSON.stringify(m)); } catch (e) {}
+        },
+        _t(r) { const t = parseFloat(String(r.target).replace(",", ".")); return isNaN(t) ? null : t; },
+        desvio(r) { const t = this._t(r); return t === null ? null : (r.actual * 100 - t); },
+        cls(r) { const v = this.desvio(r); return v === null ? "" : (v >= 0 ? "px-up" : "px-down"); },
+        fpct(x) { return (x === null || x === undefined) ? "—" : ar(x, 1) + "%"; },
+        fdev(r) { const v = this.desvio(r); return v === null ? "—" : (v >= 0 ? "+" : "") + ar(v, 1) + " pp"; },
+        copy() {
+          const out = ["Categoría\tTarget\tActual\tDesvío"];
+          this.rows.forEach(r => {
+            const t = this._t(r), v = this.desvio(r);
+            out.push([r.cat, t === null ? "" : ar(t, 1) + "%", ar(r.actual * 100, 1) + "%",
+                      v === null ? "" : (v >= 0 ? "+" : "") + ar(v, 1) + " pp"].join("\t"));
+          });
+          const txt = out.join("\n");
+          const done = () => { this.copied = true; setTimeout(() => { this.copied = false; }, 1200); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(txt).then(done).catch(() => {});
+          } else {
+            const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta);
+            ta.select(); try { document.execCommand("copy"); done(); } catch (e) {} document.body.removeChild(ta);
+          }
+        },
+      };
+    }
+
     function themeSwitcher() {
       return {
         theme: (function () {

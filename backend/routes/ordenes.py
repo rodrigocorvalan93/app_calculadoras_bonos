@@ -14,6 +14,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from backend.config import settings
+from backend.locale_ar import parse_ar_num
 from backend.services import marketdata_store as mds, oms, pricing, symbols as syms
 
 router = APIRouter(tags=["ordenes"])
@@ -39,22 +40,25 @@ def _moneda(code: str) -> str:
 
 
 def _num_qty(s: Any) -> Optional[float]:
-    """Cantidad (VN, entera): los puntos son separador de miles (es-AR)."""
-    s = str(s or "").strip().replace(" ", "").replace(".", "").replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return None
+    """Cantidad (VN): parser es-AR único (`parse_ar_num`), no negativa."""
+    return parse_ar_num(s, allow_negative=False)
 
 
 def _num_px(s: Any) -> Optional[float]:
-    """Precio: si hay coma es es-AR (1.234,56); si no, se toma tal cual."""
-    s = str(s or "").strip().replace(" ", "")
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
+    """Precio: parser es-AR único. CRÍTICO: '204.600' → 204600 (no 204,6).
+    Antes el viejo `_num_px` leía el punto de miles como decimal → sub-precio 1000×."""
+    return parse_ar_num(s, allow_negative=False)
+
+
+def _theo_ref(code: str) -> Optional[float]:
+    """Valor técnico del bono como referencia TEÓRICA para la banda fat-finger
+    cuando no hay cotización de mercado. Es yield-independiente (no depende del
+    precio): sólo sirve para descartar errores de orden de magnitud."""
     try:
-        return float(s)
-    except ValueError:
+        m = pricing.compute_metrics(code, "tir", 10.0)
+        vt = (m or {}).get("valor_tecnico")
+        return float(vt) if vt is not None and vt == vt and vt > 0 else None
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -96,12 +100,15 @@ async def ordenes_panel(request: Request, account: str = "") -> HTMLResponse:
     accs: List[Dict[str, Any]] = []
     orders: List[Dict[str, Any]] = []
     err = None
-    # Guard: si la sesión REST no está logueada, NO tocamos la red — si no, cada
-    # poll (15 s) colgaría ~5 s en el connect timeout (paper/offline). Mostramos
-    # el aviso y listo; cuando haya login, el panel se enciende solo.
+    # Guard: sin login REST NO tocamos la red (cada poll colgaría ~5 s en el
+    # connect timeout, paper/offline). Igual mostramos las comitentes
+    # configuradas (OMS_COMITENTES): no requieren sesión y sirven para armar
+    # órdenes PAPER. Sólo si tampoco hay configuradas avisamos que falta login.
     from backend.services.primary_ws import get_ws_client
     if not get_ws_client().authenticated:
-        err = "Sesión del broker sin login (paper/offline). Conectá en /conexion."
+        accs = oms.configured_comitentes()
+        if not accs:
+            err = "Sesión del broker sin login (paper/offline). Conectá en /conexion."
     else:
         try:
             accs = await oms.accounts()
@@ -109,6 +116,7 @@ async def ordenes_panel(request: Request, account: str = "") -> HTMLResponse:
                 orders = await oms.live_orders(account)
         except Exception as exc:  # noqa: BLE001
             err = str(exc)
+            accs = oms.configured_comitentes()   # fallback: al menos los configurados
     return _render(request, "partials/ordenes_panel.html",
                    accounts=accs, orders=orders, account=account, err=err, **_base_ctx())
 
@@ -118,7 +126,8 @@ async def ordenes_panel(request: Request, account: str = "") -> HTMLResponse:
 async def ordenes_ticket(request: Request, code: str = Form(""), side: str = Form("buy"),
                          ordtype: str = Form("limit"), qty: str = Form(""),
                          price: str = Form(""), account: str = Form(""),
-                         plazo: str = Form("24hs")) -> HTMLResponse:
+                         plazo: str = Form("24hs"),
+                         confirm_no_ref: str = Form("")) -> HTMLResponse:
     code = code.strip().upper()
     fqty = _num_qty(qty)
     fpx = _num_px(price)
@@ -127,7 +136,8 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
                        error="Cantidad/precio inválidos.", **_base_ctx())
     moneda = _moneda(code)
     ref = _last_ref(code, plazo)
-    motivo = oms.validate(code, side, fqty, fpx, account, ref, moneda, ordtype)
+    motivo = oms.validate(code, side, fqty, fpx, account, ref, moneda, ordtype,
+                          theo_ref=_theo_ref(code), confirmed=(confirm_no_ref == "1"))
     if motivo:
         oms.audit("rechazada_pretrade", {"code": code, "side": side, "qty": fqty,
                                          "price": fpx, "account": account,
@@ -160,7 +170,8 @@ async def ordenes_confirmar(request: Request, token: str = Form("")) -> HTMLResp
 @router.post("/ordenes/multi", response_class=HTMLResponse)
 async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form("buy"),
                         ordtype: str = Form("limit"), price: str = Form(""),
-                        plazo: str = Form("24hs"), lines: str = Form("")) -> HTMLResponse:
+                        plazo: str = Form("24hs"), lines: str = Form(""),
+                        confirm_no_ref: str = Form("")) -> HTMLResponse:
     """Una orden por línea 'comitente, cantidad' (misma especie/lado/precio)."""
     code = code.strip().upper()
     fpx = _num_px(price)
@@ -169,7 +180,9 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
                        error="Precio inválido (Limit).", **_base_ctx())
     moneda = _moneda(code)
     ref = _last_ref(code, plazo)
-    est_px = fpx if ordtype != "market" else ref
+    theo = _theo_ref(code)
+    confirmed = (confirm_no_ref == "1")
+    est_px = fpx if ordtype != "market" else (ref or theo)
     batch: List[Dict[str, Any]] = []
     errors: List[str] = []
     for i, raw in enumerate(lines.splitlines(), 1):
@@ -184,7 +197,8 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
         if not acct or q is None:
             errors.append(f"Línea {i}: comitente o cantidad inválidos.")
             continue
-        motivo = oms.validate(code, side, q, fpx, acct, ref, moneda, ordtype)
+        motivo = oms.validate(code, side, q, fpx, acct, ref, moneda, ordtype,
+                              theo_ref=theo, confirmed=confirmed)
         if motivo:
             errors.append(f"{acct}: {motivo}")
             continue

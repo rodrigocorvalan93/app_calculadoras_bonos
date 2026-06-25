@@ -1108,3 +1108,60 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .nss-params > div.grp { border-top: 1px solid var(--border-soft); padding-top: 6px; margin-top: 2px; }
 .nss-params span { font-size: 11px; color: var(--text-muted); }
 .nss-params b { font-variant-numeric: tabular-nums; }
+
+/* ── Total Return — gráfico de columnas apiladas (SVG server-side) ─────── */
+:root { --tr-carry: #cf8d8d; --tr-capital: #5b8ff9; }
+[data-theme="light"] { --tr-carry: #c0736f; --tr-capital: #3d6fd0; }
+.tr-chart { display: block; width: 100%; height: auto; font-variant-numeric: tabular-nums; }
+.tr-chart .tr-grid { stroke: var(--border-soft); stroke-width: 1; }
+.tr-chart .tr-zero { stroke: var(--border); stroke-width: 1.4; }
+.tr-chart .tr-vlabel, .tr-chart .tr-xlabel { fill: var(--text-muted); font-size: 11px; }
+.tr-chart .tr-total { fill: var(--text-soft); font-size: 11px; font-weight: 600; }
+.tr-chart .tr-bar.carry { fill: var(--tr-carry); }
+.tr-chart .tr-bar.capital { fill: var(--tr-capital); }
+.tr-chart .tr-dot { fill: var(--text); stroke: var(--panel); stroke-width: 1; }
+.tr-chart .tr-legend text { fill: var(--text-muted); font-size: 11px; }
+
+/* ── Escenario — inputs por categoría + tabla agrupada ─────────────────── */
+.esc-cats { display: grid; gap: 4px; margin: 10px 0 2px; max-width: 560px; }
+.esc-cats-head, .esc-cat-row { display: grid; grid-template-columns: 1fr 120px 120px; gap: 8px; align-items: center; }
+.esc-cats-head { font-size: 11px; color: var(--text-muted); padding: 0 2px; }
+.esc-cat-row input { width: 100%; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 7px;
+  font-size: 12px; font-family: inherit; font-variant-numeric: tabular-nums; }
+.esc-cat-row.is-empty { opacity: .45; }
+.esc-cat-name { font-size: 12px; }
+.esc-tbl .esc-grp td { background: var(--panel-2); font-weight: 650;
+  border-top: 2px solid var(--border); }
+.esc-tbl .esc-grp td:first-child { color: var(--text); }
+
+/* ── Curva de tasas (TIR vs Duration): actual vs esperada ──────────────── */
+.yc-chart { display: block; width: 100%; height: auto; }
+.yc-chart .yc-grid { stroke: var(--border); stroke-width: 1; opacity: .5; }
+.yc-chart .yc-axis { stroke: var(--border); stroke-width: 1; }
+.yc-chart .yc-vlabel, .yc-chart .yc-xlabel { fill: var(--text-muted); font-size: 10px;
+  font-variant-numeric: tabular-nums; }
+.yc-chart .yc-line { fill: none; stroke-width: 1.6; }
+.yc-chart .yc-line.act { stroke: var(--text-muted); }
+.yc-chart .yc-line.esp { stroke: var(--accent); }
+.yc-chart .yc-dot { stroke: var(--panel); stroke-width: .8; }
+.yc-chart .yc-dot.act { fill: var(--text-muted); }
+.yc-chart .yc-dot.esp { fill: var(--accent); }
+.yc-chart .yc-legend text { fill: var(--text-muted); font-size: 11px; }
+.yc-chart .yc-axhint { fill: var(--text-muted); opacity: .7; font-size: 10px; }
+.yc-k { font-weight: 600; }
+.yc-k.act { color: var(--text-muted); }
+.yc-k.esp { color: var(--accent); }
+
+/* ── Posiciones · Target vs Actual por categoría ───────────────────────── */
+.tgt-tbl { width: 100%; }
+.tgt-tbl th, .tgt-tbl td { padding: 5px 10px; font-variant-numeric: tabular-nums; }
+.tgt-tbl th:not(:first-child), .tgt-tbl td:not(:first-child) { text-align: right; }
+.tgt-cell { white-space: nowrap; }
+.tgt-in { width: 56px; text-align: right; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 6px;
+  font-size: 12px; font-family: inherit; font-variant-numeric: tabular-nums; }
+.tgt-pct { color: var(--text-muted); font-size: 11px; margin-left: 3px; }
+.tgt-copy { background: var(--panel-2); color: var(--text-muted); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 2px 9px; font-size: 11px; cursor: pointer; }
+.tgt-copy:hover { color: var(--text); border-color: var(--accent); }

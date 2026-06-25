@@ -60,6 +60,55 @@ async def test_total_return_endpoints() -> None:
         assert tb.status_code == 200
         assert "Carry" in tb.text and "Ajuste" in tb.text and "TR total" in tb.text
         assert 'name="y1__TX26"' in tb.text          # TIR final editable por fila
+        # Gráfico de columnas apiladas (SVG server-side, sin JS).
+        assert 'class="tr-chart"' in tb.text and "<svg" in tb.text
+        assert "Ganancia de capital" in tb.text and "Retorno Total" in tb.text
+
+
+def test_curve_chart_two_series() -> None:
+    import math
+    rows = [
+        {"code": "A", "dur0": 0.5, "y0": 0.40, "y1": 0.30},
+        {"code": "B", "dur0": 2.0, "y0": 0.35, "y1": 0.28},
+        {"code": "C", "dur0": 4.0, "y0": 0.33, "y1": float("nan")},  # y1 NaN → sólo 'actual'
+    ]
+    ch = tr.curve_chart(rows)
+    assert ch is not None
+    assert len(ch["actual"]["nodes"]) == 3 and len(ch["esper"]["nodes"]) == 2
+    for s in ("actual", "esper"):
+        for n in ch[s]["nodes"]:
+            assert math.isfinite(n["cx"]) and math.isfinite(n["cy"])
+    assert ch["actual"]["poly"] and ch["yticks"] and ch["xticks"]
+
+
+def test_curve_chart_empty() -> None:
+    assert tr.curve_chart([]) is None
+    assert tr.curve_chart([{"code": "X", "dur0": None, "y0": 0.4, "y1": 0.3}]) is None
+
+
+def test_bar_chart_geometry() -> None:
+    """Apilado estilo Excel: positivos arriba, negativos abajo, punto = total,
+    y todo dentro del lienzo."""
+    items = [
+        {"label": "A", "carry": 0.08, "capital": 0.02, "total": 0.10},   # ambos +
+        {"label": "B", "carry": 0.08, "capital": -0.015, "total": 0.065},  # capital −
+        {"label": "C", "carry": 0.0, "capital": 0.0, "total": 0.0},       # plano
+    ]
+    ch = tr.bar_chart(items, width=860, height=308)
+    assert ch is not None and len(ch["bars"]) == 3
+    H = ch["h"]
+    for b in ch["bars"]:
+        for s in b["segs"]:
+            assert s["h"] >= 0 and 0 <= s["y"] <= H and 0 <= s["y"] + s["h"] <= H + 0.5
+        if b["dot_y"] is not None:
+            assert 0 <= b["dot_y"] <= H
+    # carry positivo arranca en la base (toca el 0); capital negativo cuelga del 0.
+    bz = ch["zero_y"]
+    a_carry = ch["bars"][0]["segs"][0]
+    assert abs((a_carry["y"] + a_carry["h"]) - bz) < 0.6        # base del carry = 0
+    b_cap = ch["bars"][1]["segs"][1]
+    assert abs(b_cap["y"] - bz) < 0.6                            # capital − arranca en 0
+    assert b_cap["y"] + b_cap["h"] > bz                          # y baja
 
 
 @pytest.mark.asyncio

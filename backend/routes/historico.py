@@ -152,8 +152,11 @@ async def historicos_page(
     refresh: bool = False,
 ) -> HTMLResponse:
     if refresh:
-        historico.refresh()
-        historico_byma.refresh()
+        # refresh() relee Excels grandes (~3-4 s): fuera del event loop o bloquea
+        # TODAS las requests concurrentes (los endpoints hermanos ya lo offloadean).
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, historico.refresh)
+        await loop.run_in_executor(None, historico_byma.refresh)
     series = historico.series_list()
     keys = {s["key"] for s in series}
     selected = serie if serie in keys else (series[0]["key"] if series else None)

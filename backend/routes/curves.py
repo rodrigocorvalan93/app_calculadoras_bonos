@@ -541,10 +541,10 @@ def _forwards_matrix(rows: list[dict]) -> dict:
     pts = [
         (r["code"], r["tirea"], r["duration"])
         for r in rows
-        if r.get("tirea") is not None and r["tirea"] == r["tirea"]
+        if r.get("tirea") is not None and r["tirea"] == r["tirea"] and (1.0 + r["tirea"]) > 0.0
         and r.get("duration") is not None and r["duration"] == r["duration"] and r["duration"] > 0
     ]
-    pts.sort(key=lambda p: p[2])  # por Duration ascendente
+    pts.sort(key=lambda p: p[2])  # por Duration ascendente (TIR ≤ −100% excluida → sin (1+y)^t complejo)
     n = len(pts)
     codes = [p[0] for p in pts]
     ys = [p[1] for p in pts]

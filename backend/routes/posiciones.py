@@ -145,7 +145,11 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float]) -> Dict[
             groups[g][k] = groups[g].get(k, 0.0) + valor
     out: Dict[str, List[Dict[str, Any]]] = {}
     for g, d in groups.items():
-        rows = [{"cat": k, "monto": v, "pct": (v / pn) if (pn and pn > 0) else None}
+        # Denominador: PN si lo hay, si no Σ Valor invertido (como el legacy) —
+        # sin esto, un fondo sin PN cargado mostraba TODA la columna % en blanco.
+        total = sum(d.values())
+        denom = pn if (pn and pn > 0) else (total if total > 0 else None)
+        rows = [{"cat": k, "monto": v, "pct": (v / denom) if denom else None}
                 for k, v in d.items()]
         rows.sort(key=lambda r: -abs(r["monto"]))
         out[g] = rows
@@ -153,6 +157,9 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float]) -> Dict[
 
 
 def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[Dict[str, Any]]:
+    # Denominador del peso por tenencia: PN, si no Σ Valor invertido (fallback legacy).
+    total_valor = sum(h["valor"] for h in hs if h.get("valor"))
+    denom = pn if (pn and pn > 0) else (total_valor if total_valor > 0 else None)
     rows: List[Dict[str, Any]] = []
     for h in hs:
         code = h.get("cod_delta")
@@ -178,7 +185,7 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
         rows.append({
             **h,
             "in_universe": m is not None,
-            "pct_pn": (valor / pn) if (valor is not None and pn and pn > 0) else None,
+            "pct_pn": (valor / denom) if (valor is not None and denom) else None,
             "emisor": _emisor_for(code, obj),
             "categoria": _cat_for(h, obj),
             "rating": _calif(obj) if obj is not None else "—",
@@ -237,6 +244,26 @@ async def posiciones_table(request: Request, fondo: Optional[int] = None, plazo:
     # (sin carteras cargadas) y no debe romper con 422.
     bond_universe.ensure_loaded()
     return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **_fondo_ctx(fondo, plazo))
+
+
+@router.get("/posiciones/targets", response_class=HTMLResponse)
+async def posiciones_targets(request: Request, fondo: Optional[int] = None,
+                             plazo: str = "24hs") -> HTMLResponse:
+    """Cuadro Target vs Actual por categoría — SEPARADO del panel live (no lleva
+    `md-update` en el trigger) para no pisar la edición de los targets en cada
+    tick. Los targets se guardan en localStorage por fondo (cliente); el server
+    sólo aporta el % actual de cada categoría (snapshot por selección de fondo).
+    Composición barata: suma de Valor por categoría, sin pricing por bono."""
+    bond_universe.ensure_loaded()
+    cat_actual: List[Dict[str, Any]] = []
+    nombre = ""
+    if fondo is not None:
+        summary = _composicion_summary(positions.holdings(fondo), positions.pn_of(fondo))
+        cat_actual = [{"cat": r["cat"], "actual": r["pct"]}
+                      for r in summary.get("Categoría", []) if r.get("pct") is not None]
+        nombre = positions.fondo_label(fondo)
+    return _render(request, "partials/posiciones_targets.html",
+                   cat_actual=cat_actual, fondo=fondo, nombre=nombre)
 
 
 # ── Matriz de tenencias (pestaña aparte) ───────────────────────────────────

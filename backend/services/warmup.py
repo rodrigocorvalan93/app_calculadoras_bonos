@@ -160,6 +160,7 @@ class WarmupDaemon:
         self._task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
         self._primed = False
+        self._esc_warmed = False        # escenario: 1 warm frío al boot, luego touch
         self._stats: Dict[str, float | int] = {
             "sweeps": 0,
             "last_warmed": 0,
@@ -210,6 +211,16 @@ class WarmupDaemon:
                         )
                 except Exception:  # noqa: BLE001
                     logger.exception("[warmup] sweep failed")
+                try:                                # escenario: warm frío 1 vez (boot),
+                    from backend.routes.escenario import warm_escenario_default  # luego touch
+                    first = not self._esc_warmed
+                    ew = await warm_escenario_default(self.plazo, refresh_only=not first)
+                    self._esc_warmed = True
+                    if ew:
+                        logger.debug("[warmup] escenario %s: %d bonos",
+                                     "warm" if first else "touch", ew)
+                except Exception:  # noqa: BLE001
+                    logger.exception("[warmup] escenario warm failed")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=wait)
                 break  # stop set during the wait

@@ -49,5 +49,12 @@
        hx-swap="innerHTML" hx-include="[name=fondo], [name=plazo]">
     {% include "partials/posiciones_fondo.html" %}
   </div>
+
+  {# Cuadro Target vs Actual: FUERA del panel live (sin md-update) para no pisar la
+     edición. Refresca el % actual sólo al cambiar fondo/plazo. #}
+  <div id="pos-targets" hx-get="/posiciones/targets" hx-swap="innerHTML"
+       hx-include="[name=fondo], [name=plazo]"
+       hx-trigger="load, change from:select[name='fondo'], change from:select[name='plazo']">
+  </div>
 </section>
 {% endblock %}
