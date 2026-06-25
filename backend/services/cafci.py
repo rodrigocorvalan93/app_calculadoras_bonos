@@ -23,6 +23,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.locale_ar import parse_ar_num
+
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
@@ -44,6 +46,11 @@ _DATE_RE = re.compile(r"(\d{8})")
 
 
 def _num(v: Any) -> Optional[float]:
+    # Las celdas del vector CAFCI vienen como float real O como string es-AR
+    # ("941,3", "1.234,5", "12,5%"). float() directo devolvía None para los
+    # strings → columnas en blanco. parse_ar_num cubre ambos casos.
+    if isinstance(v, str):
+        return parse_ar_num(v.replace("%", ""))
     try:
         f = float(v)
         return None if math.isnan(f) else f

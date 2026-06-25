@@ -65,7 +65,14 @@ def _refresh() -> None:
         except Exception:  # noqa: BLE001 — un feed caído no voltea el resto
             continue
     with _lock:
-        if fresh or not _items:
+        if fresh:
+            # Un feed caído ESTE ciclo no debe vaciar su parte del ticker: conservamos
+            # los titulares viejos de fuentes que no respondieron (dedup + acotado).
+            ok = {it["source"] for it in fresh}
+            kept = [it for it in _items
+                    if it.get("source") not in ok and it["title"][:60].lower() not in seen]
+            _items = (fresh + kept)[:60]
+        elif not _items:
             _items = fresh
     if fresh:
         logger.info("[news] %d titulares", len(fresh))
