@@ -351,3 +351,71 @@ def chart_from_tr_rows(rows: List[Dict[str, Any]], **kw) -> Optional[Dict[str, A
         "total": r.get("tr_total"),
     } for r in rows]
     return bar_chart(items, **kw)
+
+
+def curve_chart(rows: List[Dict[str, Any]], *, width: int = 860, height: int = 300
+                ) -> Optional[Dict[str, Any]]:
+    """Geometría SVG (sin JS) de la curva de tasas: TIR (eje y, %) vs Duration
+    (eje x, años). Dos series por bono, ambas a su duration ACTUAL (`dur0`):
+
+        · 'actual'   = TIR de hoy (`y0`)            → la curva de mercado
+        · 'esperada' = TIR de salida imaginada (`y1`) → la curva que espera el inversor
+
+    El salto vertical entre las dos es el shift de tasas que uno imagina; sirve de
+    referencia visual del escenario. Reusa `_ticks`/`_nice_step` de este módulo."""
+    import math
+
+    def _f(x: Any) -> Optional[float]:
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return None
+        return x if math.isfinite(x) else None
+
+    actual: List[tuple] = []
+    esper: List[tuple] = []
+    for r in rows or []:
+        d = _f(r.get("dur0"))
+        if d is None:
+            continue
+        code = r.get("code") or ""
+        y0, y1 = _f(r.get("y0")), _f(r.get("y1"))
+        if y0 is not None:
+            actual.append((d, y0, code))
+        if y1 is not None:
+            esper.append((d, y1, code))
+    if not actual and not esper:
+        return None
+
+    allp = actual + esper
+    xs = [p[0] for p in allp] + [0.0]
+    ys = [p[1] for p in allp]
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    yspan = (ymax - ymin) or 0.01
+    ymin -= yspan * 0.10
+    ymax += yspan * 0.10
+    xspan = (xmax - xmin) or 1.0
+    xmax += xspan * 0.04
+    pad_l, pad_r, pad_t, pad_b = 46, 12, 12, 44
+    plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
+
+    def X(d: float) -> float:
+        return round(pad_l + (d - xmin) / (xmax - xmin) * plot_w, 2)
+
+    def Y(y: float) -> float:
+        return round(pad_t + (ymax - y) / (ymax - ymin) * plot_h, 2)
+
+    def _series(pts: List[tuple], cls: str) -> Dict[str, Any]:
+        pts = sorted(pts, key=lambda p: p[0])
+        nodes = [{"cx": X(d), "cy": Y(y), "d": d, "y": y, "code": c} for d, y, c in pts]
+        return {"cls": cls, "nodes": nodes,
+                "poly": " ".join(f"{n['cx']},{n['cy']}" for n in nodes)}
+
+    return {
+        "w": width, "h": height, "x0": pad_l, "x1": width - pad_r,
+        "yb": height - pad_b, "xlabel_y": height - pad_b + 15, "legend_y": height - 12,
+        "actual": _series(actual, "act"), "esper": _series(esper, "esp"),
+        "yticks": [{"v": v, "y": Y(v)} for v in _ticks(ymin, ymax, 5) if ymin <= v <= ymax],
+        "xticks": [{"v": v, "x": X(v)} for v in _ticks(xmin, xmax, 6) if xmin <= v <= xmax],
+    }

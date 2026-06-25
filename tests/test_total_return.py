@@ -65,6 +65,27 @@ async def test_total_return_endpoints() -> None:
         assert "Ganancia de capital" in tb.text and "Retorno Total" in tb.text
 
 
+def test_curve_chart_two_series() -> None:
+    import math
+    rows = [
+        {"code": "A", "dur0": 0.5, "y0": 0.40, "y1": 0.30},
+        {"code": "B", "dur0": 2.0, "y0": 0.35, "y1": 0.28},
+        {"code": "C", "dur0": 4.0, "y0": 0.33, "y1": float("nan")},  # y1 NaN → sólo 'actual'
+    ]
+    ch = tr.curve_chart(rows)
+    assert ch is not None
+    assert len(ch["actual"]["nodes"]) == 3 and len(ch["esper"]["nodes"]) == 2
+    for s in ("actual", "esper"):
+        for n in ch[s]["nodes"]:
+            assert math.isfinite(n["cx"]) and math.isfinite(n["cy"])
+    assert ch["actual"]["poly"] and ch["yticks"] and ch["xticks"]
+
+
+def test_curve_chart_empty() -> None:
+    assert tr.curve_chart([]) is None
+    assert tr.curve_chart([{"code": "X", "dur0": None, "y0": 0.4, "y1": 0.3}]) is None
+
+
 def test_bar_chart_geometry() -> None:
     """Apilado estilo Excel: positivos arriba, negativos abajo, punto = total,
     y todo dentro del lienzo."""

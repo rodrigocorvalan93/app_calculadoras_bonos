@@ -1134,3 +1134,21 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .esc-tbl .esc-grp td { background: var(--panel-2); font-weight: 650;
   border-top: 2px solid var(--border); }
 .esc-tbl .esc-grp td:first-child { color: var(--text); }
+
+/* ── Curva de tasas (TIR vs Duration): actual vs esperada ──────────────── */
+.yc-chart { display: block; width: 100%; height: auto; }
+.yc-chart .yc-grid { stroke: var(--border); stroke-width: 1; opacity: .5; }
+.yc-chart .yc-axis { stroke: var(--border); stroke-width: 1; }
+.yc-chart .yc-vlabel, .yc-chart .yc-xlabel { fill: var(--text-muted); font-size: 10px;
+  font-variant-numeric: tabular-nums; }
+.yc-chart .yc-line { fill: none; stroke-width: 1.6; }
+.yc-chart .yc-line.act { stroke: var(--text-muted); }
+.yc-chart .yc-line.esp { stroke: var(--accent); }
+.yc-chart .yc-dot { stroke: var(--panel); stroke-width: .8; }
+.yc-chart .yc-dot.act { fill: var(--text-muted); }
+.yc-chart .yc-dot.esp { fill: var(--accent); }
+.yc-chart .yc-legend text { fill: var(--text-muted); font-size: 11px; }
+.yc-chart .yc-axhint { fill: var(--text-muted); opacity: .7; font-size: 10px; }
+.yc-k { font-weight: 600; }
+.yc-k.act { color: var(--text-muted); }
+.yc-k.esp { color: var(--accent); }

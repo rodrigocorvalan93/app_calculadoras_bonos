@@ -1,6 +1,43 @@
 {% if not rows %}
   <div class="alert">Sin bonos calculables en esta curva para ese horizonte (¿precios cargados? ¿fecha terminal válida? ¿bonos vencidos antes del terminal?).</div>
 {% else %}
+{% if ycurve %}
+<div class="card">
+  <div class="card-title"><span>Curva de tasas → {{ terminal }}</span>
+    <span class="card-title-aux">TIR vs Duration · <b class="yc-k act">actual</b> vs
+      <b class="yc-k esp">esperada (salida)</b> — el salto vertical es el shift que imaginás</span></div>
+  <div class="card-body">
+    <svg class="yc-chart" viewBox="0 0 {{ ycurve.w }} {{ ycurve.h }}" width="100%"
+         preserveAspectRatio="xMidYMid meet" role="img" aria-label="Curva de tasas actual vs esperada">
+      {% for t in ycurve.yticks %}
+        <line class="yc-grid" x1="{{ ycurve.x0 }}" y1="{{ t.y }}" x2="{{ ycurve.x1 }}" y2="{{ t.y }}"/>
+        <text class="yc-vlabel" x="{{ ycurve.x0 - 6 }}" y="{{ t.y + 3.5 }}" text-anchor="end">{{ t.v | ar_pct(0) }}</text>
+      {% endfor %}
+      {% for t in ycurve.xticks %}
+        <text class="yc-xlabel" x="{{ t.x }}" y="{{ ycurve.xlabel_y }}" text-anchor="middle">{{ t.v | ar_num(1) }}</text>
+      {% endfor %}
+      <line class="yc-axis" x1="{{ ycurve.x0 }}" y1="{{ ycurve.yb }}" x2="{{ ycurve.x1 }}" y2="{{ ycurve.yb }}"/>
+      {% if ycurve.esper.nodes %}
+        <polyline class="yc-line esp" points="{{ ycurve.esper.poly }}"/>
+        {% for n in ycurve.esper.nodes %}
+          <circle class="yc-dot esp" cx="{{ n.cx }}" cy="{{ n.cy }}" r="2.6"><title>{{ n.code }} · esperada {{ n.y | ar_pct(2) }} @ dur {{ n.d | ar_num(2) }}</title></circle>
+        {% endfor %}
+      {% endif %}
+      {% if ycurve.actual.nodes %}
+        <polyline class="yc-line act" points="{{ ycurve.actual.poly }}"/>
+        {% for n in ycurve.actual.nodes %}
+          <circle class="yc-dot act" cx="{{ n.cx }}" cy="{{ n.cy }}" r="2.6"><title>{{ n.code }} · actual {{ n.y | ar_pct(2) }} @ dur {{ n.d | ar_num(2) }}</title></circle>
+        {% endfor %}
+      {% endif %}
+      <g class="yc-legend" transform="translate({{ ycurve.x0 }} {{ ycurve.legend_y }})">
+        <line class="yc-line act" x1="0" y1="-3.5" x2="18" y2="-3.5"/><text x="23" y="0">actual</text>
+        <line class="yc-line esp" x1="74" y1="-3.5" x2="92" y2="-3.5"/><text x="97" y="0">esperada</text>
+        <text class="yc-axhint" x="{{ ycurve.x1 - ycurve.x0 }}" y="0" text-anchor="end">x = Duration (años)</text>
+      </g>
+    </svg>
+  </div>
+</div>
+{% endif %}
 {% with chart_title='Retorno esperado en pesos → ' ~ terminal,
         chart_aux='Carry (cupón/rolldown + ajuste) + Ganancia de capital (Δprecio por compresión) = Retorno Total' %}
   {% include "partials/_bar_chart.html" %}
