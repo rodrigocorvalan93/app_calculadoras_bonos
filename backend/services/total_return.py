@@ -240,17 +240,37 @@ def bar_chart(items: List[Dict[str, Any]], *, width: int = 860, height: int = 30
     plot_w = width - pad_l - pad_r
     plot_h = height - pad_t - pad_b
 
+    import math
+
+    def _fin(x: Any) -> float:
+        """float finito o 0.0 (descarta None/NaN/±inf antes de la geometría)."""
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return 0.0
+        return x if math.isfinite(x) else 0.0
+
+    def _fin_or_none(x: Any) -> Optional[float]:
+        """float finito o None: un total no-finito no dibuja punto ni contamina la escala."""
+        if x is None:
+            return None
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return None
+        return x if math.isfinite(x) else None
+
     tops: List[float] = [0.0]
     bots: List[float] = [0.0]
     for it in items:
-        pos = sum(max(float(it.get(k) or 0.0), 0.0) for k, _ in segments)
-        neg = sum(min(float(it.get(k) or 0.0), 0.0) for k, _ in segments)
-        tot = it.get("total")
+        pos = sum(max(_fin(it.get(k)), 0.0) for k, _ in segments)
+        neg = sum(min(_fin(it.get(k)), 0.0) for k, _ in segments)
+        tot = _fin_or_none(it.get("total"))
         tops.append(pos)
         bots.append(neg)
-        if tot is not None and tot == tot:
-            tops.append(float(tot))
-            bots.append(float(tot))
+        if tot is not None:
+            tops.append(tot)
+            bots.append(tot)
     ymax, ymin = max(tops), min(bots)
     span = (ymax - ymin) or 1.0
     ymax += span * 0.08
@@ -269,7 +289,7 @@ def bar_chart(items: List[Dict[str, Any]], *, width: int = 860, height: int = 30
         run_pos = run_neg = 0.0
         segs: List[Dict[str, Any]] = []
         for key, cls in segments:
-            val = float(it.get(key) or 0.0)
+            val = _fin(it.get(key))
             if val == 0.0:
                 continue
             if val > 0:
@@ -280,13 +300,13 @@ def bar_chart(items: List[Dict[str, Any]], *, width: int = 860, height: int = 30
                 run_neg = a
             segs.append({"x": x, "y": Y(b), "w": round(bw, 2),
                          "h": round(abs(Y(a) - Y(b)), 2), "cls": cls, "val": val})
-        tot = it.get("total")
-        has_tot = tot is not None and tot == tot
-        dot_y = Y(float(tot)) if has_tot else None
+        tot = _fin_or_none(it.get("total"))
+        has_tot = tot is not None
+        dot_y = Y(tot) if has_tot else None
         top_y = Y(run_pos)
         bars.append({
             "label": it.get("label") or "", "x": x, "cx": cx, "w": round(bw, 2),
-            "segs": segs, "total": (float(tot) if has_tot else None), "dot_y": dot_y,
+            "segs": segs, "total": tot, "dot_y": dot_y,
             "label_y": min(top_y, dot_y) if dot_y is not None else top_y,
         })
     yticks = [{"v": v, "y": Y(v)} for v in _ticks(ymin, ymax, 5) if ymin <= v <= ymax]

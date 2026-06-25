@@ -57,12 +57,12 @@
           <td>{{ r.y0 | ar_pct(2) }}</td>
           <td>{{ r.dur0 | ar_num(2) }}</td>
           <td class="grp {{ 'px-up' if r.carry >= 0 else 'px-down' }}">{{ r.carry | ar_pct(2) }}</td>
-          <td><input type="text" name="y1__{{ r.code }}" value="{{ (r.y1 * 100) | round(3) }}"
+          <td><input type="text" name="y1__{{ r.code }}" value="{{ (r.y1 * 100) | ar_num(3) }}"
                      class="cell-edit" style="width:60px" autocomplete="off"
                      title="Exit YTM (%); editalo y apretá recalcular"></td>
           <td class="grp {{ 'var-up' if r.total >= 0 else 'var-down' }}" style="font-weight:650">{{ r.total | ar_pct(2) }}</td>
-          <td class="{{ 'px-up' if r.neto_fondeo >= 0 else 'px-down' }}">{{ r.neto_fondeo | ar_pct(2) }}</td>
-          <td class="{{ 'px-up' if r.neto_fx >= 0 else 'px-down' }}">{{ r.neto_fx | ar_pct(2) }}</td>
+          <td class="{{ 'px-up' if (r.neto_fondeo or 0) >= 0 else 'px-down' }}">{{ r.neto_fondeo | ar_pct(2) }}</td>
+          <td class="{{ 'px-up' if (r.neto_fx or 0) >= 0 else 'px-down' }}">{{ r.neto_fx | ar_pct(2) }}</td>
         </tr>
         {% endfor %}
         {% endfor %}

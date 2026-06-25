@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -39,9 +40,10 @@ def _num(s: Any) -> Optional[float]:
     if "," in s:
         s = s.replace(".", "").replace(",", ".")
     try:
-        return float(s)
+        v = float(s)
     except ValueError:
         return None
+    return v if math.isfinite(v) else None   # rechaza "inf"/"nan"/"1e999"
 
 
 def _default_terminal() -> str:

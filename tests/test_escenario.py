@@ -4,6 +4,8 @@ y columnas multiplicativas neto-fondeo / neto-FX. Núcleo = total_return._bond_t
 """
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from backend.services import bond_universe, curves, escenario as esc, total_return as tr
@@ -66,6 +68,60 @@ def test_hard_dollar_overlay_ccl():
     assert abs(r["carry"] - ((1 + native["carry"]) * (1 + ccl) - 1)) < 1e-9
     assert abs((r["carry"] + r["capital"]) - r["total"]) < 1e-12
     assert abs(r["neto_fx"] - native["tr_total"]) < 1e-9                  # (1+peso)/(1+ccl)-1 = TR_usd
+
+
+def test_num_rejects_non_finite():
+    from backend.routes.escenario import _num
+    assert _num("inf") is None and _num("-inf") is None
+    assert _num("nan") is None and _num("1e999") is None     # 1e999 → inf
+    assert _num("11,75") == 11.75 and _num("1.234,5") == 1234.5 and _num("20") == 20.0
+
+
+def test_exit_ytm_clamped_to_band():
+    # pendiente extrema no manda la TIR de salida bajo −100 % ni sobre 500 %
+    assert esc.exit_ytm(0.05, -5000, 5.0, 1.0) == -0.99
+    assert esc.exit_ytm(1.0, 9000, 6.0, 1.0) == 5.0
+    assert abs(esc.exit_ytm(0.10, 0, 3.0) - 0.10) < 1e-12
+
+
+def test_bar_chart_survives_non_finite():
+    # inf/nan en segmentos o total no deben romper la geometría (antes: SVG height="nan")
+    items = [
+        {"label": "ok", "carry": 0.05, "capital": 0.01, "total": 0.06},
+        {"label": "inf", "carry": float("inf"), "capital": 0.0, "total": float("inf")},
+        {"label": "nan", "carry": float("nan"), "capital": 0.02, "total": float("nan")},
+    ]
+    ch = tr.bar_chart(items)
+    assert ch is not None
+    for b in ch["bars"]:
+        assert b["dot_y"] is None or math.isfinite(b["dot_y"])
+        for s in b["segs"]:
+            assert math.isfinite(s["y"]) and math.isfinite(s["h"])
+    for t in ch["yticks"]:
+        assert math.isfinite(t["y"]) and math.isfinite(t["v"])
+    assert math.isfinite(ch["zero_y"])
+
+
+@pytest.mark.asyncio
+async def test_escenario_table_adversarial_inputs():
+    """Entradas degeneradas (-100 % de deva/caución, no-finitos, pendiente brutal)
+    no deben 500-ear: deben renderizar 200 con celdas '—' donde corresponda."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import marketdata_store as mds, symbols as syms
+    bond_universe.ensure_loaded()
+    for c in curves.build_curve_codes()["cer"]:
+        mds.get_store().update_from_md(syms.md_symbol(c, "24hs"),
+                                       {"LA": {"price": 1000.0}, "CL": {"price": 990.0}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        for qs in ("ccl_deva=-100&mep_deva=-100",            # neto_fx → None (1+ccl == 0)
+                   "cauc_plazo=-100",                         # neto_fondeo → None (1+cauc == 0)
+                   "ccl_deva=inf&cauc_tna=nan",               # no-finitos → caen al default
+                   "ytm_cer_corto=5&slope_cer_corto=-99999"):  # exit YTM extremo → clamp
+            r = await ac.get(f"/escenario/table?plazo=24hs&terminal=31/12/2026&{qs}")
+            assert r.status_code == 200, f"{qs} -> {r.status_code}"
+            assert "Traceback" not in r.text and 'height="nan"' not in r.text
 
 
 @pytest.mark.asyncio

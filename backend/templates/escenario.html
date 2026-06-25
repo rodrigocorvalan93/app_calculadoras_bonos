@@ -25,16 +25,16 @@
         <label class="field"><span>Fecha terminal</span>
           <input type="text" name="terminal" value="{{ terminal }}" placeholder="dd/mm/aaaa" autocomplete="off"></label>
         <label class="field"><span>Caución TNA (%)</span>
-          <input type="text" name="cauc_tna" value="{{ cauc_tna_pct | round(1) }}" placeholder="20"
+          <input type="text" name="cauc_tna" value="{{ cauc_tna_pct | ar_num(1) }}" placeholder="20"
                  title="Costo de fondeo. La caución al plazo se deriva por capitalización diaria sobre {{ dias }} días."></label>
         <label class="field"><span>Deva CCL (%)</span>
-          <input type="text" name="ccl_deva" value="{{ deva_pct | round(2) }}" placeholder="11,75"
+          <input type="text" name="ccl_deva" value="{{ deva_pct | ar_num(2) }}" placeholder="11,75"
                  title="Deva esperada del CCL al horizonte: convierte el retorno USD de globales a pesos y deflacta el neto de FX. Semilla = A3500 oficial proyectado."></label>
         <label class="field"><span>Deva MEP (%)</span>
-          <input type="text" name="mep_deva" value="{{ deva_pct | round(2) }}" placeholder="11,75"
+          <input type="text" name="mep_deva" value="{{ deva_pct | ar_num(2) }}" placeholder="11,75"
                  title="Deva esperada del MEP al horizonte (bonares). Modelá la brecha cargando un valor distinto al CCL / A3500."></label>
         <label class="field"><span>Anchor (duration)</span>
-          <input type="text" name="anchor" value="{{ anchor | round(2) }}"
+          <input type="text" name="anchor" value="{{ anchor | ar_num(2) }}"
                  title="Duration donde la pendiente no tilta el Exit YTM."></label>
       </div>
 
@@ -45,7 +45,7 @@
           <span class="esc-cat-name">{{ c.label }}{% if c.fx %} · {{ 'CCL' if c.fx=='ccl' else 'MEP' }}{% endif %}
             <i class="muted">({{ c.n }})</i></span>
           <input type="text" name="ytm_{{ c.key }}"
-                 value="{{ (c.ytm * 100) | round(2) if c.ytm is not none else '' }}"
+                 value="{{ (c.ytm * 100) | ar_num(2) if c.ytm is not none else '' }}"
                  placeholder="—" autocomplete="off" {% if not c.n %}disabled{% endif %}>
           <input type="text" name="slope_{{ c.key }}" value="0" autocomplete="off" {% if not c.n %}disabled{% endif %}>
         </div>

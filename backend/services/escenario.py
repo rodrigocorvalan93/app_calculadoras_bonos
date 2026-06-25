@@ -25,6 +25,7 @@ On-demand; el cómputo pesado se cachea por inputs en la route.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Dict, List, Optional
 
 from backend.services import total_return as tr
@@ -70,9 +71,11 @@ def in_bucket(cat: Cat, dur: Optional[float]) -> bool:
 
 
 def exit_ytm(level: float, slope_bps: float, dur: float, anchor: float = 1.0) -> float:
-    """Exit YTM (decimal) por bono: nivel plano + pendiente·(dur−anchor).
-    slope_bps en bps/año; nivel/level en decimal (0.25 = 25%)."""
-    return float(level) + float(slope_bps) / 10000.0 * (float(dur) - float(anchor))
+    """Exit YTM (decimal) por bono: nivel plano + pendiente·(dur−anchor), recortado a
+    [-0,99 ; 5,0] igual que `total_return.scenario_params` (una TIR de salida < −100 %
+    rompería el precio objetivo). slope_bps en bps/año; level en decimal (0.25 = 25 %)."""
+    y = float(level) + float(slope_bps) / 10000.0 * (float(dur) - float(anchor))
+    return min(5.0, max(-0.99, y))
 
 
 def _vto(code: str):
@@ -111,9 +114,11 @@ def compute_category(
             continue
         carry, comp, aj, trn = res["carry"], res["compresion"], res["ajuste"], res["tr_total"]
         peso = (1.0 + trn) * (1.0 + fx_proy) - 1.0
+        if not math.isfinite(peso):                         # no dejes filtrar nan%/inf a la celda
+            continue
         pink = (1.0 + carry + aj) * (1.0 + fx_proy) - 1.0   # Carry (income + deva/FX)
         blue = peso - pink                                  # Ganancia de capital
-        neto_fondeo = (1.0 + peso) / (1.0 + cauc) - 1.0
+        neto_fondeo = (1.0 + peso) / (1.0 + cauc) - 1.0 if (1.0 + cauc) else None
         neto_fx = (1.0 + peso) / (1.0 + ccl_proy) - 1.0 if (1.0 + ccl_proy) else None
         out.append({
             "code": code, "vto": _vto(code), "price": r.get("px_calc"),
