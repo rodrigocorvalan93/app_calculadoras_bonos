@@ -19,6 +19,39 @@ def test_targets_partial_alpine_markup():
     assert "Target" in html and "Actual" in html and "Desvío" in html
 
 
+def _extract_xdata(html: str):
+    """Valor del atributo x-data del card, parseado como lo haría el browser.
+    Si el atributo está mal formado (el `"` del JSON cierra el atributo en
+    comillas dobles), el parser devuelve el call TRUNCADO → el test lo caza."""
+    from html.parser import HTMLParser
+
+    grabbed = []
+
+    class P(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            v = dict(attrs).get("x-data")
+            if v and v.startswith("posTargets"):
+                grabbed.append(v)
+
+    P().feed(html)
+    return grabbed[0] if grabbed else None
+
+
+def test_targets_xdata_attribute_well_formed():
+    # Regresión: `tojson` emite `"` sin escapar; en un atributo con comillas
+    # dobles el primer `"` del JSON cerraba x-data y Alpine no arrancaba (caja
+    # invisible por x-cloak). Debe ir en comillas simples → JSON intacto.
+    from backend.main import app
+    env = app.state.templates.env
+    html = env.get_template("partials/posiciones_targets.html").render(
+        cat_actual=[{"cat": "Globales", "actual": 0.14}, {"cat": "DLK", "actual": 0.16}],
+        fondo=99, nombre="G6")
+    xd = _extract_xdata(html)
+    assert xd is not None, "no se encontró un x-data='posTargets(...)' bien formado"
+    assert xd.startswith("posTargets(99,") and xd.endswith(")")   # call completo, no truncado
+    assert '"cat"' in xd and '"actual"' in xd                     # el JSON entró entero
+
+
 def test_targets_partial_empty_fondo_renders_nothing():
     from backend.main import app
     env = app.state.templates.env
