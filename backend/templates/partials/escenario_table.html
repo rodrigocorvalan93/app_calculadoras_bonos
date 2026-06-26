@@ -8,6 +8,21 @@
   {% include "partials/_bar_chart.html" %}
 {% endwith %}
 
+<div class="card esc-method">
+  <div class="card-body">
+    <p class="esc-note muted">Cada barra es el <b>promedio simple</b> del total return de los bonos de la
+      categoría (equiponderado, no un bono de referencia). <b>Categoría = curva + bucket de duration</b>:
+      CER corto &lt;0,5 · medio 0,5–1,5 · largo ≥1,5 años · Tasa fija &lt;1 / larga ≥1 ·
+      DLK/TAMAR/Globales/Bonares = la curva entera.</p>
+    <div class="esc-members">
+      {% for c in cats if c.n %}
+      <div class="esc-mrow"><span class="esc-mlabel">{{ c.label }}</span> <i class="muted">({{ c.n }})</i>
+        <span class="esc-mcodes">{{ c.rows | map(attribute='code') | join(' · ') }}</span></div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-title"><span>Escenario base → {{ terminal }}</span>
     <span class="card-title-aux">settle {{ settle }} · {{ dias }} días ·

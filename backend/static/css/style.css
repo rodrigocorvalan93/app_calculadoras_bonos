@@ -1134,6 +1134,11 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .esc-tbl .esc-grp td { background: var(--panel-2); font-weight: 650;
   border-top: 2px solid var(--border); }
 .esc-tbl .esc-grp td:first-child { color: var(--text); }
+.esc-method .esc-note { font-size: 11.5px; line-height: 1.5; margin: 0 0 8px; }
+.esc-members { display: grid; gap: 3px; }
+.esc-mrow { font-size: 11.5px; line-height: 1.4; }
+.esc-mlabel { font-weight: 600; }
+.esc-mcodes { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 /* ── Curva de tasas (TIR vs Duration): actual vs esperada ──────────────── */
 .yc-chart { display: block; width: 100%; height: auto; }

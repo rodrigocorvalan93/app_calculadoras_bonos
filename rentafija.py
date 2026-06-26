@@ -361,7 +361,12 @@ class Bono:
             ajuste_aplicable = []
             for i in range(self.cupones):
                 fecha_ajuste_actual = n_dias_laborales(self.fechas_cupon[i],self.dias_lag_ajuste)
-                ajuste_actual = inputs['a3500'].loc[fecha_ajuste_actual, 'tca3500'] if fecha_ajuste_actual in inputs['a3500'].index else inputs['a3500'].iloc[-1]['tca3500']
+                # A3500 "actual" (FX corriente) para cupones futuros. Override what-if
+                # POR-OBJETO (`_a3500_override`, seteado en la copia per-request) en vez
+                # de mutar el global `inputs['a3500']` (eso corrompía el A3500 de todo el
+                # proceso). Sin override seteado el comportamiento es idéntico al previo.
+                _a3500_cur = self._a3500_override if getattr(self, '_a3500_override', None) is not None else inputs['a3500'].iloc[-1]['tca3500']
+                ajuste_actual = inputs['a3500'].loc[fecha_ajuste_actual, 'tca3500'] if fecha_ajuste_actual in inputs['a3500'].index else _a3500_cur
                 ratio_aplicable = ajuste_actual
                 ajuste_aplicable.append(ratio_aplicable)
         elif self.ajuste_sobre_capital == "A3500 PROYECTADO":

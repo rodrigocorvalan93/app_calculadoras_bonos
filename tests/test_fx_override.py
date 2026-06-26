@@ -12,9 +12,12 @@ from backend.services import bond_universe, curves, pricing
 
 
 def _a3500_state():
+    # fingerprint fuerte: largo + último + suma total → caza cualquier mutación
+    # (append, cambio de un valor en el medio, etc.). Con el override por-objeto
+    # ahora NADA muta el global, así que esto queda idéntico antes/después.
     import rentafija
     s = rentafija.inputs["a3500"]
-    return (len(s.index), float(s.iloc[-1]["tca3500"]))
+    return (len(s.index), float(s.iloc[-1]["tca3500"]), round(float(s["tca3500"].sum()), 4))
 
 
 def _dlk_code():
