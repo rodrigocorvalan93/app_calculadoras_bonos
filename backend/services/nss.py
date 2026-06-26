@@ -141,12 +141,14 @@ def estimate(duration: float, xs: List[float], ys: List[float],
     d = float(duration)
     d_used = float(np.clip(d, x_min, x_max)) if clip else d
     tirea = float(model(d_used, *popt)) / 100.0
-    # TIR ≤ −100% (sobre-extrapolación NSS) → los derivados (potencias fraccionarias
-    # de base negativa) darían número complejo → 500 en json.dumps. Quedan None.
+    # Sobre-extrapolación NSS: TIR ≤ −100% daría potencia COMPLEJA y TIR absurda
+    # (p.ej. miles de %) daría OVERFLOW en (1+t)^d → ambas 500-ean json.dumps.
+    # `pos` cubre lo primero; `sane` (|TIR| acotada) lo segundo. Derivados → None.
     pos = (1.0 + tirea) > 0.0
+    sane = pos and tirea < 5.0          # exp pequeño en `tem` no desborda; el de `d` sí
     tem = (1.0 + tirea) ** (30.0 / 360.0) - 1.0 if pos else None
     # TNA del plazo: rendimiento total sobre D años anualizado lineal (días/365).
-    tna_plazo = (((1.0 + tirea) ** d_used - 1.0) / d_used) if (pos and d_used > 0) else None
+    tna_plazo = (((1.0 + tirea) ** d_used - 1.0) / d_used) if (sane and d_used > 0) else None
     return {
         "duration_in": d, "duration_used": d_used, "clamped": (d != d_used),
         "x_min": x_min, "x_max": x_max,
