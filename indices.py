@@ -688,7 +688,10 @@ def refresh_a3500_in_rentafija(session=None, force=False):
     """Obtiene FX actual y lo inyecta en rentafija.inputs['a3500'] para hoy."""
     import rentafija
     fx = get_fx_hoy(session=session, force_refresh=force)
-    fecha_hoy = datetime.now().date().isoformat()
+    # date (no string): el índice de inputs['a3500'] son `date` → inyectar un string
+    # dejaba el índice MIXTO y rompía toda comparación por fecha (p.ej. la deva A3500
+    # de Históricos "Qué pasó"). Nadie lee esta serie por clave string.
+    fecha_hoy = datetime.now().date()
     try:
         rentafija.inputs['a3500'].loc[fecha_hoy, 'tca3500'] = fx
     except Exception as e:
