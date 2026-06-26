@@ -145,6 +145,7 @@ async def test_escenario_endpoints():
         assert 'class="tr-chart"' in tb.text                       # gráfico por categoría
         assert "Total Return" in tb.text and "Neto de FX" in tb.text
         assert "CER corto" in tb.text and 'name="y1__' in tb.text  # banda + Exit YTM editable
+        assert "promedio simple" in tb.text and "esc-members" in tb.text  # nota + desglose de bonos
 
 
 def test_bond_tr_want_duration_skips_durf_same_math():
