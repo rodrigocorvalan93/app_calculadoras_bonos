@@ -23,6 +23,36 @@ def test_equities_rows() -> None:
     assert "tirea" not in rows[0]                  # sin calculadora
 
 
+def test_merval_snapshot_robusto_a_simbolo() -> None:
+    """El índice Merval llega con un string que puede diferir del que suscribimos
+    (echo del broker). merval_snapshot escanea el store por 'MERVAL' → lo encuentra
+    aunque no matchee ninguna variante exacta, así el 'MERVAL US$' del tape aparece."""
+    mds.get_store().update_from_md("MERV - XMEV - I.MERVAL - spot",
+                                   {"LA": {"price": 2_500_000.0}, "CL": {"price": 2_450_000.0}})
+    ms = equities.merval_snapshot()
+    assert ms is not None and ms.last == 2_500_000.0
+
+
+@pytest.mark.asyncio
+async def test_tape_merval_usd_aparece() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, curves
+    bond_universe.ensure_loaded()
+    store = mds.get_store()
+    # CCL computable: pata ARS (base) + cable (…C) de los globales
+    for c in curves.build_curve_codes().get("globales", []):
+        base = c[:-1] if c.endswith("C") else c
+        store.update_from_md(syms.md_symbol(base, "24hs"), {"LA": {"price": 70000.0}})
+        store.update_from_md(syms.md_symbol(base + "C", "24hs"), {"LA": {"price": 70.0}})
+    store.update_from_md("MERV - XMEV - I.MERVAL - spot",
+                         {"LA": {"price": 2_500_000.0}, "CL": {"price": 2_450_000.0}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        tp = await ac.get("/tape")
+    assert tp.status_code == 200 and "MERVAL US$" in tp.text     # Merval / CCL en la barra
+
+
 @pytest.mark.asyncio
 async def test_equities_tape_news_endpoints() -> None:
     from httpx import ASGITransport, AsyncClient
