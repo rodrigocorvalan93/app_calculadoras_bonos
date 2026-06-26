@@ -77,3 +77,25 @@ async def test_targets_endpoint_no_crash():
         import re
         m = re.search(r'id="pos-targets"[^>]*hx-trigger="([^"]*)"', pg.text)
         assert m and "md-update" not in m.group(1) and "change from:select" in m.group(1)
+
+
+@pytest.mark.asyncio
+async def test_pos_fondo_es_estatica_con_boton_refresh():
+    """La tabla de tenencias (con el Last editable) NO debe auto-refrescarse en cada
+    tick BYMA — pisaba lo que el usuario tipeaba. Es estática + botón ↻ Precios BYMA."""
+    import re
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe
+    bond_universe.ensure_loaded()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        pg = await ac.get("/posiciones")
+    assert pg.status_code == 200
+    # el contenedor de tenencias NO escucha md-update (no se refresca solo)
+    m = re.search(r'id="pos-fondo"[^>]*>', pg.text)
+    assert m and "md-update" not in m.group(0)
+    # botón manual para traer precios BYMA, apuntando al panel
+    assert "Precios BYMA" in pg.text
+    assert re.search(r'hx-get="/posiciones/table"[^>]*hx-target="#pos-fondo"', pg.text)
