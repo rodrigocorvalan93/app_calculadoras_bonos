@@ -85,12 +85,37 @@ _DRIFT_SERIES = {"CER": ("cer_proyectado", "CER"), "UVA": ("uva_proyectado", "UV
                  "A3500": ("a3500_proyectado", "tca3500")}
 
 
+def compound_path(path, months: float) -> Optional[float]:
+    """Crecimiento compuesto de un sendero MENSUAL sobre `months` (puede ser
+    fraccional): ∏(1+mᵢ) − 1, extendiendo el ÚLTIMO valor del sendero para los
+    meses que excedan su largo. `path` = secuencia de tasas mensuales (decimal).
+    None si el sendero está vacío → el caller cae al comportamiento por defecto.
+
+    Generaliza el viejo `(1+infl)^months − 1`: un sendero de UN elemento [m] da
+    exactamente eso (m plano sobre todo el horizonte)."""
+    if not path:
+        return None
+    months = max(0.0, float(months))
+    full = int(months)
+    frac = months - full
+    n = len(path)
+    prod = 1.0
+    for i in range(full):
+        prod *= 1.0 + float(path[i] if i < n else path[-1])
+    if frac > 1e-9:
+        prod *= (1.0 + float(path[full] if full < n else path[-1])) ** frac
+    return prod - 1.0
+
+
 def _drift_compute(kind: str, lag: int, settle_d: date, terminal_d: date,
-                   infl_monthly: Optional[float]) -> float:
-    if infl_monthly is not None and kind in ("CER", "UVA"):
-        # El lag corre ambos extremos por igual → el span (meses) no cambia.
-        months = max(0.0, (terminal_d - settle_d).days / 30.4375)
-        return (1.0 + float(infl_monthly)) ** months - 1.0
+                   infl_path: Optional[tuple], a3500_path: Optional[tuple]) -> float:
+    months = max(0.0, (terminal_d - settle_d).days / 30.4375)
+    # Senderos override (el lag corre ambos extremos igual → el span no cambia):
+    # CER/UVA toman el sendero de inflación; A3500 (deva DLK) el suyo propio.
+    if kind in ("CER", "UVA") and infl_path:
+        return compound_path(infl_path, months)
+    if kind == "A3500" and a3500_path:
+        return compound_path(a3500_path, months)
     import rentafija
     sl = rentafija.n_dias_laborales(settle_d, lag)
     tl = rentafija.n_dias_laborales(terminal_d, lag)
@@ -102,32 +127,34 @@ def _drift_compute(kind: str, lag: int, settle_d: date, terminal_d: date,
 
 
 def _drift_from_meta(ajuste_raw: Optional[str], lag: int, settle_d: date,
-                     terminal_d: date, infl_monthly: Optional[float] = None) -> float:
+                     terminal_d: date, infl_path: Optional[tuple] = None,
+                     a3500_path: Optional[tuple] = None) -> float:
     """Crecimiento del índice (CER/UVA/A3500) entre settle y terminal desde los
     METADATOS del bono (no del objeto) → se aplica sobre una base cacheada sin
-    recopiar. `infl_monthly` (decimal): si se pasa, CER y UVA usan inflación
-    COMPUESTA sobre el horizonte en vez de cer/uva_proyectado; A3500 (deva) no se
-    toca. 0 sin ajuste de capital.
+    recopiar. Senderos mensuales (tuplas de decimales) override la proyección:
+    `infl_path` pega en CER/UVA, `a3500_path` en la deva A3500 (DLK). Sin sendero,
+    cada índice usa su serie proyectada. 0 sin ajuste de capital.
 
-    Memoizado (TTL 20 s) por (kind, lag, settle, terminal, infl): el drift es el
-    MISMO para todos los bonos del mismo índice/lag/horizonte → se computa 1 vez,
-    no una búsqueda en el df por bono (los ~65 del escenario comparten ~3 drifts)."""
+    Memoizado (TTL 20 s) por (kind, lag, settle, terminal, infl_path, a3500_path):
+    el drift es el MISMO para todos los bonos del mismo índice/lag/horizonte →
+    se computa 1 vez (los ~65 del escenario comparten ~3 drifts)."""
     ajuste = (ajuste_raw or "").upper()
     kind = ("CER" if "CER" in ajuste else "UVA" if "UVA" in ajuste
             else "A3500" if "A3500" in ajuste else "")
     if not kind:
         return 0.0
     return _drift_cache.get_or_compute(
-        (kind, lag, settle_d, terminal_d, infl_monthly),
-        lambda: _drift_compute(kind, lag, settle_d, terminal_d, infl_monthly))
+        (kind, lag, settle_d, terminal_d, infl_path, a3500_path),
+        lambda: _drift_compute(kind, lag, settle_d, terminal_d, infl_path, a3500_path))
 
 
 def _index_drift(obj, settle_d: date, terminal_d: date,
-                 infl_monthly: Optional[float] = None) -> float:
+                 infl_path: Optional[tuple] = None,
+                 a3500_path: Optional[tuple] = None) -> float:
     """Wrapper de `_drift_from_meta` para llamadas que ya tienen el objeto bono."""
     return _drift_from_meta(getattr(obj, "ajuste_sobre_capital", None),
                             int(getattr(obj, "dias_lag_ajuste_base", -10) or -10),
-                            settle_d, terminal_d, infl_monthly)
+                            settle_d, terminal_d, infl_path, a3500_path)
 
 
 # ── curva de salida (3 modos) → y1 por duration ──────────────────────────────
@@ -207,19 +234,25 @@ _bond_tr_cache = LockedTTLCache(maxsize=8192, ttl=20)
 
 def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
              settle_d: date, terminal_d: date, dur0: Optional[float],
-             want_duration: bool = True, infl_monthly: Optional[float] = None
+             want_duration: bool = True, infl_monthly: Optional[float] = None,
+             infl_path: Optional[tuple] = None, a3500_path: Optional[tuple] = None
              ) -> Optional[Dict[str, Any]]:
     """TR por bono. La parte cara (carry/real/dur_f, libre de inflación) se cachea
     (TTL 20 s) por (code,y0,y1,terminal,settle,want_duration); el ajuste por índice
-    —con el override de inflación opcional `infl_monthly`— se aplica barato encima.
-    Así tocar el Exit YTM de una categoría recalcula sólo esa, y tocar la inflación
-    NO recalcula nada caro (sólo re-aplica el drift sobre la base cacheada)."""
+    —con los senderos override de inflación (CER/UVA) y deva A3500 (DLK)— se aplica
+    barato encima. Así tocar el Exit YTM de una categoría recalcula sólo esa, y
+    tocar un sendero NO recalcula nada caro (sólo re-aplica el drift sobre la base).
+
+    `infl_monthly` (decimal, plano) se mantiene por compatibilidad = sendero de un
+    elemento; `infl_path`/`a3500_path` (tuplas de decimales mensuales) ganan si se
+    pasan."""
     key = (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str, want_duration)
     base = _bond_tr_cache.get_or_compute(
         key, lambda: _bond_tr_base(code, y0, y1, terminal_str, settle_str, dur0, want_duration))
     if base is None:
         return None
-    drift = _drift_from_meta(base["ajuste_meta"], base["lag"], settle_d, terminal_d, infl_monthly)
+    ip = infl_path if infl_path else ((float(infl_monthly),) if infl_monthly is not None else None)
+    drift = _drift_from_meta(base["ajuste_meta"], base["lag"], settle_d, terminal_d, ip, a3500_path)
     tr_real = base["tr_real"]
     tr_total = (1.0 + tr_real) * (1.0 + drift) - 1.0
     return {

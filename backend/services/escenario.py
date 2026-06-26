@@ -99,9 +99,13 @@ def compute_category(
     terminal: str,
     settle: str,
     infl_monthly: Optional[float] = None,
+    infl_path: Optional[tuple] = None,
+    a3500_path: Optional[tuple] = None,
 ) -> Dict[str, Any]:
     """Filas de TR EN PESOS por bono de la categoría + fila resumen (promedio
-    simple). `rows` = filas de `_rows_for` ya filtradas al bucket de duration."""
+    simple). `rows` = filas de `_rows_for` ya filtradas al bucket de duration.
+    Senderos: `infl_path` (CER/UVA) y `a3500_path` (deva A3500 → DLK) override la
+    proyección; CCL/MEP ya entran compuestos en `fx_proy`."""
     sd, td = tr._parse_d(settle), tr._parse_d(terminal)
     out: List[Dict[str, Any]] = []
     for r in rows:
@@ -112,7 +116,8 @@ def compute_category(
             continue
         res = tr._bond_tr(code, y0, y1, terminal, settle, sd, td, r.get("duration"),
                           want_duration=False,   # el comparador no usa dur_f → −1 calc/bono
-                          infl_monthly=infl_monthly)   # escenario de inflación → CER/UVA
+                          infl_monthly=infl_monthly,   # escenario de inflación → CER/UVA
+                          infl_path=infl_path, a3500_path=a3500_path)
         if not res:
             continue
         carry, comp, aj, trn = res["carry"], res["compresion"], res["ajuste"], res["tr_total"]

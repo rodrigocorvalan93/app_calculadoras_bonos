@@ -27,19 +27,52 @@
         <label class="field"><span>Caución TNA (%)</span>
           <input type="text" name="cauc_tna" value="{{ cauc_tna_pct | ar_num(1) }}" placeholder="20"
                  title="Costo de fondeo. La caución al plazo se deriva por capitalización diaria sobre {{ dias }} días."></label>
-        <label class="field"><span>Deva CCL (%)</span>
-          <input type="text" name="ccl_deva" value="{{ deva_pct | ar_num(2) }}" placeholder="11,75"
-                 title="Deva esperada del CCL al horizonte: convierte el retorno USD de globales a pesos y deflacta el neto de FX. Semilla = A3500 oficial proyectado."></label>
-        <label class="field"><span>Deva MEP (%)</span>
-          <input type="text" name="mep_deva" value="{{ deva_pct | ar_num(2) }}" placeholder="11,75"
-                 title="Deva esperada del MEP al horizonte (bonares). Modelá la brecha cargando un valor distinto al CCL / A3500."></label>
-        <label class="field"><span>Inflación mens. (%)</span>
-          <input type="text" name="infl" value="" autocomplete="off"
-                 placeholder="{{ infl_pct | ar_num(2) if infl_pct is not none else 'proy.' }}"
-                 title="Escenario de inflación MENSUAL → pega en CER y UVA (ajuste compuesto sobre el horizonte). Vacío = usar la proyección CER actual ({{ infl_pct | ar_num(2) if infl_pct is not none else '—' }}% implícito)."></label>
         <label class="field"><span>Anchor (duration)</span>
           <input type="text" name="anchor" value="{{ anchor | ar_num(2) }}"
                  title="Duration donde la pendiente no tilta el Exit YTM."></label>
+      </div>
+
+      {# ── Senderos mensuales (inflación + devas) ───────────────────────────
+         Nivel mes a mes por driver; persisten en localStorage (lo último que
+         cargaste queda escrito). Vacío = proyección/serie actual. El último mes
+         cargado se extiende al resto del horizonte. Pegan en el TR: inflación →
+         CER/UVA, A3500 → DLK, CCL → globales, MEP → bonares. #}
+      <div class="esc-senderos" x-data="escSenderos({{ n_months }})" x-cloak>
+        <div class="esc-senderos-head">
+          <span>Senderos mensuales <i class="muted">(%/mes · vacío = proyección actual · el último mes se extiende)</i></span>
+          <button type="button" class="lnk" @click="clearAll()" title="Borrar todos los senderos">limpiar todo</button>
+        </div>
+        <div class="table-scroll">
+          <table class="cashflows sendero-tbl">
+            <thead><tr>
+              <th style="text-align:left">Driver</th>
+              <template x-for="m in nMonths" :key="m"><th x-text="'M'+m"></th></template>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              <template x-for="d in drivers" :key="d.key">
+                <tr>
+                  <td style="text-align:left"><b x-text="d.label"></b> <i class="muted" x-text="d.unit"></i></td>
+                  <template x-for="i in nMonths" :key="i">
+                    <td><input type="text" class="sendero-in" inputmode="decimal" autocomplete="off"
+                               :placeholder="d.ph" x-model="cells[d.key][i-1]"
+                               @input.debounce.450ms="save()"></td>
+                  </template>
+                  <td><button type="button" class="lnk" @click="clearRow(d.key)" title="Limpiar fila">✕</button></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        {# Inputs ocultos con name ESTÁTICO (htmx los manda seguro); Alpine sólo
+           bindea el value serializado del sendero. Evita depender de :name. #}
+        <input type="hidden" name="infl_path"  :value="ser('infl_path')">
+        <input type="hidden" name="a3500_path" :value="ser('a3500_path')">
+        <input type="hidden" name="ccl_path"   :value="ser('ccl_path')">
+        <input type="hidden" name="mep_path"   :value="ser('mep_path')">
+        <p class="muted" style="font-size:11px;margin:6px 2px 0">Implícitos hoy:
+          inflación ≈ <b>{{ infl_pct | ar_num(2) if infl_pct is not none else '—' }}%</b>/mes ·
+          deva A3500 ≈ <b>{{ deva_mens_pct | ar_num(2) }}%</b>/mes (dejá la fila vacía para usar la proyección).</p>
       </div>
 
       <div class="esc-cats">
@@ -69,4 +102,69 @@
 
   <div id="esc-table"></div>
 </section>
+
+<script>
+  // Senderos mensuales (Escenario). Nivel mes a mes por driver, persistido en
+  // localStorage (lo último que cargaste queda escrito). Cada fila se serializa
+  // "v1;v2;…" en un input hidden con el name del param (infl_path/a3500_path/
+  // ccl_path/mep_path) que htmx manda al recalcular. El último mes cargado se
+  // extiende al resto del horizonte (lo hace compound_path en el server).
+  function escSenderos(nMonths) {
+    var KEY = "escSenderos:v1";
+    var drivers = [
+      { key: "infl_path",  label: "Inflación",  unit: "· CER/UVA",  ph: "" },
+      { key: "a3500_path", label: "Deva A3500", unit: "· DLK",      ph: "" },
+      { key: "ccl_path",   label: "Deva CCL",   unit: "· globales", ph: "" },
+      { key: "mep_path",   label: "Deva MEP",   unit: "· bonares",  ph: "" },
+    ];
+    function load() { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } }
+    var saved = load(), cells = {};
+    drivers.forEach(function (d) {
+      var a = Array.isArray(saved[d.key]) ? saved[d.key].slice() : [];
+      while (a.length < nMonths) a.push("");
+      cells[d.key] = a;
+    });
+    return {
+      drivers: drivers, cells: cells, nMonths: nMonths,
+      init: function () {
+        var self = this, term = document.querySelector("[name=terminal]");
+        if (term) term.addEventListener("change", function () { self.resize(); });
+      },
+      _months: function () {
+        var term = document.querySelector("[name=terminal]");
+        var m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(((term && term.value) || "").trim());
+        if (!m) return this.nMonths;
+        var d = new Date(+m[3], +m[2] - 1, +m[1]);
+        var months = (d - new Date()) / (1000 * 60 * 60 * 24 * 30.4375);
+        return Math.min(18, Math.max(3, Math.ceil(months) + 1));
+      },
+      resize: function () {
+        var n = this._months();
+        if (!n || n === this.nMonths) return;
+        var self = this;
+        this.drivers.forEach(function (d) { while (self.cells[d.key].length < n) self.cells[d.key].push(""); });
+        this.nMonths = n;
+      },
+      ser: function (key) {                       // "v1;v2;…" recortando blancos finales
+        var a = this.cells[key].slice(0, this.nMonths).map(function (x) { return String(x).trim(); });
+        var last = a.length;
+        while (last > 0 && a[last - 1] === "") last--;
+        return a.slice(0, last).join(";");
+      },
+      save: function () {
+        var m = {}, self = this;
+        this.drivers.forEach(function (d) { m[d.key] = self.cells[d.key]; });
+        try { localStorage.setItem(KEY, JSON.stringify(m)); } catch (e) {}
+      },
+      clearRow: function (key) {
+        this.cells[key] = this.cells[key].map(function () { return ""; });
+        this.save();
+      },
+      clearAll: function () {
+        var self = this;
+        this.drivers.forEach(function (d) { self.clearRow(d.key); });
+      },
+    };
+  }
+</script>
 {% endblock %}

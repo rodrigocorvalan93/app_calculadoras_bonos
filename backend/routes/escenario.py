@@ -46,6 +46,26 @@ def _num(s: Any) -> Optional[float]:
     return v if math.isfinite(v) else None   # rechaza "inf"/"nan"/"1e999"
 
 
+def _parse_path(s: Any, scale: float = 0.01) -> Optional[tuple]:
+    """Sendero mensual 'a;b;c' (es-AR, ';' separa meses) → tupla de valores
+    (×scale; 0.01 = % → decimal, 1.0 = nivel TNA tal cual). Rellena huecos con el
+    valor previo (los iniciales con el primero) y recorta los blancos finales —
+    `total_return.compound_path` extiende el último igual. None si no hay ninguno."""
+    if not s:
+        return None
+    raw = [_num(t) for t in str(s).split(";")]
+    real = [i for i, v in enumerate(raw) if v is not None]
+    if not real:
+        return None
+    cur = raw[real[0]]
+    out = []
+    for v in raw[: real[-1] + 1]:
+        if v is not None:
+            cur = v
+        out.append(cur * scale)
+    return tuple(out)
+
+
 def _default_terminal() -> str:
     return (date.today() + timedelta(days=120)).strftime("%d/%m/%Y")
 
@@ -127,10 +147,16 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
         cats.append({"key": cat.key, "label": cat.label, "fx": cat.fx,
                      "n": len(rows), "ytm": ytm})
     infl_pct = _implied_infl_monthly(settle, terminal)  # mensual implícita (placeholder)
+    # Deva A3500 mensual implícita (placeholder de los senderos CCL/MEP/A3500).
+    months = max(dias / 30.4375, 1e-9)
+    deva_mens = ((1.0 + deva) ** (1.0 / months) - 1.0) if deva > -1.0 else 0.0
+    # Columnas del grid de senderos: meses del horizonte (con headroom), 3..18.
+    n_months = min(18, max(3, math.ceil(months) + 1))
     return _render(request, "escenario.html", cats=cats, terminal=terminal, plazo=plazo,
                    settle=settle, dias=dias, deva_pct=deva * 100.0,
-                   cauc_tna_pct=cauc_tna * 100.0, anchor=1.0,
-                   infl_pct=(infl_pct * 100.0) if infl_pct is not None else None)
+                   cauc_tna_pct=cauc_tna * 100.0, anchor=1.0, n_months=n_months,
+                   infl_pct=(infl_pct * 100.0) if infl_pct is not None else None,
+                   deva_mens_pct=deva_mens * 100.0)
 
 
 def _per_cat_params(request: Request) -> Tuple[Dict[str, float], Dict[str, float]]:
@@ -156,23 +182,35 @@ async def escenario_table(
     cauc_tna: str = "", cauc_plazo: str = "",
     ccl_deva: str = "", mep_deva: str = "",
     anchor: str = "", use_manual: str = "", infl: str = "",
+    infl_path: str = "", a3500_path: str = "", ccl_path: str = "", mep_path: str = "",
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     terminal = (terminal or "").strip() or _default_terminal()
     settle = tr_svc.settle_str(plazo)
     sd, td = _parse_d(settle), _parse_d(terminal)
     dias = (td - sd).days if (sd and td) else 0
+    months = dias / 30.4375
+
+    # Senderos mensuales (%/mes → decimal). Vacío = comportamiento por defecto.
+    ccl_seq = _parse_path(ccl_path)
+    mep_seq = _parse_path(mep_path)
+    infl_seq = _parse_path(infl_path)
+    a3500_seq = _parse_path(a3500_path)
+    # Inflación: sendero > input plano `infl` (compat) → sendero de un elemento.
+    if infl_seq is None and _num(infl) is not None:
+        infl_seq = (_num(infl) / 100.0,)
 
     deva_default = _a3500_drift(settle, terminal)
-    ccl_proy = (_num(ccl_deva) / 100.0) if _num(ccl_deva) is not None else deva_default
-    mep_proy = (_num(mep_deva) / 100.0) if _num(mep_deva) is not None else deva_default
+    # CCL/MEP: sendero compuesto > input plano `*_deva` (compat) > default A3500.
+    ccl_proy = tr_svc.compound_path(ccl_seq, months) if ccl_seq is not None else (
+        (_num(ccl_deva) / 100.0) if _num(ccl_deva) is not None else deva_default)
+    mep_proy = tr_svc.compound_path(mep_seq, months) if mep_seq is not None else (
+        (_num(mep_deva) / 100.0) if _num(mep_deva) is not None else deva_default)
     # Caución 'al plazo': directa si la editan, si no derivada de la TNA.
     tna = (_num(cauc_tna) / 100.0) if _num(cauc_tna) is not None else 0.20
     cauc = (_num(cauc_plazo) / 100.0) if _num(cauc_plazo) is not None \
         else _cauc_al_plazo(tna, dias)
     anchor_f = _num(anchor) if _num(anchor) is not None else 1.0
-    # Escenario de inflación mensual (%) → CER/UVA. Vacío = usar la proyección real.
-    infl_monthly = (_num(infl) / 100.0) if _num(infl) is not None else None
 
     ytm_by_cat, slope_by_cat = _per_cat_params(request)
     overrides: Dict[str, float] = {}
@@ -206,12 +244,12 @@ async def escenario_table(
                    for r in rows if r.get("code")}
            for (c, rows, y1m, _fx) in prepared}
     key = (plazo, terminal, settle, round(ccl_proy, 6), round(mep_proy, 6), round(cauc, 6),
-           None if infl_monthly is None else round(infl_monthly, 6),
+           infl_seq, a3500_seq,
            hashlib.md5(json.dumps(sig, sort_keys=True).encode()).hexdigest())
 
     def _compute() -> List[Dict[str, Any]]:
         return [esc.compute_category(cat, rows, y1m, fx, ccl_proy, cauc, terminal, settle,
-                                     infl_monthly=infl_monthly)
+                                     infl_path=infl_seq, a3500_path=a3500_seq)
                 for (cat, rows, y1m, fx) in prepared]
 
     loop = asyncio.get_running_loop()
@@ -222,7 +260,9 @@ async def escenario_table(
     return _render(request, "partials/escenario_table.html",
                    cats=cats, chart=chart, terminal=terminal, settle=settle, dias=dias,
                    ccl_proy=ccl_proy, mep_proy=mep_proy, cauc=cauc, tna=tna, tea=tea,
-                   infl_monthly=infl_monthly)
+                   infl_monthly=(infl_seq[0] if infl_seq else None),
+                   infl_seq=infl_seq, a3500_seq=a3500_seq, ccl_seq=ccl_seq, mep_seq=mep_seq,
+                   months=months)
 
 
 async def warm_escenario_default(plazo: str = "24hs", refresh_only: bool = False) -> int:
