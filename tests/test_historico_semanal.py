@@ -44,6 +44,23 @@ def test_weekly_segments_sin_data():
     assert res["loaded"] is False and res["segments"] == []
 
 
+def test_index_at_robusto_a_indice_mixto():
+    """Regresión A3500: el poller de FX inyectaba hoy con índice STRING → índice
+    mixto (date + str) que rompía la comparación y dejaba la deva A3500 en None.
+    `_index_at` ahora salta etiquetas no parseables y sigue dando el valor."""
+    import rentafija
+    from datetime import date, timedelta
+    a3500 = rentafija.inputs.get("a3500")
+    if a3500 is None or "tca3500" not in getattr(a3500, "columns", []):
+        pytest.skip("sin serie a3500")
+    # contaminar el índice con una etiqueta string (reproduce el bug viejo)
+    rentafija.inputs["a3500"].loc["2026-06-26", "tca3500"] = 1480.0
+    start = (date(2026, 6, 26) - timedelta(days=7)).isoformat()
+    idx = hb._window_indices(start, "2026-06-25")
+    assert idx["a3500"] is not None        # antes daba None por el TypeError str<=date
+    assert hb._index_at("a3500", "tca3500", start) is not None
+
+
 @pytest.mark.asyncio
 async def test_historicos_semanal_endpoint_no_crash():
     from httpx import ASGITransport, AsyncClient

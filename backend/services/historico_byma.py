@@ -246,35 +246,74 @@ def _avg_seg(xs: List[float]) -> Optional[float]:
     return sum(ys) / len(ys) if ys else None
 
 
-def _index_at(key: str, col: str, target_iso: str) -> Optional[float]:
-    """Último valor de un índice global (rentafija.inputs[key][col]) hasta target (R/O)."""
+def _ix_to_date(d: Any) -> Optional[date]:
+    """Normaliza una etiqueta de índice a `date`. Robusto a date / Timestamp / str
+    ISO (el poller de FX inyecta hoy en inputs['a3500'] con índice string → índice
+    MIXTO; sin esto una sola etiqueta string rompía toda la comparación de A3500)."""
+    if isinstance(d, date) and not hasattr(d, "hour"):   # date puro (no datetime)
+        return d
+    if hasattr(d, "date"):                                # Timestamp / datetime
+        try:
+            return d.date()
+        except Exception:  # noqa: BLE001
+            return None
     try:
-        import rentafija
-        s = rentafija.inputs[key][col]
+        return date.fromisoformat(str(d)[:10])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _index_series(key: str, col: str):
+    """Serie del índice global (R/O), robusta a columna faltante (cae a la 1ª) y a
+    que inputs[key] sea ya una Series."""
+    import rentafija
+    obj = rentafija.inputs.get(key)
+    if obj is None:
+        return None
+    if hasattr(obj, "columns"):                          # DataFrame
+        return obj[col] if col in obj.columns else (obj.iloc[:, 0] if obj.shape[1] else None)
+    return obj                                            # Series
+
+
+def _index_at(key: str, col: str, target_iso: str) -> Optional[float]:
+    """Último valor de un índice global hasta `target` (R/O). Salta etiquetas no
+    parseables en vez de abortar (una sola string rompía A3500 entero)."""
+    try:
+        s = _index_series(key, col)
+        if s is None or target_iso is None:
+            return None
         tgt = date.fromisoformat(target_iso)
-        prev = [float(v) for d, v in s.items()
-                if (d.date() if hasattr(d, "date") else d) <= tgt and v == v]
-        return prev[-1] if prev else None
+        best = None
+        for d, v in s.items():
+            dd = _ix_to_date(d)
+            if dd is not None and dd <= tgt and v == v:
+                best = float(v)                          # serie ordenada → último ≤ tgt
+        return best
     except Exception:  # noqa: BLE001
         return None
 
 
 def _index_last(key: str, col: str) -> Optional[float]:
     try:
-        import rentafija
-        return float(rentafija.inputs[key][col].iloc[-1])
+        s = _index_series(key, col)
+        return float(s.iloc[-1]) if s is not None and len(s) else None
     except Exception:  # noqa: BLE001
         return None
 
 
-def _window_indices(start_iso: str) -> Dict[str, Any]:
-    """Evolución de CER, A3500 y TAMAR en la ventana. CER/A3500 = % de cambio
-    (acumulación CER / deva); TAMAR = nivel inicio→fin (es una tasa) y su Δ en pp."""
+def _window_indices(start_iso: str, end_iso: Optional[str] = None) -> Dict[str, Any]:
+    """Evolución de CER, A3500 y TAMAR en la ventana [start, end]. CER/A3500 = % de
+    cambio (acumulación CER / deva oficial); TAMAR = nivel inicio→fin (es una tasa) y
+    su Δ en pp. El extremo final usa el valor AL `end` de la ventana (consistente con
+    el Δprecio de los bonos); si no hay end, cae al último dato del índice."""
+    def _end(key: str, col: str) -> Optional[float]:
+        return _index_at(key, col, end_iso) if end_iso else _index_last(key, col)
+
     def _pct(key: str, col: str) -> Optional[float]:
-        a0, a1 = _index_at(key, col, start_iso), _index_last(key, col)
+        a0, a1 = _index_at(key, col, start_iso), _end(key, col)
         return (a1 / a0 - 1.0) if (a0 and a0 > 0 and a1 is not None) else None
 
-    t0, t1 = _index_at("tamar", "TAMAR", start_iso), _index_last("tamar", "TAMAR")
+    t0, t1 = _index_at("tamar", "TAMAR", start_iso), _end("tamar", "TAMAR")
     return {
         "cer": _pct("CER", "CER"),
         "a3500": _pct("a3500", "tca3500"),
@@ -318,4 +357,4 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
                              "dprice": _avg_seg(dprices), "dtir": _avg_seg(dtirs),
                              "members": members})
     return {"loaded": True, "start": start, "end": end, "days": days,
-            "segments": segments, "indices": _window_indices(start)}
+            "segments": segments, "indices": _window_indices(start, end)}
