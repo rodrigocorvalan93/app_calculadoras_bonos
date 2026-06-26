@@ -244,3 +244,14 @@ async def historicos_curva_data(curve: str = "", metric: str = "TIREA",
     bands = {k: agg[k] * scale for k in ("mean", "min", "max")} if agg else None
     return JSONResponse({"loaded": True, "x": [_unix(d) for d in all_dates], "series": series,
                          "bands": bands, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")})
+
+
+@router.get("/historicos/semanal", response_class=HTMLResponse)
+async def historicos_semanal(request: Request, dias: int = 7) -> HTMLResponse:
+    """Resumen de la ventana (default 1 semana) por segmento: Δ Precio % (≈ total
+    return realizado) y Δ TIR (pp) de CER corto/medio/largo, Tasa fija, TAMAR,
+    Globales, Bonares, DLK — más la deva del dólar A3500. Cómputo en executor."""
+    dias = max(1, min(int(dias or 7), 120))
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, historico_byma.weekly_segments, dias)
+    return _render(request, "partials/historico_semanal.html", w=res, dias=dias)
