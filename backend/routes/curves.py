@@ -7,6 +7,7 @@ the TIREA column land in step 2, once the broker session is in place.
 from __future__ import annotations
 
 import asyncio
+import functools
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from types import SimpleNamespace
@@ -839,6 +840,9 @@ async def graficos_page(
     plazo: str = "24hs",
     only_quoting: bool = True,
     leg: str = "native",
+    metric: str = "tirea",
+    dmin: str = "",
+    exclude: str = "",
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     all_curves = curves.list_curves()
@@ -851,6 +855,7 @@ async def graficos_page(
         all_curves=all_curves, table=table, selected_key=selected_key,
         selected_def=curves.curve_def(selected_key) if selected_key else None,
         chart=chart, plazo=plazo, only_quoting=only_quoting, leg=leg,
+        metric=_graf_metric(metric), dmin=dmin, exclude=exclude,
     )
 
 
@@ -870,6 +875,82 @@ async def graficos_svg(
     )
 
 
+# ── Gráficos: métrica (TIREA/TEM/Margen) y filtros de la regresión NSS ─────────
+_GRAF_METRICS = ("tirea", "tem", "margen")
+
+
+def _graf_metric(metric: str) -> str:
+    """Normaliza el query param a 'tirea' | 'tem' | 'margen' (default tirea)."""
+    m = str(metric).strip().lower()
+    return m if m in _GRAF_METRICS else "tirea"
+
+
+def _metric_label(metric: str) -> str:
+    return {"tem": "TEM", "margen": "Margen TNA"}.get(metric, "TIREA")
+
+
+def _graf_y(tirea_frac, metric: str):
+    """y del bono en % para la métrica elegida, desde la TIREA (fracción).
+    TEM = (1+TIREA)^(30/360) − 1. None si la entrada no es finita o la base es
+    ≤ 0 (TIR ≤ −100% → TEM no representable)."""
+    if tirea_frac is None or tirea_frac != tirea_frac:        # None / NaN
+        return None
+    f = float(tirea_frac)
+    if metric == "tem":
+        base = 1.0 + f
+        return (base ** (30.0 / 360.0) - 1.0) * 100.0 if base > 0.0 else None
+    return f * 100.0
+
+
+def _parse_exclude(s: str) -> set:
+    """'T30J6, AL30 tx26' → {'T30J6','AL30','TX26'} (upper, sin vacíos)."""
+    return {tok for tok in (s or "").upper().replace(",", " ").split() if tok}
+
+
+def _parse_dmin(s: str):
+    """Duration mínima para descartar bonos near-maturity (outliers). None si
+    vacío/inválido. T30J6 a punto de vencer → duration ~0 y TIR exagerada."""
+    try:
+        v = float(str(s).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    return v if (v == v and v > 0.0) else None
+
+
+def _graf_pts(rows, metric: str, dmin, exclude: set):
+    """[(code, duration, y%, MONEDA, bid%|None, offer%|None)] en la métrica
+    elegida, con los filtros (duration mínima + códigos excluidos) aplicados.
+
+    - tirea/tem: y desde la TIREA (con TEM = (1+TIREA)^(30/360)−1); incluye
+      las puntas bid/offer.
+    - margen: y = `margen_tna` (spread TNA sobre TAMAR/BADLAR, pp). Sólo aplica a
+      tasa variable benchmarkeada → descarta los bonos sin margen (NaN/None) y no
+      tiene puntas (re-pricear bid/offer sería caro y de poco valor)."""
+    out = []
+    for r in rows:
+        d = r.get("duration")
+        if d is None or d != d:
+            continue
+        if dmin is not None and float(d) < dmin:
+            continue
+        code = r.get("code") or ""
+        if exclude and code.upper() in exclude:
+            continue
+        if metric == "margen":
+            mv = r.get("margen_tna")
+            if mv is None or mv != mv:            # no es floater benchmarkeado
+                continue
+            y, yb, yo = float(mv) * 100.0, None, None
+        else:
+            y = _graf_y(r.get("tirea"), metric)
+            if y is None:
+                continue
+            yb = _graf_y(r.get("tirea_bid"), metric)
+            yo = _graf_y(r.get("tirea_offer"), metric)
+        out.append((code, float(d), y, (r.get("moneda") or "").upper(), yb, yo))
+    return out
+
+
 @graficos_router.get("/graficos/estimate", response_class=HTMLResponse)
 async def graficos_estimate(
     request: Request,
@@ -878,48 +959,57 @@ async def graficos_estimate(
     only_quoting: bool = True,
     leg: str = "native",
     duration: str = "",
+    metric: str = "tirea",
+    dmin: str = "",
+    exclude: str = "",
 ) -> HTMLResponse:
-    """Estima TIR / TEM / TNAs a una `duration` dada con la regresión NSS de la
-    curva (Duration → TIREA). El fit corre en threadpool (CPU, scipy)."""
+    """Estima a una `duration` dada con la regresión NSS de la curva (Duration →
+    métrica). En TIREA/TEM devuelve TIR/TEM/TNAs; en Margen, sólo el margen
+    interpolado (no es un yield). El fit corre en threadpool (CPU, scipy)."""
     from backend.services import nss as nss_svc
 
+    metric = _graf_metric(metric)
     try:
         d = float(str(duration).strip().replace(",", "."))
     except (TypeError, ValueError):
         d = None
     est = None
+    n = 0
     if d is not None:
         rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
-        pts = [(r["duration"], r["tirea"] * 100.0) for r in rows
-               if r.get("duration") is not None and r["duration"] == r["duration"]
-               and r.get("tirea") is not None and r["tirea"] == r["tirea"]]
-        if len(pts) >= 4:
-            xs = [p[0] for p in pts]
-            ys = [p[1] for p in pts]
+        pts = _graf_pts(rows, metric, _parse_dmin(dmin), _parse_exclude(exclude))
+        n = len(pts)
+        if n >= 4:
+            xs = [p[1] for p in pts]
+            ys = [p[2] for p in pts]
             loop = asyncio.get_running_loop()
-            est = await loop.run_in_executor(None, nss_svc.estimate, d, xs, ys)
+            fn = (functools.partial(nss_svc.eval_clamped, d, xs, ys) if metric == "margen"
+                  else functools.partial(nss_svc.estimate, d, xs, ys, metric=metric))
+            est = await loop.run_in_executor(None, fn)
     return _render(request, "partials/graficos_estimate.html",
-                   est=est, duration=duration, n=len(rows) if d is not None else 0)
+                   est=est, duration=duration, n=n, metric=metric,
+                   metric_label=_metric_label(metric))
 
 
 @graficos_router.get("/graficos/nss", response_class=HTMLResponse)
 async def graficos_nss(request: Request, curve: str = "", plazo: str = "24hs",
-                       only_quoting: bool = True, leg: str = "native") -> HTMLResponse:
+                       only_quoting: bool = True, leg: str = "native",
+                       metric: str = "tirea", dmin: str = "", exclude: str = "") -> HTMLResponse:
     """Parámetros de la curva NSS ajustada (β0..β3, τ1, τ2 + nivel/pendiente/
     convexidad). El fit ya está cacheado en nss.py; corre en threadpool."""
     from backend.services import nss as nss_svc
 
+    metric = _graf_metric(metric)
     rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
-    pts = [(r["duration"], r["tirea"] * 100.0) for r in rows
-           if r.get("duration") is not None and r["duration"] == r["duration"]
-           and r.get("tirea") is not None and r["tirea"] == r["tirea"]]
+    pts = _graf_pts(rows, metric, _parse_dmin(dmin), _parse_exclude(exclude))
     p = None
     if len(pts) >= 4:
-        xs = [a for a, _ in pts]
-        ys = [b for _, b in pts]
+        xs = [a[1] for a in pts]
+        ys = [a[2] for a in pts]
         loop = asyncio.get_running_loop()
         p = await loop.run_in_executor(None, nss_svc.params, xs, ys)
-    return _render(request, "partials/graficos_nss.html", p=p, n=len(pts))
+    return _render(request, "partials/graficos_nss.html", p=p, n=len(pts),
+                   metric=metric, metric_label=_metric_label(metric))
 
 
 @graficos_router.get("/graficos/data")
@@ -929,25 +1019,23 @@ async def graficos_data(
     plazo: str = "24hs",
     only_quoting: bool = True,
     leg: str = "native",
+    metric: str = "tirea",
+    dmin: str = "",
+    exclude: str = "",
 ) -> JSONResponse:
     """Datos JSON para el chart de Gráficos (uPlot): scatter ARS/USD por leg +
-    la curva NSS evaluada en un grid fino. Eje x = Duration (años)."""
+    la curva NSS evaluada en un grid fino. Eje x = Duration (años); eje y según
+    `metric` (TIREA % o TEM %). `dmin`/`exclude` filtran outliers/near-maturity."""
     import numpy as np
 
     from backend.services import nss as nss_svc
 
+    metric = _graf_metric(metric)
     rows, _meta = await _rows_for(curve, plazo, only_quoting, leg, book=True)
-
-    def _pp(v):                       # fracción → %, NaN/None → None
-        return float(v) * 100.0 if (v is not None and v == v) else None
-
-    pts = [(r["code"], float(r["duration"]), float(r["tirea"]) * 100.0, (r.get("moneda") or "").upper(),
-            _pp(r.get("tirea_bid")), _pp(r.get("tirea_offer")))
-           for r in rows
-           if r.get("duration") is not None and r["duration"] == r["duration"]
-           and r.get("tirea") is not None and r["tirea"] == r["tirea"]]
+    pts = _graf_pts(rows, metric, _parse_dmin(dmin), _parse_exclude(exclude))
     if not pts:
-        return JSONResponse({"n": 0, "xs": [], "ars": [], "usd": [], "nss": [], "codes": [], "bid": [], "off": []})
+        return JSONResponse({"n": 0, "xs": [], "ars": [], "usd": [], "nss": [], "codes": [],
+                             "bid": [], "off": [], "metric": metric, "ylabel": _metric_label(metric)})
 
     bond_x = sorted({p[1] for p in pts})
     bid_at: Dict[float, float] = {}
@@ -977,4 +1065,5 @@ async def graficos_data(
         "off": [off_at.get(x) for x in xs],
         "codes": [code_at.get(x) for x in xs],
         "nss": nss_y or [],
+        "metric": metric, "ylabel": _metric_label(metric),
     })

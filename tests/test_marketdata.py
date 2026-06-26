@@ -262,7 +262,7 @@ async def test_curves_table_with_live_store() -> None:
     assert r.status_code == 200
     # Badge reports the cotización count and the live price renders.
     assert "con cotización" in r.text
-    assert "87,3000" in r.text
+    assert "87,30" in r.text          # precio last se muestra con 2 decimales (es-AR)
 
 
 @pytest.mark.asyncio

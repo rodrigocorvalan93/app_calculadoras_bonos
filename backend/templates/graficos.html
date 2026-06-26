@@ -5,8 +5,8 @@
 {% block content %}
 <section class="curves">
   <header class="yas-header">
-    <h1>Gráficos · TIREA vs Duration</h1>
-    <p class="muted">Cada punto es un bono (x = Duration, y = TIREA), con la <span style="color:#a78bfa">regresión NSS</span>. Interactivo (uPlot): <strong>arrastrá para zoom</strong>, doble click para reset, hover para ver el bono, click en la leyenda para aislar. USD/USB en cyan, ARS en naranja. Refresh 5 s. Ingresá una Duration para estimar TIR/TEM/TNAs.</p>
+    <h1>Gráficos · Tasa vs Duration</h1>
+    <p class="muted">Cada punto es un bono (x = Duration, y = <strong>TIREA</strong>, <strong>TEM</strong> o, para tasa variable, <strong>Margen</strong> sobre TAMAR/BADLAR según la métrica), con la <span style="color:#a78bfa">regresión NSS</span> ajustada en ese mismo espacio. Interactivo (uPlot): <strong>arrastrá para zoom</strong>, doble click para reset, hover para ver el bono, click en la leyenda para aislar. USD/USB en cyan, ARS en naranja. Refresh 5 s. <strong>Dur mín</strong> descarta near-maturity (p. ej. T30J6 que vence ya) y <strong>Excluir bonos</strong> saca códigos puntuales de la regresión.</p>
   </header>
 
   <div class="curve-picker card">
@@ -16,7 +16,7 @@
           <label class="field">
             <span>Curva</span>
             <select name="curve" hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
-                    hx-include="[name=plazo], [name=only_quoting], [name=leg], [name=duration]">
+                    hx-include="#graf-controls, [name=duration]">
               {% for c in all_curves %}
                 {% set count = (table.get(c.key) or []) | length %}
                 <option value="{{ c.key }}" {% if c.key == selected_key %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>
@@ -28,25 +28,46 @@
           <label class="field">
             <span>Plazo</span>
             <select name="plazo" hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
-                    hx-include="[name=curve], [name=only_quoting], [name=leg], [name=duration]">
+                    hx-include="#graf-controls, [name=duration]">
               <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
               <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
             </select>
           </label>
           <label class="field">
+            <span>Métrica</span>
+            <select name="metric" hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
+                    hx-include="#graf-controls, [name=duration]">
+              <option value="tirea"  {% if metric == 'tirea' %}selected{% endif %}>TIREA</option>
+              <option value="tem"    {% if metric == 'tem' %}selected{% endif %}>TEM</option>
+              <option value="margen" {% if metric == 'margen' %}selected{% endif %}>Margen /TAMAR-BADLAR</option>
+            </select>
+          </label>
+          <label class="field">
             <span>Leg (FX)</span>
             <select name="leg" hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
-                    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=duration]">
+                    hx-include="#graf-controls, [name=duration]">
               <option value="native" {% if leg == "native" %}selected{% endif %}>Nativa</option>
               <option value="USD"    {% if leg == "USD"    %}selected{% endif %}>USD (cable)</option>
               <option value="USB"    {% if leg == "USB"    %}selected{% endif %}>USB (MEP)</option>
               <option value="ARS"    {% if leg == "ARS"    %}selected{% endif %}>ARS (pesos)</option>
             </select>
           </label>
+          <label class="field" style="max-width:118px">
+            <span>Dur mín <small class="muted">(outliers)</small></span>
+            <input type="text" inputmode="decimal" name="dmin" value="{{ dmin or '' }}" placeholder="ej. 0,3" autocomplete="off"
+                   hx-get="/graficos/estimate" hx-trigger="change, keyup[key=='Enter']" hx-target="#grafico-estimate" hx-swap="innerHTML"
+                   hx-include="#graf-controls, [name=duration]">
+          </label>
+          <label class="field" style="max-width:180px">
+            <span>Excluir bonos</span>
+            <input type="text" name="exclude" value="{{ exclude or '' }}" placeholder="ej. T30J6 TX26" autocomplete="off"
+                   hx-get="/graficos/estimate" hx-trigger="change, keyup[key=='Enter']" hx-target="#grafico-estimate" hx-swap="innerHTML"
+                   hx-include="#graf-controls, [name=duration]">
+          </label>
           <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
             <input type="checkbox" name="only_quoting" value="true" {% if only_quoting %}checked{% endif %}
                    hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
-                   hx-include="[name=curve], [name=plazo], [name=leg], [name=duration]">
+                   hx-include="#graf-controls, [name=duration]">
             Solo con cotización
           </label>
         </div>
@@ -55,7 +76,7 @@
           <input type="text" inputmode="decimal" name="duration" placeholder="ej. 1,5" autocomplete="off"
                  hx-get="/graficos/estimate" hx-trigger="keyup changed delay:250ms, change"
                  hx-target="#grafico-estimate" hx-swap="innerHTML"
-                 hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]">
+                 hx-include="#graf-controls">
         </label>
       </div>
     </div>
@@ -69,7 +90,7 @@
   {# Parámetros de la curva NSS ajustada (β/τ + nivel/pendiente/convexidad). #}
   <div id="grafico-nss" style="margin-top:14px"
        hx-get="/graficos/nss" hx-trigger="load, change from:#graf-controls delay:200ms"
-       hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]" hx-swap="innerHTML"></div>
+       hx-include="#graf-controls" hx-swap="innerHTML"></div>
 
   <div id="grafico-estimate" style="margin-top:14px"></div>
 </section>
