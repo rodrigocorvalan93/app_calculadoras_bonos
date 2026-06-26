@@ -152,11 +152,17 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
     deva_mens = ((1.0 + deva) ** (1.0 / months) - 1.0) if deva > -1.0 else 0.0
     # Columnas del grid de senderos: meses del horizonte (con headroom), 3..18.
     n_months = min(18, max(3, math.ceil(months) + 1))
+    # TAMAR spot (nivel TNA actual) — placeholder de la fila TAMAR del grid.
+    try:
+        import rentafija
+        tamar_now = float(rentafija.inputs["tamar"].tail(5)["TAMAR"].mean())
+    except Exception:  # noqa: BLE001
+        tamar_now = None
     return _render(request, "escenario.html", cats=cats, terminal=terminal, plazo=plazo,
                    settle=settle, dias=dias, deva_pct=deva * 100.0,
                    cauc_tna_pct=cauc_tna * 100.0, anchor=1.0, n_months=n_months,
                    infl_pct=(infl_pct * 100.0) if infl_pct is not None else None,
-                   deva_mens_pct=deva_mens * 100.0)
+                   deva_mens_pct=deva_mens * 100.0, tamar_now=tamar_now)
 
 
 def _per_cat_params(request: Request) -> Tuple[Dict[str, float], Dict[str, float]]:
@@ -183,6 +189,7 @@ async def escenario_table(
     ccl_deva: str = "", mep_deva: str = "",
     anchor: str = "", use_manual: str = "", infl: str = "",
     infl_path: str = "", a3500_path: str = "", ccl_path: str = "", mep_path: str = "",
+    tamar_path: str = "",
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     terminal = (terminal or "").strip() or _default_terminal()
@@ -196,6 +203,7 @@ async def escenario_table(
     mep_seq = _parse_path(mep_path)
     infl_seq = _parse_path(infl_path)
     a3500_seq = _parse_path(a3500_path)
+    tamar_seq = _parse_path(tamar_path, scale=1.0)   # niveles TNA (%), NO /100
     # Inflación: sendero > input plano `infl` (compat) → sendero de un elemento.
     if infl_seq is None and _num(infl) is not None:
         infl_seq = (_num(infl) / 100.0,)
@@ -244,12 +252,12 @@ async def escenario_table(
                    for r in rows if r.get("code")}
            for (c, rows, y1m, _fx) in prepared}
     key = (plazo, terminal, settle, round(ccl_proy, 6), round(mep_proy, 6), round(cauc, 6),
-           infl_seq, a3500_seq,
+           infl_seq, a3500_seq, tamar_seq,
            hashlib.md5(json.dumps(sig, sort_keys=True).encode()).hexdigest())
 
     def _compute() -> List[Dict[str, Any]]:
         return [esc.compute_category(cat, rows, y1m, fx, ccl_proy, cauc, terminal, settle,
-                                     infl_path=infl_seq, a3500_path=a3500_seq)
+                                     infl_path=infl_seq, a3500_path=a3500_seq, tamar_path=tamar_seq)
                 for (cat, rows, y1m, fx) in prepared]
 
     loop = asyncio.get_running_loop()

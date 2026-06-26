@@ -39,7 +39,7 @@
          CER/UVA, A3500 → DLK, CCL → globales, MEP → bonares. #}
       <div class="esc-senderos" x-data="escSenderos({{ n_months }})" x-cloak>
         <div class="esc-senderos-head">
-          <span>Senderos mensuales <i class="muted">(%/mes · vacío = proyección actual · el último mes se extiende)</i></span>
+          <span>Senderos mensuales <i class="muted">(nivel mes a mes · vacío = proyección/fijo actual · el último mes se extiende)</i></span>
           <button type="button" class="lnk" @click="clearAll()" title="Borrar todos los senderos">limpiar todo</button>
         </div>
         <div class="table-scroll">
@@ -70,9 +70,13 @@
         <input type="hidden" name="a3500_path" :value="ser('a3500_path')">
         <input type="hidden" name="ccl_path"   :value="ser('ccl_path')">
         <input type="hidden" name="mep_path"   :value="ser('mep_path')">
+        <input type="hidden" name="tamar_path" :value="ser('tamar_path')">
         <p class="muted" style="font-size:11px;margin:6px 2px 0">Implícitos hoy:
           inflación ≈ <b>{{ infl_pct | ar_num(2) if infl_pct is not none else '—' }}%</b>/mes ·
-          deva A3500 ≈ <b>{{ deva_mens_pct | ar_num(2) }}%</b>/mes (dejá la fila vacía para usar la proyección).</p>
+          deva A3500 ≈ <b>{{ deva_mens_pct | ar_num(2) }}%</b>/mes ·
+          TAMAR ≈ <b>{{ tamar_now | ar_num(2) if tamar_now is not none else '—' }}%</b> TNA.
+          <b>Inflación/devas en %/mes; TAMAR en nivel TNA.</b> Con sendero TAMAR la <b>TIR de entrada</b>
+          de los floaters se re-deriva del precio bajo ese cupón (más TAMAR ⇒ más carry).</p>
       </div>
 
       <div class="esc-cats">
@@ -112,10 +116,11 @@
   function escSenderos(nMonths) {
     var KEY = "escSenderos:v1";
     var drivers = [
-      { key: "infl_path",  label: "Inflación",  unit: "· CER/UVA",  ph: "" },
-      { key: "a3500_path", label: "Deva A3500", unit: "· DLK",      ph: "" },
-      { key: "ccl_path",   label: "Deva CCL",   unit: "· globales", ph: "" },
-      { key: "mep_path",   label: "Deva MEP",   unit: "· bonares",  ph: "" },
+      { key: "infl_path",  label: "Inflación",  unit: "· CER/UVA · %/mes",  ph: "" },
+      { key: "a3500_path", label: "Deva A3500", unit: "· DLK · %/mes",      ph: "" },
+      { key: "ccl_path",   label: "Deva CCL",   unit: "· globales · %/mes", ph: "" },
+      { key: "mep_path",   label: "Deva MEP",   unit: "· bonares · %/mes",  ph: "" },
+      { key: "tamar_path", label: "TAMAR",      unit: "· floaters · TNA nivel %", ph: "" },
     ];
     function load() { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } }
     var saved = load(), cells = {};

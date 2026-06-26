@@ -177,6 +177,7 @@ class Bono:
 
         # Variable para calcular el cupón Dias / dias en el año segun la base
         dias_entre_cupones_anual = dias_entre_cupones / self.convencion_base
+        self.dias_entre_cupones_anual = dias_entre_cupones_anual  # para aplica_sendero_tamar (backend)
         self.dias_entre_cupones = dias_entre_cupones # QUITAR!!
         
 
@@ -249,6 +250,46 @@ class Bono:
         # Cálculo de paridad
 
 
+
+    def aplica_sendero_tamar(self, niveles_mensuales, settle_date):
+        """Recomputa self.intereses de un floater TAMAR con un sendero de niveles
+        TNA MENSUALES (lista, en %) en vez de inputs['tamar_proyectado'].
+        niveles[i] = TAMAR del mes i contado desde `settle_date`; se extiende el
+        último para meses posteriores. Réplica de la lógica de __init__ para
+        VARIABLE / VARIABLE_CAP TAMAR.
+
+        No-op si el bono no es floater TAMAR o el sendero está vacío. Lo usa el
+        backend SOBRE LA COPIA per-request del bono (mismo patrón que
+        _a3500_override): el cupón se congela en __init__, así que sin esto un
+        override de TAMAR no pegaría. No muta el global ni el singleton."""
+        if not niveles_mensuales:
+            return
+        if not (getattr(self, "index", None) == "TAMAR"
+                and self.tipo_tasa_interes in ("VARIABLE", "VARIABLE_CAP")):
+            return
+        niveles = [float(x) for x in niveles_mensuales]
+        n = len(niveles)
+        s0 = pd.Timestamp(settle_date)
+        fechas = self.fechas_devengo_intereses_habil
+        dca = self.dias_entre_cupones_anual
+        vr = self.valores_residuales
+
+        def _nivel(fecha):                       # nivel TNA del mes en que cae el cupón
+            meses = (pd.Timestamp(fecha) - s0).days / 30.4375
+            idx = int(meses) if meses >= 0 else 0
+            return niveles[min(idx, n - 1)]
+
+        if self.tipo_tasa_interes == "VARIABLE":
+            index_premium = [_nivel(fechas[i]) for i in range(len(fechas) - 1)]
+            cupon_aplicable = np.array([tv + self.cupon_spread for tv in index_premium])
+            self.intereses = dca * cupon_aplicable / 100 * vr
+        else:                                    # VARIABLE_CAP: capitaliza al TEM (= legacy)
+            tamar_tem_100 = 0.0
+            for i in range(len(fechas) - 1):
+                promedio = _nivel(fechas[i])
+                tamar_tem_100 = 100 * ((((1 + (((promedio + self.cupon_spread) / 100) / (365 / 32))) ** (365 / 32)) ** (1 / 12)) - 1)
+            cupon_aplicable = ((1 + tamar_tem_100 / 100) ** (dca * 12)) - 1
+            self.intereses = cupon_aplicable * vr
 
     def generate_cashflows(self, settlement_date=None):
         '''

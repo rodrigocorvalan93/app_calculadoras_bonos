@@ -186,19 +186,39 @@ def scenario_nss(durations: np.ndarray, popt: List[float]) -> np.ndarray:
 
 # ── total return por bono ────────────────────────────────────────────────────
 def _bond_tr_base(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
-                  dur0: Optional[float], want_duration: bool = True) -> Optional[Dict[str, Any]]:
+                  dur0: Optional[float], want_duration: bool = True,
+                  tamar_path: Optional[tuple] = None, price: Optional[float] = None
+                  ) -> Optional[Dict[str, Any]]:
     """Parte CARA y libre de inflación: los 2 `calcula_total_return` (carry/real —
     en términos REALES para CER/UVA) + dur_f, más los metadatos del ajuste. Para
     CER/UVA la inflación NO entra acá: entra después en el drift. Por eso se puede
-    cachear por (code,y0,y1,terminal,settle) y reusar al cambiar la inflación."""
+    cachear por (code,y0,y1,terminal,settle) y reusar al cambiar la inflación.
+
+    `tamar_path` (niveles TNA mensuales) recomputa el cupón del floater SOBRE LA
+    COPIA (cero efecto en el singleton / YAS / Curvas). Con `price` (el de mercado)
+    se RE-DERIVA la TIR de entrada bajo ese cupón → el carry refleja la TAMAR del
+    escenario con el signo correcto (más TAMAR ⇒ más cupón ⇒ más TIR ⇒ más carry).
+    Sin `tamar_path` el camino es byte-idéntico al de hoy."""
     from backend.services import pricing
     obj = pricing._bond_obj_copy(code)
     if obj is None or not hasattr(obj, "calcula_total_return"):
         return None
+    y0_eff = float(y0)
+    if tamar_path and hasattr(obj, "aplica_sendero_tamar"):
+        try:
+            obj.aplica_sendero_tamar(tamar_path, _parse_d(settle_str))
+            if price is not None and price == price:     # re-derivar y0 del precio de mercado
+                # px_calc viene en convención /100; calcula_tirea espera el settle
+                # como STRING dd/mm/aaaa (igual que pricing.compute_metrics).
+                yd = float(obj.calcula_tirea(float(price) / 100.0, settle_str))
+                if yd == yd and -0.99 < yd < 5.0:
+                    y0_eff = yd
+        except Exception:  # noqa: BLE001 — si el override falla, vale más la base normal
+            y0_eff = float(y0)
     try:
         # generate_cashflows se rearma en cada llamada → las dos son independientes.
-        carry_df = obj.calcula_total_return(float(y0), float(y0), terminal_str, settle_str)
-        real_df = obj.calcula_total_return(float(y0), float(y1), terminal_str, settle_str)
+        carry_df = obj.calcula_total_return(y0_eff, y0_eff, terminal_str, settle_str)
+        real_df = obj.calcula_total_return(y0_eff, float(y1), terminal_str, settle_str)
         carry = _pct(carry_df.loc["Total Return", "Total Return Valores"])
         tr_real = _pct(real_df.loc["Total Return", "Total Return Valores"])
         px_target = float(real_df.loc["Px final", "Total Return Valores"])
@@ -221,7 +241,7 @@ def _bond_tr_base(code: str, y0: float, y1: float, terminal_str: str, settle_str
         except Exception:  # noqa: BLE001
             dur_f = None
     return {
-        "code": code, "dur0": dur0, "y0": y0, "dur_f": dur_f, "y1": y1,
+        "code": code, "dur0": dur0, "y0": y0_eff, "dur_f": dur_f, "y1": y1,
         "px_target": px_target, "carry": carry, "compresion": tr_real - carry,
         "tr_real": tr_real,
         "ajuste_meta": (getattr(obj, "ajuste_sobre_capital", None) or ""),
@@ -232,23 +252,35 @@ def _bond_tr_base(code: str, y0: float, y1: float, terminal_str: str, settle_str
 _bond_tr_cache = LockedTTLCache(maxsize=8192, ttl=20)
 
 
+def _bond_tr_key(code, y0, y1, terminal_str, settle_str, want_duration, tamar_path):
+    """Clave del cache de la base. Incluye `tamar_path` porque recomputa el cupón
+    del floater (cambia carry/real/y0); para no-floaters el sendero llega None →
+    clave estable. Un solo lugar (lo comparten _bond_tr y _bond_tr_touch). El
+    `price` NO entra: está determinado por y0 en el snapshot de mercado."""
+    return (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str,
+            want_duration, tamar_path)
+
+
 def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
              settle_d: date, terminal_d: date, dur0: Optional[float],
              want_duration: bool = True, infl_monthly: Optional[float] = None,
-             infl_path: Optional[tuple] = None, a3500_path: Optional[tuple] = None
+             infl_path: Optional[tuple] = None, a3500_path: Optional[tuple] = None,
+             tamar_path: Optional[tuple] = None, price: Optional[float] = None
              ) -> Optional[Dict[str, Any]]:
     """TR por bono. La parte cara (carry/real/dur_f, libre de inflación) se cachea
-    (TTL 20 s) por (code,y0,y1,terminal,settle,want_duration); el ajuste por índice
-    —con los senderos override de inflación (CER/UVA) y deva A3500 (DLK)— se aplica
-    barato encima. Así tocar el Exit YTM de una categoría recalcula sólo esa, y
-    tocar un sendero NO recalcula nada caro (sólo re-aplica el drift sobre la base).
+    (TTL 20 s) por (code,y0,y1,terminal,settle,want_duration,tamar_path); el ajuste
+    por índice —con los senderos override de inflación (CER/UVA) y deva A3500
+    (DLK)— se aplica barato encima. Así tocar el Exit YTM de una categoría
+    recalcula sólo esa, y tocar inflación/deva NO recalcula nada caro.
 
     `infl_monthly` (decimal, plano) se mantiene por compatibilidad = sendero de un
-    elemento; `infl_path`/`a3500_path` (tuplas de decimales mensuales) ganan si se
-    pasan."""
-    key = (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str, want_duration)
+    elemento; `infl_path`/`a3500_path` (tuplas) ganan si se pasan. `tamar_path`
+    (niveles TNA) + `price` recomputan el cupón del floater y re-derivan y0 (sólo
+    floaters TAMAR; el resto no se toca)."""
+    key = _bond_tr_key(code, y0, y1, terminal_str, settle_str, want_duration, tamar_path)
     base = _bond_tr_cache.get_or_compute(
-        key, lambda: _bond_tr_base(code, y0, y1, terminal_str, settle_str, dur0, want_duration))
+        key, lambda: _bond_tr_base(code, y0, y1, terminal_str, settle_str, dur0,
+                                   want_duration, tamar_path, price))
     if base is None:
         return None
     ip = infl_path if infl_path else ((float(infl_monthly),) if infl_monthly is not None else None)
@@ -264,12 +296,12 @@ def _bond_tr(code: str, y0: float, y1: float, terminal_str: str, settle_str: str
 
 
 def _bond_tr_touch(code: str, y0: float, y1: float, terminal_str: str, settle_str: str,
-                   want_duration: bool = True) -> bool:
+                   want_duration: bool = True, tamar_path: Optional[tuple] = None) -> bool:
     """Extiende el TTL de la base cacheada de este bono SIN recomputar (keep-warm
     gentil del daemon: no compite por el GIL). True si estaba caliente. Misma clave
     que `_bond_tr`, definida en un solo lugar."""
-    key = (code, round(float(y0), 6), round(float(y1), 6), terminal_str, settle_str, want_duration)
-    return _bond_tr_cache.touch(key)
+    return _bond_tr_cache.touch(
+        _bond_tr_key(code, y0, y1, terminal_str, settle_str, want_duration, tamar_path))
 
 
 def compute_rows(rows: List[Dict[str, Any]], terminal_str: str, settle_str: str,
