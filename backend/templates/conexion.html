@@ -10,7 +10,8 @@
     <strong>sin reiniciar la app</strong>.</p>
   </header>
 
-  <div class="card" x-data="{ url: '{{ current_url }}' }">
+  {# x-data en comillas simples + tojson: si la URL tuviera comilla rompía el atributo. #}
+  <div class="card" x-data='{ url: {{ current_url | tojson }} }'>
     <div class="card-title"><span>Endpoint XOMS</span></div>
     <div class="card-body">
       <form hx-post="/conexion/login" hx-target="#conn-status" hx-swap="innerHTML"

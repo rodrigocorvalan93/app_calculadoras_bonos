@@ -136,8 +136,12 @@ class MarketDataStore:
                     setattr(snap, attr_price, p)
                 if s is not None:
                     setattr(snap, attr_size, s)
-                if entry == "LA" and isinstance(raw, dict):
-                    ts = raw.get("date")
+                if entry == "LA":
+                    # LA puede venir como dict O lista-de-dicts (igual que _md_value);
+                    # antes sólo se leía la fecha del caso dict → con lista el last_ts
+                    # quedaba viejo aunque el precio sí actualizara.
+                    d = raw[0] if (isinstance(raw, list) and raw) else raw
+                    ts = d.get("date") if isinstance(d, dict) else None
                     if ts:
                         snap.last_ts = str(ts)
                 if entry == "BI":

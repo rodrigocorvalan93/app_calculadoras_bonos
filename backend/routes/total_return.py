@@ -19,6 +19,7 @@ import numpy as np
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from backend.locale_ar import parse_ar_num
 from backend.routes.curves import _rows_for, _row_pool
 from backend.services import bond_universe, curves, total_return as tr_svc
 
@@ -30,15 +31,7 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 
 
 def _num(s: Any) -> Optional[float]:
-    s = str(s or "").strip().replace(" ", "")
-    if not s:
-        return None
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return None
+    return parse_ar_num(s)            # parser es-AR canónico (maneja miles + rechaza inf/nan)
 
 
 def _default_terminal() -> str:

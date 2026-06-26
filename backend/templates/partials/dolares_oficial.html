@@ -47,8 +47,11 @@
             {# MAE no informa compra/venta (no están en EntidadCotizacion); se
                usan los campos reales con .get() → clave ausente = vacío, sin 500. #}
             {% for r in siopel %}
+              {# `variacion` de MAE viene en PUNTOS PORCENTUALES (0,28 = 0,28%);
+                 lo pasamos a FRACCIÓN para que ar_pct (×100), el color y la flecha
+                 (banda plana en fracción) den bien. Antes ar_pct(0,28) → "28,00%". #}
               {% set v = r.get('variacion') %}
-              {% set vf = v if (v is number) else none %}
+              {% set vf = (v / 100.0) if (v is number) else none %}
               <tr>
                 <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.get('ticker') }}</td>
                 <td style="text-align:left">{{ r.get('segmento') }}</td>

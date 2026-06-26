@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from backend.locale_ar import fmt_pct
+from backend.locale_ar import fmt_pct, parse_ar_num
 from backend.services import bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
@@ -663,11 +663,8 @@ def _price_overrides(request: Request) -> dict[str, float]:
     for k, v in request.query_params.multi_items():
         if not k.startswith("price_"):
             continue
-        try:
-            f = float(str(v).replace(",", "."))
-        except (TypeError, ValueError):
-            continue
-        if f == f and f > 0:
+        f = parse_ar_num(v)           # es-AR: '50.000,00' (miles) ya no se descarta
+        if f is not None and f > 0:
             out[k[len("price_"):]] = f
     return out
 
