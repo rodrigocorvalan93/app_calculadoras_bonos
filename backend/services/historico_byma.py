@@ -246,19 +246,41 @@ def _avg_seg(xs: List[float]) -> Optional[float]:
     return sum(ys) / len(ys) if ys else None
 
 
-def _a3500_deva(start_iso: str) -> Optional[float]:
-    """Deva del dólar A3500 entre start y la última observación (serie global, R/O)."""
+def _index_at(key: str, col: str, target_iso: str) -> Optional[float]:
+    """Último valor de un índice global (rentafija.inputs[key][col]) hasta target (R/O)."""
     try:
         import rentafija
-        s = rentafija.inputs["a3500"]["tca3500"]
-        tgt = date.fromisoformat(start_iso)
+        s = rentafija.inputs[key][col]
+        tgt = date.fromisoformat(target_iso)
         prev = [float(v) for d, v in s.items()
                 if (d.date() if hasattr(d, "date") else d) <= tgt and v == v]
-        a0 = prev[-1] if prev else None
-        a1 = float(s.iloc[-1])
-        return (a1 / a0 - 1.0) if (a0 and a0 > 0) else None
+        return prev[-1] if prev else None
     except Exception:  # noqa: BLE001
         return None
+
+
+def _index_last(key: str, col: str) -> Optional[float]:
+    try:
+        import rentafija
+        return float(rentafija.inputs[key][col].iloc[-1])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _window_indices(start_iso: str) -> Dict[str, Any]:
+    """Evolución de CER, A3500 y TAMAR en la ventana. CER/A3500 = % de cambio
+    (acumulación CER / deva); TAMAR = nivel inicio→fin (es una tasa) y su Δ en pp."""
+    def _pct(key: str, col: str) -> Optional[float]:
+        a0, a1 = _index_at(key, col, start_iso), _index_last(key, col)
+        return (a1 / a0 - 1.0) if (a0 and a0 > 0 and a1 is not None) else None
+
+    t0, t1 = _index_at("tamar", "TAMAR", start_iso), _index_last("tamar", "TAMAR")
+    return {
+        "cer": _pct("CER", "CER"),
+        "a3500": _pct("a3500", "tca3500"),
+        "tamar_ini": t0, "tamar_fin": t1,
+        "tamar_delta": (t1 - t0) if (t0 is not None and t1 is not None) else None,
+    }
 
 
 def weekly_segments(days: int = 7) -> Dict[str, Any]:
@@ -296,4 +318,4 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
                              "dprice": _avg_seg(dprices), "dtir": _avg_seg(dtirs),
                              "members": members})
     return {"loaded": True, "start": start, "end": end, "days": days,
-            "segments": segments, "deva_a3500": _a3500_deva(start)}
+            "segments": segments, "indices": _window_indices(start)}

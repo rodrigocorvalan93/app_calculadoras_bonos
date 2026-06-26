@@ -165,10 +165,13 @@ async def lifespan(app: FastAPI):
     # lock interno evita doble-carga si llega un request mientras calienta.
     try:
         import threading
-        from backend.services import cafci
+        from backend.services import cafci, historico_byma
         threading.Thread(target=cafci.ensure_loaded, name="cafci-warm", daemon=True).start()
+        # Pre-carga el Excel histórico BYMA (~3-4 s) al boot → la 1ª visita a
+        # Históricos / "Qué pasó" no paga la lectura del Excel.
+        threading.Thread(target=historico_byma.ensure_loaded, name="hist-byma-warm", daemon=True).start()
     except Exception:  # noqa: BLE001
-        logger.exception("[main] cafci warm failed to start")
+        logger.exception("[main] cafci/historico warm failed to start")
 
     ws = get_ws_client()
     if settings.primary_user and settings.primary_pass:

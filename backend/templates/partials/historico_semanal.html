@@ -8,10 +8,15 @@
 <div class="card">
   <div class="card-title">
     <span>Qué pasó · {{ w.days }} días</span>
-    <span class="card-title-aux">{{ w.start }} → {{ w.end }} ·
-      dólar A3500 {% if w.deva_a3500 is not none %}{{ '+' if w.deva_a3500 >= 0 else '' }}{{ (w.deva_a3500 * 100) | ar_num(2) }}%{% else %}—{% endif %}
-      · Δprecio ≈ total return (hard-dollar en USD) · Δ TIR en pp (negativo = compresión)</span>
+    <span class="card-title-aux">{{ w.start }} → {{ w.end }} · Δprecio ≈ total return (hard-dollar en USD) · Δ TIR en pp (negativo = compresión)</span>
   </div>
+  {% if w.indices %}
+  <div class="sem-idx">
+    <span class="sem-idx-chip"><b>CER</b> {% if w.indices.cer is not none %}<span class="{{ 'px-up' if w.indices.cer >= 0 else 'px-down' }}">{{ '+' if w.indices.cer >= 0 else '' }}{{ (w.indices.cer * 100) | ar_num(2) }}%</span>{% else %}—{% endif %}</span>
+    <span class="sem-idx-chip"><b>dólar A3500</b> {% if w.indices.a3500 is not none %}<span class="{{ 'px-up' if w.indices.a3500 >= 0 else 'px-down' }}">{{ '+' if w.indices.a3500 >= 0 else '' }}{{ (w.indices.a3500 * 100) | ar_num(2) }}%</span>{% else %}—{% endif %}</span>
+    <span class="sem-idx-chip"><b>TAMAR</b> {% if w.indices.tamar_fin is not none %}{{ w.indices.tamar_ini | ar_num(2) }} → {{ w.indices.tamar_fin | ar_num(2) }}%{% if w.indices.tamar_delta is not none %} <span class="{{ 'px-down' if w.indices.tamar_delta >= 0 else 'px-up' }}">({{ '+' if w.indices.tamar_delta >= 0 else '' }}{{ w.indices.tamar_delta | ar_num(2) }} pp)</span>{% endif %}{% else %}—{% endif %}</span>
+  </div>
+  {% endif %}
   <div class="card-body" style="padding:0">
     <form hx-get="/historicos/semanal" hx-target="#hist-semanal" hx-swap="innerHTML" class="table-tools muted">
       <span>Ventana:</span>

@@ -1141,6 +1141,9 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .esc-mcodes { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .sem-tbl td, .sem-tbl th { font-variant-numeric: tabular-nums; }
 .sem-codes { font-size: 11px; font-variant-numeric: tabular-nums; }
+.sem-idx { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 14px;
+  border-bottom: 1px solid var(--border); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sem-idx-chip b { color: var(--text-muted); font-weight: 600; margin-right: 4px; }
 
 /* ── Curva de tasas (TIR vs Duration): actual vs esperada ──────────────── */
 .yc-chart { display: block; width: 100%; height: auto; }

@@ -31,6 +31,7 @@ def test_weekly_segments_calcula_deltas():
     assert seg is not None and seg["key"] == "cer_corto"
     assert abs(seg["dprice"] - 0.01) < 1e-9        # +1 %
     assert abs(seg["dtir"] - (-0.005)) < 1e-9       # −0,5 pp (compresión)
+    assert {"cer", "a3500", "tamar_ini", "tamar_fin", "tamar_delta"} <= set(res["indices"])
 
 
 def test_weekly_segments_sin_data():
