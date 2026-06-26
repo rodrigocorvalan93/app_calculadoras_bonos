@@ -224,7 +224,9 @@ def _bond_tr_base(code: str, y0: float, y1: float, terminal_str: str, settle_str
         px_target = float(real_df.loc["Px final", "Total Return Valores"])
     except Exception:  # noqa: BLE001
         return None
-    if tr_real != tr_real or carry != carry:        # NaN
+    # Finitud, no sólo NaN: si precio_inicial≈0 el TR sale ±inf y `inf != inf` es
+    # False → antes se colaba 'inf%' a la tabla. isfinite lo corta.
+    if not (np.isfinite(tr_real) and np.isfinite(carry) and np.isfinite(px_target)):
         return None
     # Duration a la fecha target. La ficha CER base NO puede calcular a un settle
     # futuro (sin CER observado futuro → KeyError), así que usamos la proyectada

@@ -6,7 +6,7 @@
 <section class="curves">
   <header class="yas-header">
     <h1>Posiciones</h1>
-    <p class="muted">Tenencias por fondo (Delta). Lectura única al inicio + cache — tocá <strong>Actualizar</strong> para releer.</p>
+    <p class="muted">Tenencias por fondo (Delta). La tabla <strong>no se refresca sola</strong> (para no pisar el <em>Last</em> que tipeás): tocá <strong>↻ Precios BYMA</strong> para traer precios, o <strong>↻ Cartera</strong> para releer las posiciones del Delta.</p>
     {% if status and status.asof %}
       <p class="muted" style="font-size:11px;opacity:.7;margin-top:-6px">Última cartera: {{ status.asof }}</p>
     {% endif %}
@@ -38,15 +38,21 @@
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
           </select>
         </label>
+        <button type="button" class="btn-primary" style="align-self:flex-end"
+                hx-get="/posiciones/table" hx-target="#pos-fondo" hx-swap="innerHTML"
+                hx-include="[name=fondo], [name=plazo]"
+                title="Trae los últimos precios BYMA a la tabla. La tabla NO se refresca sola para no pisar lo que tipeás en la columna Last.">↻ Precios BYMA</button>
         <a class="btn-primary" style="align-self:flex-end"
-           href="/posiciones?refresh=1{% if selected is not none %}&fondo={{ selected }}{% endif %}&plazo={{ plazo }}">↻ Actualizar</a>
+           href="/posiciones?refresh=1{% if selected is not none %}&fondo={{ selected }}{% endif %}&plazo={{ plazo }}"
+           title="Re-lee la cartera del Delta desde el archivo (lectura completa).">↻ Cartera</a>
       </div>
     </div>
   </div>
 
-  <div id="pos-fondo" data-flash-scope
-       hx-get="/posiciones/table" hx-trigger="md-update from:body, every 30s"
-       hx-swap="innerHTML" hx-include="[name=fondo], [name=plazo]">
+  {# Tabla ESTÁTICA: NO lleva md-update — el Last es editable y un re-render en vivo
+     pisaba lo que el usuario tipeaba. Se refresca a demanda con "↻ Precios BYMA" o
+     al cambiar fondo/plazo. data-flash-scope sigue marcando qué celdas cambiaron. #}
+  <div id="pos-fondo" data-flash-scope>
     {% include "partials/posiciones_fondo.html" %}
   </div>
 

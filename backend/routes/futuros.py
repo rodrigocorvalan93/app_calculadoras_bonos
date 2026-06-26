@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from backend.locale_ar import parse_ar_num
 from backend.services import bond_universe, futuros as fut, marketdata_store
 
 router = APIRouter(tags=["futuros"])
@@ -23,17 +24,10 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 
 
 def _parse_num(s: Optional[str]) -> Optional[float]:
-    """Parsea el override de spot (acepta '1.435,50' es-AR o '1435.5')."""
-    if not s:
-        return None
-    t = str(s).strip()
-    if "," in t:                      # formato es-AR: . miles, , decimal
-        t = t.replace(".", "").replace(",", ".")
-    try:
-        v = float(t)
-        return v if v > 0 else None
-    except (TypeError, ValueError):
-        return None
+    """Override de spot, positivo. Usa el parser es-AR canónico: antes '1.435'
+    (miles) daba 1,435 → spot 1000× chico y todas las tasas implícitas mal."""
+    v = parse_ar_num(s)
+    return v if (v is not None and v > 0) else None
 
 
 def _bond_tna(tirea: float, freq: float = 90.0, base: float = 365.0) -> float:

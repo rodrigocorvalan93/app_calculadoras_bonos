@@ -13,25 +13,17 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from backend.config import settings
+from backend.locale_ar import parse_ar_num
 from backend.services import bond_universe, curves as curves_svc, delta_especies, marketdata_store, positions, pricing, symbols as syms
 
 router = APIRouter(prefix="/yas", tags=["yas"])
 
 
 def _parse_ar_number(raw: Optional[str]) -> Optional[float]:
-    """Parse 'es-AR' decimals tolerantly. '87,30' or '87.30' → 87.30."""
-    if raw is None:
-        return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    # Strip thousands separators (Argentine '.') if there are 2+ '.' or a ',' present
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return None
+    """Parser es-AR canónico (puntos = miles, coma = decimal). Antes era una copia
+    propia que sólo sacaba los puntos si había coma → un VN/precio con miles
+    ('2.000.000', '500.000') daba None y caía al default 1.000.000 sin avisar."""
+    return parse_ar_num(raw)
 
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:

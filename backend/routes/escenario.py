@@ -21,6 +21,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.cache import LockedTTLCache
+from backend.locale_ar import parse_ar_num
 from backend.routes.curves import _rows_for, _row_pool
 from backend.services import bond_universe, escenario as esc, total_return as tr_svc
 
@@ -34,16 +35,7 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 
 
 def _num(s: Any) -> Optional[float]:
-    s = str(s or "").strip().replace(" ", "")
-    if not s:
-        return None
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    try:
-        v = float(s)
-    except ValueError:
-        return None
-    return v if math.isfinite(v) else None   # rechaza "inf"/"nan"/"1e999"
+    return parse_ar_num(s)            # parser es-AR canónico (maneja miles + rechaza inf/nan)
 
 
 def _parse_path(s: Any, scale: float = 0.01) -> Optional[tuple]:
@@ -149,7 +141,8 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
     infl_pct = _implied_infl_monthly(settle, terminal)  # mensual implícita (placeholder)
     # Deva A3500 mensual implícita (placeholder de los senderos CCL/MEP/A3500).
     months = max(dias / 30.4375, 1e-9)
-    deva_mens = ((1.0 + deva) ** (1.0 / months) - 1.0) if deva > -1.0 else 0.0
+    # dias>0 evita el OverflowError de (1+deva)**(1/months) con months→0 (horizonte nulo).
+    deva_mens = ((1.0 + deva) ** (1.0 / months) - 1.0) if (deva > -1.0 and dias > 0) else 0.0
     # Columnas del grid de senderos: meses del horizonte (con headroom), 3..18.
     n_months = min(18, max(3, math.ceil(months) + 1))
     # TAMAR spot (nivel TNA actual) — placeholder de la fila TAMAR del grid.
