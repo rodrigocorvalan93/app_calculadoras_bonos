@@ -1141,6 +1141,26 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .esc-mcodes { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .sem-tbl td, .sem-tbl th { font-variant-numeric: tabular-nums; }
 .sem-codes { font-size: 11px; font-variant-numeric: tabular-nums; }
+.sem-idx { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 14px;
+  border-bottom: 1px solid var(--border); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sem-idx-chip b { color: var(--text-muted); font-weight: 600; margin-right: 4px; }
+
+/* ── Senderos mensuales (Escenario): grid nivel mes a mes por driver ───── */
+.esc-senderos { margin: 12px 0 2px; max-width: 100%; }
+.esc-senderos-head { display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; font-weight: 600; margin: 0 2px 6px; }
+.sendero-tbl { font-variant-numeric: tabular-nums; }
+.sendero-tbl th { font-size: 11px; color: var(--text-muted); font-weight: 600; text-align: center;
+  padding: 3px 4px; white-space: nowrap; }
+.sendero-tbl td { padding: 2px 4px; }
+.sendero-tbl td:first-child { white-space: nowrap; font-size: 12px; }
+.sendero-in { width: 52px; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 5px;
+  font-size: 12px; font-family: inherit; font-variant-numeric: tabular-nums; text-align: right; }
+.sendero-in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.lnk { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 11px;
+  font-family: inherit; padding: 2px 4px; }
+.lnk:hover { text-decoration: underline; }
 
 /* ── Curva de tasas (TIR vs Duration): actual vs esperada ──────────────── */
 .yc-chart { display: block; width: 100%; height: auto; }

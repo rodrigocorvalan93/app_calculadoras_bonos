@@ -132,21 +132,37 @@ def eval_at(xs: List[float], ys: List[float], xq: List[float], threshold: float 
 
 
 def estimate(duration: float, xs: List[float], ys: List[float],
-             threshold: float = 3.0, clip: bool = True) -> Optional[Dict[str, Any]]:
-    """TIR / TEM / TNAs a una duration dada, vía NSS. y de entrada en %."""
+             threshold: float = 3.0, clip: bool = True,
+             metric: str = "tirea") -> Optional[Dict[str, Any]]:
+    """TIR / TEM / TNAs a una duration dada, vía NSS. y de entrada en %.
+
+    `metric` indica en qué espacio vienen los `ys` (y por tanto el fit): "tirea"
+    (TIREA %) o "tem" (TEM %). En modo TEM el valor de la curva ES la TEM; se
+    recupera la TIREA anual ((1+TEM)^12 − 1) para derivar TNAs y mostrar ambas.
+    """
     f = fit(xs, ys, threshold)
     if f is None:
         return None
     popt, x_min, x_max = f
     d = float(duration)
     d_used = float(np.clip(d, x_min, x_max)) if clip else d
-    tirea = float(model(d_used, *popt)) / 100.0
+    val = float(model(d_used, *popt)) / 100.0     # valor de la curva en la métrica fiteada
+    if metric == "tem":
+        base = 1.0 + val
+        tirea = (base ** (360.0 / 30.0) - 1.0) if base > 0.0 else None   # TEM → TIREA anual
+    else:
+        tirea = val
     # Sobre-extrapolación NSS: TIR ≤ −100% daría potencia COMPLEJA y TIR absurda
     # (p.ej. miles de %) daría OVERFLOW en (1+t)^d → ambas 500-ean json.dumps.
-    # `pos` cubre lo primero; `sane` (|TIR| acotada) lo segundo. Derivados → None.
-    pos = (1.0 + tirea) > 0.0
-    sane = pos and tirea < 5.0          # exp pequeño en `tem` no desborda; el de `d` sí
-    tem = (1.0 + tirea) ** (30.0 / 360.0) - 1.0 if pos else None
+    if tirea is None or not (1.0 + tirea > 0.0):
+        return {
+            "duration_in": d, "duration_used": d_used, "clamped": (d != d_used),
+            "x_min": x_min, "x_max": x_max,
+            "tirea": None, "tem": None, "tna_plazo": None,
+            "tnas": {"30": None, "90": None, "180": None, "365": None},
+        }
+    sane = tirea < 5.0                  # exp pequeño en `tem` no desborda; el de `d` sí
+    tem = (1.0 + tirea) ** (30.0 / 360.0) - 1.0
     # TNA del plazo: rendimiento total sobre D años anualizado lineal (días/365).
     tna_plazo = (((1.0 + tirea) ** d_used - 1.0) / d_used) if (sane and d_used > 0) else None
     return {
@@ -156,6 +172,21 @@ def estimate(duration: float, xs: List[float], ys: List[float],
         "tnas": {"30": _tna(tirea, 30, 365), "90": _tna(tirea, 90, 365),
                  "180": _tna(tirea, 180, 365), "365": _tna(tirea, 365, 365)},
     }
+
+
+def eval_clamped(duration: float, xs: List[float], ys: List[float],
+                 threshold: float = 3.0) -> Optional[Dict[str, Any]]:
+    """Valor de la curva NSS en `duration` (clamp al rango fiteado). Para métricas
+    que NO son un yield (p.ej. margen sobre TAMAR/BADLAR), donde no aplican
+    TEM/TNAs: devuelve sólo el valor interpolado (en las unidades de `ys`)."""
+    f = fit(xs, ys, threshold)
+    if f is None:
+        return None
+    popt, x_min, x_max = f
+    d = float(duration)
+    d_used = float(np.clip(d, x_min, x_max))
+    return {"duration_in": d, "duration_used": d_used, "clamped": (d != d_used),
+            "x_min": x_min, "x_max": x_max, "value": float(model(d_used, *popt))}
 
 
 def level_slope_convex(xs: List[float], ys: List[float], anchor: float,

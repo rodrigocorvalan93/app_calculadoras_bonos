@@ -1,10 +1,24 @@
-{% if est %}
+{% if est and metric == 'margen' %}
+<div class="card">
+  <div class="card-title">
+    <span>Margen NSS @ Duration {{ est.duration_in | ar_num(2) }}</span>
+    <span class="card-title-aux">
+      {% if est.clamped %}fuera de rango → clip a {{ est.duration_used | ar_num(2) }} · {% endif %}
+      rango del fit {{ est.x_min | ar_num(2) }}–{{ est.x_max | ar_num(2) }} años · spread TNA sobre TAMAR/BADLAR
+    </span>
+  </div>
+  <div class="card-body">
+    <div><div class="muted" style="font-size:11px">Margen TNA estimado</div>
+      <div style="font-weight:600;color:var(--accent);font-size:19px">{{ est.value | ar_num(2) }} pp</div></div>
+  </div>
+</div>
+{% elif est %}
 <div class="card">
   <div class="card-title">
     <span>Estimación NSS @ Duration {{ est.duration_in | ar_num(2) }}</span>
     <span class="card-title-aux">
       {% if est.clamped %}fuera de rango → clip a {{ est.duration_used | ar_num(2) }} · {% endif %}
-      rango del fit {{ est.x_min | ar_num(2) }}–{{ est.x_max | ar_num(2) }} años
+      rango del fit {{ est.x_min | ar_num(2) }}–{{ est.x_max | ar_num(2) }} años{% if metric_label and metric_label != 'TIREA' %} · regresión en {{ metric_label }}{% endif %}
     </span>
   </div>
   <div class="card-body">
@@ -31,5 +45,5 @@
   </div>
 </div>
 {% elif duration %}
-  <div class="alert">No se pudo estimar (¿menos de 4 bonos con TIREA y Duration en la curva?).</div>
+  <div class="alert">No se pudo estimar (hacen falta ≥4 bonos con Duration y {% if metric == 'margen' %}margen sobre TAMAR/BADLAR — sólo aplica a tasa variable{% else %}TIREA{% endif %} en la curva).</div>
 {% endif %}

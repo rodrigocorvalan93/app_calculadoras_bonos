@@ -25,7 +25,7 @@
     var NSSCOL = "#a78bfa";
     var MUT = cssVar("--text-muted", "#8a8a8a");
     var BORD = cssVar("--border", "#333");
-    var u = null, codes = [];
+    var u = null, codes = [], yLabel = "TIREA (%)";
 
     box.style.position = "relative";
     var tip = document.createElement("div");
@@ -56,7 +56,7 @@
           { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD },
             label: "Duration (años)", labelSize: 30 },
           { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD },
-            label: "TIREA (%)", size: 56,
+            label: yLabel, size: 56,
             values: function (uu, vals) { return vals.map(function (v) { return v + "%"; }); } },
         ],
         series: [
@@ -124,6 +124,7 @@
           var vac = j.xs.map(function () { return null; });
           var data = [j.xs, j.ars, j.usd, j.bid || vac, j.off || vac, nss];
           codes = j.codes || [];
+          if (j.ylabel) yLabel = j.ylabel + " (%)";   // TIREA/TEM según la métrica
           if (recreate || !u) {
             if (u) u.destroy();
             clear();

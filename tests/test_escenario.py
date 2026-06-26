@@ -138,7 +138,8 @@ async def test_escenario_endpoints():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         pg = await ac.get("/escenario")
         assert pg.status_code == 200 and "retorno esperado en pesos" in pg.text
-        assert 'name="ccl_deva"' in pg.text and 'name="ytm_cer_corto"' in pg.text
+        # las devas single pasaron al grid de senderos (name=ccl_path); Exit YTM sigue
+        assert 'name="ccl_path"' in pg.text and 'name="ytm_cer_corto"' in pg.text
         tb = await ac.get("/escenario/table?plazo=24hs&terminal=31/12/2026"
                           "&cauc_tna=20&ccl_deva=11,75&mep_deva=11,75&ytm_cer_corto=5&slope_cer_corto=0")
         assert tb.status_code == 200

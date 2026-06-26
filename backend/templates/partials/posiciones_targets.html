@@ -2,7 +2,11 @@
    (no tocan el backend); el % actual viene del server (snapshot por selección).
    Caja aparte del panel live → editar el target no se pisa con cada tick. #}
 {% if cat_actual %}
-<div class="card" x-data="posTargets({{ fondo | tojson }}, {{ cat_actual | tojson }})" x-cloak>
+{# x-data en comillas SIMPLES: `tojson` emite `"` (no las escapa) y escapa `'`/<>&,
+   así que dentro de un atributo con comillas dobles el primer `"` del JSON cerraba
+   el atributo → Alpine no parseaba x-data → el componente nunca arrancaba y el
+   x-cloak dejaba la caja invisible. Con comillas simples el JSON entra intacto. #}
+<div class="card" x-data='posTargets({{ fondo | tojson }}, {{ cat_actual | tojson }})' x-cloak>
   <div class="card-title">
     <span>Target vs Actual · Categoría{% if nombre %} <i class="muted">· {{ nombre }}</i>{% endif %}</span>
     <button type="button" class="tgt-copy" @click="copy()" title="Copiar como tabla (pegá en Excel)">
