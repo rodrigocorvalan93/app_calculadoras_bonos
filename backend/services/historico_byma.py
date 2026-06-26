@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -223,3 +224,76 @@ def curve_series(curve_key: str, metric: str = "TIREA", desde: Optional[str] = N
     label = next((cv.label for cv in curves.list_curves() if cv.key == curve_key), curve_key)
     return {"loaded": True, "lines": lines, "agg": agg, "metric": metric,
             "curve_label": label, "is_yield": is_yield}
+
+
+# ── Resumen semanal por segmento (Δprecio + ΔTIR) ────────────────────────────
+def _value_at(entry: Dict[str, Any], metric: str, target_iso: str) -> Optional[float]:
+    """Último valor conocido de `metric` hasta `target_iso` (fecha ≤ target)."""
+    vals = entry["vals"].get(metric)
+    if not vals:
+        return None
+    best = None
+    for d, v in zip(entry["dates"], vals):
+        if d > target_iso:
+            break
+        if v is not None:
+            best = v
+    return best
+
+
+def _avg_seg(xs: List[float]) -> Optional[float]:
+    ys = [x for x in xs if x is not None and x == x]
+    return sum(ys) / len(ys) if ys else None
+
+
+def _a3500_deva(start_iso: str) -> Optional[float]:
+    """Deva del dólar A3500 entre start y la última observación (serie global, R/O)."""
+    try:
+        import rentafija
+        s = rentafija.inputs["a3500"]["tca3500"]
+        tgt = date.fromisoformat(start_iso)
+        prev = [float(v) for d, v in s.items()
+                if (d.date() if hasattr(d, "date") else d) <= tgt and v == v]
+        a0 = prev[-1] if prev else None
+        a1 = float(s.iloc[-1])
+        return (a1 / a0 - 1.0) if (a0 and a0 > 0) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def weekly_segments(days: int = 7) -> Dict[str, Any]:
+    """Resumen de la ventana (default 1 semana) por SEGMENTO —mismas categorías que
+    Escenario (curva + bucket de duration)—: Δ Precio % (Last Price fin/inicio ≈ total
+    return de la ventana, en el precio NATIVO del bono) y Δ TIR (pp). Promedio simple
+    por segmento + los códigos que toma, más la deva del dólar A3500 de la ventana."""
+    from backend.services import curves, escenario as esc
+    data = ensure_loaded()
+    end = (data.get("bounds") or (None, None))[1]
+    if not data.get("loaded") or not end:
+        return {"loaded": False, "error": data.get("error") or "sin fechas",
+                "segments": [], "days": days}
+    start = (date.fromisoformat(end) - timedelta(days=int(days))).isoformat()
+    by_code = data["by_code"]
+    codes_by_curve = curves.build_curve_codes()
+    segments: List[Dict[str, Any]] = []
+    for cat in esc.CATEGORIES:
+        dprices: List[float] = []
+        dtirs: List[float] = []
+        members: List[str] = []
+        for code in codes_by_curve.get(cat.curve, []):
+            entry = by_code.get(code)
+            if entry is None or not esc.in_bucket(cat, _value_at(entry, "Duration", end)):
+                continue
+            p0, p1 = _value_at(entry, "Last Price", start), _value_at(entry, "Last Price", end)
+            t0, t1 = _value_at(entry, "TIREA", start), _value_at(entry, "TIREA", end)
+            if p0 and p1 and p0 > 0:
+                dprices.append(p1 / p0 - 1.0)
+            if t0 is not None and t1 is not None:
+                dtirs.append(t1 - t0)
+            members.append(code)
+        if members:
+            segments.append({"key": cat.key, "label": cat.label, "n": len(members),
+                             "dprice": _avg_seg(dprices), "dtir": _avg_seg(dtirs),
+                             "members": members})
+    return {"loaded": True, "start": start, "end": end, "days": days,
+            "segments": segments, "deva_a3500": _a3500_deva(start)}
