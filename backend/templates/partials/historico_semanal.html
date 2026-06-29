@@ -53,7 +53,7 @@
                 <thead><tr>
                   <th style="text-align:left">Bono</th>
                   <th>Δ Precio</th><th>Δ TIR</th><th>Δ TEM</th>
-                  {% if s.has_margen %}<th title="Margen TNA = TNA del bono − tasa de referencia (TAMAR/BADLAR)">Margen</th>{% endif %}
+                  {% if s.has_margen %}<th title="Margen = TNA 30d de la TIR − TAMAR/BADLAR del día">Margen</th>{% endif %}
                 </tr></thead>
                 <tbody>
                   {% for b in s.rows %}

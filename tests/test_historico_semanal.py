@@ -45,13 +45,13 @@ def test_weekly_segments_calcula_deltas():
 
 
 def test_margen_tna_formula():
-    """Margen TNA = TNA − bench/100 (VARIABLE) o cap32(TIREA) − bench/100
-    (VARIABLE_CAP); None si falta el benchmark."""
-    entry = {"dates": ["2026-06-25"], "vals": {"TNA": [0.46], "TIREA": [0.50]}}
-    assert abs(hb._margen_tna(entry, "VARIABLE", 30.0, "2026-06-25") - (0.46 - 0.30)) < 1e-9
-    tna_eq = ((1.0 + 0.50) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
-    assert abs(hb._margen_tna(entry, "VARIABLE_CAP", 30.0, "2026-06-25") - (tna_eq - 0.30)) < 1e-9
-    assert hb._margen_tna(entry, "VARIABLE", None, "2026-06-25") is None
+    """Margen = TNA30(TIR) − bench/100; None si falta benchmark o TIR.
+    TNA_30 = ((1+TIREA)^(30/365) − 1) × (365/30)."""
+    entry = {"dates": ["2026-06-25"], "vals": {"TIREA": [0.50]}}
+    tna30 = ((1.0 + 0.50) ** (30.0 / 365.0) - 1.0) * (365.0 / 30.0)
+    assert abs(hb._margen_tna(entry, 30.0, "2026-06-25") - (tna30 - 0.30)) < 1e-9
+    assert hb._margen_tna(entry, None, "2026-06-25") is None
+    assert hb._margen_tna({"dates": ["2026-06-25"], "vals": {}}, 30.0, "2026-06-25") is None
 
 
 def test_weekly_segments_margen_solo_variable(monkeypatch):
