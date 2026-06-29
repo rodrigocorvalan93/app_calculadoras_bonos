@@ -1144,6 +1144,26 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .sem-idx { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 14px;
   border-bottom: 1px solid var(--border); font-size: 12px; font-variant-numeric: tabular-nums; }
 .sem-idx-chip b { color: var(--text-muted); font-weight: 600; margin-right: 4px; }
+/* Qué pasó: fila de segmento clicable + detalle por bono (Alpine x-show). */
+.sem-row { cursor: pointer; }
+.sem-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sem-row.open > td { background: var(--accent-soft); }
+.sem-caret { display: inline-block; width: 0.85em; margin-right: 2px; color: var(--text-muted);
+  transition: transform 0.15s ease; }
+.sem-caret.open { transform: rotate(90deg); }
+.sem-detail-row > td { padding: 0 !important; background: var(--panel-2);
+  border-bottom: 1px solid var(--border) !important; }
+.sem-detail { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.sem-detail th, .sem-detail td { padding: 5px 14px; text-align: right;
+  border-bottom: 1px solid var(--border-soft); }
+.sem-detail th { color: var(--text-muted); font-weight: 500; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.03em; }
+.sem-detail td { font-size: 11.5px; color: var(--text-soft); }
+.sem-detail th:first-child, .sem-detail td:first-child { text-align: left; padding-left: 32px; }
+.sem-detail tbody tr:last-child td { border-bottom: none; }
+.sem-detail tbody tr:hover { background: var(--accent-soft); }
+.sem-dm { font-size: 10px; }
+@media (prefers-reduced-motion: reduce) { .sem-caret { transition: none; } }
 
 /* ── Senderos mensuales (Escenario): grid nivel mes a mes por driver ───── */
 .esc-senderos { margin: 12px 0 2px; max-width: 100%; }
