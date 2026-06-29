@@ -322,46 +322,43 @@ def _window_indices(start_iso: str, end_iso: Optional[str] = None) -> Dict[str, 
     }
 
 
-def _floater_kind(code: str):
-    """(tipo, index) si el bono es tasa variable benchmarkeada (TAMAR/BADLAR), si
-    no None — mismo criterio que comparador._margen_aplica / pricing.margen_tna."""
+def _floater_index(code: str) -> Optional[str]:
+    """Índice de referencia (TAMAR/BADLAR) si el bono es tasa variable
+    benchmarkeada; si no None — criterio de comparador._margen_aplica / pricing."""
     from backend.services import bond_universe
     o = bond_universe.get(code)
     if o is None:
         return None
     tipo = (getattr(o, "tipo_tasa_interes", "") or "").upper()
     idx = (getattr(o, "index", "") or "").upper()
-    if tipo in ("VARIABLE", "VARIABLE_CAP") and idx in ("TAMAR", "BADLAR"):
-        return tipo, idx
-    return None
+    return idx if (tipo in ("VARIABLE", "VARIABLE_CAP") and idx in ("TAMAR", "BADLAR")) else None
 
 
-def _margen_tna(entry: Dict[str, Any], tipo: str, bench_pct: Optional[float],
+def _margen_tna(entry: Dict[str, Any], bench_pct: Optional[float],
                 target_iso: str) -> Optional[float]:
-    """Margen TNA histórico (decimal) = TNA del bono − tasa de referencia, al
-    `target_iso`. Mismo criterio que pricing.margen_tna: cap32 sobre TIREA para
-    VARIABLE_CAP (dual TAMAR), TNA directa para VARIABLE puro. `bench_pct` = nivel
-    TAMAR/BADLAR en %. None si falta el benchmark o la tasa del bono."""
+    """Margen histórico (decimal) = TNA a 30 días de la TIR del bono − tasa de
+    referencia, al `target_iso`:
+
+        TNA_30 = ((1 + TIREA) ** (30/365) − 1) × (365/30)
+        margen = TNA_30 − bench/100
+
+    `bench_pct` = nivel TAMAR/BADLAR del día en %. None si falta el benchmark o la
+    TIR del bono."""
     if bench_pct is None or bench_pct != bench_pct:
         return None
-    if tipo == "VARIABLE_CAP":
-        tirea = _value_at(entry, "TIREA", target_iso)
-        if tirea is None:
-            return None
-        tna_eq = ((1.0 + tirea) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
-        return tna_eq - bench_pct / 100.0
-    tna = _value_at(entry, "TNA", target_iso)
-    if tna is None:
+    tirea = _value_at(entry, "TIREA", target_iso)
+    if tirea is None:
         return None
-    return tna - bench_pct / 100.0
+    tna30 = ((1.0 + tirea) ** (30.0 / 365.0) - 1.0) * (365.0 / 30.0)
+    return tna30 - bench_pct / 100.0
 
 
 def weekly_segments(days: int = 7) -> Dict[str, Any]:
     """Resumen de la ventana (default 1 semana) por SEGMENTO —mismas categorías que
     Escenario (curva + bucket de duration)—: Δ Precio % (Last Price fin/inicio ≈ total
     return de la ventana, en el precio NATIVO del bono) y Δ TIR (pp). Promedio simple
-    por segmento + `rows` con el detalle por bono (Δprecio / ΔTIR / ΔTEM y margen TNA
-    = TNA − TAMAR/BADLAR, sólo tasa variable), más la deva del dólar A3500."""
+    por segmento + `rows` con el detalle por bono (Δprecio / ΔTIR / ΔTEM y margen =
+    TNA 30d de la TIR − TAMAR/BADLAR, sólo tasa variable), más la deva del A3500."""
     from backend.services import curves, escenario as esc
     data = ensure_loaded()
     end = (data.get("bounds") or (None, None))[1]
@@ -392,14 +389,13 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
             dprice = (p1 / p0 - 1.0) if (p0 and p1 and p0 > 0) else None
             dtir = (t1 - t0) if (t0 is not None and t1 is not None) else None
             dtem = (m1 - m0) if (m0 is not None and m1 is not None) else None
-            # Margen TNA = TNA del bono − tasa de referencia; SÓLO tasa variable
+            # Margen = TNA(30d) de la TIR − tasa de referencia; SÓLO tasa variable
             # (TAMAR/BADLAR). CER / tasa fija / HD no llevan margen.
             margen = dmargen = None
-            kind = _floater_kind(code)
-            if kind is not None:
-                tipo, idx = kind
-                mg0 = _margen_tna(entry, tipo, bench_ini.get(idx), start)
-                mg1 = _margen_tna(entry, tipo, bench_fin.get(idx), end)
+            idx = _floater_index(code)
+            if idx is not None:
+                mg0 = _margen_tna(entry, bench_ini.get(idx), start)
+                mg1 = _margen_tna(entry, bench_fin.get(idx), end)
                 margen = mg1
                 dmargen = (mg1 - mg0) if (mg0 is not None and mg1 is not None) else None
             if dprice is not None:
