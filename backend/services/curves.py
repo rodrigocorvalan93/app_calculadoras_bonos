@@ -184,6 +184,10 @@ def build_curve_codes() -> Dict[str, List[str]]:
         if clas == "Soberano"
     })
     dualtamar = sorted({_apply_curve_suffix("dualtamar", c) for c in dualfija + dualcer})
+    # Patas TAMAR partidas por tipo de dual (para segmentar "Qué pasó"): Tamar/Fija
+    # vs Tamar/CER. Mismo sufijo 'v' aplicado sobre la base correspondiente.
+    dualtamar_fija = sorted({_apply_curve_suffix("dualtamar", c) for c in dualfija})
+    dualtamar_cer = sorted({_apply_curve_suffix("dualtamar", c) for c in dualcer})
 
     bonares = sorted({
         c for c, qpc in by_ind_clas.get(("Soberano USD Ley Argentina D", "Soberano"), [])
@@ -238,6 +242,8 @@ def build_curve_codes() -> Dict[str, List[str]]:
         "dualfija": dualfija,
         "dualcer": dualcer,
         "dualtamar": dualtamar,
+        "dualtamar_fija": dualtamar_fija,
+        "dualtamar_cer": dualtamar_cer,
         "corp_tamar": sorted(corp_tamar_set),
         "corp_badlar": sorted(corp_badlar_set),
         "corp_tasafija": sorted(corp_tasafija_set),
