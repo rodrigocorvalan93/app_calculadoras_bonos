@@ -81,6 +81,35 @@ def test_weekly_segments_margen_solo_variable(monkeypatch):
     assert row is not None and row["margen"] is not None and row["dmargen"] is not None
 
 
+def test_weekly_segments_duales_separados(monkeypatch):
+    """Los duales aparecen como segmentos separados: la pata TAMAR ('…v', que en el
+    Excel cae bajo el ticker base) trae margen; la base fija/CER no."""
+    bond_universe.ensure_loaded()
+    codes = curves.build_curve_codes()
+    fija, tamar_fija = codes.get("dualfija", []), codes.get("dualtamar_fija", [])
+    if not fija or not tamar_fija:
+        pytest.skip("sin duales fija/tamar en el universo")
+    base = sorted(fija)[0]            # p.ej. TTD26 (ficha FIJA = ticker traded del Excel)
+    monkeypatch.setattr(hb, "_index_at", lambda key, col, target: 30.0 if key == "tamar" else None)
+    prev = hb._cache
+    hb._cache = {
+        "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"),
+        "by_code": {base: {"dates": ["2026-06-18", "2026-06-25"],
+                           "vals": {"Last Price": [100.0, 101.0], "TIREA": [0.50, 0.495],
+                                    "TEM": [0.030, 0.029], "Duration": [0.3, 0.3]}}},
+    }
+    try:
+        res = hb.weekly_segments(7)
+    finally:
+        hb._cache = prev
+    segs = {s["key"]: s for s in res["segments"]}
+    # base Fija/TAMAR: aparece, SIN margen (no es floater)
+    assert "dual_fija" in segs and segs["dual_fija"]["has_margen"] is False
+    # pata TAMAR/Fija: aparece (vía fallback '…v' → ticker base) y CON margen
+    assert "dual_tamar_fija" in segs and segs["dual_tamar_fija"]["has_margen"] is True
+    assert segs["dual_tamar_fija"]["rows"][0]["margen"] is not None
+
+
 def test_weekly_segments_sin_data():
     prev = hb._cache
     hb._cache = {"loaded": False, "error": "x", "bounds": (None, None), "by_code": {}}

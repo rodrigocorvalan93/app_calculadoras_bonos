@@ -56,6 +56,17 @@ CATEGORIES: List[Cat] = [
 
 CAT_BY_KEY: Dict[str, Cat] = {c.key: c for c in CATEGORIES}
 
+# Segmentos DUALES — sólo para el resumen "Qué pasó" de Históricos (NO entran al
+# Escenario multi-activo, que itera CATEGORIES). Cada dual se parte en su base y su
+# pata TAMAR; el margen sólo aplica a las patas TAMAR (VARIABLE_CAP). La pata 'v'
+# vive en las curvas dualtamar_fija / dualtamar_cer (ver curves.build_curve_codes).
+DUAL_CATEGORIES: List[Cat] = [
+    Cat("dual_cer",        "Dual CER/TAMAR",  "dualcer",        0.0, 1e9, ""),
+    Cat("dual_tamar_cer",  "Dual TAMAR/CER",  "dualtamar_cer",  0.0, 1e9, ""),
+    Cat("dual_fija",       "Dual Fija/TAMAR", "dualfija",       0.0, 1e9, ""),
+    Cat("dual_tamar_fija", "Dual TAMAR/Fija", "dualtamar_fija", 0.0, 1e9, ""),
+]
+
 
 def fx_of(cat: Cat, ccl_proy: float, mep_proy: float) -> float:
     """Proyección de deva de la pata de la categoría (0 si es ARS pura)."""
