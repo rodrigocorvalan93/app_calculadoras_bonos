@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _HISTORICO_FILENAME = "Delta - historico_byma_px_tasas.xlsx"
 _METRICS = ("TIREA", "TNA", "TEM", "Paridad")          # métricas de tasa/paridad
-_EXTRA = ("Last Price", "Duration", "tem_spread")      # px/dur + margen (spread TEM) por bono
+_EXTRA = ("Last Price", "Duration")                    # para la vista "un bono" (futuro)
 
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
@@ -101,7 +101,7 @@ def _load() -> Dict[str, Any]:
         df["fecha_hoy"] = pd.to_datetime(df["fecha_hoy"], errors="coerce")
         df = df.dropna(subset=["fecha_hoy", "Código"]).copy()
         df["Código"] = df["Código"].astype(str)
-        for col in _METRICS + _EXTRA:
+        for col in _METRICS + _EXTRA + ("tem_spread",):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         # dedup (Código, fecha) keep last; drop filas muertas y TIREAs absurdas.
@@ -322,25 +322,46 @@ def _window_indices(start_iso: str, end_iso: Optional[str] = None) -> Dict[str, 
     }
 
 
-def _margen_aplica(code: str) -> bool:
-    """El margen (spread de tasa) sólo tiene sentido en tasa variable
-    benchmarkeada (TAMAR/BADLAR) — mismo criterio que comparador._margen_aplica /
-    pricing.margen_tna. Un CER / tasa fija / hard-dollar NO lleva margen, aunque el
-    Excel histórico traiga un `tem_spread` para esa fila."""
+def _floater_kind(code: str):
+    """(tipo, index) si el bono es tasa variable benchmarkeada (TAMAR/BADLAR), si
+    no None — mismo criterio que comparador._margen_aplica / pricing.margen_tna."""
     from backend.services import bond_universe
     o = bond_universe.get(code)
     if o is None:
-        return False
-    return ((getattr(o, "tipo_tasa_interes", "") or "").upper() in ("VARIABLE", "VARIABLE_CAP")
-            and (getattr(o, "index", "") or "").upper() in ("TAMAR", "BADLAR"))
+        return None
+    tipo = (getattr(o, "tipo_tasa_interes", "") or "").upper()
+    idx = (getattr(o, "index", "") or "").upper()
+    if tipo in ("VARIABLE", "VARIABLE_CAP") and idx in ("TAMAR", "BADLAR"):
+        return tipo, idx
+    return None
+
+
+def _margen_tna(entry: Dict[str, Any], tipo: str, bench_pct: Optional[float],
+                target_iso: str) -> Optional[float]:
+    """Margen TNA histórico (decimal) = TNA del bono − tasa de referencia, al
+    `target_iso`. Mismo criterio que pricing.margen_tna: cap32 sobre TIREA para
+    VARIABLE_CAP (dual TAMAR), TNA directa para VARIABLE puro. `bench_pct` = nivel
+    TAMAR/BADLAR en %. None si falta el benchmark o la tasa del bono."""
+    if bench_pct is None or bench_pct != bench_pct:
+        return None
+    if tipo == "VARIABLE_CAP":
+        tirea = _value_at(entry, "TIREA", target_iso)
+        if tirea is None:
+            return None
+        tna_eq = ((1.0 + tirea) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
+        return tna_eq - bench_pct / 100.0
+    tna = _value_at(entry, "TNA", target_iso)
+    if tna is None:
+        return None
+    return tna - bench_pct / 100.0
 
 
 def weekly_segments(days: int = 7) -> Dict[str, Any]:
     """Resumen de la ventana (default 1 semana) por SEGMENTO —mismas categorías que
     Escenario (curva + bucket de duration)—: Δ Precio % (Last Price fin/inicio ≈ total
     return de la ventana, en el precio NATIVO del bono) y Δ TIR (pp). Promedio simple
-    por segmento + `rows` con el detalle por bono (Δprecio / ΔTIR / ΔTEM y margen =
-    spread TEM, si aplica), más la deva del dólar A3500 de la ventana."""
+    por segmento + `rows` con el detalle por bono (Δprecio / ΔTIR / ΔTEM y margen TNA
+    = TNA − TAMAR/BADLAR, sólo tasa variable), más la deva del dólar A3500."""
     from backend.services import curves, escenario as esc
     data = ensure_loaded()
     end = (data.get("bounds") or (None, None))[1]
@@ -350,6 +371,10 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
     start = (date.fromisoformat(end) - timedelta(days=int(days))).isoformat()
     by_code = data["by_code"]
     codes_by_curve = curves.build_curve_codes()
+    # Benchmark (TAMAR/BADLAR, en %) al inicio/fin de la ventana — una vez, igual
+    # para todos los bonos del índice (alimenta el margen TNA histórico).
+    bench_ini = {"TAMAR": _index_at("tamar", "TAMAR", start), "BADLAR": _index_at("badlar", "BADLAR", start)}
+    bench_fin = {"TAMAR": _index_at("tamar", "TAMAR", end), "BADLAR": _index_at("badlar", "BADLAR", end)}
     segments: List[Dict[str, Any]] = []
     for cat in esc.CATEGORIES:
         dprices: List[float] = []
@@ -367,13 +392,16 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
             dprice = (p1 / p0 - 1.0) if (p0 and p1 and p0 > 0) else None
             dtir = (t1 - t0) if (t0 is not None and t1 is not None) else None
             dtem = (m1 - m0) if (m0 is not None and m1 is not None) else None
-            # Margen (spread de tasa) SÓLO para tasa variable (TAMAR/BADLAR); un
-            # CER / tasa fija / HD no lleva, aunque el Excel traiga un tem_spread.
+            # Margen TNA = TNA del bono − tasa de referencia; SÓLO tasa variable
+            # (TAMAR/BADLAR). CER / tasa fija / HD no llevan margen.
             margen = dmargen = None
-            if _margen_aplica(code):
-                g0, g1 = _value_at(entry, "tem_spread", start), _value_at(entry, "tem_spread", end)
-                margen = g1
-                dmargen = (g1 - g0) if (g0 is not None and g1 is not None) else None
+            kind = _floater_kind(code)
+            if kind is not None:
+                tipo, idx = kind
+                mg0 = _margen_tna(entry, tipo, bench_ini.get(idx), start)
+                mg1 = _margen_tna(entry, tipo, bench_fin.get(idx), end)
+                margen = mg1
+                dmargen = (mg1 - mg0) if (mg0 is not None and mg1 is not None) else None
             if dprice is not None:
                 dprices.append(dprice)
             if dtir is not None:
