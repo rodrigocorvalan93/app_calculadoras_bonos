@@ -53,7 +53,7 @@
                 <thead><tr>
                   <th style="text-align:left">Bono</th>
                   <th>Δ Precio</th><th>Δ TIR</th><th>Δ TEM</th>
-                  <th title="Spread de TEM sobre la tasa de referencia (sólo tasa variable)">Margen</th>
+                  {% if s.has_margen %}<th title="Margen de tasa sobre la referencia variable (TAMAR/BADLAR)">Margen</th>{% endif %}
                 </tr></thead>
                 <tbody>
                   {% for b in s.rows %}
@@ -65,7 +65,7 @@
                       (('+' if b.dtir >= 0 else '') ~ ((b.dtir * 100) | ar_num(2)) ~ ' pp') if b.dtir is not none else '—' }}</td>
                     <td class="{{ 'px-up' if (b.dtem or 0) <= 0 else 'px-down' }}">{{
                       (('+' if b.dtem >= 0 else '') ~ ((b.dtem * 100) | ar_num(2)) ~ ' pp') if b.dtem is not none else '—' }}</td>
-                    <td>{% if b.margen is not none %}{{ (b.margen * 100) | ar_num(2) }}%{% if b.dmargen is not none %} <span class="sem-dm {{ 'px-up' if b.dmargen <= 0 else 'px-down' }}">({{ '+' if b.dmargen >= 0 else '' }}{{ (b.dmargen * 100) | ar_num(2) }})</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+                    {% if s.has_margen %}<td>{% if b.margen is not none %}{{ (b.margen * 100) | ar_num(2) }}%{% if b.dmargen is not none %} <span class="sem-dm {{ 'px-up' if b.dmargen <= 0 else 'px-down' }}">({{ '+' if b.dmargen >= 0 else '' }}{{ (b.dmargen * 100) | ar_num(2) }})</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
                   </tr>
                   {% endfor %}
                 </tbody>

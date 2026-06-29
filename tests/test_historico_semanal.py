@@ -14,8 +14,8 @@ def test_weekly_segments_calcula_deltas():
     if not cer:
         pytest.skip("sin curva cer")
     code = cer[0]
-    # by_code sintético: precio +1%, TIR −0,5pp, TEM −0,1pp, margen 2,0→1,8%,
-    # duration 0,3 (→ CER corto)
+    # by_code sintético: precio +1%, TIR −0,5pp, TEM −0,1pp, duration 0,3 (→ CER
+    # corto). El tem_spread está cargado pero NO debe mostrarse: CER no lleva margen.
     prev = hb._cache
     hb._cache = {
         "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"),
@@ -34,14 +34,42 @@ def test_weekly_segments_calcula_deltas():
     assert abs(seg["dprice"] - 0.01) < 1e-9        # +1 %
     assert abs(seg["dtir"] - (-0.005)) < 1e-9       # −0,5 pp (compresión)
     assert {"cer", "a3500", "tamar_ini", "tamar_fin", "tamar_delta"} <= set(res["indices"])
-    # detalle por bono: Δprecio / ΔTIR / ΔTEM + margen (spread TEM) y su Δ
+    # detalle por bono: Δprecio / ΔTIR / ΔTEM
     row = next((r for r in seg["rows"] if r["code"] == code), None)
     assert row is not None
     assert abs(row["dprice"] - 0.01) < 1e-9
     assert abs(row["dtir"] - (-0.005)) < 1e-9
     assert abs(row["dtem"] - (-0.001)) < 1e-9        # 0,029 − 0,030
-    assert abs(row["margen"] - 0.018) < 1e-9         # spread TEM al cierre
-    assert abs(row["dmargen"] - (-0.002)) < 1e-9     # 0,018 − 0,020
+    # CER NO lleva margen aunque haya tem_spread en el Excel → gateado a None
+    assert row["margen"] is None and row["dmargen"] is None
+    assert seg["has_margen"] is False
+
+
+def test_weekly_segments_margen_solo_variable():
+    """El margen (tem_spread) SÍ aparece en un bono de tasa variable (TAMAR)."""
+    bond_universe.ensure_loaded()
+    tamar = curves.build_curve_codes().get("tamar", [])
+    if not tamar:
+        pytest.skip("sin curva tamar")
+    code = tamar[0]
+    prev = hb._cache
+    hb._cache = {
+        "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"),
+        "by_code": {code: {"dates": ["2026-06-18", "2026-06-25"],
+                           "vals": {"Last Price": [100.0, 101.0], "TIREA": [0.50, 0.495],
+                                    "TEM": [0.030, 0.029], "tem_spread": [0.040, 0.038],
+                                    "Duration": [0.3, 0.3]}}},
+    }
+    try:
+        res = hb.weekly_segments(7)
+    finally:
+        hb._cache = prev
+    seg = next((s for s in res["segments"] if code in s["members"]), None)
+    assert seg is not None and seg["has_margen"] is True
+    row = next((r for r in seg["rows"] if r["code"] == code), None)
+    assert row is not None
+    assert abs(row["margen"] - 0.038) < 1e-9         # tem_spread al cierre (floater)
+    assert abs(row["dmargen"] - (-0.002)) < 1e-9     # 0,038 − 0,040
 
 
 def test_weekly_segments_sin_data():
@@ -86,22 +114,23 @@ async def test_historicos_semanal_endpoint_no_crash():
 
 @pytest.mark.asyncio
 async def test_historicos_semanal_detalle_render():
-    """Con cache inyectada, el partial renderiza el detalle por bono expandible
-    (encabezados Δ TEM / Margen, la sub-tabla y el código del bono)."""
+    """Con cache inyectada (bono TAMAR = floater), el partial renderiza el detalle
+    por bono CON la columna Margen (Δ TEM, sub-tabla y código del bono)."""
     from httpx import ASGITransport, AsyncClient
 
     from backend.main import app
     bond_universe.ensure_loaded()
-    cer = curves.build_curve_codes().get("cer", [])
-    if not cer:
-        pytest.skip("sin curva cer")
-    code = cer[0]
+    tamar = curves.build_curve_codes().get("tamar", [])
+    if not tamar:
+        pytest.skip("sin curva tamar")
+    code = tamar[0]
     prev = hb._cache
     hb._cache = {
         "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"),
         "by_code": {code: {"dates": ["2026-06-18", "2026-06-25"],
                            "vals": {"Last Price": [100.0, 101.0], "TIREA": [0.50, 0.495],
-                                    "TEM": [0.030, 0.029], "Duration": [0.3, 0.3]}}},
+                                    "TEM": [0.030, 0.029], "tem_spread": [0.040, 0.038],
+                                    "Duration": [0.3, 0.3]}}},
     }
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
