@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _HISTORICO_FILENAME = "Delta - historico_byma_px_tasas.xlsx"
 _METRICS = ("TIREA", "TNA", "TEM", "Paridad")          # métricas de tasa/paridad
-_EXTRA = ("Last Price", "Duration")                    # para la vista "un bono" (futuro)
+_EXTRA = ("Last Price", "Duration", "tem_spread")      # px/dur + margen (spread TEM) por bono
 
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
@@ -101,7 +101,7 @@ def _load() -> Dict[str, Any]:
         df["fecha_hoy"] = pd.to_datetime(df["fecha_hoy"], errors="coerce")
         df = df.dropna(subset=["fecha_hoy", "Código"]).copy()
         df["Código"] = df["Código"].astype(str)
-        for col in _METRICS + _EXTRA + ("tem_spread",):
+        for col in _METRICS + _EXTRA:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         # dedup (Código, fecha) keep last; drop filas muertas y TIREAs absurdas.
@@ -326,7 +326,8 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
     """Resumen de la ventana (default 1 semana) por SEGMENTO —mismas categorías que
     Escenario (curva + bucket de duration)—: Δ Precio % (Last Price fin/inicio ≈ total
     return de la ventana, en el precio NATIVO del bono) y Δ TIR (pp). Promedio simple
-    por segmento + los códigos que toma, más la deva del dólar A3500 de la ventana."""
+    por segmento + `rows` con el detalle por bono (Δprecio / ΔTIR / ΔTEM y margen =
+    spread TEM, si aplica), más la deva del dólar A3500 de la ventana."""
     from backend.services import curves, escenario as esc
     data = ensure_loaded()
     end = (data.get("bounds") or (None, None))[1]
@@ -341,20 +342,31 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
         dprices: List[float] = []
         dtirs: List[float] = []
         members: List[str] = []
+        rows: List[Dict[str, Any]] = []
         for code in codes_by_curve.get(cat.curve, []):
             entry = by_code.get(code)
-            if entry is None or not esc.in_bucket(cat, _value_at(entry, "Duration", end)):
+            dur = _value_at(entry, "Duration", end) if entry is not None else None
+            if entry is None or not esc.in_bucket(cat, dur):
                 continue
             p0, p1 = _value_at(entry, "Last Price", start), _value_at(entry, "Last Price", end)
             t0, t1 = _value_at(entry, "TIREA", start), _value_at(entry, "TIREA", end)
-            if p0 and p1 and p0 > 0:
-                dprices.append(p1 / p0 - 1.0)
-            if t0 is not None and t1 is not None:
-                dtirs.append(t1 - t0)
+            m0, m1 = _value_at(entry, "TEM", start), _value_at(entry, "TEM", end)
+            g0, g1 = _value_at(entry, "tem_spread", start), _value_at(entry, "tem_spread", end)
+            dprice = (p1 / p0 - 1.0) if (p0 and p1 and p0 > 0) else None
+            dtir = (t1 - t0) if (t0 is not None and t1 is not None) else None
+            dtem = (m1 - m0) if (m0 is not None and m1 is not None) else None
+            dmargen = (g1 - g0) if (g0 is not None and g1 is not None) else None
+            if dprice is not None:
+                dprices.append(dprice)
+            if dtir is not None:
+                dtirs.append(dtir)
             members.append(code)
+            rows.append({"code": code, "dur": dur, "dprice": dprice, "dtir": dtir,
+                         "dtem": dtem, "margen": g1, "dmargen": dmargen})
         if members:
+            rows.sort(key=lambda r: (r["dur"] is None, r["dur"] or 0.0))
             segments.append({"key": cat.key, "label": cat.label, "n": len(members),
                              "dprice": _avg_seg(dprices), "dtir": _avg_seg(dtirs),
-                             "members": members})
+                             "members": members, "rows": rows})
     return {"loaded": True, "start": start, "end": end, "days": days,
             "segments": segments, "indices": _window_indices(start, end)}
