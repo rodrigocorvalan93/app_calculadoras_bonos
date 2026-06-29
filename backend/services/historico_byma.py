@@ -354,12 +354,13 @@ def _margen_tna(entry: Dict[str, Any], bench_pct: Optional[float],
 
 
 def weekly_segments(days: int = 7) -> Dict[str, Any]:
-    """Resumen de la ventana (default 1 semana) por SEGMENTO —mismas categorías que
-    Escenario (curva + bucket de duration)—: Δ Precio % (Last Price fin/inicio ≈ total
-    return de la ventana, en el precio NATIVO del bono) y Δ TIR (pp). Promedio simple
-    por segmento + `rows` con el detalle por bono (Δprecio / ΔTIR / ΔTEM y margen =
-    TNA 30d de la TIR − TAMAR/BADLAR, sólo tasa variable), más la deva del A3500."""
-    from backend.services import curves, escenario as esc
+    """Resumen de la ventana (default 1 semana) por SEGMENTO —las categorías de
+    Escenario MÁS los segmentos duales (base + pata TAMAR, ver esc.DUAL_CATEGORIES)—:
+    Δ Precio % (Last Price fin/inicio ≈ total return de la ventana, en el precio
+    NATIVO del bono) y Δ TIR (pp). Promedio simple por segmento + `rows` con el
+    detalle por bono (Δprecio / ΔTIR / ΔTEM y margen = TNA 30d de la TIR −
+    TAMAR/BADLAR, sólo tasa variable), más la deva del A3500."""
+    from backend.services import curves, escenario as esc, symbols as syms
     data = ensure_loaded()
     end = (data.get("bounds") or (None, None))[1]
     if not data.get("loaded") or not end:
@@ -373,13 +374,16 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
     bench_ini = {"TAMAR": _index_at("tamar", "TAMAR", start), "BADLAR": _index_at("badlar", "BADLAR", start)}
     bench_fin = {"TAMAR": _index_at("tamar", "TAMAR", end), "BADLAR": _index_at("badlar", "BADLAR", end)}
     segments: List[Dict[str, Any]] = []
-    for cat in esc.CATEGORIES:
+    for cat in esc.CATEGORIES + esc.DUAL_CATEGORIES:
         dprices: List[float] = []
         dtirs: List[float] = []
         members: List[str] = []
         rows: List[Dict[str, Any]] = []
         for code in codes_by_curve.get(cat.curve, []):
-            entry = by_code.get(code)
+            # La pata dual '…v' no tiene ticker propio en BYMA: el Excel la guarda
+            # bajo el ticker base (TTS26v → TTS26). Probamos el código exacto y,
+            # si no está, su forma base (sin sufijo j/v).
+            entry = by_code.get(code) or by_code.get(syms.calc_to_md_code(code))
             dur = _value_at(entry, "Duration", end) if entry is not None else None
             if entry is None or not esc.in_bucket(cat, dur):
                 continue
