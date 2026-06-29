@@ -14,15 +14,14 @@ def test_weekly_segments_calcula_deltas():
     if not cer:
         pytest.skip("sin curva cer")
     code = cer[0]
-    # by_code sintético: precio +1%, TIR −0,5pp, TEM −0,1pp, duration 0,3 (→ CER
-    # corto). El tem_spread está cargado pero NO debe mostrarse: CER no lleva margen.
+    # by_code sintético: precio +1%, TIR −0,5pp, TEM −0,1pp, duration 0,3 (→ CER corto)
     prev = hb._cache
     hb._cache = {
         "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"),
         "by_code": {code: {"dates": ["2026-06-18", "2026-06-25"],
                            "vals": {"Last Price": [100.0, 101.0],
                                     "TIREA": [0.50, 0.495], "TEM": [0.030, 0.029],
-                                    "tem_spread": [0.020, 0.018], "Duration": [0.3, 0.3]}}},
+                                    "Duration": [0.3, 0.3]}}},
     }
     try:
         res = hb.weekly_segments(7)
@@ -40,24 +39,36 @@ def test_weekly_segments_calcula_deltas():
     assert abs(row["dprice"] - 0.01) < 1e-9
     assert abs(row["dtir"] - (-0.005)) < 1e-9
     assert abs(row["dtem"] - (-0.001)) < 1e-9        # 0,029 − 0,030
-    # CER NO lleva margen aunque haya tem_spread en el Excel → gateado a None
+    # CER no es tasa variable → sin margen TNA
     assert row["margen"] is None and row["dmargen"] is None
     assert seg["has_margen"] is False
 
 
-def test_weekly_segments_margen_solo_variable():
-    """El margen (tem_spread) SÍ aparece en un bono de tasa variable (TAMAR)."""
+def test_margen_tna_formula():
+    """Margen TNA = TNA − bench/100 (VARIABLE) o cap32(TIREA) − bench/100
+    (VARIABLE_CAP); None si falta el benchmark."""
+    entry = {"dates": ["2026-06-25"], "vals": {"TNA": [0.46], "TIREA": [0.50]}}
+    assert abs(hb._margen_tna(entry, "VARIABLE", 30.0, "2026-06-25") - (0.46 - 0.30)) < 1e-9
+    tna_eq = ((1.0 + 0.50) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
+    assert abs(hb._margen_tna(entry, "VARIABLE_CAP", 30.0, "2026-06-25") - (tna_eq - 0.30)) < 1e-9
+    assert hb._margen_tna(entry, "VARIABLE", None, "2026-06-25") is None
+
+
+def test_weekly_segments_margen_solo_variable(monkeypatch):
+    """El margen TNA SÍ aparece en un bono de tasa variable (TAMAR). Se fija el
+    benchmark TAMAR a 30 % para no depender de la serie BCRA del entorno."""
     bond_universe.ensure_loaded()
     tamar = curves.build_curve_codes().get("tamar", [])
     if not tamar:
         pytest.skip("sin curva tamar")
     code = tamar[0]
+    monkeypatch.setattr(hb, "_index_at", lambda key, col, target: 30.0 if key == "tamar" else None)
     prev = hb._cache
     hb._cache = {
         "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"),
         "by_code": {code: {"dates": ["2026-06-18", "2026-06-25"],
                            "vals": {"Last Price": [100.0, 101.0], "TIREA": [0.50, 0.495],
-                                    "TEM": [0.030, 0.029], "tem_spread": [0.040, 0.038],
+                                    "TNA": [0.45, 0.46], "TEM": [0.030, 0.029],
                                     "Duration": [0.3, 0.3]}}},
     }
     try:
@@ -67,9 +78,7 @@ def test_weekly_segments_margen_solo_variable():
     seg = next((s for s in res["segments"] if code in s["members"]), None)
     assert seg is not None and seg["has_margen"] is True
     row = next((r for r in seg["rows"] if r["code"] == code), None)
-    assert row is not None
-    assert abs(row["margen"] - 0.038) < 1e-9         # tem_spread al cierre (floater)
-    assert abs(row["dmargen"] - (-0.002)) < 1e-9     # 0,038 − 0,040
+    assert row is not None and row["margen"] is not None and row["dmargen"] is not None
 
 
 def test_weekly_segments_sin_data():
@@ -113,9 +122,9 @@ async def test_historicos_semanal_endpoint_no_crash():
 
 
 @pytest.mark.asyncio
-async def test_historicos_semanal_detalle_render():
-    """Con cache inyectada (bono TAMAR = floater), el partial renderiza el detalle
-    por bono CON la columna Margen (Δ TEM, sub-tabla y código del bono)."""
+async def test_historicos_semanal_detalle_render(monkeypatch):
+    """Con cache inyectada (bono TAMAR = floater) y benchmark fijo, el partial
+    renderiza el detalle por bono CON la columna Margen (Δ TEM, sub-tabla, código)."""
     from httpx import ASGITransport, AsyncClient
 
     from backend.main import app
@@ -124,12 +133,13 @@ async def test_historicos_semanal_detalle_render():
     if not tamar:
         pytest.skip("sin curva tamar")
     code = tamar[0]
+    monkeypatch.setattr(hb, "_index_at", lambda key, col, target: 30.0 if key == "tamar" else None)
     prev = hb._cache
     hb._cache = {
         "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"),
         "by_code": {code: {"dates": ["2026-06-18", "2026-06-25"],
                            "vals": {"Last Price": [100.0, 101.0], "TIREA": [0.50, 0.495],
-                                    "TEM": [0.030, 0.029], "tem_spread": [0.040, 0.038],
+                                    "TNA": [0.45, 0.46], "TEM": [0.030, 0.029],
                                     "Duration": [0.3, 0.3]}}},
     }
     try:
