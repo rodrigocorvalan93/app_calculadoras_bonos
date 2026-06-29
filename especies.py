@@ -669,7 +669,7 @@ S13N6 = {
     "Días Lag índice hasta inc": 0, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": (1+0.02)**((360/360)*12), # Factor de ajuste, por defecto 1
+    "Factor Capitalización": (1+0.021)**((360/360)*12), # Factor de ajuste, por defecto 1
     "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": 0,
     "Fechas de cupón": ['30/11/2026'], # Lista de fechas como ejemplo
@@ -2860,7 +2860,7 @@ CUAP = {
     "Días Lag índice hasta inc": 0, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": "CER", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Factor Capitalización": 1.38859275156144 , # Factor de ajuste, por defecto 1
     "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": -10,
     "Fechas de cupón": ["31/12/2005", "30/06/2006", "31/12/2006", "30/06/2007", "31/12/2007",
@@ -5103,8 +5103,8 @@ TTD26 = {
 }
 TXMJ8 = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2029 Vto 30 06 2028",
-    "Código": "AR0603123321",
-    "ISIN": "TXMJ8",
+    "Código": "TXMJ8",
+    "ISIN": "AR0603123321",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -12615,6 +12615,45 @@ JNC6D = {
     "Aviso Resultados": """https://macrosecurities.cmail20.com/t/j-l-wuuuduk-ihklhrudli-r/""",
     "Suplemento Prospecto": """https://macrosecurities.cmail20.com/t/j-l-wuuklyd-ihklhrudli-k/"""
 }
+JNC7D = {
+    "Nombre Security": "ON Inversora Juramento S.A. Clase VII Vto 25 06 2028",
+    "Código": "JNC7D",
+    "ISIN": "AR0284427983",
+    "Calificación": "A-(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Agriculture",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "25/06/2026",
+    "Vencimiento": "25/06/2028",
+    "Fecha Primer Cupón": "25/12/2026",
+    "Cupón / Spread": 6.35,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": ["25/12/2026", "25/06/2027", "25/12/2027", "25/06/2028"],
+    "Amortización": None,
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "Rescate por razones impositivas (tax call, no operativo) y rescate por cambio de control a opcion del tenedor (familia Brito < 50%), al 100% del VN residual mas intereses devengados. Sin rescate a opcion del emisor.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/82b36bdc-16a1-4ac4-94fe-78d70abd069d",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/dd9ddda3-cf8a-44d1-9a1b-c7a4188746af"
+}
 SNSBD = {
     "Nombre Security": "ON San Miguel A.G.I.C.I. Y F. Serie XI Vto. 14 10 2026",
     "Código": "SNSBD",
@@ -17965,6 +18004,49 @@ nominal, en caso de corresponder, deberá adicionarse los intereses devengados y
     "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/effdca91-75b3-4b27-a989-af6bf4734572""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/d4fbf152-a39c-415c-a10c-2f962362b44c""",
 }
+ZPC5D = {
+    "Nombre Security": "ON Plaza Logística S.R.L. Clase 5 Vto 26 06 2029",
+    "Código": "ZPC5D",
+    "ISIN": "AR0514899985",
+    "Calificación": "AA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Real Estate",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "26/06/2026",
+    "Vencimiento": "26/06/2029",
+    "Fecha Primer Cupón": "26/03/2027",
+    "Cupón / Spread": 6.50,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "26/03/2027", "26/06/2027", "26/09/2027", "26/12/2027",
+        "26/03/2028", "26/06/2028", "26/09/2028", "26/12/2028",
+        "26/03/2029", "26/06/2029",
+    ],
+    "Amortización": None,
+    "Callable": True,
+    "Tipo de Call": "Call total o parcial a opción de la sociedad durante los últimos 9 meses previos al vencimiento",
+    "Fecha Call": "26/09/2028",
+    "Precio Call": 1.01,
+    "Comentarios": "Rescate Optativo Anticipado: en los ultimos 9 meses previos al vencimiento, total o parcial, al 101% del VN mas intereses devengados y no pagados. Tax call (Razones Impositivas) al 100% NO cargado.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/be77b6bd-1c4b-4370-a886-ba8855247853",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/273d2e02-a11a-4da9-9f71-db2e3b1b6f55"
+}
 MSSFD = {
     "Nombre Security": "ON MSU S.A. Clase XIV Vto 23 07 2027",
     "Código": "MSSFD",
@@ -20642,6 +20724,45 @@ BNCXO = {
     "Comentarios": "",
     "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/12d4dc7c-f5b9-4aac-b8df-d5e74ecd0cbf""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/73b0525b-35cc-4695-bfe4-f1d508c97042""",
+}
+BNCYO = {
+    "Nombre Security": "ON Banco Santander Argentina S.A. Clase XXXII Vto 23 06 2027",
+    "Código": "BNCYO",
+    "ISIN": "AR0563811915",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "23/06/2026",
+    "Vencimiento": "23/06/2027",
+    "Fecha Primer Cupón": "23/09/2026",
+    "Cupón / Spread": 3.25,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "VARIABLE",
+    "Index": "TAMAR",
+    "Días Lag índice desde inc": -7,
+    "Días Lag índice hasta inc": -7,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": ["23/09/2026", "23/12/2026", "23/03/2027", "23/06/2027"],
+    "Amortización": None,
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "Rescate a opcion del Banco: las ON no podran ser rescatadas a opcion del Emisor con anterioridad a su vencimiento, salvo Rescate por Razones Impositivas (tax call, no se carga). Tasa = TAMAR Privada + 3,25% n.a., devengamiento Actual/365, lag -7 dias habiles. Duration informada 0,91 anios.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/f118fd9b-11c8-44a1-a356-1bd56120cbc3",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/850d1c3c-6eef-4392-ad45-711ddea0314e"
 }
 VWCDO = {
     "Nombre Security": "ON Volkswagen Financial Services S.A. Clase 12 Vto 11 12 2026",
@@ -28329,6 +28450,7 @@ ICC7O = rentafija.Bono(ICC7O)
 SXC1O = rentafija.Bono(SXC1O)
 SXC3O = rentafija.Bono(SXC3O)
 BNCXO = rentafija.Bono(BNCXO)
+BNCYO = rentafija.Bono(BNCYO)
 BDCKO = rentafija.Bono(BDCKO)
 DHSGO = rentafija.Bono(DHSGO)
 PVC4O = rentafija.Bono(PVC4O)
@@ -28679,6 +28801,7 @@ TTCED = rentafija.Bono(TTCED)
 RUCED = rentafija.Bono(RUCED)
 IRCND = rentafija.Bono(IRCND)
 ZPC2D = rentafija.Bono(ZPC2D)
+ZPC5D = rentafija.Bono(ZPC5D)
 PN34D = rentafija.Bono(PN34D)
 LDCGD = rentafija.Bono(LDCGD)
 CP36D = rentafija.Bono(CP36D)
@@ -28700,6 +28823,7 @@ SIC2D = rentafija.Bono(SIC2D)
 SNSBD = rentafija.Bono(SNSBD)
 JNC5D = rentafija.Bono(JNC5D)
 JNC6D = rentafija.Bono(JNC6D)
+JNC7D = rentafija.Bono(JNC7D)
 CS45D = rentafija.Bono(CS45D)
 AERBD = rentafija.Bono(AERBD)
 YFCKD = rentafija.Bono(YFCKD)
@@ -28967,7 +29091,7 @@ todos_los_bonos = [
     T661O, TY34O, HBCBO, BYY1O, SXC5O,
     RB59O, RB61O, BNCXO, SXC6O, TY39O, MTC3O,
     BF36O, SXC1O, BDCKO, DHSGO, PSSWO, BF46O,
-    PVC4O, TLCRO, ZPC1O, PS37O, PVC6O,
+    PVC4O, TLCRO, ZPC1O, PS37O, PVC6O, BNCYO,
     RC3CO, RVS1O, PS35O, NZC1O, RC6CO, BF47O, ICC7O,
     LNS3P, VWCDO, RB64O, TY37O, SXC3O, FTN3O, VWCGO,
     RC4CO, HBCEO, BF38O, ICC4O, AFCNO,
@@ -29016,13 +29140,13 @@ todos_los_bonos = [
     YM41D, YM42D, YM43D, BYCVD, BYCWD, PUC2D, T641D, BYCXD, FO4AD, CS52D,
     MCC1D, MCC2D, MSSGD, ZZC1O, GYC5O, CS47D, CS48D, CICBD, BF44D, BF45D,
     CS49D, CS50D, PN37D, CIC8D, CIC9D, CICAD, HJCKD, CP40D, TLCUD, CS53D,
-    PECGD, PQCRD, PQCTD, HJCGD, HBCAD, HBCDD, YMCYD, LUC5D, MIC6D,
+    PECGD, PQCRD, PQCTD, HJCGD, HBCAD, HBCDD, YMCYD, LUC5D, MIC6D, JNC7D,
     YMCZD, MGCND, MGCQD, OLC5D, OLC6D, DNC5D, PZCGD, HJCHD, MRCUD, MRCYD,
     CRCJD, RZABD, RZ9BD, LECED, XMC1D, MSSFD, RCCRD, AFCMD, PFC3D, TLCWD,
     RC2CD, TTC8D, IRCND, ZPC2D, PN34D, LDCGD, CP36D, MIC4D, NPCDD, RC5CD,
     CP37D, MR35D, YFCID, PECAD, IRCJD, SNSDO, HJCFD, OLC7D, TTCED, SIC2D, 
     HJCID, HJCJD, CS44D, DNC3D, CIC7D, SIC1D, SNSBD, PLC6D, BPCVO, PVC5D,
-    JNC5D, JNC6D, CS45D, AERBD, YFCKD, LIC6D, GN48D, HBCFO, NZC2D, HJCLD,
+    JNC5D, JNC6D, CS45D, AERBD, YFCKD, LIC6D, GN48D, HBCFO, NZC2D, HJCLD, ZPC5D,
 ]
 
 # ------------------------------------------------------------------

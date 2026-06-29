@@ -892,7 +892,7 @@ def main():
     # --- Market Data Bonos ---
     lista_all = (
         lista_cer_24hs + lista_lecap_24hs + lista_tamar_24hs + lista_global_24hs
-        + lista_cer_ci + lista_lecap_ci
+        + lista_cer_ci + lista_lecap_ci + lista_curva_dlksob
         + lista_dlksob_24hs + lista_curva_dual_fija_24hs + lista_curva_dual_cer_24hs
         + lista_curva_bonar_24hs + lista_curva_bopreal_24hs
     )
@@ -976,7 +976,7 @@ def main():
     # --- Combine / histórico ---
     df_combined = pd.concat(
         [cer_24hs_prices_df, lecap_24hs_prices_df, tamar_24hs_prices_df, global_24hs_prices_df,
-         bonar_24hs_prices_df, cerproyectado_24hs_prices_df,
+         bonar_24hs_prices_df, cerproyectado_24hs_prices_df, dlksob_24hs_prices_df, 
          dual_fija_24hs_prices_df, dual_cer_24hs_prices_df, dual_cer_proyectado_24hs_prices_df,
          dual_24hs_prices_df, bopreal_24hs_prices_df],
         ignore_index=True
