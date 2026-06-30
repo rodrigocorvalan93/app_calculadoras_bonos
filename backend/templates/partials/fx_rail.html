@@ -1,5 +1,22 @@
 {% import "partials/_fx_macros.html" as fx %}
+{% if caucion and caucion.tasa is not none %}
 <div class="rail-head">
+  <span>📊 Tasa</span>
+  <a class="rail-more" href="/tasas" title="Abrir monitor de tasas">monitor →</a>
+</div>
+<div class="rail-item rail-caucion">
+  <div class="rail-l">Caución {{ caucion.plazo }}{% if caucion.volumen is not none %} · <span class="muted">vol {{ caucion.volumen | ar_hum }}</span>{% endif %}</div>
+  <div class="rail-v {{ fx.vcls(caucion.var) }}">
+    {{ caucion.tasa | ar_pct_pp(2) }}
+    <span class="rail-arrow">{{ fx.arrow(caucion.var) }}</span>
+  </div>
+  {% if caucion.var is not none %}
+    <div class="rail-s {{ fx.vcls(caucion.var) }}">{{ caucion.var | ar_num(2) }} pp <span class="muted">vs cierre</span></div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="rail-head{% if caucion and caucion.tasa is not none %} rail-macro-head{% endif %}">
   <span>💵 Dólar</span>
   <a class="rail-more" href="/dolares" title="Abrir monitor de dólares">monitor →</a>
 </div>

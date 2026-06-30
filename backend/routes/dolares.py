@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
-from backend.services import dolares as dx, fx as fx_svc, historico
+from backend.services import cauciones as cauc_svc, dolares as dx, fx as fx_svc, historico
 
 logger = logging.getLogger("backend.dolares.routes")
 
@@ -94,6 +94,7 @@ async def dolares_rail(request: Request, plazo: str = "24hs") -> HTMLResponse:
     pz = "CI" if (plazo or "").lower().startswith("ci") else "24hs"
     _safe("macro_refresh", historico.macro_maybe_refresh, None)   # re-lee sólo 11:00 / 15:30
     return _render(request, "partials/fx_rail.html", summary=dx.summary(pz),
+                   caucion=_safe("caucion_rail", lambda: cauc_svc.rail_pick("PESOS"), None),
                    macro=_safe("macro_snapshot", historico.macro_snapshot, []))
 
 

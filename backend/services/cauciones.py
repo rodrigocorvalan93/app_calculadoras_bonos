@@ -57,3 +57,25 @@ def best(moneda: str = "PESOS") -> Dict[str, Any] | None:
         if r["tasa"] is not None:
             return r
     return None
+
+
+# Plazos overnight candidatos para el KPI del riel. La caución 1D es la de
+# mayor volumen casi siempre; cuando hay feriado/finde por medio el overnight
+# rueda al 2D/3D/4D, que es entonces el que concentra el volumen. Por eso
+# elegimos por volumen entre estos plazos en vez de fijar 1D a mano.
+_RAIL_PLAZOS = (1, 2, 3, 4)
+
+
+def rail_pick(moneda: str = "PESOS") -> Dict[str, Any] | None:
+    """Caución overnight de referencia para el riel: entre 1D y 4D, la de
+    mayor volumen con tasa (1D salvo feriado/finde, donde rueda al 2-4D).
+    Si ninguna de esas tiene volumen, cae a la más corta con tasa."""
+    rows = [r for r in byma_rows(moneda) if r["tasa"] is not None]
+    if not rows:
+        return None
+    short = [r for r in rows if r["_n"] in _RAIL_PLAZOS]
+    with_vol = [r for r in short if r["volumen"] is not None]
+    if with_vol:
+        return max(with_vol, key=lambda r: r["volumen"] or 0.0)
+    # Sin volumen reportado: la más corta entre las candidatas, o la más corta global.
+    return (short or rows)[0]
