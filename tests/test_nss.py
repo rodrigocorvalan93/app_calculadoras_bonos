@@ -27,6 +27,42 @@ def test_nss_estimate_clamps_out_of_range() -> None:
     assert e["duration_used"] == pytest.approx(5.0)
 
 
+def test_nss_fit_is_compute_once_under_concurrency(monkeypatch) -> None:
+    """Varios requests pidiendo la MISMA curva fría a la vez deben correr el
+    `curve_fit` una sola vez (compute-once), no N veces en paralelo."""
+    import threading
+    import time
+
+    from backend.services import nss as nss_mod
+
+    nss_mod._cache.clear()
+    xs = [0.3, 0.6, 1.0, 1.5, 2.0, 2.8, 3.5, 4.2]
+    ys = [40, 38, 36, 34, 33, 32, 31.5, 31]
+
+    calls = {"n": 0}
+    real = nss_mod._fit_raw
+
+    def counting_fit_raw(a, b, thr, **kw):
+        calls["n"] += 1
+        time.sleep(0.01)            # simula el costo del fit para forzar el solape
+        return real(a, b, thr, **kw)
+
+    monkeypatch.setattr(nss_mod, "_fit_raw", counting_fit_raw)
+
+    barrier = threading.Barrier(12)
+
+    def worker():
+        barrier.wait()
+        assert nss_mod.fit(xs, ys) is not None
+
+    ts = [threading.Thread(target=worker) for _ in range(12)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert calls["n"] == 1           # 12 requests concurrentes → 1 solo fit
+
+
 @pytest.mark.asyncio
 async def test_graficos_estimate_endpoint() -> None:
     from httpx import ASGITransport, AsyncClient

@@ -21,21 +21,40 @@ class LockedTTLCache:
         self._maxsize = int(maxsize)
         self._store: Dict[Hashable, Tuple[Any, float]] = {}
         self._lock = threading.Lock()
+        # Un lock POR clave para computar-una-sola-vez: cuando una entrada vence,
+        # el primer thread computa y los demás esperan y leen el resultado fresco,
+        # en vez de recomputar todos la misma clave (estampida que dispara p99).
+        self._compute_locks: Dict[Hashable, threading.Lock] = {}
+
+    def _compute_lock(self, key: Hashable) -> threading.Lock:
+        with self._lock:
+            lk = self._compute_locks.get(key)
+            if lk is None:
+                lk = threading.Lock()
+                self._compute_locks[key] = lk
+            return lk
 
     def get_or_compute(self, key: Hashable, factory: Callable[[], Any]) -> Any:
         now = time.monotonic()
         ent = self._store.get(key)            # lock-free: dict.get es atómico (GIL)
         if ent is not None and ent[1] > now:
             return ent[0]
-        value = factory()
-        # `None` no se cachea (mismo efecto que el wrapper anterior: se
-        # recomputa la próxima) — ningún productor cachea None de todos modos.
-        if value is not None:
-            with self._lock:
-                self._store[key] = (value, now + self._ttl)
-                if len(self._store) > self._maxsize:
-                    self._evict_locked(now)
-        return value
+        # Miss/vencida: serializamos el cómputo de ESTA clave (compute-once). El
+        # hit path de arriba sigue sin tomar locks (99 % de los accesos).
+        with self._compute_lock(key):
+            now = time.monotonic()
+            ent = self._store.get(key)        # re-chequeo: otro thread pudo computarla mientras esperábamos
+            if ent is not None and ent[1] > now:
+                return ent[0]
+            value = factory()
+            # `None` no se cachea (mismo efecto que el wrapper anterior: se
+            # recomputa la próxima) — ningún productor cachea None de todos modos.
+            if value is not None:
+                with self._lock:
+                    self._store[key] = (value, now + self._ttl)
+                    if len(self._store) > self._maxsize:
+                        self._evict_locked(now)
+            return value
 
     def _evict_locked(self, now: float) -> None:
         # Primero los expirados; si aún sobra, el bloque de menor expiry.
@@ -68,3 +87,4 @@ class LockedTTLCache:
     def clear(self) -> None:
         with self._lock:
             self._store.clear()
+            self._compute_locks.clear()

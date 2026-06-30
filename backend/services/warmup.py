@@ -96,6 +96,32 @@ def prime_calc_engine() -> float:
     return 0.0
 
 
+def prime_aux_loaders() -> None:
+    """Absorbe los loads de disco perezosos que, si no, corrían en el primer
+    request de su pestaña (bloqueando el event loop):
+
+      - `delta_especies` y `positions`: `pd.read_excel` bajo lock.
+      - `credito`: lee `credit_scores.json` + scorea todos los emisores.
+
+    Cada uno es idempotente y auto-guardado; los llamamos en el pool de warmup
+    al boot así la primera visita a YAS / Posiciones / Créditos ya los encuentra
+    cargados. Defensivo: un fallo acá nunca debe tumbar el warmup."""
+    # Import perezoso: estos módulos arrastran pandas/OMScredit, que no queremos
+    # cargar al importar warmup.
+    from backend.services import credito, delta_especies, positions
+
+    for label, loader in (
+        ("delta_especies", delta_especies.ensure_loaded),
+        ("positions", positions.ensure_loaded),
+        ("credito", credito._ensure),
+    ):
+        try:
+            loader()
+            logger.info("[warmup] %s primed", label)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[warmup] %s prime failed: %s", label, exc)
+
+
 def _warm_code(code: str, plazo: str) -> bool:
     """Populate the metrics cache for one code at its current live price.
 
@@ -193,6 +219,13 @@ class WarmupDaemon:
             self._primed = True
         except Exception:  # noqa: BLE001
             logger.exception("[warmup] prime step failed")
+
+        # Loads de disco perezosos (delta_especies / positions / credito): off
+        # the loop, así su primer request no paga el pd.read_excel / scoring.
+        try:
+            await loop.run_in_executor(_pool, prime_aux_loaders)
+        except Exception:  # noqa: BLE001
+            logger.exception("[warmup] aux loaders prime failed")
 
         while not self._stop.is_set():
             has_data = marketdata_store.get_store().stats().get("symbols", 0) > 0
