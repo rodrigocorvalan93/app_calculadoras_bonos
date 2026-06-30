@@ -79,3 +79,14 @@ def rail_pick(moneda: str = "PESOS") -> Dict[str, Any] | None:
         return max(with_vol, key=lambda r: r["volumen"] or 0.0)
     # Sin volumen reportado: la más corta entre las candidatas, o la más corta global.
     return (short or rows)[0]
+
+
+def rail_picks() -> List[Dict[str, Any]]:
+    """Cauciones overnight de referencia para el riel, en orden ARS → USD.
+    Sólo incluye las monedas con dato en el store (lista vacía si no hay)."""
+    out: List[Dict[str, Any]] = []
+    for moneda in ("PESOS", "DOLAR"):
+        pick = rail_pick(moneda)
+        if pick is not None:
+            out.append(pick)
+    return out
