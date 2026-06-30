@@ -424,19 +424,18 @@ def _calcular_start_date_por_backup(backup: dict, default_days_back: int = 365):
 # =============================================================================
 
 proyeccion_inflacion_mensual = {
-    "May-26": 2+0.1,
-    "Jun-26": 1.80,
-    "Jul-26": 1.5,
+    "Jun-26": 2,
+    "Jul-26": 1.8,
     "Aug-26": 1.6,
     "Sep-26": 1.8,
     "Oct-26": 1.8,
     "Nov-26": 1.7,
-    "Dec-26": 1.8,
+    "Dec-26": 1.7,
     "Jan-27": 1.3,
     "Feb-27": 1.6,
     "Mar-27": 1.2,
     "Apr-27": 1.0,
-    "May-27": 0.8,
+    "May-27": 0.9,
     "Jun-27": 0.8,
     "Jul-27": 0.8,
     "Aug-27": 0.8,
