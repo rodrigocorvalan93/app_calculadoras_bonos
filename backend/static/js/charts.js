@@ -26,6 +26,10 @@
     var MUT = cssVar("--text-muted", "#8a8a8a");
     var BORD = cssVar("--border", "#333");
     var u = null, codes = [], yLabel = "TIREA (%)";
+    // Zoom del usuario: si arrastró para hacer zoom, el auto-refresh NO debe
+    // re-encuadrar (setData con reset pisa el zoom). `selfSet` evita que
+    // nuestro propio setData se confunda con una interacción del usuario.
+    var userZoomed = false, selfSet = false;
 
     box.style.position = "relative";
     var tip = document.createElement("div");
@@ -72,6 +76,10 @@
         legend: { isolate: true },
         padding: [12, 34, 0, 0],
         hooks: {
+          setScale: [function (uu, key) {
+            // Un cambio de escala que NO viene de nuestro setData es zoom/pan del usuario.
+            if (key === "x" && !selfSet) userZoomed = true;
+          }],
           draw: [function (uu) {
             // Etiqueta el código de cada bono sobre su punto (anti-superposición).
             var ctx = uu.ctx; ctx.save();
@@ -128,19 +136,31 @@
           if (recreate || !u) {
             if (u) u.destroy();
             clear();
+            selfSet = true;                 // la construcción dispara setScale: no es zoom del usuario
             u = new uPlot(opts(), data, box);
+            selfSet = false;
+            userZoomed = false;             // chart nuevo → arranca siguiendo los datos
           } else {
-            u.setData(data);
+            // Si el usuario hizo zoom, refrescamos los datos SIN re-encuadrar
+            // (resetScales=false) para no pisarle la vista.
+            selfSet = true;
+            u.setData(data, !userZoomed);
+            selfSet = false;
           }
         })
         .catch(function () { /* sin red → mantiene el último chart */ });
     }
 
+    // Doble-click resetea el zoom (default de uPlot): volvemos a auto-encuadrar.
+    box.addEventListener("dblclick", function () { userZoomed = false; });
+
     load(true);
     form.querySelectorAll("[name]").forEach(function (el) {
       el.addEventListener("change", function () { load(true); });
     });
-    setInterval(function () { load(false); }, 5000);
+    // Refresh en vivo más calmo (8 s): suficiente para datos de curva y menos
+    // saltón. Con el zoom preservado, el refresh ya no descoloca la vista.
+    setInterval(function () { load(false); }, 8000);
     window.addEventListener("resize", function () {
       if (u) u.setSize({ width: box.clientWidth || 900, height: 460 });
     });

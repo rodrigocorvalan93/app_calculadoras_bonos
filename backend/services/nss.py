@@ -9,16 +9,21 @@ no re-fitear en cada refresh de 5 s.
 from __future__ import annotations
 
 import logging
-import threading
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from backend.cache import LockedTTLCache
+
 logger = logging.getLogger(__name__)
 
-_lock = threading.Lock()
-_cache: Dict[tuple, Optional[Tuple[np.ndarray, float, float]]] = {}
-_CACHE_MAX = 64
+# `curve_fit` (scipy, multi-pasada robusta) es la op más cara de la app. El cache
+# da compute-once por fingerprint (un solo fit aunque /data, /nss y /estimate
+# pidan la MISMA curva en paralelo) y evicta LRU en vez de vaciarse entero al
+# llenarse (antes un clear() forzaba decenas de refits fríos). TTL holgado: el
+# fingerprint ya rota cuando se mueven los precios.
+_cache = LockedTTLCache(maxsize=256, ttl=120)
+_NO_FIT = object()   # sentinel: "no fitea" cacheado (LockedTTLCache no cachea None)
 
 
 def model(x, b0, b1, b2, b3, t1, t2):
@@ -82,19 +87,16 @@ def _fit_raw(xs, ys, threshold: float, maxfev: int = 10000):
 
 
 def fit(xs: List[float], ys: List[float], threshold: float = 3.0):
-    """Ajuste NSS cacheado por fingerprint de los puntos. (popt, x_min, x_max) o None."""
+    """Ajuste NSS cacheado por fingerprint de los puntos. (popt, x_min, x_max) o None.
+
+    El cómputo se serializa por clave (compute-once): si varios requests piden la
+    misma curva fría a la vez, sólo uno corre `curve_fit` y el resto lee el fit.
+    """
     key = (round(float(threshold), 2),
            tuple(round(float(x), 4) for x in xs),
            tuple(round(float(y), 4) for y in ys))
-    with _lock:
-        if key in _cache:
-            return _cache[key]
-    res = _fit_raw(xs, ys, threshold)
-    with _lock:
-        if len(_cache) >= _CACHE_MAX:
-            _cache.clear()
-        _cache[key] = res
-    return res
+    res = _cache.get_or_compute(key, lambda: _fit_raw(xs, ys, threshold) or _NO_FIT)
+    return None if res is _NO_FIT else res
 
 
 def _tna(tirea: float, freq: float, base: float) -> Optional[float]:
