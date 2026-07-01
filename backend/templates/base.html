@@ -33,29 +33,24 @@
       <span class="brand-text">Calculadora · Bonos</span>
     </a>
     <nav class="tabs">
-      <a class="tab {% block tab_yas %}{% endblock %}" href="/yas">YAS</a>
-      <a class="tab {% block tab_comparador %}{% endblock %}" href="/comparador">Comparador</a>
-      <a class="tab {% block tab_curves %}{% endblock %}" href="/curves">Curvas</a>
-      <a class="tab {% block tab_mercado %}{% endblock %}" href="/mercado">Mercado</a>
-      <a class="tab {% block tab_breakeven %}{% endblock %}" href="/breakeven">Break-even</a>
-      <a class="tab {% block tab_dolares %}{% endblock %}" href="/dolares">Dólares</a>
-      <a class="tab {% block tab_tasas %}{% endblock %}" href="/tasas">Tasas</a>
-      <a class="tab {% block tab_posiciones %}{% endblock %}" href="/posiciones">Posiciones</a>
-      <a class="tab {% block tab_matriz %}{% endblock %}" href="/matriz">Matriz</a>
-      <a class="tab {% block tab_forwards %}{% endblock %}" href="/forwards">Forwards</a>
-      <a class="tab {% block tab_futuros %}{% endblock %}" href="/futuros">Futuros</a>
-      <a class="tab {% block tab_graficos %}{% endblock %}" href="/graficos">Gráficos</a>
-      <a class="tab {% block tab_total_return %}{% endblock %}" href="/total-return">Total Return</a>
-      <a class="tab {% block tab_escenario %}{% endblock %}" href="/escenario">Escenario</a>
-      <a class="tab {% block tab_historicos %}{% endblock %}" href="/historicos">Históricos</a>
-      <a class="tab {% block tab_creditos %}{% endblock %}" href="/creditos">Créditos</a>
-      <a class="tab {% block tab_cafci %}{% endblock %}" href="/cafci">CAFCI</a>
-      <a class="tab {% block tab_ordenes %}{% endblock %}" href="/ordenes">Órdenes</a>
+      {# Sólo las pestañas permitidas para el rol del usuario (auth.nav_for),
+         inyectadas por el middleware en request.state. La activa se resuelve
+         por path (request.state.nav_active). #}
+      {% for t in request.state.nav_tabs %}
+      <a class="tab {{ 'active' if request.state.nav_active == t.key else '' }}" href="{{ t.path }}">{{ t.label }}</a>
+      {% endfor %}
     </nav>
     <div class="topbar-meta">
       <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
       <span id="live-meta" class="live-meta muted"></span>
+      {% if request.state.user %}
+      {% if request.state.user.role == 'superuser' %}
+      <a class="rail-toggle" href="/admin" title="Panel de administración (usuarios y permisos)" style="text-decoration:none">👤</a>
       <a class="rail-toggle" href="/conexion" title="Conexión broker (endpoint / credenciales)" style="text-decoration:none">🔌</a>
+      {% endif %}
+      <span class="user-chip" title="Sesión ({{ request.state.user.role }})">{{ request.state.user.username }}<i class="muted"> · {{ request.state.user.role }}</i></span>
+      <a class="rail-toggle" href="/logout" title="Cerrar sesión" style="text-decoration:none">⎋</a>
+      {% endif %}
       <button type="button" class="rail-toggle" :class="{ active: railOpen }"
               @click="railOpen = !railOpen; try { localStorage.setItem('fx_rail', railOpen ? '1' : '0'); } catch (e) {}"
               title="Mostrar/ocultar el monitor de dólar">💵</button>

@@ -1,0 +1,45 @@
+{# Resultado del cálculo ad-hoc: métricas + cashflow + Guardar. Reusa los
+   partials de YAS (sólo necesitan `metrics`). #}
+<div class="yas-grid">
+  <aside class="yas-left">
+    {% if not metrics.get("error") %}
+    <div class="card">
+      <div class="card-title"><span>Ticket</span><span class="card-title-aux">{{ metrics.codigo }}</span></div>
+      <div class="card-body">{% include "partials/yas_ticket.html" %}</div>
+    </div>
+    {% endif %}
+
+    {% if can_save %}
+    <div class="card">
+      <div class="card-title"><span>Guardar en especies.py</span></div>
+      <div class="card-body">
+        {% if existe %}
+          <p class="muted" style="font-size:12px">Ya existe una especie <code>{{ metrics.codigo }}</code>
+            en <code>especies.py</code>. Cambiá el código si querés persistir otra.</p>
+        {% elif metrics.get("error") %}
+          <p class="muted" style="font-size:12px">Corregí la ficha antes de guardar.</p>
+        {% else %}
+          <p class="muted" style="font-size:12px;margin-bottom:8px">Agrega la ficha (dict + wrapper
+            <code>rentafija.Bono</code>) al final de <code>especies.py</code>. Entra al universo tras reiniciar.</p>
+          <button type="button" class="btn-primary"
+                  hx-post="/nueva/guardar" hx-target="#nueva-guardar-msg" hx-swap="innerHTML"
+                  hx-vals='{"token": "{{ token }}"}'
+                  hx-confirm="¿Agregar {{ metrics.codigo }} a especies.py?">Guardar especie</button>
+        {% endif %}
+        <div id="nueva-guardar-msg" style="margin-top:8px"></div>
+      </div>
+    </div>
+    {% endif %}
+  </aside>
+
+  <section class="yas-right">
+    {% include "partials/yas_metrics.html" %}
+
+    {% if not metrics.get("error") %}
+    <div class="card">
+      <div class="card-title"><span>Cashflows · CPN / PMT</span><span class="card-title-aux">post-settlement</span></div>
+      <div class="card-body">{% include "partials/yas_cashflows.html" %}</div>
+    </div>
+    {% endif %}
+  </section>
+</div>

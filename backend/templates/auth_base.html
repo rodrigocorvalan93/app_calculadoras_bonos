@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es-AR" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Ingresar{% endblock %} · Calculadora de Bonos</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', path='favicon.png') }}?v={{ asset_v }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ asset_v }}">
+  <script>
+    (function () {
+      try { document.documentElement.setAttribute("data-theme", localStorage.getItem("yas_theme") || "dark"); } catch (e) {}
+    })();
+  </script>
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <div class="auth-brand">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path d="M12 3.6 L21.2 20.4 L2.8 20.4 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+      <span>Calculadora · Bonos</span>
+    </div>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

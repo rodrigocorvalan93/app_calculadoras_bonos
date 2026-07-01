@@ -1,18 +1,52 @@
 # OMS · Calculadora de Bonos & Analytics
 
-Suite de herramientas para análisis de **renta fija argentina**: pricing de bonos, curvas de tasas, monitoreo de mercado en tiempo real (BYMA), gestión de posiciones y un Order Management System (OMS) sobre Streamlit.
+Suite de herramientas para análisis de **renta fija argentina**: pricing de bonos, curvas de tasas, monitoreo de mercado en tiempo real (BYMA), gestión de posiciones y un Order Management System (OMS).
+
+El **front actual** es una reescritura en **FastAPI + Jinja2 + HTMX + Alpine** (`backend/`), enfocada en performance (objetivo < 50 ms p95 server-side en el path caliente). La app Streamlit original (`OMSweb_app.py`) queda como referencia/legacy para portar lógica de negocio.
 
 ---
 
 ## 🧭 Mapa rápido
 
-El proyecto tiene **tres puntos de entrada** según el caso de uso:
+Puntos de entrada según el caso de uso:
 
 | Entry point | Tipo | Para qué se usa |
 |---|---|---|
-| `OMSweb_app.py` | Streamlit web app | **Front principal.** Dashboard completo: curvas, monitor, posiciones, news, OMS |
+| `backend/` (`uvicorn backend.main:app`) | ⭐ **FastAPI web app** | **Front actual.** Muro de login + roles, YAS, Nueva especie ad-hoc, Curvas, Mercado, Qué pasó, Posiciones, OMS, etc. |
+| `OMSweb_app.py` | Streamlit web app (legacy) | Dashboard original. Referencia para portar lógica; no se importa desde `backend/` |
 | `bymaapi.py` | Script REPL | **Calculadora en vivo** desde VS Code Interactive (`bymaapi.bat` lanza `python -i`) |
 | `rentafija.py` | Librería core | **Núcleo duro de cálculos** (TIR, MD, flujos, valuación). No se ejecuta solo, se importa |
+
+---
+
+## ⚡ Front web — FastAPI (`backend/`)
+
+Reescritura moderna del front, sin frameworks JS pesados (sólo HTMX + Alpine; gráficos en SVG/uPlot). Estado de larga vida cacheado en memoria y un *warmup daemon* que precalienta el motor de cálculo al arranque, así el path caliente queda bajo **50 ms p95**.
+
+### Pestañas
+YAS (análisis de yields) · **Nueva especie** (calculadora ad-hoc: armás/pegás una ficha y calcula cashflow + métricas en vivo, sin tocar el universo) · Comparador · Curvas · Mercado · Break-even · Dólares · Tasas · Posiciones · Matriz · Forwards · Futuros · Gráficos · Total Return · Escenario · Históricos · **Qué pasó** (resumen de la ventana por segmento + gráfico de cómo se movió la curva) · Créditos · CAFCI · Órdenes.
+
+### Usuarios y permisos
+Muro de login con roles **superuser / premium / básico**. El superuser gestiona usuarios y qué pestañas ve cada rol desde `/admin`. Contraseñas hasheadas (PBKDF2 + salt), sesión por cookie firmada, recuperación por mail (SMTP). Config por env (nada de credenciales en el código) — ver `backend/README.md`.
+
+### Correr
+
+```bash
+pip install -r backend/requirements.txt
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+# abrir http://127.0.0.1:8000  (redirige a /login)
+```
+
+Env mínimas para el muro de login (o `AUTH_ENABLED=0` para dev sin muro):
+
+```
+APP_SUPERUSER_USER=<usuario>
+APP_SUPERUSER_PASSWORD=<clave>
+APP_SUPERUSER_EMAIL=<mail>
+APP_SECRET_KEY=<hex largo>
+```
+
+Detalle de todas las env (SMTP, paths, etc.) y de la arquitectura del backend en **`backend/README.md`**.
 
 ---
 
@@ -35,9 +69,9 @@ dias_habiles.py     Calendario AR: feriados, días hábiles, settlement.
 plotter.py          Gráficos (matplotlib): curvas, NSS, scatter, dispersión.
 ```
 
-### Front web — Streamlit (`OMSweb_app.py` + módulos `OMS*`)
+### Front web legacy — Streamlit (`OMSweb_app.py` + módulos `OMS*`)
 
-El web app es el agregador. Importa todos los módulos `OMS*` para armar las distintas tabs del dashboard.
+El web app Streamlit es el front original (hoy legacy; el front actual es `backend/`). Importa todos los módulos `OMS*` para armar las tabs del dashboard. Se mantiene como referencia para portar lógica de negocio.
 
 ```
 OMSweb_app.py             ⭐ Front principal Streamlit (dashboard, OMS, monitor)
@@ -143,7 +177,13 @@ Archivos locales (NO versionados, ver `.gitignore`):
 
 ## 🚀 Uso
 
-### Front web (uso normal)
+### Front web FastAPI (uso normal)
+
+```bash
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### Front web Streamlit (legacy)
 
 ```bash
 streamlit run OMSweb_app.py
@@ -177,4 +217,6 @@ El `.gitignore` usa **paradigma whitelist**: ignora todo por default y sólo se 
 
 ## 📝 Stack
 
-Python 3.x · Streamlit · pandas/numpy · scipy · matplotlib/plotly · requests · feedparser · holidays · openpyxl
+**Front actual:** FastAPI · Jinja2 · HTMX · Alpine.js · uPlot/SVG · Starlette SessionMiddleware (auth) · itsdangerous · httpx · uvicorn
+
+**Núcleo y legacy:** Python 3.11 · pandas/numpy · scipy · matplotlib/plotly · requests · feedparser · holidays · openpyxl · Streamlit (front legacy)

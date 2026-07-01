@@ -49,6 +49,31 @@
           {% if s.rows %}
           <tr x-show="open" x-cloak class="sem-detail-row">
             <td colspan="4">
+              {% if s.curve %}
+              {% set c = s.curve %}
+              <div class="sem-curve">
+                <div class="sem-curve-head">
+                  <span>Cómo se movió la curva · TIR (%) vs duration</span>
+                  <span class="sem-curve-legend">
+                    <span class="sem-lg sem-lg-before">antes ({{ w.start }})</span>
+                    <span class="sem-lg sem-lg-after">ahora ({{ w.end }})</span>
+                  </span>
+                </div>
+                <svg viewBox="0 0 {{ c.width }} {{ c.height }}" width="100%" style="max-width:520px;height:auto;font-family:inherit">
+                  {% for t in c.yticks %}
+                    <line x1="{{ c.x0 }}" y1="{{ t.y }}" x2="{{ c.x1 }}" y2="{{ t.y }}" stroke="var(--border)" stroke-width="1" opacity="0.4"/>
+                    <text x="{{ c.x0 - 6 }}" y="{{ t.y + 3 }}" text-anchor="end" font-size="9" fill="var(--text-muted)">{{ t.v }}</text>
+                  {% endfor %}
+                  {% for t in c.xticks %}
+                    <text x="{{ t.x }}" y="{{ c.y1 + 14 }}" text-anchor="middle" font-size="9" fill="var(--text-muted)">{{ t.v }}</text>
+                  {% endfor %}
+                  <path d="{{ c.path_before }}" fill="none" stroke="var(--text-muted)" stroke-width="1.4" stroke-dasharray="4 3" opacity="0.75"/>
+                  <path d="{{ c.path_after }}" fill="none" stroke="var(--accent)" stroke-width="1.9"/>
+                  {% for n in c.before %}<circle cx="{{ n.x }}" cy="{{ n.y }}" r="2.2" fill="var(--text-muted)" opacity="0.7"/>{% endfor %}
+                  {% for n in c.after %}<circle cx="{{ n.x }}" cy="{{ n.y }}" r="2.6" fill="var(--accent)"><title>{{ n.dur | ar_num(2) }} · {{ n.tir | ar_num(2) }}%</title></circle>{% endfor %}
+                </svg>
+              </div>
+              {% endif %}
               <table class="sem-detail">
                 <thead><tr>
                   <th style="text-align:left">Bono</th>

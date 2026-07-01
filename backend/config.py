@@ -86,6 +86,29 @@ class Settings(BaseSettings):
     warmup_enabled: bool = True
     warmup_interval_seconds: int = 8
 
+    # ── Auth (login wall + roles) ─────────────────────────────────────────
+    # Escape hatch: AUTH_ENABLED=0 apaga el muro (dev/emergencia). Default ON.
+    auth_enabled: bool = True
+    # Firma de la cookie de sesión. Si está vacío se genera y persiste en el
+    # store (así las sesiones sobreviven reinicios sin exponer la clave en git).
+    app_secret_key: str = ""
+    # Path del store de usuarios (JSON, gitignored). Vacío → auth_store.json en la raíz.
+    app_users_path: str = ""
+    # Bootstrap del superuser (NO hardcodear la contraseña en el código): en el
+    # primer arranque, si el store no tiene superuser, se crea desde estas env.
+    app_superuser_user: str = ""
+    app_superuser_password: str = ""
+    app_superuser_email: str = ""
+    # URL base para los links de reset por mail (ej https://miapp.example.com).
+    app_base_url: str = ""
+    # SMTP para recuperación de contraseña por mail (Gmail: smtp.gmail.com:587,
+    # user = tu gmail, password = App Password). Vacío → /forgot avisa que falta.
+    app_smtp_host: str = ""
+    app_smtp_port: int = 587
+    app_smtp_user: str = ""
+    app_smtp_password: str = ""
+    app_smtp_from: str = ""
+
 
 settings = Settings()
 

@@ -1,0 +1,6 @@
+{# Resultado de POST /nueva/guardar. #}
+{% if res.ok %}
+  <div class="alert alert-ok">✓ {{ res.msg }}</div>
+{% else %}
+  <div class="alert alert-error">{{ res.error }}</div>
+{% endif %}

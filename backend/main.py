@@ -16,10 +16,13 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from urllib.parse import quote
+
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
@@ -40,6 +43,9 @@ from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
 from backend.routes.tape import router as tape_router
 from backend.routes.yas import router as yas_router
+from backend.routes.nueva import router as nueva_router
+from backend.routes.auth import router as auth_router
+from backend.routes.admin import router as admin_router
 from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, symbols as syms
 from backend.services.primary_ws import get_ws_client
 from backend.services.warmup import get_daemon as get_warmup_daemon
@@ -67,6 +73,12 @@ logging.getLogger("uvicorn.access").addFilter(_QuietPolls())
 BACKEND_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BACKEND_DIR / "templates"
 STATIC_DIR = BACKEND_DIR / "static"
+
+
+def _auth_secret() -> str:
+    """Clave de firma de la cookie de sesión (env o autogenerada/persistida)."""
+    from backend.services import auth
+    return auth.get_secret_key()
 
 
 def _initial_symbols() -> list[str]:
@@ -129,6 +141,17 @@ def _initial_symbols() -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("[main] starting up")
+    # Auth: sembrar el superuser desde env si el store está vacío (login wall).
+    try:
+        from backend.services import auth
+        b = auth.ensure_bootstrapped()
+        if b.get("created"):
+            logger.info("[main] auth: superuser '%s' bootstrapped from env", b["user"])
+        elif b.get("warning"):
+            logger.warning("[main] auth: %s", b["warning"])
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] auth bootstrap failed")
+
     try:
         bond_universe.ensure_loaded()
     except Exception:  # noqa: BLE001
@@ -276,7 +299,10 @@ def create_app() -> FastAPI:
     app.state.templates = templates
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.include_router(auth_router)
+    app.include_router(admin_router)
     app.include_router(yas_router)
+    app.include_router(nueva_router)
     app.include_router(comparador_router)
     app.include_router(conexion_router)
     app.include_router(creditos_router)
@@ -296,6 +322,74 @@ def create_app() -> FastAPI:
     app.include_router(posiciones_router)
     app.include_router(market_router)
     app.include_router(tape_router)
+
+    # ── Login wall + gating por rol ───────────────────────────────────────
+    # Público (sin sesión): login/recuperación, estáticos, health, favicon.
+    _PUBLIC_EXACT = {"/login", "/logout", "/forgot", "/reset", "/healthz",
+                     "/favicon.ico", "/favicon.png"}
+    _PUBLIC_PREFIX = ("/static/",)
+    # Páginas sensibles reservadas al superuser (no son pestañas gateables).
+    _SUPERUSER_ONLY = ("/admin", "/conexion")
+
+    def _is_public(path: str) -> bool:
+        return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
+
+    def _needs_login(request: Request) -> Response:
+        # htmx (partial/polling): 401 + HX-Redirect para que el cliente navegue
+        # a /login sin inyectar la página de login dentro de un panel.
+        if request.headers.get("hx-request"):
+            r = Response(status_code=401)
+            r.headers["HX-Redirect"] = "/login"
+            return r
+        nxt = request.url.path
+        return RedirectResponse(url=f"/login?next={quote(nxt, safe='')}", status_code=302)
+
+    @app.middleware("http")
+    async def auth_guard(request: Request, call_next):
+        from backend.services import auth as auth_svc
+
+        # defaults para los templates (nav/topbar) — siempre presentes
+        request.state.user = None
+        request.state.nav_tabs = []
+        request.state.nav_active = None
+
+        path = request.url.path
+        if not settings.auth_enabled or _is_public(path):
+            if not settings.auth_enabled:
+                # sin muro: mostrar todo (dev). Nav = todas las pestañas.
+                request.state.nav_tabs = auth_svc.nav_for("superuser")
+                request.state.nav_active = auth_svc.active_tab(path)
+            return await call_next(request)
+
+        username = request.session.get("user")
+        role = auth_svc.role_of(username) if username else None
+        if not username or role is None:
+            return _needs_login(request)
+
+        request.state.user = {"username": username, "role": role}
+        request.state.nav_tabs = auth_svc.nav_for(role)
+        request.state.nav_active = auth_svc.active_tab(path)
+
+        if any(path == p or path.startswith(p + "/") for p in _SUPERUSER_ONLY) and role != "superuser":
+            return HTMLResponse("<h1>403</h1><p>Sección reservada al superuser.</p>", status_code=403)
+        if not auth_svc.can_access_path(role, path):
+            return HTMLResponse(
+                "<h1>403</h1><p>No tenés acceso a esta sección. "
+                "<a href='/yas'>Volver</a></p>", status_code=403)
+        return await call_next(request)
+
+    # SessionMiddleware se agrega DESPUÉS del guard → queda MÁS AFUERA (Starlette
+    # inserta en index 0), así decodifica la cookie ANTES de que corra el guard y
+    # `request.session` está disponible adentro. Costo por request: verificar el
+    # HMAC de la cookie (sub-µs).
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=_auth_secret(),
+        session_cookie="bonos_session",
+        max_age=14 * 24 * 3600,
+        same_site="lax",
+        https_only=False,
+    )
 
     @app.get("/")
     async def index() -> RedirectResponse:

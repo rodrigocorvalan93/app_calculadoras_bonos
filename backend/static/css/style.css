@@ -654,6 +654,47 @@ select {
   background: rgba(239, 68, 68, 0.07);
   border-color: var(--red);
 }
+.alert-ok {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: var(--green);
+}
+
+/* ── Auth (login / recuperación) ──────────────────────────────────── */
+.auth-body { min-height: 100vh; display: grid; place-items: center; padding: 24px;
+  background: var(--bg); }
+.auth-card { width: 100%; max-width: 360px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 26px 24px; }
+.auth-brand { display: flex; align-items: center; gap: 8px; color: var(--accent);
+  font-weight: 700; font-size: 14px; margin-bottom: 18px; }
+.auth-title { font-size: 20px; margin: 0 0 14px; }
+.auth-form { display: flex; flex-direction: column; gap: 12px; }
+.auth-form .field { display: flex; flex-direction: column; gap: 4px; }
+.auth-form input { width: 100%; }
+.auth-form .btn-primary { margin-top: 4px; padding: 9px; font-size: 14px; }
+.auth-links { margin: 14px 0 0; font-size: 12.5px; }
+.auth-links a { color: var(--accent); }
+
+/* ── Chip de usuario en la topbar ─────────────────────────────────── */
+.user-chip { font-size: 12px; color: var(--text-soft); padding: 2px 8px;
+  border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
+
+/* ── Panel de administración ──────────────────────────────────────── */
+.admin-grid { display: grid; gap: 16px; grid-template-columns: 1fr; max-width: 900px; }
+.admin-users td, .admin-tabs td, .admin-users th, .admin-tabs th { padding: 6px 12px; }
+.btn-mini { background: var(--panel-2); border: 1px solid var(--border); color: var(--text-soft);
+  border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 12px; line-height: 1; }
+.btn-mini:hover { border-color: var(--accent); color: var(--text); }
+.btn-danger:hover { border-color: var(--red); color: var(--red); }
+
+/* ── Nueva especie (form ad-hoc) ──────────────────────────────────── */
+.nueva-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+.nueva-grid .field { min-width: 0; }
+@media (max-width: 900px) { .nueva-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .nueva-grid { grid-template-columns: 1fr; } }
 
 /* ── Misc ─────────────────────────────────────────────────────────── */
 
@@ -1163,6 +1204,17 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .sem-detail tbody tr:last-child td { border-bottom: none; }
 .sem-detail tbody tr:hover { background: var(--accent-soft); }
 .sem-dm { font-size: 10px; }
+.sem-curve { padding: 10px 14px 4px 32px; border-bottom: 1px solid var(--border-soft); }
+.sem-curve-head { display: flex; justify-content: space-between; align-items: baseline;
+  flex-wrap: wrap; gap: 4px 12px; margin-bottom: 4px;
+  font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.sem-curve-legend { display: inline-flex; gap: 12px; text-transform: none; letter-spacing: 0; }
+.sem-lg { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
+.sem-lg::before { content: ""; display: inline-block; width: 14px; height: 0; }
+.sem-lg-before { color: var(--text-muted); }
+.sem-lg-before::before { border-top: 1.4px dashed var(--text-muted); }
+.sem-lg-after { color: var(--accent); }
+.sem-lg-after::before { border-top: 2px solid var(--accent); }
 @media (prefers-reduced-motion: reduce) { .sem-caret { transition: none; } }
 
 /* ── Senderos mensuales (Escenario): grid nivel mes a mes por driver ───── */
