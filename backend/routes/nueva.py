@@ -29,6 +29,17 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
 
 
+def _can_save(request: Request) -> bool:
+    """Sólo el superuser puede persistir en especies.py (escribe un archivo fuente
+    que se importa al arranque). En modo dev sin muro (auth_enabled=False) se
+    permite para no trabar el flujo local."""
+    from backend.config import settings
+    if not settings.auth_enabled:
+        return True
+    u = getattr(request.state, "user", None)
+    return bool(u and u.get("role") == "superuser")
+
+
 @router.get("", response_class=HTMLResponse)
 async def nueva_page(request: Request) -> HTMLResponse:
     return _render(request, "nueva.html")
@@ -45,6 +56,7 @@ def _panel(request: Request, token: str, ficha: dict, *, mode: str = "precio",
         mode=mode, default_value=str(value).replace(".", ","),
         n_cupones=len(ficha.get("Fechas de cupón") or []),
         existe=adhoc.especie_existe(str(ficha.get("Código") or "")),
+        can_save=_can_save(request),
     )
 
 
@@ -112,16 +124,23 @@ async def nueva_recompute(
     if parsed is None:
         return _render(request, "partials/nueva_result.html",
                        metrics={"error": "Ingresá un valor numérico."}, ticket={}, token=token,
-                       existe=adhoc.especie_existe(str(ficha.get("Código") or "")))
+                       existe=adhoc.especie_existe(str(ficha.get("Código") or "")),
+                       can_save=_can_save(request))
     metrics = adhoc.compute(token, mode, parsed, settle=settle_custom.strip() or None)
     ticket = pricing.ticket_rows(metrics) if not metrics.get("error") else {}
     return _render(request, "partials/nueva_result.html",
                    metrics=metrics, ticket=ticket, token=token,
                    meta=adhoc.meta_from_ficha(ficha),
-                   existe=adhoc.especie_existe(str(ficha.get("Código") or "")))
+                   existe=adhoc.especie_existe(str(ficha.get("Código") or "")),
+                   can_save=_can_save(request))
 
 
 @router.post("/guardar", response_class=HTMLResponse)
 async def nueva_guardar(request: Request, token: str = Form(...)) -> HTMLResponse:
+    # Persistir en especies.py escribe un archivo fuente que se importa al boot →
+    # reservado al superuser (defensa en el server, no sólo ocultar el botón).
+    if not _can_save(request):
+        return _render(request, "partials/nueva_guardar.html",
+                       res={"ok": False, "error": "Sólo el superuser puede guardar en especies.py."})
     res = adhoc.guardar(token)
     return _render(request, "partials/nueva_guardar.html", res=res)

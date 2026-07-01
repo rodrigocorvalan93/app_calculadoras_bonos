@@ -146,6 +146,28 @@ async def test_sub_endpoints_compartidos_no_se_gatean(auth_on):
 
 
 @pytest.mark.asyncio
+async def test_guardar_especie_solo_superuser(auth_on):
+    """Persistir en especies.py es sólo del superuser: el botón no se renderiza
+    para premium y el endpoint /nueva/guardar lo bloquea aunque conozca la URL."""
+    form = {"entrada": "form", "codigo": "NPX", "emision": "01/07/2025",
+            "vencimiento": "01/07/2027", "frecuencia": "2", "tipo_tasa": "FIJA",
+            "cupon": "5", "tipo_amortizacion": "BULLET"}
+    async with _client() as su:
+        await _login(su, "rodricor93", "Rc_874562")
+        await su.post("/admin/users", data={"username": "prem", "password": "clave123", "role": "premium"})
+    async with _client() as ac:
+        await _login(ac, "prem", "clave123")
+        r = await ac.post("/nueva/parse", data=form)
+        assert r.status_code == 200 and "Guardar especie" not in r.text   # botón oculto
+        g = await ac.post("/nueva/guardar", data={"token": "loquesea"})
+        assert "superuser" in g.text.lower()                              # endpoint bloqueado
+    async with _client() as ac:
+        await _login(ac, "rodricor93", "Rc_874562")
+        r = await ac.post("/nueva/parse", data=form)
+        assert "Guardar especie" in r.text                                # superuser sí lo ve
+
+
+@pytest.mark.asyncio
 async def test_logout(auth_on):
     async with _client() as ac:
         await _login(ac, "rodricor93", "Rc_874562")
