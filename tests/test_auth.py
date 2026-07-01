@@ -123,6 +123,29 @@ async def test_config_role_tabs(auth_on):
 
 
 @pytest.mark.asyncio
+async def test_sub_endpoints_compartidos_no_se_gatean(auth_on):
+    """Regresión: los endpoints GLOBALES/compartidos sólo piden sesión, NO permiso
+    de tab. Un básico sin 'dolares'/'historicos' NO debe recibir 403 en el riel
+    (/dolares/rail, que sondea toda página) ni en /historicos/semanal (que usa la
+    pestaña Qué pasó). La PÁGINA exacta sí se gatea."""
+    async with _client() as su:
+        await _login(su, "rodricor93", "Rc_874562")
+        # básico ve sólo YAS + Qué pasó (ni dólares ni históricos)
+        await su.post("/admin/tabs", data={"tab_basico_yas": "on", "tab_basico_quepaso": "on",
+                                           "tab_premium_yas": "on"})
+        await su.post("/admin/users", data={"username": "beto", "password": "clave123", "role": "basico"})
+    async with _client() as ac:
+        await _login(ac, "beto", "clave123")
+        # sub-endpoints globales/compartidos → NO 403 (sólo requieren sesión)
+        assert (await ac.get("/dolares/rail")).status_code != 403
+        assert (await ac.get("/historicos/semanal")).status_code == 200
+        assert (await ac.get("/que-paso")).status_code == 200      # su pestaña
+        # la PÁGINA exacta que no tiene sí se gatea
+        assert (await ac.get("/dolares")).status_code == 403
+        assert (await ac.get("/historicos")).status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_logout(auth_on):
     async with _client() as ac:
         await _login(ac, "rodricor93", "Rc_874562")

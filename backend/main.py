@@ -358,7 +358,7 @@ def create_app() -> FastAPI:
             if not settings.auth_enabled:
                 # sin muro: mostrar todo (dev). Nav = todas las pestañas.
                 request.state.nav_tabs = auth_svc.nav_for("superuser")
-                request.state.nav_active = auth_svc.page_tab(path)
+                request.state.nav_active = auth_svc.active_tab(path)
             return await call_next(request)
 
         username = request.session.get("user")
@@ -368,7 +368,7 @@ def create_app() -> FastAPI:
 
         request.state.user = {"username": username, "role": role}
         request.state.nav_tabs = auth_svc.nav_for(role)
-        request.state.nav_active = auth_svc.page_tab(path)
+        request.state.nav_active = auth_svc.active_tab(path)
 
         if any(path == p or path.startswith(p + "/") for p in _SUPERUSER_ONLY) and role != "superuser":
             return HTMLResponse("<h1>403</h1><p>Sección reservada al superuser.</p>", status_code=403)

@@ -25,6 +25,7 @@ Nada de nombres, llamadas, atributos, indexado, etc.
 from __future__ import annotations
 
 import ast
+import os
 import secrets
 import textwrap
 import threading
@@ -392,8 +393,14 @@ def guardar(token: str) -> Dict[str, Any]:
         if name in _saved_codes or especie_existe(name):
             return {"ok": False, "error": f"Ya existe una especie '{name}' en especies.py."}
         try:
-            with open(_ESPECIES_PATH, "a", encoding="utf-8") as fh:
-                fh.write(block)
+            # Escritura ATÓMICA (tmp + os.replace): especies.py se importa al
+            # arranque, así que un write a medias (disco lleno / interrupción)
+            # lo dejaría corrupto y tumbaría toda la app. Con replace queda o el
+            # archivo viejo intacto o el nuevo completo — nunca un fragmento.
+            existing = _ESPECIES_PATH.read_text(encoding="utf-8") if _ESPECIES_PATH.is_file() else ""
+            tmp = _ESPECIES_PATH.with_suffix(_ESPECIES_PATH.suffix + ".tmp")
+            tmp.write_text(existing + block, encoding="utf-8")
+            os.replace(tmp, _ESPECIES_PATH)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": f"No pude escribir especies.py: {exc}"}
         _saved_codes.add(name)

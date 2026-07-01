@@ -249,18 +249,33 @@ def nav_for(role: Optional[str]) -> List[Dict[str, str]]:
     return [{"key": k, "label": _TAB_LABEL[k], "path": _TAB_PATH[k]} for k in keys]
 
 
-def page_tab(path: str) -> Optional[str]:
-    """Tab-key de la PÁGINA exacta (para gating), o None si no es una página de
-    pestaña. Match por prefijo más largo: /yas y /yas/... → 'yas'."""
+def active_tab(path: str) -> Optional[str]:
+    """Tab-key para RESALTAR en la nav: match por prefijo más largo, así
+    /yas/recompute resalta 'YAS'. NO se usa para gating."""
     for p, k in _PAGES_BY_LEN:
         if path == p or path.startswith(p + "/"):
             return k
     return None
 
 
+def page_tab(path: str) -> Optional[str]:
+    """Tab-key de la PÁGINA EXACTA (para gating), o None. Sólo la GET top-level de
+    la pestaña matchea (/yas, /que-paso, …); los sub-endpoints (/yas/recompute,
+    /dolares/rail, /historicos/semanal) devuelven None → NO se gatean por tab.
+
+    Clave: endpoints GLOBALES o COMPARTIDOS (el riel /dolares/rail que sondea toda
+    página, /historicos/semanal que usan Históricos y Qué pasó) NO deben quedar
+    atados a la pestaña de su prefijo, o un rol sin esa pestaña recibiría 403 en
+    cada página. El gating es a nivel de página; el resto sólo pide sesión."""
+    for p, k in _PAGES_BY_LEN:
+        if path == p or path == p + "/":
+            return k
+    return None
+
+
 def can_access_path(role: Optional[str], path: str) -> bool:
-    """True si el rol puede acceder a `path`. Sólo se gatea la página de pestaña;
-    todo lo demás (sub-endpoints) pasa con estar logueado."""
+    """True si el rol puede acceder a `path`. Sólo se gatea la PÁGINA de pestaña
+    (match exacto); todo lo demás (sub-endpoints) pasa con estar logueado."""
     tab = page_tab(path)
     if tab is None:
         return True

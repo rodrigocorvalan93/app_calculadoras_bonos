@@ -22,8 +22,11 @@ def _render(request: Request, template: str, status: int = 200, **ctx) -> HTMLRe
 
 
 def _safe_next(nxt: Optional[str]) -> str:
-    """Sólo redirigimos a paths internos ('/...') para evitar open-redirect."""
-    if nxt and nxt.startswith("/") and not nxt.startswith("//"):
+    """Sólo redirigimos a paths internos para evitar open-redirect. Rechaza
+    esquemas y URLs scheme-relative: '//host', y también '/\\host' o control
+    chars, que los browsers normalizan a '//host' (el '\\' se convierte en '/')."""
+    if (nxt and nxt.startswith("/") and not nxt.startswith("//")
+            and "\\" not in nxt and not any(c in nxt for c in "\t\r\n")):
         return nxt
     return "/yas"
 
