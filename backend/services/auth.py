@@ -131,6 +131,7 @@ def refresh() -> None:
     global _cache
     with _lock:
         _cache = _load()
+        _nav_cache.clear()
 
 
 # ── Hashing ──────────────────────────────────────────────────────────────────
@@ -243,10 +244,21 @@ def allowed_tabs(role: Optional[str]) -> List[str]:
     return [k for k in TAB_KEYS if k in allowed]
 
 
+_nav_cache: Dict[str, List[Dict[str, str]]] = {}
+
+
 def nav_for(role: Optional[str]) -> List[Dict[str, str]]:
-    """Items de nav (key/label/path) permitidos para el rol, en orden."""
-    keys = allowed_tabs(role)
-    return [{"key": k, "label": _TAB_LABEL[k], "path": _TAB_PATH[k]} for k in keys]
+    """Items de nav (key/label/path) permitidos para el rol, en orden. Cacheado
+    por rol: el middleware lo pide en CADA request (incluido el poller de 1/s),
+    y `role_tabs` sólo cambia desde el panel → sin esto se reconstruían ~20 dicts
+    por request. El cache se invalida en `refresh()` y `set_role_tabs()`. Se
+    devuelve la MISMA lista (read-only en los templates)."""
+    key = role or ""
+    cached = _nav_cache.get(key)
+    if cached is None:
+        cached = [{"key": k, "label": _TAB_LABEL[k], "path": _TAB_PATH[k]} for k in allowed_tabs(role)]
+        _nav_cache[key] = cached
+    return cached
 
 
 def active_tab(path: str) -> Optional[str]:
@@ -360,6 +372,7 @@ def set_role_tabs(role: str, tabs: List[str]) -> None:
         data = _store()
         data["role_tabs"][role] = clean
         _save_locked(data)
+        _nav_cache.pop(role, None)
 
 
 def _count_superusers(data: Dict[str, Any]) -> int:

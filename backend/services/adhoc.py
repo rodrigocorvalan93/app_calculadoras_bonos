@@ -309,6 +309,33 @@ def register(ficha: Dict[str, Any]) -> Tuple[str, str]:
     return token, str(ficha.get("Código"))
 
 
+# Cache del Bono construido por token. Armar un Bono re-parsea las fechas de cupón
+# y hace ops numpy (≈6 ms en un bono de 120 cupones); como la ficha del token es
+# inmutable, lo construimos UNA vez y `compute_metrics` copia (copy.copy) por
+# request — mismo patrón thread-safe que los singletons del universo. EXCEPCIÓN:
+# los floaters VARIABLE congelan el cupón en __init__ leyendo el índice proyectado
+# (TAMAR/BADLAR), así que esos se reconstruyen siempre para no servir cupón viejo.
+_bono_cache: "OrderedDict[str, Any]" = OrderedDict()
+
+
+def _built_bono(token: str, ficha: Dict[str, Any]):
+    tipo = (ficha.get("Tipo Tasa Interés") or "").upper()
+    if tipo in ("VARIABLE", "VARIABLE_CAP"):
+        return build_bono(ficha)            # cupón atado al índice → siempre fresco
+    with _store_lock:
+        b = _bono_cache.get(token)
+        if b is not None:
+            _bono_cache.move_to_end(token)
+            return b
+    b = build_bono(ficha)                    # fuera del lock (puede tardar)
+    with _store_lock:
+        _bono_cache[token] = b
+        _bono_cache.move_to_end(token)
+        while len(_bono_cache) > _STORE_MAX:
+            _bono_cache.popitem(last=False)
+    return b
+
+
 def compute(token: str, mode: str, value: float, settle: Optional[str] = None,
             fx_override: Optional[float] = None, freq_override: Optional[int] = None,
             base_override: Optional[int] = None) -> Dict[str, Any]:
@@ -319,7 +346,7 @@ def compute(token: str, mode: str, value: float, settle: Optional[str] = None,
     if ficha is None:
         return {"error": "La ficha expiró o no existe. Volvé a cargarla."}
     try:
-        bono = build_bono(ficha)
+        bono = _built_bono(token, ficha)
     except ValueError as exc:
         return {"error": str(exc)}
     return pricing.compute_metrics(
