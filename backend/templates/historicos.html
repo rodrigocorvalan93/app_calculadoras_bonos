@@ -3,7 +3,7 @@
 {% block tab_historicos %}active{% endblock %}
 
 {% block content %}
-<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false, semLoaded: false }">
+<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false }">
   <header class="yas-header">
     <h1>Históricos</h1>
     <p class="muted">Series macro del BCRA y evolución histórica de tasas por curva (BYMA). Rango personalizable. Lectura única + cache; <strong>Actualizar</strong> relee.</p>
@@ -16,16 +16,6 @@
     <button @click="tab='curvas'; if(!curvaLoaded){curvaLoaded=true; $nextTick(()=>htmx.trigger('#hist-curva','reveal'))}"
             :style="tab==='curvas' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
             style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Tasas por curva</button>
-    <button @click="tab='semanal'; if(!semLoaded){semLoaded=true; $nextTick(()=>htmx.trigger('#hist-semanal','reveal'))}"
-            :style="tab==='semanal' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">🗓️ Qué pasó</button>
-  </div>
-
-  {# ── Qué pasó (resumen por segmento) ── #}
-  <div x-show="tab==='semanal'" x-cloak>
-    <div id="hist-semanal" hx-get="/historicos/semanal" hx-trigger="reveal" hx-swap="innerHTML">
-      <div class="muted" style="padding:12px">Cargando…</div>
-    </div>
   </div>
 
   {# ── Macro (BCRA) ── #}

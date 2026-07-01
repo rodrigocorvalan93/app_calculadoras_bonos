@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Qué pasó{% endblock %}
+{% block tab_quepaso %}active{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Qué pasó</h1>
+    <p class="muted">Resumen de la ventana por segmento: Δ precio, Δ TIR y cómo se movió
+      la curva (antes/ahora). Clic en un segmento → detalle por bono. Lectura única + cache.</p>
+  </header>
+
+  <div id="hist-semanal" hx-get="/historicos/semanal" hx-trigger="load" hx-swap="innerHTML">
+    <div class="muted" style="padding:12px">Cargando…</div>
+  </div>
+</section>
+{% endblock %}

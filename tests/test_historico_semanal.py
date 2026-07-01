@@ -200,7 +200,8 @@ async def test_historicos_semanal_endpoint_no_crash():
         for d in (7, 14, 30):
             r = await ac.get(f"/historicos/semanal?dias={d}")
             assert r.status_code == 200 and "Traceback" not in r.text
-        pg = await ac.get("/historicos")
+        # "Qué pasó" ahora es su propia pestaña (/que-paso), no un sub-tab de Históricos
+        pg = await ac.get("/que-paso")
         assert pg.status_code == 200 and 'id="hist-semanal"' in pg.text and "Qué pasó" in pg.text
 
 

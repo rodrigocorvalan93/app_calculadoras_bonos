@@ -293,6 +293,13 @@ def _segment_curve(rows: list, width: int = 460, height: int = 210) -> Optional[
             "before": before, "after": after, "yticks": yticks, "xticks": xticks}
 
 
+@router.get("/que-paso", response_class=HTMLResponse)
+async def que_paso_page(request: Request) -> HTMLResponse:
+    """Pestaña propia de 'Qué pasó' (antes sub-tab de Históricos). Sólo el shell;
+    el resumen se carga lazy vía /historicos/semanal (cómputo en executor)."""
+    return _render(request, "que_paso.html")
+
+
 @router.get("/historicos/semanal", response_class=HTMLResponse)
 async def historicos_semanal(request: Request, dias: int = 7) -> HTMLResponse:
     """Resumen de la ventana (default 1 semana) por segmento: Δ Precio % (≈ total
