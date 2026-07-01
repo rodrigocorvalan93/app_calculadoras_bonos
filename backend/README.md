@@ -158,3 +158,33 @@ una warmup task que dispare la carga sin bloquear el arranque.
 - [ ] Confirmar visualmente abriendo `http://127.0.0.1:8000/yas`,
       seleccionando TXMJ9v y comparando con la app Streamlit corriendo
       en paralelo.
+
+## Auth (login wall + roles)
+
+La app tiene un muro de login con 3 roles: **superuser**, **premium**,
+**básico**. El superuser gestiona usuarios y qué pestañas ve cada rol desde
+`/admin`. Config por env (nada de contraseñas en el código):
+
+```
+AUTH_ENABLED=1                       # 0 apaga el muro (dev/emergencia)
+APP_SECRET_KEY=<hex largo>           # firma de la cookie de sesión (si falta
+                                     # se autogenera y persiste en el store)
+APP_USERS_PATH=auth_store.json       # store de usuarios (gitignored). Default: raíz
+APP_SUPERUSER_USER=rodricor93        # se siembra en el 1er arranque si no hay superuser
+APP_SUPERUSER_PASSWORD=<tu clave>
+APP_SUPERUSER_EMAIL=vos@ejemplo.com
+APP_BASE_URL=https://tuapp.example   # para los links de reset por mail
+
+# SMTP para recuperación de contraseña (Gmail: App Password, no la clave normal)
+APP_SMTP_HOST=smtp.gmail.com
+APP_SMTP_PORT=587
+APP_SMTP_USER=vos@gmail.com
+APP_SMTP_PASSWORD=<app password>
+APP_SMTP_FROM=vos@gmail.com
+```
+
+- El hash de contraseñas es PBKDF2-HMAC-SHA256 con salt por usuario (stdlib).
+- El gating es a nivel de página: las sub-rutas (partials/data) sólo piden
+  sesión. Overhead del middleware: ~0,2 ms/request (cookie HMAC + lookups).
+- Recuperación: `/forgot` manda un link de reset por mail (si SMTP está
+  configurado); el superuser también puede resetear cualquier clave desde `/admin`.

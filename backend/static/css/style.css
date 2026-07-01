@@ -659,6 +659,33 @@ select {
   border-color: var(--green);
 }
 
+/* ── Auth (login / recuperación) ──────────────────────────────────── */
+.auth-body { min-height: 100vh; display: grid; place-items: center; padding: 24px;
+  background: var(--bg); }
+.auth-card { width: 100%; max-width: 360px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 26px 24px; }
+.auth-brand { display: flex; align-items: center; gap: 8px; color: var(--accent);
+  font-weight: 700; font-size: 14px; margin-bottom: 18px; }
+.auth-title { font-size: 20px; margin: 0 0 14px; }
+.auth-form { display: flex; flex-direction: column; gap: 12px; }
+.auth-form .field { display: flex; flex-direction: column; gap: 4px; }
+.auth-form input { width: 100%; }
+.auth-form .btn-primary { margin-top: 4px; padding: 9px; font-size: 14px; }
+.auth-links { margin: 14px 0 0; font-size: 12.5px; }
+.auth-links a { color: var(--accent); }
+
+/* ── Chip de usuario en la topbar ─────────────────────────────────── */
+.user-chip { font-size: 12px; color: var(--text-soft); padding: 2px 8px;
+  border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
+
+/* ── Panel de administración ──────────────────────────────────────── */
+.admin-grid { display: grid; gap: 16px; grid-template-columns: 1fr; max-width: 900px; }
+.admin-users td, .admin-tabs td, .admin-users th, .admin-tabs th { padding: 6px 12px; }
+.btn-mini { background: var(--panel-2); border: 1px solid var(--border); color: var(--text-soft);
+  border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 12px; line-height: 1; }
+.btn-mini:hover { border-color: var(--accent); color: var(--text); }
+.btn-danger:hover { border-color: var(--red); color: var(--red); }
+
 /* ── Nueva especie (form ad-hoc) ──────────────────────────────────── */
 .nueva-grid {
   display: grid;

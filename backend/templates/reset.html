@@ -1,0 +1,22 @@
+{% extends "auth_base.html" %}
+{% block title %}Nueva contraseña{% endblock %}
+{% block content %}
+<h1 class="auth-title">Nueva contraseña</h1>
+{% if done %}
+  <div class="alert alert-ok">Contraseña actualizada. Ya podés <a href="/login">ingresar</a>.</div>
+{% elif not valid %}
+  <div class="alert alert-error">El link no es válido o expiró. <a href="/forgot">Pedí uno nuevo</a>.</div>
+{% else %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <p class="muted">Usuario: <b>{{ username }}</b></p>
+  <form method="post" action="/reset" class="auth-form">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label class="field"><span>Nueva contraseña</span>
+      <input type="password" name="password" required minlength="6" autofocus></label>
+    <label class="field"><span>Repetir</span>
+      <input type="password" name="password2" required minlength="6"></label>
+    <button class="btn-primary" type="submit">Guardar</button>
+  </form>
+{% endif %}
+<p class="auth-links"><a href="/login">Volver a ingresar</a></p>
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Administración{% endblock %}
+
+{% block content %}
+<section class="admin">
+  <header class="yas-header">
+    <h1>Administración</h1>
+    <p class="muted">Gestión de usuarios (usuario · contraseña · categoría) y qué pestañas ve cada rol.
+      Sólo el superuser accede a este panel.</p>
+  </header>
+
+  {% if msg %}<div class="alert alert-ok">{{ msg }}</div>{% endif %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+  <div class="admin-grid">
+    {# ── Alta de usuario ── #}
+    <div class="card">
+      <div class="card-title"><span>Nuevo usuario</span></div>
+      <div class="card-body">
+        <form method="post" action="/admin/users" class="yas-form">
+          <div class="row-fields">
+            <label class="field"><span>Usuario</span><input name="username" required autocomplete="off"></label>
+            <label class="field"><span>Contraseña</span><input type="password" name="password" required minlength="6" autocomplete="new-password"></label>
+            <label class="field"><span>Email</span><input name="email" type="email" autocomplete="off" placeholder="opcional"></label>
+            <label class="field"><span>Categoría</span>
+              <select name="role">
+                {% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == 'basico' else '' }}>{{ role_labels[r] }}</option>{% endfor %}
+              </select></label>
+            <button class="btn-primary" type="submit" style="align-self:flex-end">Crear</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {# ── Usuarios existentes ── #}
+    <div class="card">
+      <div class="card-title"><span>Usuarios</span><span class="card-title-aux">{{ users | length }}</span></div>
+      <div class="card-body" style="padding:0">
+        <table class="cashflows admin-users">
+          <thead><tr><th style="text-align:left">Usuario</th><th style="text-align:left">Email</th>
+            <th>Categoría</th><th>Contraseña</th><th></th></tr></thead>
+          <tbody>
+            {% for u in users %}
+            <tr>
+              <td style="text-align:left"><b>{{ u.username }}</b></td>
+              <td style="text-align:left" class="muted">{{ u.email or '—' }}</td>
+              <td>
+                <form method="post" action="/admin/users/role" style="display:inline-flex;gap:4px;align-items:center">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <select name="role" onchange="this.form.submit()">
+                    {% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == u.role else '' }}>{{ role_labels[r] }}</option>{% endfor %}
+                  </select>
+                </form>
+              </td>
+              <td>
+                <form method="post" action="/admin/users/password" style="display:inline-flex;gap:4px;align-items:center">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <input type="password" name="password" placeholder="nueva" minlength="6" required style="width:90px" autocomplete="new-password">
+                  <button type="submit" class="btn-mini">↻</button>
+                </form>
+              </td>
+              <td>
+                <form method="post" action="/admin/users/delete" onsubmit="return confirm('¿Borrar {{ u.username }}?')">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <button type="submit" class="btn-mini btn-danger" title="Borrar">✕</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# ── Pestañas por rol ── #}
+    <div class="card">
+      <div class="card-title"><span>Pestañas visibles por rol</span>
+        <span class="card-title-aux">el superuser ve todas</span></div>
+      <div class="card-body">
+        <form method="post" action="/admin/tabs">
+          <table class="cashflows admin-tabs">
+            <thead><tr><th style="text-align:left">Pestaña</th><th>Premium</th><th>Básico</th></tr></thead>
+            <tbody>
+              {% for t in tabs %}
+              <tr>
+                <td style="text-align:left">{{ t.label }}</td>
+                <td><input type="checkbox" name="tab_premium_{{ t.key }}" {{ 'checked' if t.key in role_tabs.premium else '' }}></td>
+                <td><input type="checkbox" name="tab_basico_{{ t.key }}" {{ 'checked' if t.key in role_tabs.basico else '' }}></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <div style="margin-top:10px"><button class="btn-primary" type="submit">Guardar permisos</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

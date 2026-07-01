@@ -1,0 +1,19 @@
+{% extends "auth_base.html" %}
+{% block title %}Ingresar{% endblock %}
+{% block content %}
+<h1 class="auth-title">Ingresar</h1>
+{% if no_superuser %}
+  <div class="alert alert-error">No hay superuser configurado. Seteá <code>APP_SUPERUSER_USER</code> /
+    <code>APP_SUPERUSER_PASSWORD</code> en las env vars y reiniciá la app.</div>
+{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+<form method="post" action="/login" class="auth-form">
+  <input type="hidden" name="next" value="{{ next }}">
+  <label class="field"><span>Usuario</span>
+    <input name="username" autocomplete="username" autofocus required></label>
+  <label class="field"><span>Contraseña</span>
+    <input type="password" name="password" autocomplete="current-password" required></label>
+  <button class="btn-primary" type="submit">Ingresar</button>
+</form>
+<p class="auth-links"><a href="/forgot">¿Olvidaste tu contraseña?</a></p>
+{% endblock %}

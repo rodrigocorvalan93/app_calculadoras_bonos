@@ -1,0 +1,19 @@
+{% extends "auth_base.html" %}
+{% block title %}Recuperar contraseña{% endblock %}
+{% block content %}
+<h1 class="auth-title">Recuperar contraseña</h1>
+{% if sent %}
+  <div class="alert alert-ok">Si el usuario o email existe, te enviamos un link para restablecerla (vence en 1 hora). Revisá tu correo.</div>
+  {% if not smtp_ok %}
+  <div class="alert">SMTP no está configurado, así que el mail no salió. Pedile al superuser que te resetee la contraseña desde su panel.</div>
+  {% endif %}
+{% else %}
+  <p class="muted">Ingresá tu usuario o email y te mandamos un link para restablecerla.</p>
+  <form method="post" action="/forgot" class="auth-form">
+    <label class="field"><span>Usuario o email</span>
+      <input name="identifier" autocomplete="username" required autofocus></label>
+    <button class="btn-primary" type="submit">Enviar link</button>
+  </form>
+{% endif %}
+<p class="auth-links"><a href="/login">Volver a ingresar</a></p>
+{% endblock %}

@@ -149,3 +149,7 @@ tests/__pycache__/
 # Si algo de la lista de arriba alguna vez tiene que versionarse,
 # se agrega con `!` en la sección 2.
 # ======================================================================
+
+# Auth store (usuarios + hashes) — NUNCA commitear
+auth_store.json
+auth_store.json.tmp
