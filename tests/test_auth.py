@@ -151,6 +151,26 @@ async def test_reset_token_flow(auth_on):
         assert "no es válido" in bad.text or "expiró" in bad.text
 
 
+def test_seed_users_script(tmp_path, monkeypatch):
+    """El script de seed crea los usuarios con el rol pedido, sólo guarda el hash
+    y es idempotente (2da corrida no duplica ni rompe)."""
+    import importlib
+    monkeypatch.setattr(settings, "app_users_path", str(tmp_path / "seed.json"))
+    auth.refresh()
+    seed = importlib.import_module("scripts.seed_users")
+    seed.main(["jpaolicchi:premium", "jrivasrivas:basico"])
+    assert auth.role_of("jpaolicchi") == "premium"
+    assert auth.role_of("jrivasrivas") == "basico"
+    # el store no guarda la clave en claro, sólo hash+salt
+    import json
+    raw = json.loads((tmp_path / "seed.json").read_text(encoding="utf-8"))
+    assert "hash" in raw["users"]["jpaolicchi"] and "password" not in raw["users"]["jpaolicchi"]
+    # idempotente
+    seed.main(["jpaolicchi:premium"])
+    assert sum(1 for u in auth.list_users() if u["username"] == "jpaolicchi") == 1
+    auth.refresh()
+
+
 @pytest.mark.asyncio
 async def test_no_borrar_ultimo_superuser(auth_on):
     async with _client() as su:
