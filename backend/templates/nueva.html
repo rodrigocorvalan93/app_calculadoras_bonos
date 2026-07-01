@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Nueva especie{% endblock %}
+{% block tab_nueva %}active{% endblock %}
+
+{% block content %}
+<section class="yas" x-data="{ tab: 'form' }">
+  <header class="yas-header">
+    <h1>Nueva especie · calculadora ad-hoc</h1>
+    <p class="muted">Armá un bono con el formulario guiado <em>o</em> pegá una ficha estilo
+      <code>especies.py</code>. Calcula cashflow y métricas en vivo sin tocar el universo.
+      Opcional: <strong>Guardar</strong> lo agrega a <code>especies.py</code> para el próximo arranque.</p>
+  </header>
+
+  <div style="display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)">
+    <button @click="tab='form'"
+            :style="tab==='form' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
+            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">🧮 Generar ficha</button>
+    <button @click="tab='pegar'"
+            :style="tab==='pegar' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
+            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📋 Pegar ficha</button>
+  </div>
+
+  {# ── Formulario guiado ── #}
+  <form x-show="tab==='form'" class="yas-form nueva-form"
+        hx-post="/nueva/parse" hx-target="#nueva-panel" hx-swap="innerHTML">
+    <input type="hidden" name="entrada" value="form">
+    <div class="nueva-grid">
+      <label class="field"><span>Código / ticker</span>
+        <input type="text" name="codigo" placeholder="ADHOC1" autocomplete="off" required></label>
+      <label class="field"><span>Nombre</span>
+        <input type="text" name="nombre" placeholder="Bono ad-hoc 3 años" autocomplete="off"></label>
+      <label class="field"><span>Moneda</span>
+        <select name="moneda">
+          <option value="ARS">ARS (pesos)</option>
+          <option value="USD">USD (cable / hard-dollar)</option>
+          <option value="USB">USB (MEP / hard-dollar)</option>
+          <option value="DLK">DLK (dólar-linked)</option>
+        </select></label>
+      <label class="field"><span>Clasificación</span>
+        <input type="text" name="clasificacion" placeholder="Soberano / Hard Dolar…" autocomplete="off"></label>
+
+      <label class="field"><span>Emisión</span>
+        <input type="text" name="emision" placeholder="DD/MM/AAAA" autocomplete="off" required></label>
+      <label class="field"><span>Vencimiento</span>
+        <input type="text" name="vencimiento" placeholder="DD/MM/AAAA" autocomplete="off" required></label>
+      <label class="field"><span>Primer cupón <i class="muted">(opcional)</i></span>
+        <input type="text" name="primer_cupon" placeholder="auto" autocomplete="off"></label>
+      <label class="field"><span>Frecuencia (pagos/año)</span>
+        <select name="frecuencia">
+          <option value="1">Anual (1)</option>
+          <option value="2" selected>Semestral (2)</option>
+          <option value="3">Cuatrimestral (3)</option>
+          <option value="4">Trimestral (4)</option>
+          <option value="6">Bimestral (6)</option>
+          <option value="12">Mensual (12)</option>
+        </select></label>
+
+      <label class="field"><span>Tipo de tasa</span>
+        <select name="tipo_tasa">
+          <option value="FIJA">Fija</option>
+          <option value="VARIABLE">Variable (BADLAR/TAMAR)</option>
+          <option value="VARIABLE_CAP">Variable cap (TAMAR dual)</option>
+        </select></label>
+      <label class="field"><span>Cupón / Spread (%)</span>
+        <input type="text" inputmode="decimal" name="cupon" placeholder="5" autocomplete="off"></label>
+      <label class="field"><span>Índice <i class="muted">(si variable)</i></span>
+        <select name="index">
+          <option value="">—</option>
+          <option value="TAMAR">TAMAR</option>
+          <option value="BADLAR">BADLAR</option>
+        </select></label>
+      <label class="field"><span>Ajuste sobre capital</span>
+        <select name="ajuste">
+          <option value="">Ninguno</option>
+          <option value="CER">CER</option>
+          <option value="CER PROYECTADO">CER proyectado</option>
+          <option value="UVA">UVA</option>
+          <option value="UVA PROYECTADO">UVA proyectado</option>
+          <option value="A3500">A3500 (DLK)</option>
+          <option value="A3500 PROYECTADO">A3500 proyectado</option>
+        </select></label>
+
+      <label class="field"><span>Amortización</span>
+        <select name="tipo_amortizacion" x-data x-ref="amort">
+          <option value="BULLET">Bullet (al vto.)</option>
+          <option value="AMORTIZABLE">Amortizable</option>
+        </select></label>
+      <label class="field"><span>Cuotas finales iguales</span>
+        <input type="text" inputmode="numeric" name="cuotas_finales" value="1" autocomplete="off"
+               title="Nº de últimas cuotas que amortizan por partes iguales (ignorado si bullet o si ponés lista custom)"></label>
+      <label class="field"><span>Amort. custom <i class="muted">(opcional)</i></span>
+        <input type="text" name="amortizacion_custom" placeholder="ej 0,0,50,50" autocomplete="off"
+               title="Lista separada por comas, 1 valor por cupón, suma = VN"></label>
+      <label class="field"><span>Valor nominal</span>
+        <input type="text" inputmode="decimal" name="valor_nominal" value="100" autocomplete="off"></label>
+
+      <label class="field"><span>Convención devengamiento</span>
+        <select name="convencion_devengamiento">
+          <option value="Actual">Actual</option>
+          <option value="ISMA-30">ISMA-30</option>
+          <option value="NASD-30">NASD-30</option>
+        </select></label>
+      <label class="field"><span>Convención base</span>
+        <select name="convencion_base">
+          <option value="365">365</option>
+          <option value="360">360</option>
+        </select></label>
+      <label class="field"><span>Quote price</span>
+        <select name="quote_price_cnv">
+          <option value="DIRTY">Dirty</option>
+          <option value="CLEAN">Clean</option>
+        </select></label>
+    </div>
+    <div style="margin-top:12px"><button type="submit" class="btn-primary">Generar y calcular</button></div>
+  </form>
+
+  {# ── Pegar ficha ── #}
+  <form x-show="tab==='pegar'" x-cloak class="yas-form"
+        hx-post="/nueva/parse" hx-target="#nueva-panel" hx-swap="innerHTML">
+    <input type="hidden" name="entrada" value="pegar">
+    <label class="field" style="display:block">
+      <span>Ficha (dict estilo <code>especies.py</code> — acepta comentarios y aritmética de listas)</span>
+      <textarea name="ficha_text" rows="16" spellcheck="false" autocomplete="off"
+                style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;tab-size:2"
+                placeholder='AL30 = {&#10;    "Nombre Security": "…",&#10;    "Código": "AL30",&#10;    …&#10;    "Amortización": ([0]*6 + [4] + [8]*12),&#10;    …&#10;}'></textarea>
+    </label>
+    <div style="margin-top:10px"><button type="submit" class="btn-primary">Parsear y calcular</button></div>
+  </form>
+
+  <div id="nueva-panel" aria-live="polite" style="margin-top:18px">
+    <p class="muted" style="font-size:12px">Generá o pegá una ficha para ver el resultado.</p>
+  </div>
+</section>
+{% endblock %}

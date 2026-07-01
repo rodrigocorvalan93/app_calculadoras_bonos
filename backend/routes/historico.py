@@ -246,12 +246,62 @@ async def historicos_curva_data(curve: str = "", metric: str = "TIREA",
                          "bands": bands, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")})
 
 
+def _segment_curve(rows: list, width: int = 460, height: int = 210) -> Optional[Dict[str, Any]]:
+    """SVG de "cómo se movió la curva" de un segmento: TIR (%) vs Duration, con dos
+    trazos — 'antes' (inicio de la ventana) y 'ahora' (fin) — sobre los mismos bonos.
+
+    Puro geometría sobre `rows` (dur / tir0 / tir1) que ya trae `weekly_segments`; no
+    lee nada nuevo → cero costo extra. Devuelve None si no hay ≥2 bonos con duration y
+    TIR en ambos extremos (no se puede trazar una curva)."""
+    pts = [(r.get("dur"), r.get("tir0"), r.get("tir1")) for r in rows]
+    pts = [(d, a, b) for d, a, b in pts
+           if d is not None and d == d and a is not None and a == a and b is not None and b == b]
+    if len(pts) < 2:
+        return None
+    pts.sort(key=lambda p: p[0])
+    scale = 100.0
+    xs = [d for d, _, _ in pts]
+    ys = [v * scale for _, a, b in pts for v in (a, b)]
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    if xmax == xmin:
+        xmax = xmin + 1.0
+    if ymax == ymin:
+        ymax = ymin + 1.0
+    padx = (xmax - xmin) * 0.06
+    pady = (ymax - ymin) * 0.10
+    xmin -= padx; xmax += padx
+    ymin -= pady; ymax += pady
+    ml, mr, mt, mb = 44, 12, 12, 30
+    pw, ph = width - ml - mr, height - mt - mb
+
+    def sx(d): return round(ml + (d - xmin) / (xmax - xmin) * pw, 1)
+    def sy(v): return round(mt + (1 - (v - ymin) / (ymax - ymin)) * ph, 1)
+
+    def _nodes(sel):
+        return [{"x": sx(d), "y": sy((a if sel == 0 else b) * scale),
+                 "dur": d, "tir": (a if sel == 0 else b) * scale} for d, a, b in pts]
+
+    before = _nodes(0)
+    after = _nodes(1)
+    path_before = "M " + " L ".join(f"{n['x']},{n['y']}" for n in before)
+    path_after = "M " + " L ".join(f"{n['x']},{n['y']}" for n in after)
+    yticks = [{"y": sy(ymin + (ymax - ymin) / 4 * i), "v": round(ymin + (ymax - ymin) / 4 * i, 1)} for i in range(5)]
+    xticks = [{"x": sx(xmin + (xmax - xmin) / 4 * i), "v": round(xmin + (xmax - xmin) / 4 * i, 2)} for i in range(5)]
+    return {"width": width, "height": height, "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph,
+            "path_before": path_before, "path_after": path_after,
+            "before": before, "after": after, "yticks": yticks, "xticks": xticks}
+
+
 @router.get("/historicos/semanal", response_class=HTMLResponse)
 async def historicos_semanal(request: Request, dias: int = 7) -> HTMLResponse:
     """Resumen de la ventana (default 1 semana) por segmento: Δ Precio % (≈ total
     return realizado) y Δ TIR (pp) de CER corto/medio/largo, Tasa fija, TAMAR,
-    Globales, Bonares, DLK — más la deva del dólar A3500. Cómputo en executor."""
+    Globales, Bonares, DLK — más la deva del dólar A3500. Cómputo en executor.
+    Adjunta a cada segmento el SVG de 'curva antes/ahora' (TIR vs duration)."""
     dias = max(1, min(int(dias or 7), 120))
     loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(None, historico_byma.weekly_segments, dias)
+    for seg in res.get("segments", []):
+        seg["curve"] = _segment_curve(seg.get("rows") or [])
     return _render(request, "partials/historico_semanal.html", w=res, dias=dias)

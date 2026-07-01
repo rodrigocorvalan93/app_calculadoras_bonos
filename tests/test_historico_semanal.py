@@ -137,6 +137,60 @@ def test_index_at_robusto_a_indice_mixto():
     assert hb._index_at("a3500", "tca3500", start) is not None
 
 
+def test_segment_curve_geometria():
+    """El SVG de 'curva antes/ahora' necesita ≥2 bonos con dur + TIR en ambos
+    extremos; con menos devuelve None. Ejes: X=duration, Y=TIR (×100)."""
+    from backend.routes.historico import _segment_curve
+    rows = [
+        {"code": "A", "dur": 0.5, "tir0": 0.30, "tir1": 0.28},
+        {"code": "B", "dur": 1.5, "tir0": 0.32, "tir1": 0.29},
+        {"code": "C", "dur": 2.5, "tir0": None, "tir1": 0.31},   # descartada (tir0 None)
+    ]
+    c = _segment_curve(rows)
+    assert c is not None
+    assert len(c["before"]) == 2 and len(c["after"]) == 2       # C descartada
+    assert c["path_before"].startswith("M ") and c["path_after"].startswith("M ")
+    assert len(c["yticks"]) == 5 and len(c["xticks"]) == 5
+    # ordenado por duration → primer nodo es el de dur menor
+    assert c["after"][0]["dur"] == 0.5
+    assert _segment_curve(rows[:1]) is None                     # 1 punto → sin curva
+    assert _segment_curve([]) is None
+
+
+@pytest.mark.asyncio
+async def test_historicos_semanal_curva_render():
+    """Con ≥2 bonos CER en el mismo bucket, el partial dibuja el SVG de curva
+    antes/ahora (leyenda + paths) dentro del acordeón del segmento."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    bond_universe.ensure_loaded()
+    cer = curves.build_curve_codes().get("cer", [])
+    if len(cer) < 2:
+        pytest.skip("se necesitan ≥2 CER")
+    c0, c1 = cer[0], cer[1]
+    prev = hb._cache
+    hb._cache = {
+        "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"),
+        "by_code": {
+            c0: {"dates": ["2026-06-18", "2026-06-25"],
+                 "vals": {"Last Price": [100.0, 101.0], "TIREA": [0.50, 0.48],
+                          "TEM": [0.030, 0.029], "Duration": [0.3, 0.3]}},
+            c1: {"dates": ["2026-06-18", "2026-06-25"],
+                 "vals": {"Last Price": [100.0, 100.5], "TIREA": [0.52, 0.49],
+                          "TEM": [0.031, 0.030], "Duration": [0.45, 0.45]}},
+        },
+    }
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+            r = await ac.get("/historicos/semanal?dias=7")
+    finally:
+        hb._cache = prev
+    assert r.status_code == 200 and "Traceback" not in r.text
+    assert "Cómo se movió la curva" in r.text and "sem-curve" in r.text
+    assert "sem-lg-before" in r.text and "sem-lg-after" in r.text
+
+
 @pytest.mark.asyncio
 async def test_historicos_semanal_endpoint_no_crash():
     from httpx import ASGITransport, AsyncClient

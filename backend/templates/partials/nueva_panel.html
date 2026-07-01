@@ -1,0 +1,47 @@
+{# Panel completo tras /nueva/parse: encabezado + form de cálculo + resultado. #}
+<div class="bond-strip">
+  <div class="bond-strip-id">
+    <span class="bond-code">{{ meta.codigo }}</span>
+    <span class="bond-name">{{ meta.nombre }}</span>
+  </div>
+  <ul class="bond-strip-meta">
+    <li><strong>Vto.</strong> {{ meta.vencimiento or "—" }}</li>
+    <li><strong>Emisión</strong> {{ meta.emision or "—" }}</li>
+    <li><strong>Moneda</strong> {{ meta.moneda or "—" }}</li>
+    <li><strong>Tipo tasa</strong> {{ meta.tipo_tasa_interes or "—" }}</li>
+    {% if meta.index %}<li><strong>Índice</strong> {{ meta.index }}</li>{% endif %}
+    {% if meta.ajuste_sobre_capital %}<li><strong>Ajuste</strong> {{ meta.ajuste_sobre_capital }}</li>{% endif %}
+    <li><strong>Amort.</strong> {{ meta.tipo_amortizacion or "—" }}</li>
+    <li><strong>Frec.</strong> {{ meta.frecuencia or "—" }}</li>
+    <li><strong>Cupones</strong> {{ n_cupones }}</li>
+  </ul>
+</div>
+
+<form class="yas-form nueva-calc" style="margin-top:12px"
+      hx-post="/nueva/recompute" hx-target="#nueva-result" hx-swap="innerHTML"
+      hx-trigger="change, keyup changed delay:120ms from:input[name=value]"
+      x-data="{ mode: {{ mode | tojson }}, useSettle: false }">
+  <input type="hidden" name="token" value="{{ token }}">
+  <div class="form-row">
+    <fieldset class="field field-mode">
+      <label><input type="radio" name="mode" value="precio" x-model="mode"> Precio</label>
+      <label><input type="radio" name="mode" value="tir" x-model="mode"> TIREA</label>
+      <label><input type="radio" name="mode" value="tna" x-model="mode"> TNA</label>
+      <label><input type="radio" name="mode" value="margen" x-model="mode"> Margen</label>
+    </fieldset>
+    <label class="field field-value">
+      <span x-text="({precio:'Precio (% VN)',tir:'TIREA (decimal)',tna:'TNA (decimal)',margen:'Margen TNA (decimal)'})[mode]"></span>
+      <input type="text" inputmode="decimal" name="value" value="{{ default_value }}" autocomplete="off"
+             :placeholder="({precio:'87,30',tir:'0,40',tna:'0,38',margen:'0,02'})[mode]">
+    </label>
+    <label class="field-toggle"><input type="checkbox" x-model="useSettle"> Settle custom</label>
+    <label class="field" x-show="useSettle" x-cloak>
+      <span>Fecha liq. (DD/MM/AAAA)</span>
+      <input type="text" name="settle_custom" placeholder="DD/MM/AAAA" autocomplete="off">
+    </label>
+  </div>
+</form>
+
+<div id="nueva-result" aria-live="polite">
+  {% include "partials/nueva_result.html" %}
+</div>

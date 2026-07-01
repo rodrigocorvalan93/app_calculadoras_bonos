@@ -40,6 +40,7 @@ from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
 from backend.routes.tape import router as tape_router
 from backend.routes.yas import router as yas_router
+from backend.routes.nueva import router as nueva_router
 from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, symbols as syms
 from backend.services.primary_ws import get_ws_client
 from backend.services.warmup import get_daemon as get_warmup_daemon
@@ -277,6 +278,7 @@ def create_app() -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(yas_router)
+    app.include_router(nueva_router)
     app.include_router(comparador_router)
     app.include_router(conexion_router)
     app.include_router(creditos_router)

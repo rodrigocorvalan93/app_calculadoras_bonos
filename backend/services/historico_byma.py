@@ -408,7 +408,11 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
                 dtirs.append(dtir)
             members.append(code)
             rows.append({"code": code, "dur": dur, "dprice": dprice, "dtir": dtir,
-                         "dtem": dtem, "margen": margen, "dmargen": dmargen})
+                         "dtem": dtem, "margen": margen, "dmargen": dmargen,
+                         # TIREA absoluta al inicio/fin de la ventana → alimenta el
+                         # gráfico "curva antes/ahora" (TIR vs duration). El Δ ya está
+                         # en dtir; acá van los niveles para poder trazar las 2 curvas.
+                         "tir0": t0, "tir1": t1})
         if members:
             rows.sort(key=lambda r: (r["dur"] is None, r["dur"] or 0.0))
             segments.append({"key": cat.key, "label": cat.label, "n": len(members),

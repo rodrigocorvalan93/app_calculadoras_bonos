@@ -389,6 +389,7 @@ def compute_metrics(
     freq_override: Optional[int] = None,
     base_override: Optional[int] = None,
     include_cashflows: bool = True,
+    obj_override: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Run a YAS calc end-to-end and return numerics + ticket + cashflow.
 
@@ -397,6 +398,12 @@ def compute_metrics(
       tir     → value is TIREA in decimal (e.g. 0.42)
       tna     → value is TNA in decimal, inverted with `tirea_from_tna`
       margen  → spread over benchmark; TNA target = bench/100 + margen
+
+    `obj_override`: price an *ad-hoc* `rentafija.Bono` that is NOT in the
+    universe (especie ad-hoc: ficha pegada / generada). We `copy.copy` it so
+    the caller's instance is never mutated, mirroring `_bond_obj_copy`. The
+    whole downstream pipeline (TNA, duration, cashflows, index_applied) is
+    reused unchanged — zero coupling to `especies.py`.
     """
     base = dict(NAN_METRICS)
     base["codigo"] = code
@@ -406,7 +413,7 @@ def compute_metrics(
     base["freq_override"] = freq_override
     base["base_override"] = base_override
 
-    obj = _bond_obj_copy(code)
+    obj = copy.copy(obj_override) if obj_override is not None else _bond_obj_copy(code)
     if obj is None:
         base["error"] = f"Bono '{code}' no encontrado."
         return base
