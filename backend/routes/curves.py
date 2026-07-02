@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import math
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from types import SimpleNamespace
@@ -685,12 +686,28 @@ async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str
 
 
 def _price_overrides(request: Request) -> dict[str, float]:
-    """Lee los `price_<CODE>` del query (what-if): precio nativo % VN > 0."""
+    """Lee los `price_<CODE>` del query (what-if): precio nativo % VN > 0.
+
+    Los inputs del what-if son <input type="number">, que SIEMPRE serializan en
+    formato inglés (punto = decimal, sin separador de miles) sin importar el
+    locale del browser. Por eso NO se parsean con parse_ar_num: su heurística
+    es-AR trata '1.234' como mil-doscientos-treinta-y-cuatro → precio 1000×.
+    float() es el parser correcto para un type=number; parse_ar_num queda de
+    fallback defensivo por si el valor llega manipulado o el input cambia a text.
+    """
     out: dict[str, float] = {}
     for k, v in request.query_params.multi_items():
         if not k.startswith("price_"):
             continue
-        f = parse_ar_num(v)           # es-AR: '50.000,00' (miles) ya no se descarta
+        s = (v or "").strip()
+        if not s:
+            continue
+        try:
+            f = float(s)                       # type=number → formato inglés
+            if not math.isfinite(f):
+                continue
+        except ValueError:
+            f = parse_ar_num(v)                # fallback (input no-number / manipulado)
         if f is not None and f > 0:
             out[k[len("price_"):]] = f
     return out

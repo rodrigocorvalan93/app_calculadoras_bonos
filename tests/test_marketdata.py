@@ -59,6 +59,18 @@ def test_update_from_md_merges_book_and_trade() -> None:
     assert snap.vwap() == 50_000_000 / 715_000
 
 
+def test_close_ts_from_list_form() -> None:
+    """Regresión #38: CL como lista-de-dicts también debe actualizar close_ts
+    (antes sólo se leía la fecha del caso dict → fecha de cierre vieja/blanca)."""
+    store = mds.MarketDataStore()
+    # forma dict (ya andaba)
+    s1 = store.update_from_md("A", {"CL": {"price": 70.1, "date": "2026-05-27T17:00:00"}})
+    assert s1.close == 70.1 and s1.close_ts == "2026-05-27T17:00:00"
+    # forma lista-de-dicts (el bug)
+    s2 = store.update_from_md("B", {"CL": [{"price": 99.5, "date": "2026-05-28T17:00:00"}]})
+    assert s2.close == 99.5 and s2.close_ts == "2026-05-28T17:00:00"
+
+
 def test_update_from_md_keeps_sticky_fields() -> None:
     """A second push that only carries a new LA shouldn't blow away BI/OF."""
     store = mds.MarketDataStore()

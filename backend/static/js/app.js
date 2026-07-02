@@ -14,6 +14,14 @@
 //   4) Live dot in the topbar: green pulse while ticks flow, gray when the
 //      market is quiet, amber if /market/seq is unreachable.
 
+// El riel del dólar se oculta con Alpine (x-show) pero queda en el DOM, así que
+// sin esto seguía polleando /dolares/rail en cada md-update + cada 30s aunque
+// estuviera plegado. El trigger del riel usa [fxRailOpen()] como filtro htmx.
+window.fxRailOpen = function () {
+  var l = document.querySelector('.layout');
+  return !l || !l.classList.contains('rail-closed');
+};
+
 (function () {
   // htmx custom event hooks (debug logging behind a flag).
   if (window.localStorage.getItem('yas_debug') === '1') {

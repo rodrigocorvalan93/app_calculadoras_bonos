@@ -168,8 +168,14 @@ class MarketDataStore:
                 v = _md_value(raw, "price") if entry in ("OP", "CL", "HI", "LO") else _md_value(raw, "size")
                 if v is not None:
                     setattr(snap, attr, v)
-                if entry == "CL" and isinstance(raw, dict) and raw.get("date"):
-                    snap.close_ts = str(raw.get("date"))
+                if entry == "CL":
+                    # CL puede venir como dict O lista-de-dicts (igual que LA arriba):
+                    # con la forma lista, el isinstance(raw, dict) fallaba y close_ts
+                    # quedaba viejo/blanco en las filas priceadas por cierre.
+                    d = raw[0] if (isinstance(raw, list) and raw) else raw
+                    ts = d.get("date") if isinstance(d, dict) else None
+                    if ts:
+                        snap.close_ts = str(ts)
 
             snap.updated_at = now
             self._data[symbol] = snap
