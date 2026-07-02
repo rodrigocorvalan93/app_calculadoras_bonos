@@ -361,7 +361,12 @@ def position_for(code: Optional[str]) -> Optional[Dict[str, Any]]:
     key = _strip_plazo(str(code).strip().upper())    # ignora ' CI' / ' 24hs'
     agg = by.get(key)
     if not agg:                       # fallback: TTS26v / TX26j → TTS26 / TX26 (md_symbol)
-        key = syms.calc_to_md_code(key).upper()
+        # El strip del sufijo de calc (j/v MINÚSCULA) corre sobre el case ORIGINAL:
+        # uppercasear antes ('v'→'V') lo rompía y además mutilaba tickers reales
+        # como SUPV. Se quita primero el plazo, después el sufijo j/v. Ver
+        # symbols.calc_to_md_code.
+        base = _strip_plazo(str(code).strip())       # conserva el case del sufijo j/v
+        key = syms.calc_to_md_code(base).upper()
         agg = by.get(key)
     if not agg:
         return None

@@ -85,9 +85,15 @@ def test_subscribe_payload_shape() -> None:
 
 
 def test_symbol_strips_calc_suffix() -> None:
+    # Sufijos de calc (minúscula) → se strippean
     assert syms.calc_to_md_code("TX26j") == "TX26"
     assert syms.calc_to_md_code("TXMJ9v") == "TXMJ9"
     assert syms.calc_to_md_code("GD30") == "GD30"
+    # Regresión #12: un ticker REAL terminado en V/J MAYÚSCULA no debe mutilarse.
+    # SUPV (Grupo Supervielle) se convertía en "SUP" con el strip case-insensitive
+    # y nunca levantaba precio.
+    assert syms.calc_to_md_code("SUPV") == "SUPV"
+    assert syms.md_symbol("SUPV", "24hs") == "MERV - XMEV - SUPV - 24hs"
 
 
 def test_symbol_builds_byma_ticker() -> None:
