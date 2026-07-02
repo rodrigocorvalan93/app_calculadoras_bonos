@@ -122,6 +122,30 @@ async def test_ws_start_without_creds_is_inert() -> None:
     await client.stop()
 
 
+def test_feed_alive_distingue_caido_de_quieto() -> None:
+    """`feed_alive` = conectado Y con un Md reciente. Es la señal honesta que el
+    dot/healthz deben usar en vez de `authenticated` (cookies), que sigue True con
+    el feed muerto."""
+    import time
+
+    client = pws.PrimaryWS("https://example.invalid/", store=mds.MarketDataStore())
+    # sin conexión ni mensajes → feed muerto
+    assert client.feed_alive is False
+    s = client.stats()
+    assert s["feed_alive"] is False and s["stale_seconds"] is None
+    # conectado y con un Md recién llegado → vivo
+    client._connected = True
+    client._stats["last_message_at"] = time.time()
+    assert client.feed_alive is True
+    assert client.stats()["stale_seconds"] is not None
+    # conectado pero sin datos hace rato (> STALE_AFTER) → stale, no "vivo"
+    client._stats["last_message_at"] = time.time() - (pws.PrimaryWS.STALE_AFTER + 10)
+    assert client.feed_alive is False
+    # tener cookies (authenticated) NO implica que el feed esté vivo
+    client._cookies = object()
+    assert client.authenticated is True and client.feed_alive is False
+
+
 # ── /market endpoints ────────────────────────────────────────────────
 
 

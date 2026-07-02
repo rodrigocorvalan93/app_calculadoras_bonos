@@ -419,6 +419,10 @@ def create_app() -> FastAPI:
             "status": "ok",
             "bonds_loaded": len(bond_universe.all_codes()),
             "broker_authenticated": ws.authenticated,
+            # feed_alive ≠ authenticated: la sesión REST puede seguir abierta
+            # (cookies válidas) mientras el WS de market data está muerto. Esto
+            # dice si los precios son de ahora.
+            "feed_alive": ws.feed_alive,
             "ws": ws.stats(),
             "warmup": get_warmup_daemon().stats(),
         }
