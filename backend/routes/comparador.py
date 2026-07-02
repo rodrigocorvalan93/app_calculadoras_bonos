@@ -11,6 +11,7 @@ bonos cae a valuar por el last y se marca "no aplica".
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request
@@ -159,8 +160,10 @@ async def comparador_result(
         key = (code, cm_mode, (val or "").strip(), plazo)
         return _cmp_cache.get_or_compute(key, lambda: metrics(code, val))
 
-    ma = _cached(a, val_a)
-    mb = _cached(b, val_b)
+    # Los dos pricings (cache-miss ~27 ms c/u, hasta ~101 ms en DICP/CUAP) fuera
+    # del event loop, como el resto del pricing de la app.
+    ma, mb = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: (_cached(a, val_a), _cached(b, val_b)))
 
     deltas: Dict[str, float] = {}
     swap: Optional[Dict[str, Any]] = None

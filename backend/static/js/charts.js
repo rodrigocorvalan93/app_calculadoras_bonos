@@ -158,9 +158,20 @@
     form.querySelectorAll("[name]").forEach(function (el) {
       el.addEventListener("change", function () { load(true); });
     });
-    // Refresh en vivo más calmo (8 s): suficiente para datos de curva y menos
-    // saltón. Con el zoom preservado, el refresh ya no descoloca la vista.
-    setInterval(function () { load(false); }, 8000);
+    // Refresh en vivo siguiendo el motor live (md-update ~1s tras un tick real),
+    // no un poll ciego. Throttle a 1×/2s, fallback 30s y pausa con la pestaña
+    // oculta. Antes era un setInterval fijo de 8s que redibujaba aunque no
+    // hubiera ticks ni la pestaña estuviera visible (~7,5 req/min por cliente).
+    var lastLive = 0;
+    function liveRefresh() {
+      if (document.hidden || !document.getElementById("grafico-uplot")) return;
+      var now = Date.now();
+      if (now - lastLive < 2000) return;           // throttle
+      lastLive = now;
+      load(false);
+    }
+    document.body.addEventListener("md-update", liveRefresh);
+    setInterval(liveRefresh, 30000);               // fallback (datos que no pasan por el store)
     window.addEventListener("resize", function () {
       if (u) u.setSize({ width: box.clientWidth || 900, height: 460 });
     });

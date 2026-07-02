@@ -7,6 +7,7 @@ sub-50 ms p95 sin tocar el broker en el path de request.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
@@ -92,7 +93,11 @@ async def dolares_oficial(request: Request) -> HTMLResponse:
 async def dolares_rail(request: Request, plazo: str = "24hs") -> HTMLResponse:
     """Partial htmx del riel lateral (se carga en todas las pestañas)."""
     pz = "CI" if (plazo or "").lower().startswith("ci") else "24hs"
-    _safe("macro_refresh", historico.macro_maybe_refresh, None)   # re-lee sólo 11:00 / 15:30
+    # 2×/día (11:00 / 15:30) esto re-lee la serie macro del BCRA (I/O de red, ~19 ms).
+    # Como el riel se pollea en TODAS las pestañas, ese stall congelaría el event
+    # loop para todos los usuarios a la vez → al pool.
+    await asyncio.get_running_loop().run_in_executor(
+        None, _safe, "macro_refresh", historico.macro_maybe_refresh, None)
     cauciones = _safe("caucion_rail", cauc_svc.rail_picks, [])     # [ARS, USD] (en ese orden)
     return _render(request, "partials/fx_rail.html", summary=dx.summary(pz),
                    cauciones=cauciones,

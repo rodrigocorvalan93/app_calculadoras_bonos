@@ -27810,6 +27810,11 @@ ARC1O = rentafija.Bono(ARC1O)
 ARC1C = rentafija.Bono(ARC1C)
 MGC9O = rentafija.Bono(MGC9O)
 MGC9C = rentafija.Bono(MGC9C)
+# La ficha MGCTO (ON Pampa Clase XXVII, hard-dollar MEP, vto 01/04/2029) estaba
+# definida como dict pero nunca se envolvía en Bono, así que quedaba fuera del
+# universo (bond_universe sólo enumera instancias de Bono) → ausente de toda la
+# app. Las hermanas D30A6/S30A6 quedan sin envolver A PROPÓSITO (vencidas 04/2026).
+MGCTO = rentafija.Bono(MGCTO)
 GNCXO = rentafija.Bono(GNCXO)
 GNCXC = rentafija.Bono(GNCXC)
 GN49O = rentafija.Bono(GN49O)

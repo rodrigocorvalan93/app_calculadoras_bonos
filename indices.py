@@ -13,8 +13,18 @@ import OMSsecrets  # noqa: F401 — auto-carga secrets.txt a os.environ
 import dias_habiles
 from utils import *  # trae: datetime, timedelta, pd, np, MonthEnd, requests, json, os, io, URLError, etc.
 
-# Desactiva la advertencia al usar verify=False en requests.get
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# Verificación TLS de los fetch a api.bcra.gob.ar. Estos datos (CER/UVA/A3500/
+# TAMAR/BADLAR) entran DIRECTO al cálculo de TIR/precio/ticket, así que un MITM
+# podría inyectar coeficientes de ajuste. BCRA sirve una cadena de certificados
+# válida → verificamos por defecto. Escape hatch para entornos con un proxy
+# corporativo que hace TLS-inspection: BCRA_TLS_VERIFY=0 (documentado como
+# inseguro, sólo si tu red lo exige).
+_BCRA_VERIFY = os.environ.get("BCRA_TLS_VERIFY", "1").strip().lower() not in ("0", "false", "no", "off")
+
+# Sólo silenciamos el warning de urllib3 si la verificación quedó deshabilitada
+# por env (con verify activo no hay warning que suprimir).
+if not _BCRA_VERIFY:
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 # =============================================================================
@@ -123,7 +133,7 @@ def fetch_variable_data_api_v4(id_variable, fecha_desde, fecha_hasta,
         # Lo importante es no bloquear el boot completo: como las series se
         # piden en paralelo (ver _fetch_bcra_series_paralelo), peor caso son
         # 8s en vez de 6×20=120s.
-        resp = requests.get(url, params=params, verify=False, timeout=8)
+        resp = requests.get(url, params=params, verify=_BCRA_VERIFY, timeout=8)
         resp.raise_for_status()
         data = resp.json()
 
@@ -175,7 +185,7 @@ def fetch_principales_variables():
     """
     url = "https://api.bcra.gob.ar/estadisticas/v4.0/monetarias/"
     try:
-        resp = requests.get(url, verify=False, timeout=20)
+        resp = requests.get(url, verify=_BCRA_VERIFY, timeout=20)
         resp.raise_for_status()
         data = resp.json()
         results = data.get("results", [])
@@ -1011,13 +1021,20 @@ def main():
     else:
         cer_completo_escenario_base = combined_df_cer.copy()
 
-    # El CSV es sólo un dump de cache: si el archivo está tomado (OneDrive,
-    # Excel, antivirus → Permission denied) NO debe abortar la población de
+    # Dump de inspección del CER proyectado (NADIE lo re-lee; sólo para mirarlo a
+    # mano). Antes se escribía a "cer_completo.csv", que ESTÁ versionado en git →
+    # cada indices.main() (cada boot / cada refresh) lo sobrescribía con nuevas
+    # proyecciones y ensuciaba el árbol. Lo mandamos a un path UNTRACKED (env
+    # CER_PROY_DUMP_PATH; default cer_completo.generated.csv, que el .gitignore
+    # ignora por no estar en la whitelist). Vacío ⇒ no se escribe. Si el archivo
+    # está tomado (OneDrive/Excel → Permission denied) NO aborta la población de
     # rentafija.inputs (más abajo), que es lo que necesita especies/el universo.
-    try:
-        cer_completo_escenario_base.to_csv("cer_completo.csv", header=["Proyeccion CER"])
-    except OSError as exc:
-        _log_fx.warning("[indices] no pude escribir cer_completo.csv (%s) — sigo con los datos en memoria", exc)
+    _cer_dump = os.environ.get("CER_PROY_DUMP_PATH", "cer_completo.generated.csv")
+    if _cer_dump:
+        try:
+            cer_completo_escenario_base.to_csv(_cer_dump, header=["Proyeccion CER"])
+        except OSError as exc:
+            _log_fx.warning("[indices] no pude escribir el dump CER %s (%s) — sigo con los datos en memoria", _cer_dump, exc)
 
     # UVA proyectado desde CER
     if not cer_completo_escenario_base.empty:

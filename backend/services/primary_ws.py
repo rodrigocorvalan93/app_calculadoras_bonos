@@ -121,6 +121,9 @@ class PrimaryWS:
         self._ws: Optional[websockets.ClientConnection] = None
         self._http: Optional[httpx.AsyncClient] = None
         self._cookies: Optional[httpx.Cookies] = None
+        # Credenciales guardadas para re-login en reconexión (cookie vencida).
+        self._username = ""
+        self._password = ""
         self._connected = False
         self._stats: Dict[str, Any] = {
             "connected": False,
@@ -148,10 +151,19 @@ class PrimaryWS:
         if not username or not password:
             logger.info("[primary_ws] no credentials provided, skipping login")
             return False
+        self._username, self._password = username, password   # para re-login en reconexión
         # follow_redirects=True: el login OK de Spring Security responde 302
         # -> /marketdata.html. requests (legacy) seguía el redirect por
         # defecto; httpx no. Sin esto, raise_for_status() trata el 302 como
         # error y descartamos las cookies de sesión válidas.
+        #
+        # Cerramos un cliente previo antes de reemplazarlo (re-login): si no, cada
+        # re-login filtra un AsyncClient con su pool de conexiones abierto.
+        if self._http is not None:
+            try:
+                await self._http.aclose()
+            except Exception:  # noqa: BLE001
+                pass
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=httpx.Timeout(10.0, connect=5.0),
@@ -163,6 +175,17 @@ class PrimaryWS:
                 data={"j_username": username, "j_password": password},
             )
             r.raise_for_status()
+            # Spring Security responde 200 TAMBIÉN cuando el login FALLA: redirige
+            # a /login?error, que raise_for_status ve como 200 OK. Sin validar el
+            # destino, credenciales malas devolvían True y el WS reintentaba para
+            # siempre con una sesión anónima. Si la URL final es la de login/error,
+            # el login no prosperó.
+            final = str(r.url).lower()
+            if any(k in final for k in ("login", "error", "authentication")):
+                self._stats["last_error"] = "login: credenciales rechazadas (redirect a login)"
+                self._cookies = None
+                logger.warning("[primary_ws] login RECHAZADO (redirect a %s)", r.url)
+                return False
             self._cookies = self._http.cookies
             logger.info("[primary_ws] login OK (%d cookies)", len(list(self._cookies.jar)))
             return True
@@ -321,15 +344,35 @@ class PrimaryWS:
             except (ConnectionClosed, WebSocketException):
                 return
 
+    # Sin un Md en este tiempo consideramos el feed "stale" (mercado quieto o
+    # conexión muerta). 90 s cubre holgado un mercado ilíquido intradía.
+    STALE_AFTER = 90.0
+
     def stats(self) -> Dict[str, Any]:
         s = dict(self._stats)
         s["subscriptions"] = len(self._subscriptions)
         s["rejected"] = len(self._rejected)
+        last = self._stats.get("last_message_at") or 0.0
+        s["stale_seconds"] = round(time.time() - last, 1) if last else None
+        s["feed_alive"] = self.feed_alive
         return s
 
     @property
     def authenticated(self) -> bool:
+        """Tenemos cookies de sesión para el REST del OMS. NO implica que el feed
+        de market data esté vivo — para eso, `feed_alive`."""
         return self._cookies is not None
+
+    @property
+    def feed_alive(self) -> bool:
+        """El WS está conectado Y llegó un Md hace poco. Es la señal honesta de
+        "los precios que ves son de ahora": `/healthz` y el dot del frontend deben
+        usar esto, no `authenticated` (que sigue True con la sesión abierta aunque
+        el feed lleve horas muerto)."""
+        if not self._connected:
+            return False
+        last = self._stats.get("last_message_at") or 0.0
+        return last > 0 and (time.time() - last) < self.STALE_AFTER
 
     # ── Internals ───────────────────────────────────────────────────
 
@@ -341,23 +384,54 @@ class PrimaryWS:
                 # in case `login` was called after start.
                 await asyncio.sleep(2.0)
                 continue
+            connected_at = time.monotonic()
+            clean_close = False
             try:
                 await self._connect_and_read()
-                backoff = BACKOFF_INITIAL  # clean exit (stop): reset
+                clean_close = True                  # retorno normal (server cerró)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._connected = False
-                self._stats["connected"] = False
                 self._stats["last_error"] = f"{type(exc).__name__}: {exc}"
-                logger.warning("[primary_ws] disconnected: %s — reconnect in %.0fs", exc, backoff)
-                try:
-                    await asyncio.wait_for(self._stop_evt.wait(), timeout=backoff)
-                    break  # stop set during the wait
-                except asyncio.TimeoutError:
-                    pass
-                backoff = min(backoff * 2, BACKOFF_MAX)
-                self._stats["reconnects"] += 1
+                logger.warning("[primary_ws] disconnected: %s", exc)
+            self._connected = False
+            self._stats["connected"] = False
+            if self._stop_evt.is_set():
+                break
+
+            # BUG histórico: un retorno normal de _connect_and_read (close limpio
+            # del server: 1000/1001, sesión invalidada, LB idle) reseteaba el
+            # backoff y daba otra vuelta SIN esperar → loop apretado martillando al
+            # broker, y sin contar el reconnect. Ahora el close limpio se trata como
+            # cualquier desconexión: backoff + reconnect, igual que un error.
+            uptime = time.monotonic() - connected_at
+            if clean_close:
+                self._stats["last_error"] = "server cerró la conexión (close limpio)"
+                logger.info("[primary_ws] server closed cleanly after %.0fs — reconnect", uptime)
+            # Una sesión larga y sana que recién ahora cae → el próximo intento
+            # arranca rápido (backoff bajo). Una que cae enseguida → fallo
+            # persistente: dejamos que el backoff escale.
+            if uptime >= 30.0:
+                backoff = BACKOFF_INITIAL
+            else:
+                # Caída rápida con credenciales: la sesión pudo vencer. Re-login
+                # para refrescar las cookies; si no, reconectaríamos para siempre
+                # con la MISMA cookie vencida y el feed quedaría muerto sin señal.
+                if self._username and self._password:
+                    try:
+                        if await self.login(self._username, self._password):
+                            logger.info("[primary_ws] re-login OK tras caída rápida")
+                        else:
+                            logger.warning("[primary_ws] re-login falló; reintento con cookies actuales")
+                    except Exception:  # noqa: BLE001
+                        logger.exception("[primary_ws] re-login raised")
+            self._stats["reconnects"] += 1
+            try:
+                await asyncio.wait_for(self._stop_evt.wait(), timeout=backoff)
+                break  # stop set during the wait
+            except asyncio.TimeoutError:
+                pass
+            backoff = min(backoff * 2, BACKOFF_MAX)
 
     async def _connect_and_read(self) -> None:
         cookie_hdr = _cookie_header(self._cookies)

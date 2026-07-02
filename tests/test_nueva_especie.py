@@ -211,3 +211,23 @@ async def test_nueva_endpoints():
         # token expirado en recompute
         r4 = await ac.post("/nueva/recompute", data={"token": "deadbeef", "mode": "precio", "value": "100"})
         assert r4.status_code == 200 and "alert-error" in r4.text
+
+
+def test_form_clasificacion_cae_en_curva():
+    """Regresión #15/#18: la Clasificación del <select> del form llega hasta el
+    atributo que lee curves.build_curve_codes (`clasificacion`), así una ON ad-hoc
+    cae en su curva. Antes el campo era texto libre y quedaba None/mal escrito →
+    ninguna curva. Se cubren las 7 clasificaciones corporativas del select."""
+    corp = [
+        "Corporativo Hard Dolar", "Corporativo Hard Dolar MEP", "Corporativo Tasa Fija",
+        "Corporativo TAMAR", "Corporativo BADLAR", "Corporativo UVA", "Corporativo Dolar Linked",
+    ]
+    for clas in corp:
+        ficha = adhoc.build_ficha_from_form({
+            "codigo": "TSTXO", "emision": "01/01/2026", "vencimiento": "01/01/2029",
+            "clasificacion": clas, "cupon": "10", "moneda": "USD",
+            "tipo_tasa": "FIJA", "frecuencia": "2",
+        })
+        assert ficha["Clasificación"] == clas
+        bono = adhoc.build_bono(ficha)
+        assert getattr(bono, "clasificacion", None) == clas

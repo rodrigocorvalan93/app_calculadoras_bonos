@@ -419,6 +419,13 @@ def compute_metrics(
         return base
 
     canonical_settle = _safe_settle(settle)
+    # Fecha de liquidación EXPLÍCITA pero no parseable (p. ej. settle_custom de YAS
+    # mal tipeado): antes se descartaba en silencio y se valuaba a la fecha default,
+    # mostrando métricas creíbles pero a otra fecha. Ahora avisamos en vez de
+    # engañar. `settle=None`/"" es el default legítimo y NO entra acá.
+    if settle and str(settle).strip() and canonical_settle is None:
+        base["error"] = f"Fecha de liquidación inválida: {settle!r}. Usá DD/MM/AAAA."
+        return base
     base["fecha_settlement_input"] = canonical_settle
 
     # What-if de FX (DLK/A3500): override POR-OBJETO sobre la copia per-request, no
@@ -533,12 +540,17 @@ def compute_metrics(
 
 from backend.cache import LockedTTLCache  # noqa: E402  (avoid top circular)
 
-# Curve rows poll every 5 s. We bucket the price (rounded to 2 decimals)
-# and TTL at 20 s so steady polling NEVER hits a cold cache mid-session
-# — only the very first request for a curve pays the compute cost. The
-# background warmup daemon (next step) will keep the cache hot ahead of
-# the first user click too.
-_curve_metrics_cache = LockedTTLCache(maxsize=8192, ttl=20)
+# Curve rows poll ~1×/s (md-update). La key ya identifica TODO lo que mueve la
+# TIR a un precio dado: el bono, el bucket de precio (2 decimales), el settle y
+# el fingerprint del índice (A3500/CER/UVA) — más el día (ordinal), que captura
+# el rollover de fecha (cambia días_corridos / settlement cuando el proceso cruza
+# medianoche). Como la key es exacta, el TTL puede ser LARGO sin servir números
+# viejos: con 20 s la entrada expiraba y se recomputaba en ciclo (los hits NO
+# refrescan el TTL en LockedTTLCache), y un poll de 1 s pegaba la ventana fría
+# antes que el warmup → spike de ~1,26 s por curva ancha cada ~20 s. Con 1 h el
+# warmup deja todo caliente de sobra y sólo el 1er cómputo de cada (precio,día)
+# paga; un cambio de índice o de bucket entra por la key, no por expiración.
+_curve_metrics_cache = LockedTTLCache(maxsize=16384, ttl=3600)
 
 # Bonos ajustados (DLK/CER/UVA): su TIR a un precio dado depende del índice
 # (A3500/CER/UVA), no sólo del precio. Si la key del cache no lo incluye, al
@@ -608,9 +620,11 @@ def metrics_for_market_price(
         return None
 
     bucket = round(v, 2)
-    # La key incluye el valor del índice para los DLK/CER/UVA → un cambio del
-    # A3500/CER/UVA invalida el cache (la TIR reacciona en ~2 s, no en 20 s).
-    key = (code, bucket, settle or "", _index_fingerprint(_bond_index_kind(code)))
+    # La key incluye el valor del índice (DLK/CER/UVA → un cambio del A3500/CER/UVA
+    # la invalida) y el día ordinal (rollover de fecha con settle=None → recomputa
+    # con el settlement del día nuevo, no el cacheado de ayer).
+    key = (code, bucket, settle or "", _index_fingerprint(_bond_index_kind(code)),
+           date.today().toordinal())
 
     def _factory() -> Dict[str, Any]:
         try:

@@ -10,41 +10,44 @@
       <span class="market-card-ts muted">sin data en el store</span>
     {% endif %}
   </div>
+  {# data-fl en cada valor: la market card no es tabla ni riel, así que el diff
+     de flash post-swap sólo la detecta por estas claves. Sin ellas, los precios
+     cambiaban sin el flash verde/rojo del resto de los paneles live. #}
   <div class="market-grid">
     <div class="mc-cell">
       <span class="mc-lbl">Bid</span>
-      <span class="mc-val">{{ snap.bid | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-val" data-fl="mc-bid">{{ snap.bid | ar_num(4) if snap else "—" }}</span>
       <span class="mc-sub">{{ snap.bid_size | ar_int if (snap and snap.bid_size) else "" }}</span>
     </div>
     <div class="mc-cell mc-cell-last">
       <span class="mc-lbl">Last</span>
-      <span class="mc-val">{{ snap.last | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-val" data-fl="mc-last">{{ snap.last | ar_num(4) if snap else "—" }}</span>
       <span class="mc-sub">{{ snap.last_size | ar_int if (snap and snap.last_size) else "" }}</span>
     </div>
     <div class="mc-cell">
       <span class="mc-lbl">Offer</span>
-      <span class="mc-val">{{ snap.offer | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-val" data-fl="mc-offer">{{ snap.offer | ar_num(4) if snap else "—" }}</span>
       <span class="mc-sub">{{ snap.offer_size | ar_int if (snap and snap.offer_size) else "" }}</span>
     </div>
     <div class="mc-cell">
       <span class="mc-lbl">VWAP</span>
-      <span class="mc-val">{{ snap.vwap | ar_num(4) if (snap and snap.vwap) else "—" }}</span>
+      <span class="mc-val" data-fl="mc-vwap">{{ snap.vwap | ar_num(4) if (snap and snap.vwap) else "—" }}</span>
     </div>
     <div class="mc-cell">
       <span class="mc-lbl">Open</span>
-      <span class="mc-val">{{ snap.open | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-val" data-fl="mc-open">{{ snap.open | ar_num(4) if snap else "—" }}</span>
     </div>
     <div class="mc-cell">
       <span class="mc-lbl">High</span>
-      <span class="mc-val">{{ snap.high | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-val" data-fl="mc-high">{{ snap.high | ar_num(4) if snap else "—" }}</span>
     </div>
     <div class="mc-cell">
       <span class="mc-lbl">Low</span>
-      <span class="mc-val">{{ snap.low | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-val" data-fl="mc-low">{{ snap.low | ar_num(4) if snap else "—" }}</span>
     </div>
     <div class="mc-cell">
       <span class="mc-lbl">Close</span>
-      <span class="mc-val">{{ snap.close | ar_num(4) if snap else "—" }}</span>
+      <span class="mc-val" data-fl="mc-close">{{ snap.close | ar_num(4) if snap else "—" }}</span>
     </div>
   </div>
 </div>

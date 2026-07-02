@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -92,6 +93,10 @@ class Settings(BaseSettings):
     # Firma de la cookie de sesión. Si está vacío se genera y persiste en el
     # store (así las sesiones sobreviven reinicios sin exponer la clave en git).
     app_secret_key: str = ""
+    # Cookie de sesión `Secure` (sólo viaja por HTTPS). None ⇒ auto: True si
+    # `app_base_url` es https (prod), False si no (dev local por http). Override
+    # explícito con APP_COOKIE_SECURE=1/0.
+    app_cookie_secure: Optional[bool] = None
     # Path del store de usuarios (JSON, gitignored). Vacío → auth_store.json en la raíz.
     app_users_path: str = ""
     # Bootstrap del superuser (NO hardcodear la contraseña en el código): en el

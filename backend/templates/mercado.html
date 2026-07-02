@@ -88,6 +88,9 @@
         </label>
 
         <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+          {# hidden 'false' + [name=only_quoting] en el include: sin esto, desmarcar
+             no enviaba nada y el filtro no se podía apagar (ver curves.html). #}
+          <input type="hidden" name="only_quoting" value="false">
           <input
             type="checkbox"
             name="only_quoting"
@@ -97,7 +100,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=leg], [name=fuente], [name=panel]"
+            hx-include="[name=curve], [name=plazo], [name=leg], [name=fuente], [name=panel], [name=only_quoting]"
           >
           Solo con cotización
         </label>

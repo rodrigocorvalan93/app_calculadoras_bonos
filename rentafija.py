@@ -18,13 +18,55 @@ warnings.filterwarnings("error", category=RuntimeWarning)
 class _LazyInputs(dict):
     """Dict que carga indices.main() en el primer acceso, no en import time."""
     _loaded = False
+    _loading = False
 
     def _ensure_loaded(self):
-        if not self._loaded:
-            self._loaded = True  # antes del call para evitar recursión
+        # `_loading` corta la recursión (si indices.main() accediera a inputs)
+        # SIN marcar el dict como cargado. Antes se seteaba `_loaded = True` antes
+        # del call: si indices.main() fallaba (BCRA caído un instante), el dict
+        # quedaba vacío y marcado como cargado PARA SIEMPRE → todo el proceso
+        # priceaba sin índices. Ahora sólo marca `_loaded` si la carga trajo datos,
+        # y un fallo transitorio se reintenta en el próximo acceso.
+        if self._loaded or self._loading:
+            return
+        self._loading = True
+        try:
             data = indices.main()
-            if isinstance(data, dict):
+            if isinstance(data, dict) and data:
                 self.update(data)
+                self._loaded = True
+        except Exception:
+            # Fallo transitorio (BCRA caído sin backup usable): NO marcamos
+            # loaded ni propagamos una excepción cruda en medio de un pricing —
+            # el próximo acceso reintenta. No usamos warnings.warn: este módulo
+            # tiene filterwarnings("error", RuntimeWarning), lo convertiría en
+            # excepción. El fallo queda visible en el log del warmup (refresh) y
+            # en el prime del boot.
+            pass
+        finally:
+            self._loading = False
+
+    def refresh(self) -> bool:
+        """Re-corre indices.main() y actualiza las claves in-place. Para que un
+        server de larga vida no quede priceando con el CER/UVA/A3500 del boot
+        (drift silencioso de ~0,05-0,1%/día en los ajustados). Cada
+        dict.__setitem__ es atómico bajo el GIL, así que un lector sin lock nunca
+        ve corrupción (a lo sumo una mezcla transitoria viejo/nuevo, aceptable en
+        índices que cambian lento). Devuelve True si trajo datos.
+
+        Limitación conocida: los cupones proyectados de floaters (TAMAR/BADLAR)
+        se fijan en Bono.__init__ al importar especies y NO se reconstruyen acá;
+        el ajuste de capital CER/UVA/A3500, que sí se lee dinámico de inputs, se
+        actualiza. Debe correr en un thread (indices.main hace HTTP bloqueante)."""
+        try:
+            data = indices.main()
+        except Exception:  # noqa: BLE001
+            return False
+        if isinstance(data, dict) and data:
+            self.update(data)
+            self._loaded = True
+            return True
+        return False
 
     def __getitem__(self, key):
         self._ensure_loaded()

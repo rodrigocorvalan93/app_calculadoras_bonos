@@ -103,8 +103,18 @@ def _load() -> Dict[str, Any]:
         try:
             data = json.loads(path.read_text(encoding="utf-8")) or {}
         except Exception as exc:  # noqa: BLE001
-            logger.error("[auth] no pude leer %s: %s", path, exc)
-            data = {}
+            # NO devolver {} y seguir: la próxima escritura (get_secret_key /
+            # bootstrap) persistiría el store vacío, BORRANDO todos los usuarios y
+            # rotando el secret de firma (invalida todas las sesiones). Un archivo
+            # existente pero ilegible es un problema de operación (disco, corrupción,
+            # edición manual), no un "primer arranque": fallamos ruidoso para que el
+            # operador lo restaure en vez de destruirlo en silencio.
+            logger.error("[auth] store ILEGIBLE %s: %s — abortando para no sobrescribirlo", path, exc)
+            raise RuntimeError(
+                f"auth_store ilegible ({path}): {exc}. Se aborta para no pisarlo vacío; "
+                "restaurá el archivo o movelo y reiniciá para bootstrap limpio.") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"auth_store con formato inesperado ({path}): se esperaba un objeto JSON.")
     data.setdefault("users", {})
     data.setdefault("role_tabs", {k: list(v) for k, v in _DEFAULT_ROLE_TABS.items()})
     data.setdefault("secret", "")
@@ -112,10 +122,28 @@ def _load() -> Dict[str, Any]:
 
 
 def _save_locked(data: Dict[str, Any]) -> None:
-    """Escribe el store de forma atómica (tmp + replace). Llamar bajo _lock."""
+    """Escribe el store de forma atómica (tmp + fsync + replace) con permisos 0600.
+    Contiene hashes de contraseñas y el secret de firma de sesión, así que el
+    archivo no debe quedar world-readable (umask default lo dejaría 0644, y
+    cualquier cuenta local podría forjar una sesión superuser). Llamar bajo _lock."""
     path = _store_path()
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    # O_CREAT con modo 0600 → sólo el dueño lee/escribe. Si el tmp ya existía con
+    # otros permisos, O_TRUNC lo vacía pero el modo no cambia; lo forzamos igual.
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())        # durabilidad: sobrevive un corte tras el replace
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     os.replace(tmp, path)
 
 
@@ -152,9 +180,18 @@ def _make_record(password: str, role: str, email: str = "") -> Dict[str, Any]:
     }
 
 
+# Salt fijo para el branch de usuario-ausente: corre un PBKDF2 del mismo costo
+# que una verificación real, así el tiempo de respuesta NO revela si el usuario
+# existe (anti-enumeración por timing). Se genera una vez por proceso.
+_DUMMY_SALT = os.urandom(16)
+
+
 def verify_password(username: str, password: str) -> bool:
     u = _store()["users"].get(_norm(username))
     if not u:
+        # Trabajo equivalente a un login real: sin esto, un usuario inexistente
+        # responde en sub-µs y uno real en ~50 ms → oráculo de enumeración.
+        _hash(password, _DUMMY_SALT)
         return False
     try:
         salt = bytes.fromhex(u["salt"])
@@ -285,13 +322,26 @@ def page_tab(path: str) -> Optional[str]:
     return None
 
 
+# Prefijos cuyo SUBÁRBOL COMPLETO se gatea por su tab (no sólo la página exacta).
+# Para superficies sensibles —plata real— donde los sub-endpoints NO son
+# compartidos entre pestañas: un rol sin la pestaña Órdenes no debe alcanzar
+# NINGÚN /ordenes/* (ticket, confirmar, multi, kill, live, quote…). El modelo
+# general sigue siendo página-exacta (así /dolares/rail, /historicos/semanal y
+# demás partials compartidos no se atan a la pestaña de su prefijo).
+_TAB_PREFIX_GATED: Tuple[Tuple[str, str], ...] = (("/ordenes", "ordenes"),)
+
+
 def can_access_path(role: Optional[str], path: str) -> bool:
-    """True si el rol puede acceder a `path`. Sólo se gatea la PÁGINA de pestaña
-    (match exacto); todo lo demás (sub-endpoints) pasa con estar logueado."""
+    """True si el rol puede acceder a `path`. Las superficies sensibles
+    (`_TAB_PREFIX_GATED`) se gatean por todo el subárbol; el resto sólo gatea la
+    PÁGINA de pestaña (match exacto) y deja pasar los sub-endpoints compartidos."""
+    if role == "superuser":
+        return True
+    for prefix, tab in _TAB_PREFIX_GATED:
+        if path == prefix or path.startswith(prefix + "/"):
+            return tab in set(_store()["role_tabs"].get(role or "", []))
     tab = page_tab(path)
     if tab is None:
-        return True
-    if role == "superuser":
         return True
     return tab in set(_store()["role_tabs"].get(role or "", []))
 
@@ -379,18 +429,30 @@ def _count_superusers(data: Dict[str, Any]) -> int:
     return sum(1 for u in data["users"].values() if u.get("role") == "superuser")
 
 
-# ── Tokens de reset (firmados, con expiración) ───────────────────────────────
+# ── Tokens de reset (firmados, con expiración, single-use) ───────────────────
+def _pw_fingerprint(name: str) -> str:
+    """Huella corta del hash+salt ACTUAL del usuario, firmada. Se incluye en el
+    token de reset para que sea de un solo uso efectivo: apenas se cambia la
+    contraseña, el hash muta y cualquier token viejo deja de validar (sin esto,
+    el mismo link servía para resetear de nuevo durante toda la hora de TTL). No
+    expone el hash — es un HMAC truncado."""
+    u = _store()["users"].get(name)
+    seed = (u or {}).get("hash", "") + "|" + (u or {}).get("salt", "")
+    return hmac.new(get_secret_key().encode("utf-8"), seed.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+
+
 def make_reset_token(username: str, ttl_seconds: int = 3600) -> str:
     import time
     name = _norm(username)
     exp = int(time.time()) + int(ttl_seconds)
-    payload = f"{name}:{exp}".encode("utf-8")
+    payload = f"{name}:{exp}:{_pw_fingerprint(name)}".encode("utf-8")
     sig = hmac.new(get_secret_key().encode("utf-8"), payload, hashlib.sha256).hexdigest()
     return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=") + "." + sig
 
 
 def check_reset_token(token: str) -> Optional[str]:
-    """Devuelve el username si el token es válido y no expiró, si no None."""
+    """Devuelve el username si el token es válido, no expiró y la contraseña no
+    cambió desde que se emitió (single-use); si no, None."""
     import time
     try:
         b64, sig = (token or "").split(".", 1)
@@ -399,10 +461,17 @@ def check_reset_token(token: str) -> Optional[str]:
         expected = hmac.new(get_secret_key().encode("utf-8"), payload, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return None
-        name, exp = payload.decode("utf-8").rsplit(":", 1)
+        parts = payload.decode("utf-8").split(":")
+        if len(parts) != 3:                          # tokens con formato viejo → inválidos
+            return None
+        name, exp, fp = parts
         if int(exp) < int(time.time()):
             return None
-        return name if name in _store()["users"] else None
+        if name not in _store()["users"]:
+            return None
+        if not hmac.compare_digest(fp, _pw_fingerprint(name)):
+            return None                              # la contraseña cambió → token ya usado
+        return name
     except Exception:  # noqa: BLE001
         return None
 

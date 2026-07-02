@@ -37,7 +37,24 @@
           <option value="DLK">DLK (dólar-linked)</option>
         </select></label>
       <label class="field"><span>Clasificación</span>
-        <input type="text" name="clasificacion" placeholder="Soberano / Hard Dolar…" autocomplete="off"></label>
+        {# Los valores coinciden EXACTAMENTE con curves.build_curve_codes: si no
+           matchean, la especie queda fuera de TODA curva. Antes era texto libre
+           (un "Hard Dolar" sin el prefijo "Corporativo" no caía en ningún lado).
+           Las corporativas cubren el caso típico de una carga ad-hoc (ON nueva);
+           "Soberano" además necesita la Industria correcta (poco común acá). #}
+        <select name="clasificacion">
+          <option value="">(sin clasificar — no aparece en curvas)</option>
+          <optgroup label="Corporativo">
+            <option value="Corporativo Hard Dolar">Hard Dólar (cable/CCL)</option>
+            <option value="Corporativo Hard Dolar MEP">Hard Dólar MEP</option>
+            <option value="Corporativo Tasa Fija">Tasa Fija</option>
+            <option value="Corporativo TAMAR">TAMAR</option>
+            <option value="Corporativo BADLAR">BADLAR</option>
+            <option value="Corporativo UVA">UVA</option>
+            <option value="Corporativo Dolar Linked">Dólar Linked</option>
+          </optgroup>
+          <option value="Soberano">Soberano (requiere Industria)</option>
+        </select></label>
 
       <label class="field"><span>Emisión</span>
         <input type="text" name="emision" placeholder="DD/MM/AAAA" autocomplete="off" required></label>

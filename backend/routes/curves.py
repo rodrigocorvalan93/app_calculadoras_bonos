@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import math
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from types import SimpleNamespace
@@ -106,7 +107,13 @@ def _dur_sort_key(r: dict):
 
 
 def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: bool = False,
-                  fuente: str = "byma") -> dict | None:
+                  fuente: str = "byma", settle: str | None = None) -> dict | None:
+    # `settle` = fecha de liquidación del plazo elegido (CI = hoy, 24hs = None →
+    # t+1 por default). SIN esto, un precio Contado-Inmediato se descontaba desde
+    # t+1: un día de carry mal atribuido → hasta ~150-200 bps de sesgo de TIR en
+    # letras cortas, y el mismo bono mostraba TIRs distintas entre YAS-CI (que sí
+    # pasa settle) y Curvas-CI. La cache key incluye settle, así CI/24hs no se
+    # pisan.
     meta = pricing.bond_meta(code)
     if not meta:
         return None
@@ -149,7 +156,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     else:
         ref_px, price_source, price_date = None, None, None
 
-    m = (pricing.metrics_for_market_price(code, cp(ref_px)) or {}) if ref_px is not None else {}
+    m = (pricing.metrics_for_market_price(code, cp(ref_px), settle) or {}) if ref_px is not None else {}
 
     # VWAP = efectivo / nominales * 100 (misma escala que el precio cotizado).
     vwap = None
@@ -171,8 +178,8 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     # Δ yield (bps) = TIREA(last) − TIREA(close).
     delta_yield_bps = None
     if last is not None and close is not None and last != close:
-        ty_last = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
-        ty_close = _tirea_at(code, cp(close))
+        ty_last = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last), settle)
+        ty_close = _tirea_at(code, cp(close), settle)
         if ty_last is not None and ty_close is not None and ty_last == ty_last and ty_close == ty_close:
             delta_yield_bps = (ty_last - ty_close) * 10000.0
 
@@ -232,9 +239,9 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         }
     )
     if book:
-        row["tirea_bid"] = _tirea_at(code, cp(bid))
-        row["tirea_offer"] = _tirea_at(code, cp(offer))
-        row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
+        row["tirea_bid"] = _tirea_at(code, cp(bid), settle)
+        row["tirea_offer"] = _tirea_at(code, cp(offer), settle)
+        row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last), settle)
         # tirea_low/high/close son sólo para el panel del libro (un bono), NO
         # para cada fila de la tabla — se calculan en la route /mercado/book.
         # Cross-venue MAE (OTC): último/volumen del mismo bono en MAE (cache).
@@ -263,7 +270,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
                 "price_source": "MAE", "src": "MAE", "last_cls": _px_cls(mlast, mclose),
             })
             if book:
-                row["tirea_last"] = _tirea_at(code, cp(mlast))
+                row["tirea_last"] = _tirea_at(code, cp(mlast), settle)
                 row["tirea_bid"] = row["tirea_offer"] = None
         else:
             row["src"] = "BYMA*"        # sin dato MAE → se muestra BYMA
@@ -308,6 +315,10 @@ async def _rows_for(
     # Only the ARS leg needs the FX reference (pesos → native basis); the
     # native / USD / USB legs price straight off their own ticker.
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+    # Fecha de liquidación del plazo (CI = hoy, 24hs = None → t+1). Se computa UNA
+    # vez y se pasa a cada fila para que la TIR se descuente desde el settlement
+    # correcto (antes CI se valuaba a t+1, con hasta ~200 bps de sesgo).
+    settle = pricing.settlement_date_str(plazo)
     loop = asyncio.get_running_loop()
 
     # El build de filas es GIL-bound (el calc legacy no libera el GIL), así que
@@ -320,7 +331,7 @@ async def _rows_for(
     def _build_all() -> list[dict]:
         out: list[dict] = []
         for c in codes:
-            r = _row_for_code(c, plazo, leg, fx, book, fuente)
+            r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
             if r is not None:
                 out.append(r)
         return out
@@ -493,6 +504,7 @@ async def mercado_book(
     meta = pricing.bond_meta(code) or {}
     native = meta.get("moneda") or "USD"
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+    settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = None → t+1
 
     def cp(px):
         if px is None:
@@ -505,16 +517,30 @@ async def mercado_book(
         for lvl in (levels or []):
             px, sz = lvl.get("price"), lvl.get("size")
             cum += (sz or 0.0)
-            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px))})
+            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px), settle)})
         # Fracción del acumulado (se normaliza después contra el máx de ambas
         # puntas) → degradé de profundidad estilo DOM en el template.
         return out
 
-    row = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente)   # fila (BYMA o MAE)
-    if row:  # TIR de mín/máx/cierre — sólo para este bono; sobre la fuente activa
-        row["tirea_low"] = _tirea_at(code, cp(row.get("low")))
-        row["tirea_high"] = _tirea_at(code, cp(row.get("high")))
-        row["tirea_close"] = _tirea_at(code, cp(row.get("close")))
+    # Todo el cálculo del book es GIL-bound (fila + TIR por nivel de profundidad +
+    # TIRs low/high/close, casi siempre cache-miss porque el warmup no calienta la
+    # profundidad). En el handler async bloqueaba el event loop hasta ~300 ms por
+    # click, congelando /market/seq y los paneles de todos los usuarios. Lo
+    # corremos en el pool, igual que _rows_for. `/ordenes/quote` reusa esta misma
+    # función, así que el ticket de trading hereda el offload.
+    loop = asyncio.get_running_loop()
+
+    def _build_book():
+        r = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente, settle=settle)   # fila (BYMA o MAE)
+        if r:  # TIR de mín/máx/cierre — sólo para este bono; sobre la fuente activa
+            r["tirea_low"] = _tirea_at(code, cp(r.get("low")), settle)
+            r["tirea_high"] = _tirea_at(code, cp(r.get("high")), settle)
+            r["tirea_close"] = _tirea_at(code, cp(r.get("close")), settle)
+        bids = _depth_frac(with_yield(snap.bids if snap else None))
+        offers = _depth_frac(with_yield(snap.offers if snap else None))
+        return r, bids, offers
+
+    row, bids, offers = await loop.run_in_executor(_row_pool, _build_book)
     return _render(
         request,
         "partials/mercado_book.html",
@@ -525,9 +551,11 @@ async def mercado_book(
         row=row,
         position=positions.position_for(code),                  # tenencia (desplegable)
         instr=await instruments.detail(symbol),                 # lámina mínima / tick / límites
-        bids=_depth_frac(with_yield(snap.bids if snap else None)),
-        offers=_depth_frac(with_yield(snap.offers if snap else None)),
+        bids=bids,
+        offers=offers,
         fuente=fuente,
+        plazo=plazo,                                            # para el auto-refresh del book
+        leg=leg,
     )
 
 
@@ -658,12 +686,28 @@ async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str
 
 
 def _price_overrides(request: Request) -> dict[str, float]:
-    """Lee los `price_<CODE>` del query (what-if): precio nativo % VN > 0."""
+    """Lee los `price_<CODE>` del query (what-if): precio nativo % VN > 0.
+
+    Los inputs del what-if son <input type="number">, que SIEMPRE serializan en
+    formato inglés (punto = decimal, sin separador de miles) sin importar el
+    locale del browser. Por eso NO se parsean con parse_ar_num: su heurística
+    es-AR trata '1.234' como mil-doscientos-treinta-y-cuatro → precio 1000×.
+    float() es el parser correcto para un type=number; parse_ar_num queda de
+    fallback defensivo por si el valor llega manipulado o el input cambia a text.
+    """
     out: dict[str, float] = {}
     for k, v in request.query_params.multi_items():
         if not k.startswith("price_"):
             continue
-        f = parse_ar_num(v)           # es-AR: '50.000,00' (miles) ya no se descarta
+        s = (v or "").strip()
+        if not s:
+            continue
+        try:
+            f = float(s)                       # type=number → formato inglés
+            if not math.isfinite(f):
+                continue
+        except ValueError:
+            f = parse_ar_num(v)                # fallback (input no-number / manipulado)
         if f is not None and f > 0:
             out[k[len("price_"):]] = f
     return out
@@ -672,7 +716,11 @@ def _price_overrides(request: Request) -> dict[str, float]:
 async def _whatif_rows(curve_key: str, plazo: str, only_quoting: bool, leg: str,
                        include: set[str] | None, overrides: dict[str, float]):
     rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
-    return _whatif_from_rows(rows, include, overrides)
+    # El loop de overrides recalcula (metrics_for_market_price) por bono editado:
+    # con precios editados/stale son cache-misses (~27 ms c/u, hasta ~1,35 s en el
+    # peor caso). Fuera del event loop, como todo el resto del pricing de curvas.
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_row_pool, _whatif_from_rows, rows, include, overrides)
 
 
 @forwards_router.get("/forwards", response_class=HTMLResponse)
@@ -1052,8 +1100,13 @@ async def graficos_data(
         if to is not None:
             off_at[d] = to
     # La regresión NSS se ajusta SIEMPRE sobre el last (los bid/offer son
-    # series visuales extra, como en OMSweb_app).
-    nss_y = nss_svc.eval_at([p[1] for p in pts], [p[2] for p in pts], xs) if len(pts) >= 4 else None
+    # series visuales extra, como en OMSweb_app). El fit (scipy curve_fit) es
+    # CPU-bound: fuera del event loop, igual que /graficos/nss y /graficos/estimate.
+    nss_y = None
+    if len(pts) >= 4:
+        loop = asyncio.get_running_loop()
+        nss_y = await loop.run_in_executor(
+            None, nss_svc.eval_at, [p[1] for p in pts], [p[2] for p in pts], xs)
     return JSONResponse({
         "n": len(pts), "xs": xs,
         "ars": [ars_at.get(x) for x in xs],

@@ -7,7 +7,9 @@ acá sólo escribimos/borramos `request.session['user']`.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+import time
+from collections import defaultdict
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -15,6 +17,29 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from backend.services import auth, mailer
 
 router = APIRouter(tags=["auth"])
+
+# ── Throttle de fuerza bruta ─────────────────────────────────────────────────
+# Login corre PBKDF2 (~50 ms) y es público: sin límite, es a la vez un vector de
+# fuerza bruta y de DoS (cada intento ocupa un hilo del executor). Contamos los
+# fallos por IP en una ventana; superado el tope, respondemos 429 sin siquiera
+# hashear. En memoria (deploy single-process); se limpia al primer login exitoso.
+_LOGIN_MAX_FAILS = 10
+_LOGIN_WINDOW = 300.0                       # 5 min
+_login_fails: Dict[str, List[float]] = defaultdict(list)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
+def _login_throttled(key: str) -> bool:
+    now = time.time()
+    fails = [t for t in _login_fails.get(key, ()) if now - t < _LOGIN_WINDOW]
+    if fails:
+        _login_fails[key] = fails
+    else:
+        _login_fails.pop(key, None)
+    return len(fails) >= _LOGIN_MAX_FAILS
 
 
 def _render(request: Request, template: str, status: int = 200, **ctx) -> HTMLResponse:
@@ -42,9 +67,20 @@ async def login_page(request: Request, next: str = "/yas") -> HTMLResponse:
 @router.post("/login", response_class=HTMLResponse)
 async def login_submit(request: Request, username: str = Form(...),
                        password: str = Form(...), next: str = Form("/yas")) -> HTMLResponse:
-    if auth.verify_password(username, password):
+    ip = _client_ip(request)
+    if _login_throttled(ip):
+        return _render(request, "login.html", status=429, next=_safe_next(next),
+                       error="Demasiados intentos fallidos. Esperá unos minutos y reintentá.",
+                       no_superuser=not auth.has_any_superuser())
+    # PBKDF2 (~50 ms, GIL-bound) fuera del event loop: en el hilo del handler
+    # bloquearía /market/seq y todos los paneles live de los demás usuarios.
+    loop = asyncio.get_running_loop()
+    ok = await loop.run_in_executor(None, auth.verify_password, username, password)
+    if ok:
+        _login_fails.pop(ip, None)                 # sesión limpia: reset del contador
         request.session["user"] = username.strip().lower()
         return RedirectResponse(url=_safe_next(next), status_code=303)
+    _login_fails[ip].append(time.time())
     return _render(request, "login.html", status=401, next=_safe_next(next),
                    error="Usuario o contraseña incorrectos.",
                    no_superuser=not auth.has_any_superuser())

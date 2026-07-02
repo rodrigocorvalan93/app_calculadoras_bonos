@@ -52,7 +52,7 @@
       <a class="rail-toggle" href="/logout" title="Cerrar sesión" style="text-decoration:none">⎋</a>
       {% endif %}
       <button type="button" class="rail-toggle" :class="{ active: railOpen }"
-              @click="railOpen = !railOpen; try { localStorage.setItem('fx_rail', railOpen ? '1' : '0'); } catch (e) {}"
+              @click="railOpen = !railOpen; try { localStorage.setItem('fx_rail', railOpen ? '1' : '0'); } catch (e) {}; if (railOpen && window.htmx) { var r = document.querySelector('.fx-rail'); if (r) window.htmx.trigger(r, 'load'); }"
               title="Mostrar/ocultar el monitor de dólar">💵</button>
       <div class="theme-switch" role="tablist" aria-label="Tema">
         <button type="button" role="tab" :aria-selected="theme==='dark'"  :class="{ active: theme==='dark'  }" @click="set('dark')"  title="Dark (Bloomberg)">Dark</button>
@@ -65,18 +65,27 @@
 
   {# La animación corre en #tape-track (htmx sólo swapea su contenido → el
      deslizamiento NO se reinicia con cada refresh live). #}
-  <div id="tape" class="tape" data-flash-scope
+  <div id="tape" class="tape"
        hx-get="/tape" hx-trigger="load, md-update from:body, every 60s"
        hx-target="#tape-track" hx-swap="innerHTML">
-    <div id="tape-track" class="tape-track"></div>
+    {# data-flash-scope va en #tape-track (el que recibe el swap), no en #tape:
+       el diff post-swap corre sobre el TARGET, así que en el padre nunca llegaba
+       a los .tape-px (que llevan data-fl) y el tape no flasheaba. #}
+    <div id="tape-track" class="tape-track" data-flash-scope></div>
   </div>
 
   <div id="news-marquee" class="news-marquee news-top"
        hx-get="/news/marquee" hx-trigger="load, every 180s" hx-swap="innerHTML"></div>
 
   <div class="layout" :class="{ 'rail-closed': !railOpen }">
+    {# El polling live/every-30s se gatea con [fxRailOpen()]: plegado, el riel
+       queda en el DOM (x-show) pero NO pollea /dolares/rail (antes seguía a
+       ~1/s + cada 30s aunque estuviera oculto). El `load` inicial sí corre una
+       vez; al re-abrirlo, el @click del toggle dispara un load para refrescarlo. #}
     <aside class="fx-rail" x-show="railOpen" x-cloak data-flash-scope
-           hx-get="/dolares/rail" hx-trigger="load, md-update from:body, every 30s" hx-swap="innerHTML">
+           hx-get="/dolares/rail"
+           hx-trigger="load, md-update from:body [fxRailOpen()], every 30s [fxRailOpen()]"
+           hx-swap="innerHTML">
       <div class="muted" style="padding:12px;font-size:12px">Cargando dólar…</div>
     </aside>
     <main class="content">

@@ -7,6 +7,7 @@ Layout:
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Form, Request
@@ -91,16 +92,22 @@ async def yas_recompute(
         )
 
     settle = settle_custom.strip() or pricing.settlement_date_str(plazo)
-    metrics = pricing.compute_metrics(
-        code=code,
-        mode=mode,
-        value=parsed_value,
-        settle=settle,
-        fx_override=parsed_fx,
-        freq_override=int(parsed_freq) if parsed_freq else None,
-        base_override=int(parsed_base) if parsed_base else None,
-    )
-    ticket = pricing.ticket_rows(metrics, nominales=parsed_nom)
+    # compute_metrics + ticket_rows son GIL-bound (el calc legacy no libera el
+    # GIL); un CER pesado llega a ~64-76 ms. En el handler async bloquearían el
+    # event loop y con él /market/seq y los paneles live de todos. Al pool.
+    def _calc():
+        m = pricing.compute_metrics(
+            code=code,
+            mode=mode,
+            value=parsed_value,
+            settle=settle,
+            fx_override=parsed_fx,
+            freq_override=int(parsed_freq) if parsed_freq else None,
+            base_override=int(parsed_base) if parsed_base else None,
+        )
+        return m, pricing.ticket_rows(m, nominales=parsed_nom)
+
+    metrics, ticket = await asyncio.get_running_loop().run_in_executor(None, _calc)
     return _render(
         request,
         "partials/yas_result.html",

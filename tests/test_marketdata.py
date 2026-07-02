@@ -59,6 +59,18 @@ def test_update_from_md_merges_book_and_trade() -> None:
     assert snap.vwap() == 50_000_000 / 715_000
 
 
+def test_close_ts_from_list_form() -> None:
+    """Regresión #38: CL como lista-de-dicts también debe actualizar close_ts
+    (antes sólo se leía la fecha del caso dict → fecha de cierre vieja/blanca)."""
+    store = mds.MarketDataStore()
+    # forma dict (ya andaba)
+    s1 = store.update_from_md("A", {"CL": {"price": 70.1, "date": "2026-05-27T17:00:00"}})
+    assert s1.close == 70.1 and s1.close_ts == "2026-05-27T17:00:00"
+    # forma lista-de-dicts (el bug)
+    s2 = store.update_from_md("B", {"CL": [{"price": 99.5, "date": "2026-05-28T17:00:00"}]})
+    assert s2.close == 99.5 and s2.close_ts == "2026-05-28T17:00:00"
+
+
 def test_update_from_md_keeps_sticky_fields() -> None:
     """A second push that only carries a new LA shouldn't blow away BI/OF."""
     store = mds.MarketDataStore()
@@ -85,9 +97,15 @@ def test_subscribe_payload_shape() -> None:
 
 
 def test_symbol_strips_calc_suffix() -> None:
+    # Sufijos de calc (minúscula) → se strippean
     assert syms.calc_to_md_code("TX26j") == "TX26"
     assert syms.calc_to_md_code("TXMJ9v") == "TXMJ9"
     assert syms.calc_to_md_code("GD30") == "GD30"
+    # Regresión #12: un ticker REAL terminado en V/J MAYÚSCULA no debe mutilarse.
+    # SUPV (Grupo Supervielle) se convertía en "SUP" con el strip case-insensitive
+    # y nunca levantaba precio.
+    assert syms.calc_to_md_code("SUPV") == "SUPV"
+    assert syms.md_symbol("SUPV", "24hs") == "MERV - XMEV - SUPV - 24hs"
 
 
 def test_symbol_builds_byma_ticker() -> None:
@@ -120,6 +138,30 @@ async def test_ws_start_without_creds_is_inert() -> None:
     assert stats["connected"] is False
     assert stats["messages"] == 0
     await client.stop()
+
+
+def test_feed_alive_distingue_caido_de_quieto() -> None:
+    """`feed_alive` = conectado Y con un Md reciente. Es la señal honesta que el
+    dot/healthz deben usar en vez de `authenticated` (cookies), que sigue True con
+    el feed muerto."""
+    import time
+
+    client = pws.PrimaryWS("https://example.invalid/", store=mds.MarketDataStore())
+    # sin conexión ni mensajes → feed muerto
+    assert client.feed_alive is False
+    s = client.stats()
+    assert s["feed_alive"] is False and s["stale_seconds"] is None
+    # conectado y con un Md recién llegado → vivo
+    client._connected = True
+    client._stats["last_message_at"] = time.time()
+    assert client.feed_alive is True
+    assert client.stats()["stale_seconds"] is not None
+    # conectado pero sin datos hace rato (> STALE_AFTER) → stale, no "vivo"
+    client._stats["last_message_at"] = time.time() - (pws.PrimaryWS.STALE_AFTER + 10)
+    assert client.feed_alive is False
+    # tener cookies (authenticated) NO implica que el feed esté vivo
+    client._cookies = object()
+    assert client.authenticated is True and client.feed_alive is False
 
 
 # ── /market endpoints ────────────────────────────────────────────────

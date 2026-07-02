@@ -65,6 +65,10 @@
                    hx-include="#graf-controls, [name=duration]">
           </label>
           <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+            {# hidden 'false' para poder DESactivar el filtro (checkbox desmarcado
+               no envía nada). El hidden vive dentro de #graf-controls, así que el
+               hx-include existente ya lo captura. #}
+            <input type="hidden" name="only_quoting" value="false">
             <input type="checkbox" name="only_quoting" value="true" {% if only_quoting %}checked{% endif %}
                    hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
                    hx-include="#graf-controls, [name=duration]">

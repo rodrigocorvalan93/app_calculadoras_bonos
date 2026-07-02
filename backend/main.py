@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -328,8 +329,11 @@ def create_app() -> FastAPI:
     _PUBLIC_EXACT = {"/login", "/logout", "/forgot", "/reset", "/healthz",
                      "/favicon.ico", "/favicon.png"}
     _PUBLIC_PREFIX = ("/static/",)
-    # Páginas sensibles reservadas al superuser (no son pestañas gateables).
-    _SUPERUSER_ONLY = ("/admin", "/conexion")
+    # Páginas / endpoints sensibles reservados al superuser (no son pestañas
+    # gateables). /ordenes/live (armar el envío REAL al broker) y /ordenes/kill
+    # (kill-switch del desk) son operaciones de mesa, no de un usuario cualquiera
+    # con la pestaña Órdenes: se restringen a superuser además del gating por tab.
+    _SUPERUSER_ONLY = ("/admin", "/conexion", "/ordenes/live", "/ordenes/kill")
 
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
@@ -382,14 +386,27 @@ def create_app() -> FastAPI:
     # inserta en index 0), así decodifica la cookie ANTES de que corra el guard y
     # `request.session` está disponible adentro. Costo por request: verificar el
     # HMAC de la cookie (sub-µs).
+    # Secure: auto-derivado de app_base_url (https ⇒ True) salvo override explícito.
+    # En prod detrás de HTTPS la cookie de sesión no debe viajar por http en claro.
+    if settings.app_cookie_secure is not None:
+        _cookie_secure = bool(settings.app_cookie_secure)
+    else:
+        _cookie_secure = (settings.app_base_url or "").lower().startswith("https://")
     app.add_middleware(
         SessionMiddleware,
         secret_key=_auth_secret(),
         session_cookie="bonos_session",
         max_age=14 * 24 * 3600,
         same_site="lax",
-        https_only=False,
+        https_only=_cookie_secure,
     )
+    # Compresión de respuestas: las tablas de curva/mercado/posiciones swapean
+    # 70-110 KB de HTML hasta 1×/s por panel. gzip baja eso ~85-90% (100 KB→~10 KB)
+    # y con él el tiempo de transferencia en links remotos. minimum_size=1024 deja
+    # sin comprimir las respuestas chicas (p. ej. /market/seq, un entero plano),
+    # donde el overhead no compensa. Se agrega ÚLTIMO → queda como el middleware
+    # más externo y comprime todo lo que sale.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.get("/")
     async def index() -> RedirectResponse:
@@ -402,6 +419,10 @@ def create_app() -> FastAPI:
             "status": "ok",
             "bonds_loaded": len(bond_universe.all_codes()),
             "broker_authenticated": ws.authenticated,
+            # feed_alive ≠ authenticated: la sesión REST puede seguir abierta
+            # (cookies válidas) mientras el WS de market data está muerto. Esto
+            # dice si los precios son de ahora.
+            "feed_alive": ws.feed_alive,
             "ws": ws.stats(),
             "warmup": get_warmup_daemon().stats(),
         }

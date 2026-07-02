@@ -27,6 +27,7 @@ import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from typing import Dict, List, Optional
 
 from backend.services import (
@@ -187,6 +188,7 @@ class WarmupDaemon:
         self._stop = asyncio.Event()
         self._primed = False
         self._esc_warmed = False        # escenario: 1 warm frío al boot, luego touch
+        self._last_index_day: Optional[date] = None   # rollover → refresca inputs (CER/UVA/A3500)
         self._stats: Dict[str, float | int] = {
             "sweeps": 0,
             "last_warmed": 0,
@@ -217,6 +219,7 @@ class WarmupDaemon:
         try:
             self._stats["prime_seconds"] = await loop.run_in_executor(_pool, prime_calc_engine)
             self._primed = True
+            self._last_index_day = date.today()   # el prime cargó los índices de HOY
         except Exception:  # noqa: BLE001
             logger.exception("[warmup] prime step failed")
 
@@ -228,6 +231,7 @@ class WarmupDaemon:
             logger.exception("[warmup] aux loaders prime failed")
 
         while not self._stop.is_set():
+            await self._maybe_refresh_indices()          # rollover de fecha → CER/UVA/A3500 frescos
             has_data = marketdata_store.get_store().stats().get("symbols", 0) > 0
             wait = self.interval if has_data else self.interval * 4
             if has_data:
@@ -259,6 +263,31 @@ class WarmupDaemon:
                 break  # stop set during the wait
             except asyncio.TimeoutError:
                 pass
+
+    async def _maybe_refresh_indices(self) -> None:
+        """En rollover de fecha, re-corre indices.main() para refrescar
+        rentafija.inputs (CER/UVA/A3500/TAMAR). Sin esto un server de varios días
+        price con los índices del boot (drift ~0,05-0,1%/día en los ajustados).
+        HTTP bloqueante → al pool. Best-effort: un fallo reintenta al día siguiente
+        (o en el próximo ciclo si `refresh` devolvió False)."""
+        today = date.today()
+        if self._last_index_day is None:      # aún no primó; el prime lo siembra
+            return
+        if today == self._last_index_day:
+            return
+        try:
+            import rentafija
+            loop = asyncio.get_running_loop()
+            ok = await loop.run_in_executor(_pool, rentafija.inputs.refresh)
+            if ok:
+                self._last_index_day = today
+                # Los caches de métricas keyean por día (ver pricing): las TIRs
+                # viejas se recalculan solas con inputs ya fresco.
+                logger.info("[warmup] índices refrescados por rollover de fecha (%s)", today)
+            else:
+                logger.warning("[warmup] refresh de índices sin datos; reintenta en el próximo ciclo")
+        except Exception:  # noqa: BLE001
+            logger.exception("[warmup] refresh de índices falló")
 
     def stats(self) -> Dict[str, float | int | bool]:
         s: Dict[str, float | int | bool] = dict(self._stats)

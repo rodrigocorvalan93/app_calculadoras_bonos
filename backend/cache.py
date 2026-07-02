@@ -54,7 +54,21 @@ class LockedTTLCache:
                     self._store[key] = (value, now + self._ttl)
                     if len(self._store) > self._maxsize:
                         self._evict_locked(now)
+                    # `_compute_locks` crecía 1 entrada por clave única computada y
+                    # sólo se limpiaba en clear() → leak lineal en procesos de larga
+                    # vida (agravado por keys con día/índice en la clave). Lo podamos
+                    # a las claves aún cacheadas cuando pasa el umbral.
+                    if len(self._compute_locks) > self._maxsize:
+                        self._prune_compute_locks_locked()
             return value
+
+    def _prune_compute_locks_locked(self) -> None:
+        """Descarta los locks de cómputo huérfanos (claves ya no cacheadas). Llamar
+        bajo `_lock`. Best-effort: si justo un thread está computando una clave
+        recién podada, a lo sumo se pierde el compute-once de ESA clave por un
+        instante (otro thread podría recomputarla en paralelo) — nunca un error."""
+        alive = set(self._store)
+        self._compute_locks = {k: lk for k, lk in self._compute_locks.items() if k in alive}
 
     def _evict_locked(self, now: float) -> None:
         # Primero los expirados; si aún sobra, el bloque de menor expiry.

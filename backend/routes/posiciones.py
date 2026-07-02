@@ -7,13 +7,14 @@ Calificación × Monto/%PN) matcheando Cod_Delta ↔ ticker del universo.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _row_for_code
-from backend.services import bond_universe, positions
+from backend.services import bond_universe, positions, pricing
 
 router = APIRouter(tags=["posiciones"])
 
@@ -160,11 +161,12 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
     # Denominador del peso por tenencia: PN, si no Σ Valor invertido (fallback legacy).
     total_valor = sum(h["valor"] for h in hs if h.get("valor"))
     denom = pn if (pn and pn > 0) else (total_valor if total_valor > 0 else None)
+    settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = None → t+1
     rows: List[Dict[str, Any]] = []
     for h in hs:
         code = h.get("cod_delta")
         obj = _bono(code)
-        m = _row_for_code(code, plazo) if code else None
+        m = _row_for_code(code, plazo, settle=settle) if code else None
         # Especies fuera del universo de bonos (acciones, CEDEARs): el Last
         # sale directo del store del WS (lookup en memoria, ~µs) — antes estas
         # filas quedaban sin precio porque bond_meta(code) es vacío.
@@ -210,15 +212,19 @@ async def posiciones_page(
     refresh: bool = False,
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
+    loop = asyncio.get_running_loop()
     if refresh:
-        positions.refresh()
+        await loop.run_in_executor(None, positions.refresh)   # relee Excels (I/O)
     fs = positions.fondos()
     selected = fondo if (fondo is not None and any(f["cod"] == fondo for f in fs)) \
         else (fs[0]["cod"] if fs else None)
+    # _fondo_ctx valúa cada tenencia (pricing GIL-bound, cold ~200 ms–segundos):
+    # fuera del event loop para no congelar todos los tabs live durante el refresh.
+    ctx = await loop.run_in_executor(None, _fondo_ctx, selected, plazo)
     return _render(
         request, "posiciones.html",
         fondos=fs, selected=selected, plazo=plazo, status=positions.status(),
-        **_fondo_ctx(selected, plazo),
+        **ctx,
     )
 
 
@@ -243,7 +249,8 @@ async def posiciones_table(request: Request, fondo: Optional[int] = None, plazo:
     # `fondo` opcional: el poll live (md-update) puede llegar sin selección
     # (sin carteras cargadas) y no debe romper con 422.
     bond_universe.ensure_loaded()
-    return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **_fondo_ctx(fondo, plazo))
+    ctx = await asyncio.get_running_loop().run_in_executor(None, _fondo_ctx, fondo, plazo)
+    return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **ctx)
 
 
 @router.get("/posiciones/targets", response_class=HTMLResponse)
@@ -271,7 +278,7 @@ async def posiciones_targets(request: Request, fondo: Optional[int] = None,
 async def matriz_page(request: Request, view: str = "vn", refresh: bool = False) -> HTMLResponse:
     bond_universe.ensure_loaded()
     if refresh:
-        positions.refresh()
+        await asyncio.get_running_loop().run_in_executor(None, positions.refresh)   # relee Excels (I/O)
     return _render(request, "matriz.html", view=view, status=positions.status(), **_matriz_ctx())
 
 
