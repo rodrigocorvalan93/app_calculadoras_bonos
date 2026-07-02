@@ -553,6 +553,8 @@ async def mercado_book(
         bids=bids,
         offers=offers,
         fuente=fuente,
+        plazo=plazo,                                            # para el auto-refresh del book
+        leg=leg,
     )
 
 

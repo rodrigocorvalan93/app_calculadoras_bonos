@@ -25,10 +25,13 @@
   // ── 1+2+4: seq poller ──────────────────────────────────────────────────
   var POLL_MS = 1000;       // cadencia base
   var QUIET_AFTER_MS = 20000; // sin avances por 20s → dot "quieto"
+  var HEALTH_EVERY = 15;      // cada 15 polls (~15s) chequeo el estado del feed
   var lastSeq = null;
   var lastAdvance = 0;
   var failures = 0;
   var timer = null;
+  var feedDown = false;       // el broker tiene sesión pero el WS está caído
+  var healthTick = 0;
 
   function dot(state, title) {
     var el = document.getElementById('live-dot');
@@ -45,8 +48,20 @@
     while (advances.length && now - advances[0] > 60000) advances.shift();
     el.textContent = advances.length ? (advances.length + ' t/min · ' + Math.round(rtt) + ' ms') : '';
   }
+  // Estado real del feed del broker (liviano, cada ~15s): distingue "feed caído"
+  // (sesión abierta pero WS del broker desconectado → precios congelados) de
+  // "mercado quieto" (conectado, sin operaciones). Sin esto el dot mostraba
+  // 'idle' en ambos casos y el trader no sabía que veía precios viejos.
+  function checkHealth() {
+    fetch('/market/health', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (h) { feedDown = !!(h && h.feed_down); })
+      .catch(function () { /* dejamos el estado previo del feed */ });
+  }
+
   function poll() {
     if (document.hidden) return; // visibilitychange re-arma
+    if ((healthTick++ % HEALTH_EVERY) === 0) checkHealth();
     var t0 = performance.now();
     fetch('/market/seq', { cache: 'no-store' })
       .then(function (r) { return r.text(); })
@@ -55,11 +70,17 @@
         var rtt = performance.now() - t0;
         var seq = parseInt(txt, 10);
         if (isNaN(seq)) return;
-        if (lastSeq !== null && seq !== lastSeq) {
+        var advanced = (lastSeq !== null && seq !== lastSeq);
+        if (advanced) {
           lastAdvance = Date.now();
           advances.push(lastAdvance);
-          dot('live', 'En vivo — tick hace instantes');
           if (window.htmx) { window.htmx.trigger(document.body, 'md-update'); }
+        }
+        // Prioridad del dot: feed caído (rojo) > tick en vivo (verde) > quieto (gris).
+        if (feedDown) {
+          dot('down', 'Feed caído — el WS del broker está desconectado; los precios pueden estar congelados');
+        } else if (advanced) {
+          dot('live', 'En vivo — tick hace instantes');
         } else if (Date.now() - lastAdvance > QUIET_AFTER_MS) {
           dot('idle', 'Sin operaciones recientes');
         }
@@ -135,7 +156,12 @@
     el.classList.remove('tick-up', 'tick-down');
     void el.offsetWidth; // reinicia la animación si ya estaba corriendo
     el.classList.add(cls);
-    el.addEventListener('animationend', function h() {
+    el.addEventListener('animationend', function h(e) {
+      // La clase corre DOS animaciones: el flash de color (tick-up/tick-down,
+      // 0,9s) y un tick-pop de escala (0,22s). Sin filtrar por animationName, el
+      // animationend del pop (que termina primero) removía la clase y cortaba el
+      // flash a 0,22s. Esperamos el fin de la animación de color (nombre = cls).
+      if (e.animationName !== cls) return;
       el.classList.remove(cls);
       el.removeEventListener('animationend', h);
     });

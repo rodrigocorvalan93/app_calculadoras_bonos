@@ -880,7 +880,8 @@ select {
 .rail-v.tick-down { color: var(--red);   transition: color 1.2s ease 0.4s; }
 
 /* Dot de estado del feed (topbar): live = pulso verde, idle = gris,
-   off = ámbar (sin conexión con /market/seq). */
+   off = ámbar (sin conexión con /market/seq), down = pulso rojo (el broker
+   tiene sesión pero el WS de market data está caído → precios congelados). */
 .live-dot {
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--text-muted); display: inline-block; flex: 0 0 auto;
@@ -892,8 +893,17 @@ select {
 }
 .live-dot[data-state="idle"] { background: var(--text-muted); animation: none; }
 .live-dot[data-state="off"]  { background: var(--yellow); animation: none; }
+.live-dot[data-state="down"] {
+  background: var(--red);
+  animation: live-pulse-down 1.2s ease-out infinite;
+}
 @keyframes live-pulse {
   0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); }
+  70%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes live-pulse-down {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 55%, transparent); }
   70%  { box-shadow: 0 0 0 7px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
@@ -919,7 +929,8 @@ select {
 
 /* Accesibilidad: si el usuario pide menos movimiento, todo quieto. */
 @media (prefers-reduced-motion: reduce) {
-  .tick-up, .tick-down, .live-dot[data-state="live"] { animation: none !important; }
+  .tick-up, .tick-down,
+  .live-dot[data-state="live"], .live-dot[data-state="down"] { animation: none !important; }
   .tab::after, .card, .btn-primary, button { transition: none !important; }
 }
 
