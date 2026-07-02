@@ -419,6 +419,13 @@ def compute_metrics(
         return base
 
     canonical_settle = _safe_settle(settle)
+    # Fecha de liquidación EXPLÍCITA pero no parseable (p. ej. settle_custom de YAS
+    # mal tipeado): antes se descartaba en silencio y se valuaba a la fecha default,
+    # mostrando métricas creíbles pero a otra fecha. Ahora avisamos en vez de
+    # engañar. `settle=None`/"" es el default legítimo y NO entra acá.
+    if settle and str(settle).strip() and canonical_settle is None:
+        base["error"] = f"Fecha de liquidación inválida: {settle!r}. Usá DD/MM/AAAA."
+        return base
     base["fecha_settlement_input"] = canonical_settle
 
     # What-if de FX (DLK/A3500): override POR-OBJETO sobre la copia per-request, no

@@ -48,15 +48,20 @@ def _parse_d(s: str) -> Optional[date]:
 
 
 def settle_str(plazo: str) -> str:
-    """Fecha de liquidación concreta '%d/%m/%Y'. CI → hoy; 24hs → próximo hábil
-    (pricing.settlement_date_str devuelve None para 24hs)."""
+    """Fecha de liquidación concreta '%d/%m/%Y'. CI → hoy; 24hs → t+1 hábil.
+
+    24hs debe liquidar a t+1, IGUAL que el default de compute_metrics
+    (n_dias_laborales(today, 1)). El fallback anterior era
+    siguiente_dia_habil_ar(today), que devuelve HOY cuando hoy es hábil → TR y
+    Escenario liquidaban a CI (t+0), inconsistente con Curvas/YAS y sobrestimando
+    el carry en un día."""
     from backend.services import pricing
     s = pricing.settlement_date_str(plazo)
     if s:
         return s
     try:
-        from dias_habiles import siguiente_dia_habil_ar
-        return siguiente_dia_habil_ar(date.today()).strftime("%d/%m/%Y")
+        import rentafija
+        return rentafija.n_dias_laborales(date.today(), 1).strftime("%d/%m/%Y")
     except Exception:  # noqa: BLE001
         return date.today().strftime("%d/%m/%Y")
 

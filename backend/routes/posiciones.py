@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _row_for_code
-from backend.services import bond_universe, positions
+from backend.services import bond_universe, positions, pricing
 
 router = APIRouter(tags=["posiciones"])
 
@@ -161,11 +161,12 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
     # Denominador del peso por tenencia: PN, si no Σ Valor invertido (fallback legacy).
     total_valor = sum(h["valor"] for h in hs if h.get("valor"))
     denom = pn if (pn and pn > 0) else (total_valor if total_valor > 0 else None)
+    settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = None → t+1
     rows: List[Dict[str, Any]] = []
     for h in hs:
         code = h.get("cod_delta")
         obj = _bono(code)
-        m = _row_for_code(code, plazo) if code else None
+        m = _row_for_code(code, plazo, settle=settle) if code else None
         # Especies fuera del universo de bonos (acciones, CEDEARs): el Last
         # sale directo del store del WS (lookup en memoria, ~µs) — antes estas
         # filas quedaban sin precio porque bond_meta(code) es vacío.

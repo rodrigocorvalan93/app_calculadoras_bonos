@@ -106,7 +106,13 @@ def _dur_sort_key(r: dict):
 
 
 def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: bool = False,
-                  fuente: str = "byma") -> dict | None:
+                  fuente: str = "byma", settle: str | None = None) -> dict | None:
+    # `settle` = fecha de liquidación del plazo elegido (CI = hoy, 24hs = None →
+    # t+1 por default). SIN esto, un precio Contado-Inmediato se descontaba desde
+    # t+1: un día de carry mal atribuido → hasta ~150-200 bps de sesgo de TIR en
+    # letras cortas, y el mismo bono mostraba TIRs distintas entre YAS-CI (que sí
+    # pasa settle) y Curvas-CI. La cache key incluye settle, así CI/24hs no se
+    # pisan.
     meta = pricing.bond_meta(code)
     if not meta:
         return None
@@ -149,7 +155,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     else:
         ref_px, price_source, price_date = None, None, None
 
-    m = (pricing.metrics_for_market_price(code, cp(ref_px)) or {}) if ref_px is not None else {}
+    m = (pricing.metrics_for_market_price(code, cp(ref_px), settle) or {}) if ref_px is not None else {}
 
     # VWAP = efectivo / nominales * 100 (misma escala que el precio cotizado).
     vwap = None
@@ -171,8 +177,8 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     # Δ yield (bps) = TIREA(last) − TIREA(close).
     delta_yield_bps = None
     if last is not None and close is not None and last != close:
-        ty_last = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
-        ty_close = _tirea_at(code, cp(close))
+        ty_last = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last), settle)
+        ty_close = _tirea_at(code, cp(close), settle)
         if ty_last is not None and ty_close is not None and ty_last == ty_last and ty_close == ty_close:
             delta_yield_bps = (ty_last - ty_close) * 10000.0
 
@@ -232,9 +238,9 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         }
     )
     if book:
-        row["tirea_bid"] = _tirea_at(code, cp(bid))
-        row["tirea_offer"] = _tirea_at(code, cp(offer))
-        row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last))
+        row["tirea_bid"] = _tirea_at(code, cp(bid), settle)
+        row["tirea_offer"] = _tirea_at(code, cp(offer), settle)
+        row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last), settle)
         # tirea_low/high/close son sólo para el panel del libro (un bono), NO
         # para cada fila de la tabla — se calculan en la route /mercado/book.
         # Cross-venue MAE (OTC): último/volumen del mismo bono en MAE (cache).
@@ -263,7 +269,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
                 "price_source": "MAE", "src": "MAE", "last_cls": _px_cls(mlast, mclose),
             })
             if book:
-                row["tirea_last"] = _tirea_at(code, cp(mlast))
+                row["tirea_last"] = _tirea_at(code, cp(mlast), settle)
                 row["tirea_bid"] = row["tirea_offer"] = None
         else:
             row["src"] = "BYMA*"        # sin dato MAE → se muestra BYMA
@@ -308,6 +314,10 @@ async def _rows_for(
     # Only the ARS leg needs the FX reference (pesos → native basis); the
     # native / USD / USB legs price straight off their own ticker.
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+    # Fecha de liquidación del plazo (CI = hoy, 24hs = None → t+1). Se computa UNA
+    # vez y se pasa a cada fila para que la TIR se descuente desde el settlement
+    # correcto (antes CI se valuaba a t+1, con hasta ~200 bps de sesgo).
+    settle = pricing.settlement_date_str(plazo)
     loop = asyncio.get_running_loop()
 
     # El build de filas es GIL-bound (el calc legacy no libera el GIL), así que
@@ -320,7 +330,7 @@ async def _rows_for(
     def _build_all() -> list[dict]:
         out: list[dict] = []
         for c in codes:
-            r = _row_for_code(c, plazo, leg, fx, book, fuente)
+            r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
             if r is not None:
                 out.append(r)
         return out
@@ -493,6 +503,7 @@ async def mercado_book(
     meta = pricing.bond_meta(code) or {}
     native = meta.get("moneda") or "USD"
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+    settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = None → t+1
 
     def cp(px):
         if px is None:
@@ -505,7 +516,7 @@ async def mercado_book(
         for lvl in (levels or []):
             px, sz = lvl.get("price"), lvl.get("size")
             cum += (sz or 0.0)
-            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px))})
+            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px), settle)})
         # Fracción del acumulado (se normaliza después contra el máx de ambas
         # puntas) → degradé de profundidad estilo DOM en el template.
         return out
@@ -519,11 +530,11 @@ async def mercado_book(
     loop = asyncio.get_running_loop()
 
     def _build_book():
-        r = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente)   # fila (BYMA o MAE)
+        r = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente, settle=settle)   # fila (BYMA o MAE)
         if r:  # TIR de mín/máx/cierre — sólo para este bono; sobre la fuente activa
-            r["tirea_low"] = _tirea_at(code, cp(r.get("low")))
-            r["tirea_high"] = _tirea_at(code, cp(r.get("high")))
-            r["tirea_close"] = _tirea_at(code, cp(r.get("close")))
+            r["tirea_low"] = _tirea_at(code, cp(r.get("low")), settle)
+            r["tirea_high"] = _tirea_at(code, cp(r.get("high")), settle)
+            r["tirea_close"] = _tirea_at(code, cp(r.get("close")), settle)
         bids = _depth_frac(with_yield(snap.bids if snap else None))
         offers = _depth_frac(with_yield(snap.offers if snap else None))
         return r, bids, offers
