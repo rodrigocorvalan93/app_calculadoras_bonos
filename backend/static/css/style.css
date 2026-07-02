@@ -897,6 +897,8 @@ select {
   background: var(--red);
   animation: live-pulse-down 1.2s ease-out infinite;
 }
+/* Aviso textual de feed caído en la topbar (junto al dot). */
+.live-meta.feed-down-txt { color: var(--red); font-weight: 600; }
 @keyframes live-pulse {
   0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); }
   70%  { box-shadow: 0 0 0 7px transparent; }

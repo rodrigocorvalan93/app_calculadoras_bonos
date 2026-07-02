@@ -44,6 +44,14 @@
   function meta(rtt) {
     var el = document.getElementById('live-meta');
     if (!el) return;
+    // Feed caído: aviso explícito en la topbar (el dot rojo solo puede pasar
+    // desapercibido; el trader tiene que SABER que ve precios congelados).
+    if (feedDown) {
+      el.textContent = '⚠ Feed caído';
+      el.classList.add('feed-down-txt');
+      return;
+    }
+    el.classList.remove('feed-down-txt');
     var now = Date.now();
     while (advances.length && now - advances[0] > 60000) advances.shift();
     el.textContent = advances.length ? (advances.length + ' t/min · ' + Math.round(rtt) + ' ms') : '';
