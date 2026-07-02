@@ -510,11 +510,25 @@ async def mercado_book(
         # puntas) → degradé de profundidad estilo DOM en el template.
         return out
 
-    row = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente)   # fila (BYMA o MAE)
-    if row:  # TIR de mín/máx/cierre — sólo para este bono; sobre la fuente activa
-        row["tirea_low"] = _tirea_at(code, cp(row.get("low")))
-        row["tirea_high"] = _tirea_at(code, cp(row.get("high")))
-        row["tirea_close"] = _tirea_at(code, cp(row.get("close")))
+    # Todo el cálculo del book es GIL-bound (fila + TIR por nivel de profundidad +
+    # TIRs low/high/close, casi siempre cache-miss porque el warmup no calienta la
+    # profundidad). En el handler async bloqueaba el event loop hasta ~300 ms por
+    # click, congelando /market/seq y los paneles de todos los usuarios. Lo
+    # corremos en el pool, igual que _rows_for. `/ordenes/quote` reusa esta misma
+    # función, así que el ticket de trading hereda el offload.
+    loop = asyncio.get_running_loop()
+
+    def _build_book():
+        r = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente)   # fila (BYMA o MAE)
+        if r:  # TIR de mín/máx/cierre — sólo para este bono; sobre la fuente activa
+            r["tirea_low"] = _tirea_at(code, cp(r.get("low")))
+            r["tirea_high"] = _tirea_at(code, cp(r.get("high")))
+            r["tirea_close"] = _tirea_at(code, cp(r.get("close")))
+        bids = _depth_frac(with_yield(snap.bids if snap else None))
+        offers = _depth_frac(with_yield(snap.offers if snap else None))
+        return r, bids, offers
+
+    row, bids, offers = await loop.run_in_executor(_row_pool, _build_book)
     return _render(
         request,
         "partials/mercado_book.html",
@@ -525,8 +539,8 @@ async def mercado_book(
         row=row,
         position=positions.position_for(code),                  # tenencia (desplegable)
         instr=await instruments.detail(symbol),                 # lámina mínima / tick / límites
-        bids=_depth_frac(with_yield(snap.bids if snap else None)),
-        offers=_depth_frac(with_yield(snap.offers if snap else None)),
+        bids=bids,
+        offers=offers,
         fuente=fuente,
     )
 
@@ -672,7 +686,11 @@ def _price_overrides(request: Request) -> dict[str, float]:
 async def _whatif_rows(curve_key: str, plazo: str, only_quoting: bool, leg: str,
                        include: set[str] | None, overrides: dict[str, float]):
     rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
-    return _whatif_from_rows(rows, include, overrides)
+    # El loop de overrides recalcula (metrics_for_market_price) por bono editado:
+    # con precios editados/stale son cache-misses (~27 ms c/u, hasta ~1,35 s en el
+    # peor caso). Fuera del event loop, como todo el resto del pricing de curvas.
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_row_pool, _whatif_from_rows, rows, include, overrides)
 
 
 @forwards_router.get("/forwards", response_class=HTMLResponse)
@@ -1052,8 +1070,13 @@ async def graficos_data(
         if to is not None:
             off_at[d] = to
     # La regresión NSS se ajusta SIEMPRE sobre el last (los bid/offer son
-    # series visuales extra, como en OMSweb_app).
-    nss_y = nss_svc.eval_at([p[1] for p in pts], [p[2] for p in pts], xs) if len(pts) >= 4 else None
+    # series visuales extra, como en OMSweb_app). El fit (scipy curve_fit) es
+    # CPU-bound: fuera del event loop, igual que /graficos/nss y /graficos/estimate.
+    nss_y = None
+    if len(pts) >= 4:
+        loop = asyncio.get_running_loop()
+        nss_y = await loop.run_in_executor(
+            None, nss_svc.eval_at, [p[1] for p in pts], [p[2] for p in pts], xs)
     return JSONResponse({
         "n": len(pts), "xs": xs,
         "ars": [ars_at.get(x) for x in xs],

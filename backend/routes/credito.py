@@ -3,6 +3,7 @@ con las métricas live de sus ONs. Lee todo de cache (credit_scores.json + store
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
@@ -52,16 +53,23 @@ async def creditos_detail(request: Request, ticker: str = "") -> HTMLResponse:
     """Ficha del emisor + sus ONs con métricas live (TIREA/TNA/Duration/Paridad)."""
     d = credito.detail(ticker)
     store = marketdata_store.get_store()
-    bonds: List[Dict[str, Any]] = []
-    for bc in d.get("bonds", []):
-        snap = store.get(syms.md_symbol(bc, "24hs"))
-        last = snap.last if snap else None
-        m = pricing.metrics_for_market_price(bc, last) if last is not None else None
-        bonds.append({
-            "code": bc, "last": last,
-            "tirea": (m or {}).get("tirea"), "tna": (m or {}).get("tna"),
-            "duration": (m or {}).get("duration"), "paridad": (m or {}).get("paridad"),
-            "nombre": (pricing.bond_meta(bc) or {}).get("nombre"),
-        })
+
+    # Una TIREA por ON del emisor: cache-miss ~20-150 ms en frío. En el handler
+    # async bloquearía el event loop por click de emisor; al pool como el resto.
+    def _build_bonds() -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for bc in d.get("bonds", []):
+            snap = store.get(syms.md_symbol(bc, "24hs"))
+            last = snap.last if snap else None
+            m = pricing.metrics_for_market_price(bc, last) if last is not None else None
+            out.append({
+                "code": bc, "last": last,
+                "tirea": (m or {}).get("tirea"), "tna": (m or {}).get("tna"),
+                "duration": (m or {}).get("duration"), "paridad": (m or {}).get("paridad"),
+                "nombre": (pricing.bond_meta(bc) or {}).get("nombre"),
+            })
+        return out
+
+    bonds = await asyncio.get_running_loop().run_in_executor(None, _build_bonds)
     return _render(request, "partials/creditos_detail.html",
                    ticker=ticker, credit=d.get("credit") or {}, bonds=bonds)

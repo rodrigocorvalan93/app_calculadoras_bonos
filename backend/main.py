@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -399,6 +400,13 @@ def create_app() -> FastAPI:
         same_site="lax",
         https_only=_cookie_secure,
     )
+    # Compresión de respuestas: las tablas de curva/mercado/posiciones swapean
+    # 70-110 KB de HTML hasta 1×/s por panel. gzip baja eso ~85-90% (100 KB→~10 KB)
+    # y con él el tiempo de transferencia en links remotos. minimum_size=1024 deja
+    # sin comprimir las respuestas chicas (p. ej. /market/seq, un entero plano),
+    # donde el overhead no compensa. Se agrega ÚLTIMO → queda como el middleware
+    # más externo y comprime todo lo que sale.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.get("/")
     async def index() -> RedirectResponse:
