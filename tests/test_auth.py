@@ -223,3 +223,34 @@ async def test_no_borrar_ultimo_superuser(auth_on):
         r = await su.post("/admin/users/delete", data={"username": "rodricor93"})
         # es el usuario logueado → bloqueado
         assert "propio usuario" in r.text or "último superuser" in r.text
+
+
+@pytest.mark.asyncio
+async def test_ordenes_gateado_por_prefijo_y_live_kill_superuser(auth_on):
+    """El OMS mueve plata real: TODO /ordenes/* se gatea por la pestaña Órdenes
+    (antes sólo la página exacta se gateaba, y confirmar/multi/kill/live se colaban
+    para cualquier logueado). Armar LIVE y el kill-switch son además superuser-only."""
+    async with _client() as su:
+        await _login(su, "rodricor93", "Rc_874562")
+        await su.post("/admin/users", data={"username": "bruno", "password": "clave123", "role": "basico"})
+        await su.post("/admin/users", data={"username": "pia", "password": "clave123", "role": "premium"})
+    # Básico (sin la pestaña Órdenes): NINGÚN sub-endpoint de plata pasa → 403.
+    async with _client() as ac:
+        await _login(ac, "bruno", "clave123")
+        assert (await ac.post("/ordenes/confirmar", data={"token": "x"})).status_code == 403
+        assert (await ac.post("/ordenes/multi/confirmar", data={"token": "x"})).status_code == 403
+        assert (await ac.post("/ordenes/live", data={"arm": "1", "confirm": "LIVE"})).status_code == 403
+        assert (await ac.post("/ordenes/kill", data={"on": "1"})).status_code == 403
+        assert (await ac.get("/ordenes/quote", params={"code": "AL30"})).status_code == 403
+    # Premium (tiene la pestaña): cursa (el gate pasa; token inválido → 200 con
+    # error), pero armar LIVE y kill-switch siguen siendo superuser-only → 403.
+    async with _client() as ac:
+        await _login(ac, "pia", "clave123")
+        r = await ac.post("/ordenes/confirmar", data={"token": "inexistente"})
+        assert r.status_code == 200 and ("vencido" in r.text.lower() or "volvé" in r.text.lower())
+        assert (await ac.post("/ordenes/live", data={"arm": "1", "confirm": "LIVE"})).status_code == 403
+        assert (await ac.post("/ordenes/kill", data={"on": "1"})).status_code == 403
+    # Superuser: el kill-switch pasa el gate (lo dejamos desactivado = default).
+    async with _client() as ac:
+        await _login(ac, "rodricor93", "Rc_874562")
+        assert (await ac.post("/ordenes/kill", data={"on": "0"})).status_code == 200

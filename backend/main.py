@@ -328,8 +328,11 @@ def create_app() -> FastAPI:
     _PUBLIC_EXACT = {"/login", "/logout", "/forgot", "/reset", "/healthz",
                      "/favicon.ico", "/favicon.png"}
     _PUBLIC_PREFIX = ("/static/",)
-    # Páginas sensibles reservadas al superuser (no son pestañas gateables).
-    _SUPERUSER_ONLY = ("/admin", "/conexion")
+    # Páginas / endpoints sensibles reservados al superuser (no son pestañas
+    # gateables). /ordenes/live (armar el envío REAL al broker) y /ordenes/kill
+    # (kill-switch del desk) son operaciones de mesa, no de un usuario cualquiera
+    # con la pestaña Órdenes: se restringen a superuser además del gating por tab.
+    _SUPERUSER_ONLY = ("/admin", "/conexion", "/ordenes/live", "/ordenes/kill")
 
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
@@ -382,13 +385,19 @@ def create_app() -> FastAPI:
     # inserta en index 0), así decodifica la cookie ANTES de que corra el guard y
     # `request.session` está disponible adentro. Costo por request: verificar el
     # HMAC de la cookie (sub-µs).
+    # Secure: auto-derivado de app_base_url (https ⇒ True) salvo override explícito.
+    # En prod detrás de HTTPS la cookie de sesión no debe viajar por http en claro.
+    if settings.app_cookie_secure is not None:
+        _cookie_secure = bool(settings.app_cookie_secure)
+    else:
+        _cookie_secure = (settings.app_base_url or "").lower().startswith("https://")
     app.add_middleware(
         SessionMiddleware,
         secret_key=_auth_secret(),
         session_cookie="bonos_session",
         max_age=14 * 24 * 3600,
         same_site="lax",
-        https_only=False,
+        https_only=_cookie_secure,
     )
 
     @app.get("/")

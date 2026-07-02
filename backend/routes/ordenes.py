@@ -69,6 +69,32 @@ def _base_ctx() -> Dict[str, Any]:
             "band": settings.oms_price_band_pct}
 
 
+def _role_block(request: Request, *, superuser: bool = False) -> Optional[HTMLResponse]:
+    """Defensa en profundidad sobre el gating del middleware: cada endpoint que
+    mueve plata re-chequea el rol server-side. Devuelve un partial de error si el
+    usuario no está autorizado, o None si puede seguir.
+
+    - `superuser=True` → sólo el superuser (armar LIVE / kill-switch).
+    - default → cualquier rol con la pestaña Órdenes (premium/superuser); el
+      básico, que no la tiene, queda afuera de cursar/confirmar.
+    Con el muro apagado (AUTH_ENABLED=0, dev) no bloquea nada."""
+    if not settings.auth_enabled:
+        return None
+    from backend.services import auth
+    u = getattr(request.state, "user", None)
+    role = u.get("role") if isinstance(u, dict) else None
+    if role == "superuser":
+        return None
+    if superuser:
+        return _render(request, "partials/orden_confirm.html",
+                       error="Acción reservada al superuser (armar LIVE / kill-switch).",
+                       **_base_ctx())
+    if role and auth.can_access_path(role, "/ordenes"):
+        return None
+    return _render(request, "partials/orden_confirm.html",
+                   error="No tenés permiso para cursar órdenes.", **_base_ctx())
+
+
 # ── páginas / parciales ──────────────────────────────────────────────────────
 @router.get("/ordenes", response_class=HTMLResponse)
 async def ordenes_page(request: Request, code: str = "", side: str = "buy",
@@ -128,6 +154,9 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
                          price: str = Form(""), account: str = Form(""),
                          plazo: str = Form("24hs"),
                          confirm_no_ref: str = Form("")) -> HTMLResponse:
+    blocked = _role_block(request)
+    if blocked is not None:
+        return blocked
     code = code.strip().upper()
     fqty = _num_qty(qty)
     fpx = _num_px(price)
@@ -145,10 +174,12 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
         return _render(request, "partials/orden_confirm.html", error=motivo,
                        trigger="orden-done", **_base_ctx())
     est_px = fpx if ordtype != "market" else ref
+    # notional None (no 0) cuando Market no tiene referencia: la card muestra
+    # "sin referencia" en vez de un engañoso "notional ≈ 0".
     payload = {"code": code, "symbol": syms.md_symbol(code, plazo), "side": side,
                "ordtype": ordtype, "qty": fqty, "price": fpx, "account": account,
                "plazo": plazo, "moneda": moneda, "ref": ref,
-               "notional": fqty * (est_px or 0) / 100.0}
+               "notional": (fqty * est_px / 100.0) if est_px else None}
     token = oms.new_token(payload)
     return _render(request, "partials/orden_confirm.html",
                    p=payload, token=token, **_base_ctx())
@@ -156,6 +187,9 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
 
 @router.post("/ordenes/confirmar", response_class=HTMLResponse)
 async def ordenes_confirmar(request: Request, token: str = Form("")) -> HTMLResponse:
+    blocked = _role_block(request)
+    if blocked is not None:
+        return blocked
     payload = oms.pop_token(token)
     if payload is None or "batch" in payload:
         return _render(request, "partials/orden_confirm.html",
@@ -173,6 +207,9 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
                         plazo: str = Form("24hs"), lines: str = Form(""),
                         confirm_no_ref: str = Form("")) -> HTMLResponse:
     """Una orden por línea 'comitente, cantidad' (misma especie/lado/precio)."""
+    blocked = _role_block(request)
+    if blocked is not None:
+        return blocked
     code = code.strip().upper()
     fpx = _num_px(price)
     if ordtype != "market" and fpx is None:
@@ -205,19 +242,22 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
         batch.append({"code": code, "symbol": syms.md_symbol(code, plazo), "side": side,
                       "ordtype": ordtype, "qty": q, "price": fpx, "account": acct,
                       "plazo": plazo, "moneda": moneda, "ref": ref,
-                      "notional": q * (est_px or 0) / 100.0})
+                      "notional": (q * est_px / 100.0) if est_px else None})
     if not batch:
         return _render(request, "partials/orden_confirm.html",
                        error="Sin líneas válidas. " + " · ".join(errors), **_base_ctx())
     token = oms.new_token({"batch": batch})
     return _render(request, "partials/orden_confirm.html",
-                   batch=batch, batch_total=sum(b["notional"] for b in batch),
+                   batch=batch, batch_total=sum((b["notional"] or 0) for b in batch),
                    batch_moneda=("USD" if (moneda or "ARS").upper() in ("USD", "USB") else "ARS"),
                    warnings=errors, token=token, **_base_ctx())
 
 
 @router.post("/ordenes/multi/confirmar", response_class=HTMLResponse)
 async def ordenes_multi_confirmar(request: Request, token: str = Form("")) -> HTMLResponse:
+    blocked = _role_block(request)
+    if blocked is not None:
+        return blocked
     payload = oms.pop_token(token)
     if payload is None or "batch" not in payload:
         return _render(request, "partials/orden_confirm.html",
@@ -230,6 +270,9 @@ async def ordenes_multi_confirmar(request: Request, token: str = Form("")) -> HT
 
 @router.post("/ordenes/kill", response_class=HTMLResponse)
 async def ordenes_kill(request: Request, on: str = Form("1")) -> HTMLResponse:
+    blocked = _role_block(request, superuser=True)
+    if blocked is not None:
+        return blocked
     oms.kill_switch(on == "1")
     return _render(request, "partials/oms_status.html", trigger="orden-done", **_base_ctx())
 
@@ -239,6 +282,9 @@ async def ordenes_live(request: Request, arm: str = Form("0"),
                        confirm: str = Form("")) -> HTMLResponse:
     """Prende/apaga el modo LIVE en caliente. Armar exige escribir 'LIVE'
     (anti-click accidental); apagar es inmediato. No persiste (reboot→config)."""
+    blocked = _role_block(request, superuser=True)
+    if blocked is not None:
+        return blocked
     if arm == "1":
         if confirm.strip().upper() != "LIVE":
             return _render(request, "partials/oms_status.html",

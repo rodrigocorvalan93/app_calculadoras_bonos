@@ -46,7 +46,7 @@
                 <td style="color:{{ 'var(--green)' if b.side == 'buy' else 'var(--red)' }}">{{ 'COMPRA' if b.side=='buy' else 'VENTA' }}</td>
                 <td>{{ b.code }}</td><td>{{ b.qty | ar_int }}</td>
                 <td>{% if b.ordtype == 'market' %}mercado{% else %}{{ b.price | ar_num(2) }}{% endif %}</td>
-                <td>{{ b.notional | ar_int }}</td></tr>
+                <td>{% if b.notional %}{{ b.notional | ar_int }}{% else %}<span class="muted">s/ref</span>{% endif %}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -70,7 +70,8 @@
         de <b>{{ p.qty | ar_int }} VN</b> de <b>{{ p.code }}</b>
         {% if p.ordtype == 'market' %}<b>a mercado</b>{% else %}@ <b>{{ p.price | ar_num(2) }}</b>{% endif %} ({{ p.plazo }})
         · comitente <b>{{ p.account }}</b>
-        · notional ≈ <b>{{ p.notional | ar_int }} {{ 'USD' if (p.moneda or 'ARS')|upper in ('USD','USB') else 'ARS' }}</b>
+        {% if p.notional %}· notional ≈ <b>{{ p.notional | ar_int }} {{ 'USD' if (p.moneda or 'ARS')|upper in ('USD','USB') else 'ARS' }}</b>
+        {% else %}· <b style="color:var(--red)">sin referencia de precio</b>{% endif %}
         {% if p.ref %}· ref. mercado {{ p.ref | ar_num(2) }}{% endif %}
       </p>
       <form hx-post="/ordenes/confirmar" hx-target="#orden-result" hx-swap="innerHTML" style="display:inline">

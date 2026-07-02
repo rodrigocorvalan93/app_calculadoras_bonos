@@ -99,6 +99,12 @@ tests/__pycache__/
 # Config raíz para el harness de tests
 !pytest.ini
 
+# ── Scripts de administración (seed de usuarios, etc.) ──────
+# Sólo código .py; el store que generan (auth_store.json) sigue ignorado arriba.
+!scripts/
+!scripts/**
+scripts/__pycache__/
+
 # ── Skills de Claude Code (versionadas para el equipo) ──────
 # Sólo .claude/skills/ va al repo; settings locales / estado de sesión NO.
 !.claude/

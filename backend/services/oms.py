@@ -149,6 +149,10 @@ def validate(code: str, side: str, qty: float, price: Optional[float],
       `oms_require_ref_confirm`). Esto cierra el agujero del ON ilíquido sin
       cotización, donde antes NO se chequeaba banda y un precio mal tipeado
       (p.ej. sub-precio 1000×) pasaba directo.
+    - Market SIN ninguna referencia (ni mercado ni valor técnico): también exige
+      `confirmed` y aplica el tope de notional sobre el VN a la par (precio=100).
+      Antes este caso se colaba sin tope ni confirmación (ambos guards vivían bajo
+      ramas que Market o el `ref_px` nulo salteaban) — el agujero real del hallazgo.
     """
     if _kill["on"]:
         return "KILL-SWITCH activado: envíos bloqueados."
@@ -187,6 +191,23 @@ def validate(code: str, side: str, qty: float, price: Optional[float],
         elif settings.oms_require_ref_confirm and not confirmed:
             return ("Sin referencia de mercado ni valor técnico para validar el precio. "
                     "Confirmá manualmente (o usá Market) para enviar.")
+    elif ref_px is None:
+        # Market SIN ninguna referencia (ni last/close ni valor técnico): antes se
+        # colaba sin tope de notional (el `if ref_px:` de arriba no corre) y sin la
+        # confirmación de sin-referencia (vivía bajo `if not is_market`). Eximir a
+        # Market de la BANDA de precio es intencional ("toma lo que haya"), pero un
+        # VN arbitrario no puede viajar al broker sin ningún guard. Exigimos
+        # confirmación explícita y aplicamos un tope conservador sobre el VN
+        # valuado a la par (precio=100 ⇒ notional ≈ qty).
+        if settings.oms_require_ref_confirm and not confirmed:
+            return ("Market sin referencia de mercado ni valor técnico: no se puede "
+                    "estimar el notional. Confirmá manualmente para enviar (o usá "
+                    "Limit con precio).")
+        notional_par = qty                          # qty * 100 / 100 — VN a la par
+        if notional_par > cap:
+            return (f"VN {qty:,.0f} (≈{notional_par:,.0f} {unit} a la par) supera el tope "
+                    f"{cap:,.0f} {unit}. Sin cotización no se puede validar mejor; "
+                    f"bajá la cantidad o usá Limit.")
     return None
 
 

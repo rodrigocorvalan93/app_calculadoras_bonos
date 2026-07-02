@@ -52,3 +52,22 @@ def test_validate_market_order_uses_theo_for_notional():
     huge = settings.oms_max_notional_usd * 100 / 1.0      # qty que excede el tope USD
     m = oms.validate("GD30", "buy", huge, None, "acct", None, "USD", "market", theo_ref=100.0)
     assert m and "notional" in m.lower()
+
+
+def test_validate_market_sin_referencia_bloquea_y_topea():
+    """Agujero cerrado: Market SIN mercado NI teórico se colaba sin tope de
+    notional (el `if ref_px:` no corría) y sin la confirmación de sin-referencia
+    (vivía bajo `if not is_market`). Ahora exige confirmación y, confirmado,
+    aplica el tope sobre el VN a la par (precio=100)."""
+    from backend.config import settings
+    # sin confirmar → bloquea pidiendo confirmación manual
+    m = oms.validate("RARE", "buy", 1000, None, "acct", None, "ARS", "market", theo_ref=None)
+    assert m and "confirm" in m.lower() and "market" in m.lower()
+    # confirmado y VN chico → pasa
+    assert oms.validate("RARE", "buy", 1000, None, "acct", None, "ARS", "market",
+                        theo_ref=None, confirmed=True) is None
+    # confirmado pero VN enorme (a la par supera el tope ARS) → rebota por notional
+    huge = settings.oms_max_notional + 1                  # notional_par = qty > cap
+    m2 = oms.validate("RARE", "buy", huge, None, "acct", None, "ARS", "market",
+                      theo_ref=None, confirmed=True)
+    assert m2 and "supera el tope" in m2.lower()
