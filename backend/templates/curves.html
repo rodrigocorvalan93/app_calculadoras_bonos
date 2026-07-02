@@ -63,6 +63,12 @@
         </label>
 
         <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+          {# Hidden 'false' ANTES del checkbox: un checkbox desmarcado no envía
+             nada, así que sin esto no se podía DESactivar el filtro (el server
+             caía a su default True). Con el hidden, desmarcado manda false;
+             marcado manda false+true y FastAPI toma el último (true). El
+             [name=only_quoting] en el hx-include captura el hidden al desmarcar. #}
+          <input type="hidden" name="only_quoting" value="false">
           <input
             type="checkbox"
             name="only_quoting"
@@ -72,7 +78,7 @@
             hx-trigger="change"
             hx-target="#curve-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=leg]"
+            hx-include="[name=curve], [name=plazo], [name=leg], [name=only_quoting]"
           >
           Solo con cotización
         </label>
