@@ -74,6 +74,48 @@ def test_rail_picks_skips_currency_without_data() -> None:
     assert [p["moneda"] for p in picks] == ["ARS"]
 
 
+def _seed_caucion_close_only(n: int, *, close: float, moneda: str = "PESOS") -> None:
+    """Snapshot como el que deja el feed fuera de rueda / tras un reinicio:
+    sólo CL (cierre previo), sin last/bid/offer ni volumen."""
+    store = mds_.get_store()
+    store.update_from_md(f"MERV - XMEV - {moneda} - {n}D", {"CL": {"price": close}})
+
+
+def test_byma_rows_excludes_close_only_by_default() -> None:
+    # La pestaña Tasas no debe mostrar filas sin cotización viva.
+    _clear_cauciones()
+    _seed_caucion_close_only(1, close=23.0)
+    _seed_caucion(2, tasa=24.0, close=23.8, vol=5_000_000_000)
+    assert [r["plazo"] for r in cauc_svc.byma_rows("PESOS")] == ["2D"]
+    rows = cauc_svc.byma_rows("PESOS", include_close_only=True)
+    assert [r["plazo"] for r in rows] == ["1D", "2D"]
+
+
+def test_rail_pick_falls_back_to_previous_close() -> None:
+    # Mercado cerrado / pre-apertura: sólo hay cierres en el store → el riel
+    # muestra el cierre previo marcado es_cierre (antes desaparecía el KPI).
+    _clear_cauciones()
+    _seed_caucion_close_only(1, close=23.0)
+    _seed_caucion_close_only(2, close=23.4)
+    r = cauc_svc.rail_pick("PESOS")
+    assert r is not None
+    assert r["plazo"] == "1D"                      # el más corto con cierre
+    assert r["tasa"] == pytest.approx(23.0)
+    assert r["var"] is None
+    assert r["es_cierre"] is True
+
+
+def test_rail_pick_prefers_live_trade_over_close_fallback() -> None:
+    _clear_cauciones()
+    _seed_caucion_close_only(1, close=23.0)        # 1D todavía no operó
+    _seed_caucion(3, tasa=22.0, close=22.3, vol=90_000_000_000)
+    r = cauc_svc.rail_pick("PESOS")
+    assert r is not None
+    assert r["plazo"] == "3D"                      # gana la operada, no el cierre
+    assert r["tasa"] == pytest.approx(22.0)
+    assert "es_cierre" not in r
+
+
 @pytest.mark.asyncio
 async def test_rail_renders_caucion_block() -> None:
     from httpx import ASGITransport, AsyncClient
@@ -90,3 +132,19 @@ async def test_rail_renders_caucion_block() -> None:
         assert tok in r.text, tok
     # ARS aparece antes que USD en el riel.
     assert r.text.index("Caución ARS") < r.text.index("Caución USD")
+
+
+@pytest.mark.asyncio
+async def test_rail_renders_close_fallback() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    _clear_cauciones()
+    _seed_caucion_close_only(1, close=23.0, moneda="PESOS")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get("/dolares/rail")
+    assert r.status_code == 200
+    for tok in ("📊 Tasa", "Caución ARS 1D", "23,00%", "cierre previo"):
+        assert tok in r.text, tok
+    assert "vs cierre</span>" not in r.text.split("💵 Dólar")[0]  # sin flecha/var en el bloque caución
