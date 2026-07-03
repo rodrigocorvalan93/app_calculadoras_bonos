@@ -9,9 +9,11 @@
   <div class="rail-l">Caución {{ c.moneda }} {{ c.plazo }}{% if c.volumen is not none %} · <span class="muted">vol {{ c.volumen | ar_hum }}</span>{% endif %}</div>
   <div class="rail-v {{ fx.vcls(c.var) }}">
     {{ c.tasa | ar_pct_pp(2) }}
-    <span class="rail-arrow">{{ fx.arrow(c.var) }}</span>
+    {% if not c.es_cierre %}<span class="rail-arrow">{{ fx.arrow(c.var) }}</span>{% endif %}
   </div>
-  {% if c.var is not none %}
+  {% if c.es_cierre %}
+    <div class="rail-s muted">cierre previo · sin operaciones</div>
+  {% elif c.var is not none %}
     <div class="rail-s {{ fx.vcls(c.var) }}">{{ c.var | ar_num(2) }} pp <span class="muted">vs cierre</span></div>
   {% endif %}
 </div>
