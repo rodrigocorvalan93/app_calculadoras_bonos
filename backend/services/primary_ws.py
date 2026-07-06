@@ -23,6 +23,7 @@ import asyncio
 import inspect
 import json
 import logging
+import ssl
 import time
 from typing import Any, Dict, Iterable, List, Optional, Set
 
@@ -76,6 +77,25 @@ def _ws_header_kwarg() -> str:
 
 
 _WS_HEADER_KW = _ws_header_kwarg()
+
+
+def _ssl_context_for(url: str) -> Optional[ssl.SSLContext]:
+    """Contexto TLS con el bundle de certifi para las conexiones wss://.
+
+    Sin esto, `websockets.connect` usa los CA default del intérprete — que en
+    el Python de python.org para macOS están VACÍOS (no lee el Keychain del
+    sistema): cada conexión moría con CERTIFICATE_VERIFY_FAILED y el feed
+    quedaba en un loop conectar/caer, mientras el login REST sí funcionaba
+    (httpx trae certifi propio). Usamos el mismo bundle que httpx — certifi es
+    dependencia dura de httpx, siempre está. En Windows/Linux es equivalente
+    al default, así que no cambia nada donde ya andaba."""
+    if not url.startswith("wss://"):
+        return None
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001 — sin certifi, el default de siempre
+        return None
 
 
 def _ws_url_from_base(base_url: str) -> str:
@@ -447,6 +467,9 @@ class PrimaryWS:
         }
         if headers:
             connect_kwargs[_WS_HEADER_KW] = headers
+        ssl_ctx = _ssl_context_for(self.ws_url)
+        if ssl_ctx is not None:
+            connect_kwargs["ssl"] = ssl_ctx
         async with websockets.connect(self.ws_url, **connect_kwargs) as ws:
             self._ws = ws
             self._connected = True
