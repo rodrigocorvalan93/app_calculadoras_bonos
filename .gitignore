@@ -46,6 +46,7 @@ generar_fondos.py
 
 # Scripts de arranque
 !*.bat
+!correr_app.command
 
 # ── Datasets de referencia (estables, no sensibles) ──────────
 # A3500 (BCRA tipo de cambio mayorista) — serie histórica de uso público
