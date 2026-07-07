@@ -80,6 +80,28 @@ def test_positions_finds_composicion_via_onedrive(mac_home, monkeypatch) -> None
     assert got == str(carteras / "Delta_Composicion.xlsx")
 
 
+def test_historico_dir_resolves_on_mac(mac_home, monkeypatch) -> None:
+    # Destino de guardado de bymaapi.py: DELTA_HISTORICO_DIR estilo Windows
+    # remapea a la carpeta 'Delta Bases' del OneDrive local.
+    monkeypatch.setenv("DELTA_HISTORICO_DIR", _WIN_HISTORICO)
+    got = deltapaths.historico_dir()
+    assert got is not None and os.path.isdir(got)
+    assert got.endswith(os.path.join("Inversiones - Documentos", "Delta Bases"))
+    assert _TENANT_DIR in got
+
+
+def test_historico_dir_falls_back_to_bases_parent(mac_home, monkeypatch) -> None:
+    # Sólo DELTA_BASES_DIR (Carteras) configurada → el padre remapeado.
+    monkeypatch.setenv("DELTA_BASES_DIR", _WIN_BASES)
+    got = deltapaths.historico_dir()
+    assert got is not None
+    assert got.endswith(os.path.join("Inversiones - Documentos", "Delta Bases"))
+
+
+def test_historico_dir_none_without_env(mac_home) -> None:
+    assert deltapaths.historico_dir() is None
+
+
 def test_historico_derives_parent_from_remapped_bases(mac_home, monkeypatch) -> None:
     # DELTA_BASES_DIR (Carteras) remapeada → el histórico se busca en el padre
     # remapeado (Delta Bases), igual que en Windows.

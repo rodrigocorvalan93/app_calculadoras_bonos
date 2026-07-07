@@ -691,6 +691,30 @@ def process_future_data(
 # =============================================================================
 # Excel
 # =============================================================================
+def _sin_timezones(df: pd.DataFrame) -> pd.DataFrame:
+    """Excel (openpyxl) rechaza datetimes con timezone y el guardado entero
+    muere ('Excel does not support datetimes with timezones'). Devuelve una
+    copia con las columnas datetime tz-aware pasadas a naive (misma hora de
+    pared) y los Timestamps/datetimes sueltos con tz dentro de columnas
+    object normalizados igual."""
+    out = df.copy()
+
+    def _naive(v):
+        if isinstance(v, pd.Timestamp) and v.tzinfo is not None:
+            return v.tz_localize(None)
+        if isinstance(v, datetime) and v.tzinfo is not None:
+            return v.replace(tzinfo=None)
+        return v
+
+    for col in out.columns:
+        s = out[col]
+        if isinstance(s.dtype, pd.DatetimeTZDtype):
+            out[col] = s.dt.tz_localize(None)
+        elif s.dtype == object:
+            out[col] = s.map(_naive)
+    return out
+
+
 def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
     """
     Guarda el DF en Excel, concatenando con datos existentes si existe.
@@ -716,8 +740,11 @@ def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
         df_last['Proy'] = np.where(df_last['Código'].str.endswith('j'), 1, 0)
 
         for col in ['TIREA', 'TNA', 'TEM']:
-            df_last[col].replace('nan%', '', inplace=True)
+            # pandas 3 (Copy-on-Write): el .replace(inplace=True) sobre la
+            # columna era chained assignment y NO modificaba el DataFrame.
+            df_last[col] = df_last[col].replace('nan%', '')
 
+        df_last = _sin_timezones(df_last)
         df_last.to_excel(file_path, index=False)
         print(f"DataFrame guardado con éxito en '{file_path}'.")
 
@@ -989,6 +1016,19 @@ def main():
         user_profile, "DELTA ASSET MANAGEMENT S.A", "Inversiones - Documentos",
         "Delta Bases", "Delta - historico_byma_px_tasas.xlsx"
     )
+    # En Windows la carpeta clásica existe y se usa tal cual (idéntico a
+    # siempre). Si NO existe (macOS: el OneDrive del equipo vive en
+    # ~/Library/CloudStorage/...), se resuelve desde DELTA_HISTORICO_DIR /
+    # DELTA_BASES_DIR de secrets.txt con el mismo mapeo multiplataforma que
+    # usa la app para LEER el histórico — así se guarda donde la app lee.
+    if not os.path.isdir(os.path.dirname(file_path)):
+        try:
+            from backend.services import deltapaths
+            hist_dir = deltapaths.historico_dir()
+            if hist_dir:
+                file_path = os.path.join(hist_dir, "Delta - historico_byma_px_tasas.xlsx")
+        except Exception as exc:  # noqa: BLE001 — nunca romper el guardado por esto
+            print(f"[bymaapi] resolvedor multiplataforma no disponible ({exc}); sigo con la ruta clásica.")
 
     respuesta = input("¿Deseas guardar el DataFrame en un archivo Excel? (S/N): ").strip().upper()
     if respuesta == "S":

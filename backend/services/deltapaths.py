@@ -119,6 +119,23 @@ def _search_onedrive(parts: List[str], want: str) -> Optional[str]:
     return None
 
 
+def historico_dir() -> Optional[str]:
+    """Carpeta 'Delta Bases' donde vive el histórico diario de px/tasas —
+    resuelta multiplataforma desde las env de secrets.txt. La usa el WRITER
+    (bymaapi.py guarda ahí la base todos los días) además de los readers:
+    DELTA_HISTORICO_DIR si existe; si no, el padre de DELTA_BASES_DIR
+    (Carteras → Delta Bases). None si ninguna existe en esta máquina."""
+    d = expand(os.getenv("DELTA_HISTORICO_DIR"), want="dir")
+    if d and os.path.isdir(d):
+        return d
+    bases = expand(os.getenv("DELTA_BASES_DIR"), want="dir")
+    if bases and os.path.isdir(bases):
+        parent = os.path.dirname(bases.rstrip("\\/"))
+        if os.path.isdir(parent):
+            return parent
+    return None
+
+
 def expand(raw: Optional[str], want: str = "dir") -> Optional[str]:
     """Ruta de secrets.txt → ruta usable en ESTA máquina.
 
