@@ -24,6 +24,8 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from backend.services import deltapaths
+
 logger = logging.getLogger("backend.positions")
 
 _COMPOSICION_FILE = "Delta_Composicion.xlsx"
@@ -49,10 +51,10 @@ _cache: Optional[Dict[str, Any]] = None
 
 # ── paths ────────────────────────────────────────────────────────────────
 def _resolve(filename: str, env_override: str) -> Optional[str]:
-    p = os.getenv(env_override)
+    p = deltapaths.expand(os.getenv(env_override), want="file")
     if p and os.path.isfile(p):
         return p
-    base = os.getenv("DELTA_BASES_DIR")
+    base = deltapaths.expand(os.getenv("DELTA_BASES_DIR"), want="dir")
     if base:
         cand = os.path.join(base, filename)
         if os.path.isfile(cand):
@@ -170,14 +172,14 @@ def _fondos_path() -> Optional[str]:
     case-insensitive (el archivo suele ser 'Delta_fondos.txt')."""
     env = os.getenv("DELTA_FONDOS_PATH")
     if env:
-        env = os.path.expandvars(os.path.expanduser(env))
+        env = deltapaths.expand(env, want="file")
         if os.path.isfile(env):
             return env
     for base_env in ("DELTA_HISTORICO_DIR", "DELTA_BASES_DIR"):
         base = os.getenv(base_env)
         if not base:
             continue
-        base = os.path.expandvars(os.path.expanduser(base)).rstrip("\\/")
+        base = deltapaths.expand(base, want="dir").rstrip("\\/")
         parent = os.path.dirname(base)
         for d in (os.path.join(base, "Text", "Esco"), base,
                   os.path.join(parent, "Text", "Esco"), parent):

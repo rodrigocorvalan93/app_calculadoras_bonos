@@ -18,6 +18,8 @@ import threading
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.services import deltapaths
+
 logger = logging.getLogger(__name__)
 
 _HISTORICO_FILENAME = "Delta - historico_byma_px_tasas.xlsx"
@@ -39,18 +41,18 @@ def _resolve_path() -> Optional[str]:
     DELTA_BASES_DIR/.. (junto a Carteras). Mismo orden que el legacy."""
     env = os.getenv("DELTA_HISTORICO_PATH")
     if env:
-        env = os.path.expandvars(os.path.expanduser(env))
+        env = deltapaths.expand(env, want="file")
         if os.path.isfile(env):
             return env
     env_dir = os.getenv("DELTA_HISTORICO_DIR")
     if env_dir:
-        env_dir = os.path.expandvars(os.path.expanduser(env_dir))
+        env_dir = deltapaths.expand(env_dir, want="dir")
         cand = os.path.join(env_dir, _HISTORICO_FILENAME)
         if os.path.isfile(cand):
             return cand
     env_bases = os.getenv("DELTA_BASES_DIR")
     if env_bases:
-        env_bases = os.path.expandvars(os.path.expanduser(env_bases))
+        env_bases = deltapaths.expand(env_bases, want="dir")
         cand = os.path.join(os.path.dirname(env_bases.rstrip("\\/")), _HISTORICO_FILENAME)
         if os.path.isfile(cand):
             return cand

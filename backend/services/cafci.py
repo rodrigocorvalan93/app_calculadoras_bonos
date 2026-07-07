@@ -24,6 +24,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.locale_ar import parse_ar_num
+from backend.services import deltapaths
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def _discover_dirs() -> List[str]:
     def add_root(p: Optional[str], *, is_file: bool = False) -> None:
         if not p:
             return
-        p = os.path.expandvars(os.path.expanduser(p)).rstrip("\\/")
+        p = deltapaths.expand(p, want="file" if is_file else "dir").rstrip("\\/")
         base = os.path.dirname(p) if is_file else p
         for r in (base, os.path.dirname(base)):   # la carpeta y un nivel arriba
             if r and r not in roots:
@@ -192,7 +193,7 @@ def _cafci_dir() -> Optional[str]:
     global _dir_cache
     env_dir = os.getenv("DELTA_CAFCI_DIR")
     if env_dir:
-        return os.path.expandvars(os.path.expanduser(env_dir))
+        return deltapaths.expand(env_dir, want="dir")
     if _dir_cache and os.path.isdir(_dir_cache):
         return _dir_cache
     for d in _discover_dirs():
@@ -208,7 +209,7 @@ def _resolve_candidates() -> List[str]:
     (`_cafci_dir`). Dentro de una carpeta, ver `_dir_candidates`."""
     env = os.getenv("DELTA_CAFCI_PATH")
     if env:
-        env = os.path.expandvars(os.path.expanduser(env))
+        env = deltapaths.expand(env, want="file")
         if os.path.isfile(env):
             return [env]
     d = _cafci_dir()

@@ -16,6 +16,8 @@ import os
 import threading
 from typing import Any, Dict, List, Optional
 
+from backend.services import deltapaths
+
 logger = logging.getLogger("backend.delta_especies")
 
 _ESPECIES_FILENAME = "Delta - Especies.xlsx"
@@ -38,14 +40,14 @@ _cache: Optional[Dict[str, Any]] = None
 def _resolve_path() -> Optional[str]:
     env = os.getenv("DELTA_ESPECIES_PATH")
     if env:
-        env = os.path.expandvars(os.path.expanduser(env))
+        env = deltapaths.expand(env, want="file")
         if os.path.isfile(env):
             return env
     for base_env in ("DELTA_HISTORICO_DIR", "DELTA_BASES_DIR"):
         base = os.getenv(base_env)
         if not base:
             continue
-        base = os.path.expandvars(os.path.expanduser(base)).rstrip("\\/")
+        base = deltapaths.expand(base, want="dir").rstrip("\\/")
         for cand in (os.path.join(base, _ESPECIES_FILENAME),
                      os.path.join(os.path.dirname(base), _ESPECIES_FILENAME)):
             if os.path.isfile(cand):
