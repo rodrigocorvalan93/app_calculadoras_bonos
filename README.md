@@ -48,6 +48,24 @@ APP_SECRET_KEY=<hex largo>
 
 Detalle de todas las env (SMTP, paths, etc.) y de la arquitectura del backend en **`backend/README.md`**.
 
+### Desde el celular (Tailscale)
+
+La app no se hostea en el teléfono: sigue corriendo en tu Mac/PC y el celu
+abre el navegador contra ella por una VPN privada. **No** la expongas a
+internet con túneles públicos — el OMS cursa órdenes reales.
+
+1. Instalá [Tailscale](https://tailscale.com/download) en la máquina que corre
+   la app y en el celular, con la misma cuenta (gratis para uso personal).
+2. En `secrets.txt` agregá `APP_HOST=0.0.0.0` (hace que uvicorn escuche en la
+   red, no sólo en localhost). `correr_app.command` la lee solo; a mano:
+   `uvicorn backend.main:app --host 0.0.0.0 --port 8000`.
+3. En el celu abrí `http://<nombre-de-tu-maquina>:8000` (el nombre aparece en
+   la app de Tailscale). Login normal — el muro de sesión sigue activo.
+
+La máquina que corre la app tiene que quedar prendida. Con la app abierta a
+las 17:01 de un día hábil, la base histórica de px/tasas del día se guarda
+sola (ver `HISTORICO_AUTOSAVE` en `backend/config.py`).
+
 ---
 
 ## 🗂️ Estructura del proyecto

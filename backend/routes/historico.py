@@ -28,6 +28,27 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
 
 
+@router.post("/historicos/guardar-base", response_class=HTMLResponse)
+async def historicos_guardar_base(request: Request) -> HTMLResponse:
+    """Guardado manual de la base px/tasas de HOY (Excel + Parquet), con la
+    data viva del store — reemplaza la corrida manual de bymaapi. SÓLO
+    superuser (gateado en main._SUPERUSER_ONLY). force=True: el que aprieta
+    el botón decide, sin guards de calendario; el dedup protege igual."""
+    from backend.services import historico_writer
+
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, lambda: historico_writer.save_today(force=True))
+    if res.get("ok"):
+        msg = (f"✅ Base guardada: {res['rows']} filas de hoy "
+               f"({res['operados']} con operaciones) · total {res['total_rows']} filas"
+               f" · Excel{' + Parquet' if res.get('parquet') else ''}")
+        cls = "guardar-ok"
+    else:
+        msg = f"⚠ {res.get('error') or res.get('skipped') or 'no se guardó'}"
+        cls = "guardar-err"
+    return HTMLResponse(f'<span class="{cls} muted" style="font-size:12px">{msg}</span>')
+
+
 def _line_chart(serie: str, rango: str, desde: Optional[str] = None,
                 hasta: Optional[str] = None, width: int = 960, height: int = 420) -> Dict[str, Any]:
     days = None if (desde or hasta) else _RANGOS.get(rango, 365)

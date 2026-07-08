@@ -748,6 +748,22 @@ def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
         df_last.to_excel(file_path, index=False)
         print(f"DataFrame guardado con éxito en '{file_path}'.")
 
+        # Espejo .parquet de la MISMA base: la app lo lee ~100× más rápido que
+        # el Excel (y sin bloquear el archivo si lo tenés abierto). El Excel
+        # sigue siendo el canónico; si esto falla (sin pyarrow), no pasa nada.
+        try:
+            parquet_path = os.path.splitext(file_path)[0] + ".parquet"
+            # Columnas de texto con tipos mixtos (Excel viejo devuelve Price
+            # Date como int, el df nuevo trae str) rompen pyarrow: unificar.
+            mirror = df_last.copy()
+            for col in ("symbol", "Código", "Price Source", "Price Date"):
+                if col in mirror.columns:
+                    mirror[col] = mirror[col].astype("string")
+            mirror.to_parquet(parquet_path, index=False)
+            print(f"Espejo parquet actualizado en '{parquet_path}'.")
+        except Exception as e:  # noqa: BLE001
+            print(f"(Espejo parquet no guardado: {e} — el Excel quedó bien. Tip: pip install pyarrow)")
+
     except Exception as e:
         print(f"Error al guardar el archivo: {e}")
 

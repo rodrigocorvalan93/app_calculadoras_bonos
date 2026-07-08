@@ -87,6 +87,17 @@ class Settings(BaseSettings):
     warmup_enabled: bool = True
     warmup_interval_seconds: int = 8
 
+    # ── Autoguardado del histórico px/tasas al cierre ─────────────────────
+    # Si la app está corriendo a esa hora (BA, días hábiles), guarda las filas
+    # del día en el Excel/Parquet de bymaapi (mismo esquema y dedup).
+    # HISTORICO_AUTOSAVE=0 lo apaga — dejalo prendido en UNA sola máquina si
+    # corrés la app en dos a la vez (evita escribir el archivo en paralelo).
+    historico_autosave: bool = True
+    historico_autosave_hhmm: str = "17:01"
+    # Mínimo de bonos con operaciones DE HOY para autoguardar (guard de
+    # feriado/sin rueda: los cierres pegajosos de ayer no cuentan).
+    historico_autosave_min_operados: int = 30
+
     # ── Auth (login wall + roles) ─────────────────────────────────────────
     # Escape hatch: AUTH_ENABLED=0 apaga el muro (dev/emergencia). Default ON.
     auth_enabled: bool = True

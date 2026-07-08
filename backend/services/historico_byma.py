@@ -36,27 +36,76 @@ def _empty(error: Optional[str] = None, path: Optional[str] = None) -> Dict[str,
             "last_update": None}
 
 
-def _resolve_path() -> Optional[str]:
-    """DELTA_HISTORICO_PATH (archivo) → DELTA_HISTORICO_DIR (carpeta) →
-    DELTA_BASES_DIR/.. (junto a Carteras). Mismo orden que el legacy."""
-    env = os.getenv("DELTA_HISTORICO_PATH")
-    if env:
-        env = deltapaths.expand(env, want="file")
-        if os.path.isfile(env):
-            return env
+def _resolve_named(filename: str) -> Optional[str]:
+    """Busca `filename` en DELTA_HISTORICO_DIR y junto a DELTA_BASES_DIR
+    (padre de Carteras). Mismo orden que el legacy."""
     env_dir = os.getenv("DELTA_HISTORICO_DIR")
     if env_dir:
         env_dir = deltapaths.expand(env_dir, want="dir")
-        cand = os.path.join(env_dir, _HISTORICO_FILENAME)
+        cand = os.path.join(env_dir, filename)
         if os.path.isfile(cand):
             return cand
     env_bases = os.getenv("DELTA_BASES_DIR")
     if env_bases:
         env_bases = deltapaths.expand(env_bases, want="dir")
-        cand = os.path.join(os.path.dirname(env_bases.rstrip("\\/")), _HISTORICO_FILENAME)
+        cand = os.path.join(os.path.dirname(env_bases.rstrip("\\/")), filename)
         if os.path.isfile(cand):
             return cand
     return None
+
+
+def _resolve_path() -> Optional[str]:
+    """El Excel canónico: DELTA_HISTORICO_PATH (archivo) → DELTA_HISTORICO_DIR
+    (carpeta) → DELTA_BASES_DIR/.. (junto a Carteras)."""
+    env = os.getenv("DELTA_HISTORICO_PATH")
+    if env:
+        env = deltapaths.expand(env, want="file")
+        if os.path.isfile(env):
+            return env
+    return _resolve_named(_HISTORICO_FILENAME)
+
+
+def _parquet_sibling(xlsx_path: str) -> str:
+    return os.path.splitext(xlsx_path)[0] + ".parquet"
+
+
+def _pick_source(xlsx: Optional[str]) -> Tuple[Optional[str], str]:
+    """(path, formato) a leer. El parquet espejo gana si existe y no es más
+    viejo que el Excel (bymaapi y el autosave escriben ambos; si alguien
+    actualizó SOLO el Excel — bymaapi viejo, edición a mano — el Excel manda
+    y el parquet se regenera después de leerlo). Sin Excel, vale el parquet
+    suelto: la base sigue disponible."""
+    pq = _parquet_sibling(xlsx) if xlsx else _resolve_named(
+        os.path.splitext(_HISTORICO_FILENAME)[0] + ".parquet")
+    pq_ok = pq is not None and os.path.isfile(pq)
+    if xlsx is None:
+        return (pq, "parquet") if pq_ok else (None, "")
+    if pq_ok:
+        try:
+            # 60 s de gracia: bymaapi escribe xlsx y parquet en tándem y el
+            # orden/mtime puede variar con OneDrive de por medio.
+            if os.path.getmtime(pq) >= os.path.getmtime(xlsx) - 60.0:
+                return pq, "parquet"
+        except OSError:
+            pass
+    return xlsx, "xlsx"
+
+
+def _regen_parquet(xlsx_path: str, df) -> None:
+    """Cache best-effort: espeja el Excel recién leído a .parquet (atómico)
+    para que la PRÓXIMA carga sea ~100× más rápida. Nunca rompe la carga."""
+    pq = _parquet_sibling(xlsx_path)
+    tmp = pq + ".tmp"
+    try:
+        df.to_parquet(tmp, index=False)
+        os.replace(tmp, pq)
+        logger.info("[historico_byma] parquet espejo regenerado: %s", pq)
+    except Exception as exc:  # noqa: BLE001 — sin pyarrow / sin permisos: seguimos con xlsx
+        logger.info("[historico_byma] no pude regenerar el parquet (%s)", exc)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def _build(df) -> Dict[str, Any]:
@@ -93,13 +142,19 @@ def _build(df) -> Dict[str, Any]:
 
 
 def _load() -> Dict[str, Any]:
-    path = _resolve_path()
+    xlsx = _resolve_path()
+    path, fmt = _pick_source(xlsx)
     if path is None:
         return _empty("No se encontró el Excel histórico (configurá DELTA_HISTORICO_PATH / "
                       "DELTA_HISTORICO_DIR / DELTA_BASES_DIR).")
     try:
         import pandas as pd
-        df = pd.read_excel(path, sheet_name="Sheet1")
+        if fmt == "parquet":
+            df = pd.read_parquet(path)
+        else:
+            df = pd.read_excel(path, sheet_name="Sheet1")
+            if xlsx:
+                _regen_parquet(xlsx, df)     # la próxima carga lee el espejo rápido
         df["fecha_hoy"] = pd.to_datetime(df["fecha_hoy"], errors="coerce")
         df = df.dropna(subset=["fecha_hoy", "Código"]).copy()
         df["Código"] = df["Código"].astype(str)
@@ -118,7 +173,8 @@ def _load() -> Dict[str, Any]:
             df = df[~((df["TIREA"] > 2.0) | (df["TIREA"] <= -0.99))].copy()
         out = _build(df)
         out["path"] = path
-        logger.info("[historico_byma] %d códigos · %d fechas · %d obs", out["n_codes"], out["n_dates"], out["n_obs"])
+        logger.info("[historico_byma] %d códigos · %d fechas · %d obs (fuente %s)",
+                    out["n_codes"], out["n_dates"], out["n_obs"], fmt)
         return out
     except Exception as exc:  # noqa: BLE001
         logger.exception("[historico_byma] load falló")
