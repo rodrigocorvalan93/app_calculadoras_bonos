@@ -100,13 +100,24 @@ def test_duales_en_categorias_con_pata_correcta() -> None:
 # ── HTTP: página, endpoints de prefs y skip de categorías ───────────────────
 @pytest.mark.asyncio
 async def test_pagina_muestra_defaults_duales_y_checkboxes(prefs_tmp) -> None:
+    import json as _json
+    import re
+
     async with _client() as ac:
         r = await ac.get("/escenario")
     assert r.status_code == 200
     assert "Dual TAMAR/CER" in r.text and "Dual CER/TAMAR" in r.text
-    assert "escSenderos(" in r.text and '"infl_path"' in r.text
     assert "↺ defaults" in r.text
     assert 'toggleCat' in r.text                              # checkboxes por categoría
+    # La config viaja en el <script type="application/json"> y PARSEA — nunca
+    # como JSON crudo dentro del atributo x-data (las comillas lo rompían y
+    # el grid quedaba vacío).
+    assert 'x-data="escSenderosInit()"' in r.text
+    m = re.search(r'id="esc-init">(.*?)</script>', r.text, re.S)
+    assert m, "falta el <script id=esc-init> con la config"
+    cfg = _json.loads(m.group(1))
+    assert set(cfg) >= {"n_months", "senderos", "saved_keys", "cats_off"}
+    assert set(cfg["senderos"]) == {"infl_path", "a3500_path", "ccl_path", "mep_path", "tamar_path"}
 
 
 @pytest.mark.asyncio

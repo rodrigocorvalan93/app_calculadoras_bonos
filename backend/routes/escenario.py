@@ -162,14 +162,19 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
                                         tamar_now, deva_mens)
     senderos = {**defaults, **saved}
     cats_off = prefs.get("cats_off") or []
+    # Config inicial del grid como JSON en un <script type="application/json">:
+    # dentro de un atributo x-data las comillas del JSON rompen el HTML. El
+    # replace de "</" blinda contra un cierre de script inyectado en un valor.
+    esc_init = json.dumps({
+        "n_months": n_months, "senderos": senderos,
+        "saved_keys": sorted(saved.keys()), "cats_off": cats_off,
+    }).replace("</", "<\\/")
     return _render(request, "escenario.html", cats=cats, terminal=terminal, plazo=plazo,
                    settle=settle, dias=dias, deva_pct=deva * 100.0,
                    cauc_tna_pct=cauc_tna * 100.0, anchor=1.0, n_months=n_months,
                    infl_pct=(infl_pct * 100.0) if infl_pct is not None else None,
                    deva_mens_pct=deva_mens * 100.0, tamar_now=tamar_now,
-                   senderos_json=json.dumps(senderos),
-                   saved_keys_json=json.dumps(sorted(saved.keys())),
-                   cats_off_json=json.dumps(cats_off), cats_off=cats_off)
+                   esc_init_json=esc_init, cats_off=cats_off)
 
 
 def _per_cat_params(request: Request) -> Tuple[Dict[str, float], Dict[str, float]]:
