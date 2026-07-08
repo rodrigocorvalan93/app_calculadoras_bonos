@@ -17,7 +17,8 @@
   <div class="curve-picker card">
    <div class="card-body">
     <form id="esc-form" hx-get="/escenario/table" hx-target="#esc-table" hx-swap="innerHTML"
-          hx-indicator="#esc-spin">
+          hx-indicator="#esc-spin"
+          x-data="escSenderos({{ n_months }}, {{ senderos_json | safe }}, {{ saved_keys_json | safe }}, {{ cats_off_json | safe }})">
       <div class="row-fields">
         <label class="field"><span>Plazo</span>
           <select name="plazo"><option value="24hs" {% if plazo=='24hs' %}selected{% endif %}>24hs</option>
@@ -33,14 +34,20 @@
       </div>
 
       {# ── Senderos mensuales (inflación + devas) ───────────────────────────
-         Nivel mes a mes por driver; persisten en localStorage (lo último que
-         cargaste queda escrito). Vacío = proyección/serie actual. El último mes
-         cargado se extiende al resto del horizonte. Pegan en el TR: inflación →
-         CER/UVA, A3500 → DLK, CCL → globales, MEP → bonares. #}
-      <div class="esc-senderos" x-data="escSenderos({{ n_months }})" x-cloak>
+         Vienen PRECARGADOS con defaults vivos: inflación = proyección de la
+         economista (indices.py), deva A3500 = ROFEX mes a mes interpolado,
+         CCL/MEP = mismo sendero (brecha/canje constantes), TAMAR = nivel
+         actual flat. Editar una fila la deja FIJA (persistida en el server,
+         sobrevive reinicios y se comparte entre dispositivos); las filas no
+         tocadas siguen vivas. "↺ defaults" borra lo fijado. #}
+      <div class="esc-senderos" x-cloak>
         <div class="esc-senderos-head">
-          <span>Senderos mensuales <i class="muted">(nivel mes a mes · vacío = proyección/fijo actual · el último mes se extiende)</i></span>
-          <button type="button" class="lnk" @click="clearAll()" title="Borrar todos los senderos">limpiar todo</button>
+          <span>Senderos mensuales <i class="muted">(defaults vivos: economista / ROFEX / TAMAR actual · editar una fila la deja fija</i> <b class="muted" x-show="dirty.length" x-text="'· fijas: ' + dirty.join(', ')"></b><i class="muted">)</i></span>
+          <span>
+            <button type="button" class="lnk" @click="resetDefaults()" title="Borrar lo fijado y volver a los defaults vivos (economista / ROFEX / TAMAR actual)">↺ defaults</button>
+            ·
+            <button type="button" class="lnk" @click="clearAll()" title="Vaciar todos los senderos (vacío = serie/proyección actual del sistema)">✕ limpiar</button>
+          </span>
         </div>
         <div class="table-scroll">
           <table class="cashflows sendero-tbl">
@@ -56,9 +63,10 @@
                   <template x-for="i in nMonths" :key="i">
                     <td><input type="text" class="sendero-in" inputmode="decimal" autocomplete="off"
                                :placeholder="d.ph" x-model="cells[d.key][i-1]"
-                               @input.debounce.450ms="save()"></td>
+                               :style="isDirty(d.key) ? 'font-weight:600' : ''"
+                               @input.debounce.450ms="touch(d.key)"></td>
                   </template>
-                  <td><button type="button" class="lnk" @click="clearRow(d.key)" title="Limpiar fila">✕</button></td>
+                  <td><button type="button" class="lnk" @click="clearRow(d.key)" title="Vaciar fila (vacío = serie/proyección actual)">✕</button></td>
                 </tr>
               </template>
             </tbody>
@@ -71,6 +79,7 @@
         <input type="hidden" name="ccl_path"   :value="ser('ccl_path')">
         <input type="hidden" name="mep_path"   :value="ser('mep_path')">
         <input type="hidden" name="tamar_path" :value="ser('tamar_path')">
+        <input type="hidden" name="cats_off"   :value="catsOff.join(',')">
         <p class="muted" style="font-size:11px;margin:6px 2px 0">Implícitos hoy:
           inflación ≈ <b>{{ infl_pct | ar_num(2) if infl_pct is not none else '—' }}%</b>/mes ·
           deva A3500 ≈ <b>{{ deva_mens_pct | ar_num(2) }}%</b>/mes ·
@@ -80,10 +89,14 @@
       </div>
 
       <div class="esc-cats">
-        <div class="esc-cats-head"><span>Categoría</span><span>Exit YTM (TIREA %)</span><span>Pendiente (bps/año)</span></div>
+        <div class="esc-cats-head"><span>Categoría <i class="muted">(destildar = fuera del comparativo)</i></span><span>Exit YTM (TIREA %)</span><span>Pendiente (bps/año)</span></div>
         {% for c in cats %}
-        <div class="esc-cat-row {% if not c.n %}is-empty{% endif %}">
-          <span class="esc-cat-name">{{ c.label }}{% if c.fx %} · {{ 'CCL' if c.fx=='ccl' else 'MEP' }}{% endif %}
+        <div class="esc-cat-row {% if not c.n %}is-empty{% endif %}" :style="!catOn('{{ c.key }}') ? 'opacity:.45' : ''">
+          <span class="esc-cat-name">
+            <input type="checkbox" {% if c.key not in cats_off %}checked{% endif %}
+                   @change="toggleCat('{{ c.key }}')"
+                   title="Incluir {{ c.label }} en el comparativo" style="margin-right:6px;vertical-align:-2px">
+            {{- c.label }}{% if c.fx %} · {{ 'CCL' if c.fx=='ccl' else 'MEP' }}{% endif %}
             <i class="muted">({{ c.n }})</i></span>
           <input type="text" name="ytm_{{ c.key }}"
                  value="{{ (c.ytm * 100) | ar_num(2) if c.ytm is not none else '' }}"
@@ -108,13 +121,13 @@
 </section>
 
 <script>
-  // Senderos mensuales (Escenario). Nivel mes a mes por driver, persistido en
-  // localStorage (lo último que cargaste queda escrito). Cada fila se serializa
-  // "v1;v2;…" en un input hidden con el name del param (infl_path/a3500_path/
-  // ccl_path/mep_path) que htmx manda al recalcular. El último mes cargado se
-  // extiende al resto del horizonte (lo hace compound_path en el server).
-  function escSenderos(nMonths) {
-    var KEY = "escSenderos:v1";
+  // Senderos mensuales (Escenario). Vienen PRECARGADOS del server con
+  // defaults vivos (inflación economista / deva ROFEX / TAMAR actual) más
+  // las filas que el usuario dejó FIJAS. Editar una fila la marca dirty y
+  // se persiste en el server (POST /escenario/prefs, debounced) → sobrevive
+  // reinicios y se comparte entre PC/Mac/celu. "↺ defaults" borra lo fijado.
+  // Cada fila se serializa "v1;v2;…" en un hidden que htmx manda al calcular.
+  function escSenderos(nMonths, senderos, savedKeys, catsOff) {
     var drivers = [
       { key: "infl_path",  label: "Inflación",  unit: "· CER/UVA · %/mes",  ph: "" },
       { key: "a3500_path", label: "Deva A3500", unit: "· DLK · %/mes",      ph: "" },
@@ -122,15 +135,18 @@
       { key: "mep_path",   label: "Deva MEP",   unit: "· bonares · %/mes",  ph: "" },
       { key: "tamar_path", label: "TAMAR",      unit: "· floaters · TNA nivel %", ph: "" },
     ];
-    function load() { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } }
-    var saved = load(), cells = {};
+    var cells = {};
     drivers.forEach(function (d) {
-      var a = Array.isArray(saved[d.key]) ? saved[d.key].slice() : [];
+      var s = (senderos && senderos[d.key]) || "";
+      var a = s === "" ? [] : String(s).split(";");
       while (a.length < nMonths) a.push("");
       cells[d.key] = a;
     });
+    var saveTimer = null;
     return {
       drivers: drivers, cells: cells, nMonths: nMonths,
+      dirty: (savedKeys || []).slice(),          // filas fijadas (persistidas)
+      catsOff: (catsOff || []).slice(),
       init: function () {
         var self = this, term = document.querySelector("[name=terminal]");
         if (term) term.addEventListener("change", function () { self.resize(); });
@@ -156,18 +172,41 @@
         while (last > 0 && a[last - 1] === "") last--;
         return a.slice(0, last).join(";");
       },
-      save: function () {
-        var m = {}, self = this;
-        this.drivers.forEach(function (d) { m[d.key] = self.cells[d.key]; });
-        try { localStorage.setItem(KEY, JSON.stringify(m)); } catch (e) {}
+      isDirty: function (key) { return this.dirty.indexOf(key) >= 0; },
+      touch: function (key) {                     // fila editada → fija + persistir
+        if (!this.isDirty(key)) this.dirty.push(key);
+        this.save();
+      },
+      save: function () {                         // sólo filas fijas → el resto sigue vivo
+        var self = this;
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(function () {
+          var m = {};
+          self.dirty.forEach(function (k) { m[k] = self.ser(k); });
+          fetch("/escenario/prefs", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ senderos: m, cats_off: self.catsOff }),
+          }).catch(function () {});
+        }, 350);
+      },
+      resetDefaults: function () {                // borra lo fijado → defaults vivos
+        fetch("/escenario/prefs/reset", { method: "POST" })
+          .then(function () { location.reload(); })
+          .catch(function () {});
       },
       clearRow: function (key) {
         this.cells[key] = this.cells[key].map(function () { return ""; });
-        this.save();
+        this.touch(key);                          // vacío fijado = "serie actual"
       },
       clearAll: function () {
         var self = this;
         this.drivers.forEach(function (d) { self.clearRow(d.key); });
+      },
+      catOn: function (key) { return this.catsOff.indexOf(key) === -1; },
+      toggleCat: function (key) {
+        var i = this.catsOff.indexOf(key);
+        if (i >= 0) this.catsOff.splice(i, 1); else this.catsOff.push(key);
+        this.save();
       },
     };
   }
