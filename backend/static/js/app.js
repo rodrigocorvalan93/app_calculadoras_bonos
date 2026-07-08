@@ -1,18 +1,21 @@
 // Minimal client-side glue: htmx + Alpine + the "live" engine.
 //
 // Live engine (zero new deps):
-//   1) Poll /market/seq every 1s (a plain int, ~µs server-side). When it
-//      advances, fire a single `md-update` event on <body> — every panel
-//      declaring `hx-trigger="md-update from:body, …"` re-renders. Result:
-//      a real tick reaches the screen in ~1s, and with no market activity
-//      nothing re-renders at all (cheaper than the old fixed every-5/15s).
+//   1) SSE (/market/events): el server PUSHEA la seq del store cuando avanza
+//      — un tick llega a pantalla en ~250 ms, sin requests de sondeo (clave
+//      en el celular: la radio no se despierta 1×/s). Si EventSource no
+//      conecta (proxy viejo, 401, browser raro) cae solo al plan B: poll de
+//      /market/seq cada 1 s, el motor anterior. En ambos casos, al avanzar
+//      la seq se dispara un único `md-update` en <body> — cada panel con
+//      `hx-trigger="md-update from:body, …"` se re-renderiza. Sin mercado,
+//      nada se re-renderiza.
 //   2) Pause completely while the tab is hidden; catch up on return.
 //   3) Tick flashes: before each swap of a `[data-flash-scope]` container we
 //      snapshot its numeric cells (key = first cell of the row + column);
 //      after the swap, cells whose value moved get .tick-up / .tick-down
 //      (a CSS background flash, like a broker terminal).
 //   4) Live dot in the topbar: green pulse while ticks flow, gray when the
-//      market is quiet, amber if /market/seq is unreachable.
+//      market is quiet, amber if the feed is unreachable.
 
 // El riel del dólar se oculta con Alpine (x-show) pero queda en el DOM, así que
 // sin esto seguía polleando /dolares/rail en cada md-update + cada 30s aunque
@@ -30,16 +33,18 @@ window.fxRailOpen = function () {
     });
   }
 
-  // ── 1+2+4: seq poller ──────────────────────────────────────────────────
-  var POLL_MS = 1000;       // cadencia base
+  // ── 1+2+4: motor live (SSE con fallback a polling) ────────────────────
+  var POLL_MS = 1000;       // cadencia del fallback
   var QUIET_AFTER_MS = 20000; // sin avances por 20s → dot "quieto"
-  var HEALTH_EVERY = 15;      // cada 15 polls (~15s) chequeo el estado del feed
+  var HEALTH_MS = 15000;      // cada ~15s chequeo el estado del feed
   var lastSeq = null;
   var lastAdvance = 0;
   var failures = 0;
   var timer = null;
+  var healthTimer = null;
   var feedDown = false;       // el broker tiene sesión pero el WS está caído
-  var healthTick = 0;
+  var sse = null;             // EventSource activo (null = modo polling)
+  var sseEverOk = false;      // llegó a conectar al menos una vez
 
   function dot(state, title) {
     var el = document.getElementById('live-dot');
@@ -62,7 +67,9 @@ window.fxRailOpen = function () {
     el.classList.remove('feed-down-txt');
     var now = Date.now();
     while (advances.length && now - advances[0] > 60000) advances.shift();
-    el.textContent = advances.length ? (advances.length + ' t/min · ' + Math.round(rtt) + ' ms') : '';
+    // rtt sólo aplica al fallback de polling; con SSE (push) no hay RTT que medir.
+    var rttTxt = (rtt !== null && rtt !== undefined) ? ' · ' + Math.round(rtt) + ' ms' : '';
+    el.textContent = advances.length ? (advances.length + ' t/min' + rttTxt) : '';
   }
   // Estado real del feed del broker (liviano, cada ~15s): distingue "feed caído"
   // (sesión abierta pero WS del broker desconectado → precios congelados) de
@@ -75,33 +82,35 @@ window.fxRailOpen = function () {
       .catch(function () { /* dejamos el estado previo del feed */ });
   }
 
+  // Núcleo compartido SSE/polling: avanzó la seq → md-update + dot + meta.
+  function handleSeq(seq, rtt) {
+    if (isNaN(seq)) return;
+    var advanced = (lastSeq !== null && seq !== lastSeq);
+    if (advanced) {
+      lastAdvance = Date.now();
+      advances.push(lastAdvance);
+      if (window.htmx) { window.htmx.trigger(document.body, 'md-update'); }
+    }
+    // Prioridad del dot: feed caído (rojo) > tick en vivo (verde) > quieto (gris).
+    if (feedDown) {
+      dot('down', 'Feed caído — el WS del broker está desconectado; los precios pueden estar congelados');
+    } else if (advanced) {
+      dot('live', 'En vivo — tick hace instantes');
+    } else if (Date.now() - lastAdvance > QUIET_AFTER_MS) {
+      dot('idle', 'Sin operaciones recientes');
+    }
+    meta(rtt);
+    lastSeq = seq;
+  }
+
   function poll() {
     if (document.hidden) return; // visibilitychange re-arma
-    if ((healthTick++ % HEALTH_EVERY) === 0) checkHealth();
     var t0 = performance.now();
     fetch('/market/seq', { cache: 'no-store' })
       .then(function (r) { return r.text(); })
       .then(function (txt) {
         failures = 0;
-        var rtt = performance.now() - t0;
-        var seq = parseInt(txt, 10);
-        if (isNaN(seq)) return;
-        var advanced = (lastSeq !== null && seq !== lastSeq);
-        if (advanced) {
-          lastAdvance = Date.now();
-          advances.push(lastAdvance);
-          if (window.htmx) { window.htmx.trigger(document.body, 'md-update'); }
-        }
-        // Prioridad del dot: feed caído (rojo) > tick en vivo (verde) > quieto (gris).
-        if (feedDown) {
-          dot('down', 'Feed caído — el WS del broker está desconectado; los precios pueden estar congelados');
-        } else if (advanced) {
-          dot('live', 'En vivo — tick hace instantes');
-        } else if (Date.now() - lastAdvance > QUIET_AFTER_MS) {
-          dot('idle', 'Sin operaciones recientes');
-        }
-        meta(rtt);
-        lastSeq = seq;
+        handleSeq(parseInt(txt, 10), performance.now() - t0);
       })
       .catch(function () {
         failures += 1;
@@ -109,14 +118,46 @@ window.fxRailOpen = function () {
       });
   }
 
-  function arm() {
+  function stopAll() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (sse) { try { sse.close(); } catch (e) { } sse = null; }
+    if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+  }
+  function armPoll() {
     if (timer) clearInterval(timer);
     timer = setInterval(poll, POLL_MS);
     poll();
   }
+  // SSE primero; el primer evento trae la seq actual como baseline. Si nunca
+  // conecta (404/proxy/401) → polling. Cortes transitorios los reconecta el
+  // propio EventSource (retry del server); mientras, dot en 'off'.
+  function startSSE() {
+    if (!window.EventSource) return false;
+    try { sse = new EventSource('/market/events'); } catch (e) { return false; }
+    sse.onmessage = function (ev) {
+      sseEverOk = true;
+      failures = 0;
+      handleSeq(parseInt(ev.data, 10), null);
+    };
+    sse.onerror = function () {
+      if (!sseEverOk) {           // nunca conectó: este entorno no soporta SSE
+        if (sse) { try { sse.close(); } catch (e) { } sse = null; }
+        armPoll();
+        return;
+      }
+      dot('off', 'Reconectando al feed…'); // transitorio: EventSource reintenta solo
+    };
+    return true;
+  }
+  function arm() {
+    stopAll();
+    checkHealth();
+    healthTimer = setInterval(function () { if (!document.hidden) checkHealth(); }, HEALTH_MS);
+    if (!startSSE()) armPoll();
+  }
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) arm(); // al volver: chequeo inmediato + re-arma
-    else if (timer) { clearInterval(timer); timer = null; }
+    if (!document.hidden) arm(); // al volver: reconexión inmediata + baseline fresco
+    else stopAll();              // oculto: ni SSE abierto ni polls (batería)
   });
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', arm);

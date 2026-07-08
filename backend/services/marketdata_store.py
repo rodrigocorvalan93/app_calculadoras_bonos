@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Dict, Iterable, List, Optional
 
 
@@ -210,6 +210,37 @@ class MarketDataStore:
                 "last_update_at": self._last_update_at,
                 "stale_seconds": time.time() - self._last_update_at if self._last_update_at else None,
             }
+
+    # ── persistencia entre reinicios (ver store_persist) ────────────────
+    def to_persist(self) -> Dict[str, Dict[str, Any]]:
+        """Estado serializable de todos los snapshots (sin vwap, que es
+        derivado). Para volcar a disco y reponer al próximo boot."""
+        with self._lock:
+            return {sym: asdict(snap) for sym, snap in self._data.items()}
+
+    def restore(self, symbols: Dict[str, Any]) -> int:
+        """Repone snapshots persistidos SIN bumpear la secuencia: no son
+        ticks — la UI no debe flashear ni el dot marcar 'live'; feed_alive
+        sigue honesto porque updated_at conserva el timestamp original.
+        No pisa símbolos que ya tengan data más nueva (p. ej. si el WS
+        conectó antes de que corriera el restore). Devuelve # repuestos."""
+        valid = {f.name for f in fields(MarketSnapshot)}
+        n = 0
+        with self._lock:
+            for sym, d in (symbols or {}).items():
+                if not isinstance(d, dict):
+                    continue
+                try:
+                    snap = MarketSnapshot(**{k: v for k, v in d.items() if k in valid})
+                except (TypeError, ValueError):
+                    continue
+                snap.symbol = sym
+                cur = self._data.get(sym)
+                if cur is not None and (cur.updated_at or 0) >= (snap.updated_at or 0):
+                    continue
+                self._data[sym] = snap
+                n += 1
+        return n
 
 
 _store: Optional[MarketDataStore] = None

@@ -11,6 +11,7 @@ Lifespan:
 """
 from __future__ import annotations
 
+import asyncio
 import gc
 import logging
 from contextlib import asynccontextmanager
@@ -197,6 +198,17 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] cafci/historico warm failed to start")
 
+    # Snapshot del store persistido: la app abre poblada con el último dato
+    # conocido (cierres, últimos precios) aunque el broker todavía no haya
+    # mandado nada — clave tras un reinicio fuera de rueda. El restore corre
+    # ANTES de arrancar el WS, así el feed vivo pisa lo persistido y no al
+    # revés (restore() nunca pisa un snapshot más nuevo).
+    from backend.services import store_persist
+    try:
+        store_persist.load()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] market snapshot restore failed")
+
     ws = get_ws_client()
     if settings.primary_user and settings.primary_pass:
         try:
@@ -259,9 +271,23 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] gc.freeze failed")
 
+    # Saver periódico del snapshot (crash-safe): cada 5 min vuelca el store a
+    # disco en el threadpool (JSON ~1 MB, fuera del event loop).
+    async def _snapshot_saver() -> None:
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(store_persist.SAVE_EVERY_SECONDS)
+            try:
+                await loop.run_in_executor(None, store_persist.save)
+            except Exception:  # noqa: BLE001
+                logger.exception("[main] periodic snapshot save failed")
+
+    snapshot_task = asyncio.create_task(_snapshot_saver(), name="store-persist")
+
     yield
 
     logger.info("[main] shutting down")
+    snapshot_task.cancel()
     try:
         await dolares_svc.get_poller().stop()
     except Exception:  # noqa: BLE001
@@ -279,6 +305,10 @@ async def lifespan(app: FastAPI):
         await ws.stop()
     except Exception:  # noqa: BLE001
         logger.exception("[main] primary WS stop failed")
+    try:
+        store_persist.save()          # último vuelco: el próximo boot abre poblado
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] final snapshot save failed")
 
 
 def create_app() -> FastAPI:
@@ -407,6 +437,26 @@ def create_app() -> FastAPI:
     # donde el overhead no compensa. Se agrega ÚLTIMO → queda como el middleware
     # más externo y comprime todo lo que sale.
     app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+    # El SSE de /market/events NO debe pasar por gzip: GZipMiddleware acumula
+    # los chunks de un streaming en el buffer de zlib hasta juntar bytes, así
+    # que los eventos chiquitos ("data: 123\n\n") quedarían retenidos y el
+    # cliente los vería en ráfagas tardías. Este wrapper (más externo que gzip,
+    # por agregarse después) le borra el Accept-Encoding al request del SSE →
+    # gzip lo deja pasar sin tocar. Versión-proof: no depende de cómo cada
+    # versión de Starlette trate content-encoding en streams.
+    class _SSESinGzip:
+        def __init__(self, app):  # noqa: ANN001
+            self.app = app
+
+        async def __call__(self, scope, receive, send):  # noqa: ANN001
+            if scope.get("type") == "http" and scope.get("path") == "/market/events":
+                scope = dict(scope)
+                scope["headers"] = [(k, v) for (k, v) in scope["headers"]
+                                    if k != b"accept-encoding"]
+            await self.app(scope, receive, send)
+
+    app.add_middleware(_SSESinGzip)
 
     @app.get("/")
     async def index() -> RedirectResponse:
