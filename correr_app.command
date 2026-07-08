@@ -9,6 +9,13 @@ set -e
 cd "$(dirname "$0")"
 
 PORT="${PORT:-8000}"
+# Host de escucha: 127.0.0.1 (sólo esta Mac) por default. Para entrar desde
+# el celular vía Tailscale (ver README § "Desde el celular"), agregá en
+# secrets.txt la línea:  APP_HOST=0.0.0.0
+if [ -z "${HOST:-}" ] && [ -f secrets.txt ]; then
+  HOST="$(grep -E '^APP_HOST=' secrets.txt | tail -1 | cut -d= -f2 | tr -d '[:space:]')"
+fi
+HOST="${HOST:-127.0.0.1}"
 URL="http://127.0.0.1:${PORT}"
 
 # Si ya hay una instancia corriendo, sólo abrir el navegador.
@@ -37,5 +44,5 @@ fi
   done
 ) &
 
-echo "▶ Levantando la calculadora en ${URL}  (Ctrl+C para pararla)"
-exec .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port "${PORT}"
+echo "▶ Levantando la calculadora en ${URL}  (host ${HOST} · Ctrl+C para pararla)"
+exec .venv/bin/uvicorn backend.main:app --host "${HOST}" --port "${PORT}"
