@@ -1085,16 +1085,18 @@ def main():
     # Salvaguarda anti-dedo: si casi nada OPERÓ HOY, los precios que estás por
     # guardar son de una rueda anterior (finde / feriado / corrida a las 23 h
     # de un día sin mercado) y quedarían estampados con la fecha de HOY.
-    # En ese caso, un "S" distraído no alcanza: hay que escribir GUARDAR.
+    # En ese caso el prompt cambia a una advertencia bien visible (default N),
+    # pero la confirmación sigue siendo la "S" de siempre.
     ops = _operados_hoy(df_combined)
     if ops >= MIN_OPERADOS_GUARDAR:
         respuesta = input(f"¿Deseas guardar el DataFrame en un archivo Excel? ({ops} bonos operados hoy) (S/N): ").strip().upper()
     else:
         print(f"\n⚠ ATENCIÓN: sólo {ops} bonos tienen operaciones DE HOY (mínimo esperado: {MIN_OPERADOS_GUARDAR}).")
         print("Los precios parecen de una rueda ANTERIOR (¿finde/feriado/mercado cerrado?) y se")
-        print("guardarían en la base con la fecha de hoy. Casi seguro NO querés guardar esto.")
-        respuesta = input("Escribí GUARDAR para guardar igual (cualquier otra cosa cancela): ").strip().upper()
-        respuesta = "S" if respuesta == "GUARDAR" else "N"
+        print("guardarían en la base con la fecha de hoy.")
+        respuesta = input("¿Guardar IGUAL? (S/N): ").strip().upper()
+        if respuesta not in ("S", "N"):
+            respuesta = "N"                     # ante la duda, acá NO se guarda
     if respuesta == "S":
         guardar_excel(df_combined, file_path)
     elif respuesta == "N":
