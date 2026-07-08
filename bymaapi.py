@@ -753,7 +753,13 @@ def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
         # sigue siendo el canónico; si esto falla (sin pyarrow), no pasa nada.
         try:
             parquet_path = os.path.splitext(file_path)[0] + ".parquet"
-            df_last.to_parquet(parquet_path, index=False)
+            # Columnas de texto con tipos mixtos (Excel viejo devuelve Price
+            # Date como int, el df nuevo trae str) rompen pyarrow: unificar.
+            mirror = df_last.copy()
+            for col in ("symbol", "Código", "Price Source", "Price Date"):
+                if col in mirror.columns:
+                    mirror[col] = mirror[col].astype("string")
+            mirror.to_parquet(parquet_path, index=False)
             print(f"Espejo parquet actualizado en '{parquet_path}'.")
         except Exception as e:  # noqa: BLE001
             print(f"(Espejo parquet no guardado: {e} — el Excel quedó bien. Tip: pip install pyarrow)")

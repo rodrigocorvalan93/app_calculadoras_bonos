@@ -258,6 +258,19 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] news poller start failed")
 
+    # Autoguardado del histórico px/tasas al cierre (17:01 BA, días hábiles):
+    # si la app está corriendo a esa hora, la base del día se guarda sola en
+    # el Excel/Parquet de bymaapi (mismo esquema/dedup — correr bymaapi a mano
+    # sigue funcionando igual).
+    from backend.services import historico_writer
+    autosave = None
+    if settings.historico_autosave:
+        try:
+            autosave = historico_writer.get_autosave()
+            await autosave.start()
+        except Exception:  # noqa: BLE001
+            logger.exception("[main] historico autosave start failed")
+
     # GC freeze (truco Instagram): todo el estado de larga vida (universo de
     # bonos, templates, singletons) ya está alocado. Lo movemos a la generación
     # "permanente" que el GC NO re-escanea, así las colecciones gen-2 disparadas
@@ -288,6 +301,11 @@ async def lifespan(app: FastAPI):
 
     logger.info("[main] shutting down")
     snapshot_task.cancel()
+    if autosave is not None:
+        try:
+            await autosave.stop()
+        except Exception:  # noqa: BLE001
+            logger.exception("[main] historico autosave stop failed")
     try:
         await dolares_svc.get_poller().stop()
     except Exception:  # noqa: BLE001
@@ -363,7 +381,8 @@ def create_app() -> FastAPI:
     # gateables). /ordenes/live (armar el envío REAL al broker) y /ordenes/kill
     # (kill-switch del desk) son operaciones de mesa, no de un usuario cualquiera
     # con la pestaña Órdenes: se restringen a superuser además del gating por tab.
-    _SUPERUSER_ONLY = ("/admin", "/conexion", "/ordenes/live", "/ordenes/kill")
+    _SUPERUSER_ONLY = ("/admin", "/conexion", "/ordenes/live", "/ordenes/kill",
+                       "/historicos/guardar-base")
 
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
