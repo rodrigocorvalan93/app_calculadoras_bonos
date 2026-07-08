@@ -39,19 +39,25 @@ class Cat:
     dur_lo: float      # bucket [dur_lo, dur_hi) sobre la duration inicial
     dur_hi: float
     fx: str            # "" ARS · "ccl" globales (cable) · "mep" bonares (MEP)
+    tamar_leg: bool = False   # True → el sendero TAMAR recomputa su cupón/TIR
 
 
 # Orden = orden del gráfico/tabla (igual que el Excel del usuario).
+# Duales CER: las dos patas entran al comparativo — la pata TAMAR ('v', curva
+# dualtamar_cer) recibe el sendero TAMAR como los floaters puros; la pata CER
+# (curva dualcer) recibe el de inflación como cualquier CER.
 CATEGORIES: List[Cat] = [
-    Cat("tasa_fija",   "Tasa fija",       "lecap",       0.0, 1.0,   ""),
-    Cat("tasa_fija_l", "Tasa fija larga", "lecap",       1.0, 1e9,   ""),
-    Cat("cer_corto",   "CER corto",       "cer",         0.0, 0.5,   ""),
-    Cat("cer_medio",   "CER medio",       "cer",         0.5, 1.5,   ""),
-    Cat("cer_largo",   "CER largo",       "cer",         1.5, 1e9,   ""),
-    Cat("dlk",         "DLK",             "dolarlinked", 0.0, 1e9,   ""),
-    Cat("tamar",       "TAMAR",           "tamar",       0.0, 1e9,   ""),
-    Cat("globales",    "Globales",        "globales",    0.0, 1e9,   "ccl"),
-    Cat("bonares",     "Bonares",         "bonares",     0.0, 1e9,   "mep"),
+    Cat("tasa_fija",     "Tasa fija",       "lecap",         0.0, 1.0,   ""),
+    Cat("tasa_fija_l",   "Tasa fija larga", "lecap",         1.0, 1e9,   ""),
+    Cat("cer_corto",     "CER corto",       "cer",           0.0, 0.5,   ""),
+    Cat("cer_medio",     "CER medio",       "cer",           0.5, 1.5,   ""),
+    Cat("cer_largo",     "CER largo",       "cer",           1.5, 1e9,   ""),
+    Cat("dlk",           "DLK",             "dolarlinked",   0.0, 1e9,   ""),
+    Cat("tamar",         "TAMAR",           "tamar",         0.0, 1e9,   "", tamar_leg=True),
+    Cat("dual_tamar_cer", "Dual TAMAR/CER", "dualtamar_cer", 0.0, 1e9,   "", tamar_leg=True),
+    Cat("dual_cer",      "Dual CER/TAMAR",  "dualcer",       0.0, 1e9,   ""),
+    Cat("globales",      "Globales",        "globales",      0.0, 1e9,   "ccl"),
+    Cat("bonares",       "Bonares",         "bonares",       0.0, 1e9,   "mep"),
 ]
 
 CAT_BY_KEY: Dict[str, Cat] = {c.key: c for c in CATEGORIES}
@@ -122,7 +128,7 @@ def compute_category(
     desde el precio de mercado → SÓLO se aplica a la categoría TAMAR (las demás
     reciben None, así su base cacheada no se invalida)."""
     sd, td = tr._parse_d(settle), tr._parse_d(terminal)
-    tp = tamar_path if cat.key == "tamar" else None
+    tp = tamar_path if cat.tamar_leg else None
     out: List[Dict[str, Any]] = []
     for r in rows:
         code = r.get("code")

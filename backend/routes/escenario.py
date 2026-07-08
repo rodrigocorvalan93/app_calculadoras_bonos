@@ -17,13 +17,13 @@ import math
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Body, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.cache import LockedTTLCache
 from backend.locale_ar import parse_ar_num
 from backend.routes.curves import _rows_for, _row_pool
-from backend.services import bond_universe, escenario as esc, total_return as tr_svc
+from backend.services import bond_universe, escenario as esc, escenario_prefs, total_return as tr_svc
 
 router = APIRouter(tags=["escenario"])
 
@@ -151,11 +151,25 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
         tamar_now = float(rentafija.inputs["tamar"].tail(5)["TAMAR"].mean())
     except Exception:  # noqa: BLE001
         tamar_now = None
+
+    # Senderos: defaults VIVOS (inflación de la economista, deva ROFEX
+    # interpolada, CCL/MEP = oficial, TAMAR flat) + lo que el usuario dejó
+    # FIJO en prefs (sólo las filas que tocó — el resto sigue vivo). Todo
+    # lectura de memoria/archivo chico: el render no paga nada.
+    prefs = escenario_prefs.load()
+    saved = prefs.get("senderos") or {}
+    defaults = escenario_prefs.defaults(_parse_d(settle) or date.today(), n_months,
+                                        tamar_now, deva_mens)
+    senderos = {**defaults, **saved}
+    cats_off = prefs.get("cats_off") or []
     return _render(request, "escenario.html", cats=cats, terminal=terminal, plazo=plazo,
                    settle=settle, dias=dias, deva_pct=deva * 100.0,
                    cauc_tna_pct=cauc_tna * 100.0, anchor=1.0, n_months=n_months,
                    infl_pct=(infl_pct * 100.0) if infl_pct is not None else None,
-                   deva_mens_pct=deva_mens * 100.0, tamar_now=tamar_now)
+                   deva_mens_pct=deva_mens * 100.0, tamar_now=tamar_now,
+                   senderos_json=json.dumps(senderos),
+                   saved_keys_json=json.dumps(sorted(saved.keys())),
+                   cats_off_json=json.dumps(cats_off), cats_off=cats_off)
 
 
 def _per_cat_params(request: Request) -> Tuple[Dict[str, float], Dict[str, float]]:
@@ -182,7 +196,7 @@ async def escenario_table(
     ccl_deva: str = "", mep_deva: str = "",
     anchor: str = "", use_manual: str = "", infl: str = "",
     infl_path: str = "", a3500_path: str = "", ccl_path: str = "", mep_path: str = "",
-    tamar_path: str = "",
+    tamar_path: str = "", cats_off: str = "",
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     terminal = (terminal or "").strip() or _default_terminal()
@@ -222,9 +236,15 @@ async def escenario_table(
                 if n is not None:
                     overrides[k[4:]] = n / 100.0
 
+    # Categorías destildadas del comparativo: se saltean ENTERAS (ni filas ni
+    # TIRs — analizar 2 asset class cuesta lo que 2, no lo que todas).
+    off = {c.strip() for c in cats_off.split(",") if c.strip()}
+
     # Reúno filas + TIR de salida por categoría (async, fuera del executor).
     prepared: List[Tuple[esc.Cat, List[Dict[str, Any]], Dict[str, float], float]] = []
     for cat in esc.CATEGORIES:
+        if cat.key in off:
+            continue
         rows = await _cat_rows(cat, plazo)
         level = ytm_by_cat.get(cat.key)
         if level is None:                      # sin input → mantiene la TIR actual (carry puro)
@@ -264,6 +284,28 @@ async def escenario_table(
                    infl_monthly=(infl_seq[0] if infl_seq else None),
                    infl_seq=infl_seq, a3500_seq=a3500_seq, ccl_seq=ccl_seq, mep_seq=mep_seq,
                    months=months)
+
+
+@router.post("/escenario/prefs")
+async def escenario_prefs_save(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """Persiste las filas TOCADAS de los senderos (quedan fijas entre
+    reinicios y compartidas entre dispositivos) y/o las categorías
+    destildadas. El cliente manda sólo lo editado; lo no tocado sigue
+    siendo default vivo (ROFEX/inflación/TAMAR del día)."""
+    senderos = payload.get("senderos")
+    cats_off = payload.get("cats_off")
+    cur = escenario_prefs.save(
+        senderos if isinstance(senderos, dict) else None,
+        cats_off if isinstance(cats_off, list) else None,
+    )
+    return JSONResponse({"ok": True, "saved_keys": sorted((cur.get("senderos") or {}).keys())})
+
+
+@router.post("/escenario/prefs/reset")
+async def escenario_prefs_reset() -> JSONResponse:
+    """Borra lo guardado → la pestaña vuelve a los defaults vivos."""
+    escenario_prefs.reset()
+    return JSONResponse({"ok": True})
 
 
 async def warm_escenario_default(plazo: str = "24hs", refresh_only: bool = False) -> int:
