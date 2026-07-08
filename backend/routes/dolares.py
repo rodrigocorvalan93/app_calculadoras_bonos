@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
+from backend.cache_seq import seq_cached
 from backend.services import cauciones as cauc_svc, dolares as dx, fx as fx_svc, historico
 
 logger = logging.getLogger("backend.dolares.routes")
@@ -81,15 +82,18 @@ async def dolares_tables(request: Request, plazo: str = "24hs") -> HTMLResponse:
 
 
 @router.get("/dolares/oficial", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def dolares_oficial(request: Request) -> HTMLResponse:
     """Partial htmx: SIOPEL oficial + A3500 (auto-refresh)."""
     return _render(
         request, "partials/dolares_oficial.html",
         siopel=_safe("siopel_rows", dx.siopel_rows, []), oficial=dx.official_fx(),
+        a3500=_safe("a3500", dx.a3500_official, None),
     )
 
 
 @router.get("/dolares/rail", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def dolares_rail(request: Request, plazo: str = "24hs") -> HTMLResponse:
     """Partial htmx del riel lateral (se carga en todas las pestañas)."""
     pz = "CI" if (plazo or "").lower().startswith("ci") else "24hs"

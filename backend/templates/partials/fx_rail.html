@@ -72,6 +72,22 @@
   {% endif %}
 </div>
 
+{# Último A3500 OFICIAL con su fecha — siempre visible aunque el intradía
+   venga de SIOPEL. El BCRA publica el del día ~16-17 h; el refresh
+   vespertino (warmup) lo trae solo y acá se ve la fecha girar a HOY. #}
+<div class="rail-item">
+  <div class="rail-l">A3500 · BCRA</div>
+  {% if summary.a3500 and summary.a3500.last is not none %}
+    <div class="rail-v {{ fx.vcls(summary.a3500.var_pct) }}">
+      {{ summary.a3500.last | ar_num(2) }}
+      <span class="rail-arrow">{{ fx.arrow(summary.a3500.var_pct) }}</span>
+    </div>
+    <div class="rail-s muted">al {{ summary.a3500.date }}</div>
+  {% else %}
+    <div class="rail-v muted">—</div>
+  {% endif %}
+</div>
+
 <div class="rail-item rail-oficial">
   <div class="rail-l">Oficial · {{ summary.oficial.source }}</div>
   {% if summary.oficial.last is not none %}

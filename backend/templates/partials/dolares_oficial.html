@@ -19,6 +19,15 @@
         <div class="kpi-l">Cierre previo</div>
         <div class="kpi-v">{{ oficial.close | ar_num(2) }}</div>
       </div>
+      {% if a3500 and a3500.last is not none %}
+      {# Último A3500 PUBLICADO por el BCRA con su fecha — convive con el
+         SIOPEL intradía (es el oficial que valúa los DLK al cierre). #}
+      <div class="kpi">
+        <div class="kpi-l">A3500 · BCRA</div>
+        <div class="kpi-v {{ fx.vcls(a3500.var_pct) }}">{{ a3500.last | ar_num(4) }}</div>
+        <div class="kpi-s muted">al {{ a3500.date }}</div>
+      </div>
+      {% endif %}
       {% if oficial.bid or oficial.offer %}
       <div class="kpi">
         <div class="kpi-l">Compra / Venta</div>

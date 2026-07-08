@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from backend.cache_seq import seq_cached
 from backend.services import curves, dolares as dx, equities, fx as fx_svc, marketdata_store as mds, symbols as syms
 
 router = APIRouter(tags=["tape"])
@@ -92,6 +93,7 @@ def _items(plazo: str = "24hs") -> List[Dict[str, Any]]:
 
 
 @router.get("/tape", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def tape(request: Request, plazo: str = "24hs") -> HTMLResponse:
     return _render(request, "partials/tape.html", items=_items(plazo))
 

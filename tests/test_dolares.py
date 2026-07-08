@@ -262,6 +262,12 @@ async def test_rail_renders_macro(monkeypatch) -> None:
     monkeypatch.setattr(historico, "refresh", lambda: historico._cache)
     historico._cache = _FAKE_HIST
     try:
+        # El riel se cachea por seq del store (cache_seq): la data macro NO
+        # pasa por el store, así que sin un tick este request podría recibir
+        # el render cacheado de un test anterior en vez del _FAKE_HIST.
+        from backend.services import marketdata_store as mds
+        mds.get_store().update_from_md("MERV - XMEV - MACROTEST - 24hs",
+                                       {"LA": {"price": 1.0}})
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             r = await ac.get("/dolares/rail")
         assert r.status_code == 200

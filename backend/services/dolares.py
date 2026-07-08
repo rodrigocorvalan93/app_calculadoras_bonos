@@ -282,9 +282,11 @@ def _spot_official() -> Optional[Dict[str, Any]]:
     }
 
 
-def _a3500_official() -> Dict[str, Any]:
+def a3500_official() -> Dict[str, Any]:
     """Oficial desde la serie A3500 (en memoria). Variación día/día con
-    signo correcto — arregla la flecha que sólo marcaba para arriba."""
+    signo correcto — arregla la flecha que sólo marcaba para arriba.
+    Público: el riel y la ficha Oficial muestran el ÚLTIMO A3500 con su
+    fecha aunque el intradía venga de SIOPEL."""
     pts = historico.series_points("a3500").get("points") or []
     if not pts:
         return {"source": "none", "last": None, "close": None, "var_pct": None,
@@ -316,7 +318,7 @@ def official_fx() -> Dict[str, Any]:
     raro pasa) — es el núcleo compartido por la página y el riel."""
     out = _official_base()
     try:
-        a3500 = _a3500_official()
+        a3500 = a3500_official()
         with _mae_lock:
             ust = _mae_snap.get("ust")
             n_rows = len(_mae_snap.get("rows") or [])
@@ -371,7 +373,7 @@ def siopel_rows() -> List[Dict[str, Any]]:
 def _summary_default(plazo: str) -> Dict[str, Any]:
     return {"plazo": plazo, "usd": None, "usb": None, "canje": None,
             "brecha": None, "brecha_var_pp": None, "oficial": _official_base(),
-            "as_of": time.time()}
+            "a3500": None, "as_of": time.time()}
 
 
 def summary(plazo: str = "24hs") -> Dict[str, Any]:
@@ -412,7 +414,7 @@ def summary(plazo: str = "24hs") -> Dict[str, Any]:
             "plazo": plazo,
             "usd": _leg_payload(usd), "usb": _leg_payload(usb),
             "canje": canje, "brecha": brecha, "brecha_var_pp": brecha_var_pp,
-            "oficial": ofi, "as_of": time.time(),
+            "oficial": ofi, "a3500": a3500_official(), "as_of": time.time(),
         }
     except Exception:  # noqa: BLE001
         logger.exception("[dolares] summary falló; devuelvo esqueleto")

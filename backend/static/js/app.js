@@ -82,6 +82,31 @@ window.fxRailOpen = function () {
       .catch(function () { /* dejamos el estado previo del feed */ });
   }
 
+  // En el celular, re-renderizar todos los paneles en cada tick gasta batería
+  // del TELÉFONO al pedo (el server aguanta de sobra): coalescamos los
+  // md-update a uno cada MOBILE_MIN_MS, con disparo trailing — el último tick
+  // siempre llega a pantalla, sólo se espacian los intermedios. Desktop igual.
+  var IS_MOBILE = !!(window.matchMedia &&
+    window.matchMedia('(max-width: 980px), (pointer: coarse)').matches);
+  var MOBILE_MIN_MS = 2500;
+  var lastDispatch = 0, pendingDispatch = null;
+  function dispatchUpdate() {
+    if (!window.htmx) return;
+    if (!IS_MOBILE) { window.htmx.trigger(document.body, 'md-update'); return; }
+    var now = Date.now();
+    var wait = lastDispatch + MOBILE_MIN_MS - now;
+    if (wait <= 0) {
+      lastDispatch = now;
+      window.htmx.trigger(document.body, 'md-update');
+    } else if (!pendingDispatch) {
+      pendingDispatch = setTimeout(function () {
+        pendingDispatch = null;
+        lastDispatch = Date.now();
+        if (window.htmx) window.htmx.trigger(document.body, 'md-update');
+      }, wait);
+    }
+  }
+
   // Núcleo compartido SSE/polling: avanzó la seq → md-update + dot + meta.
   function handleSeq(seq, rtt) {
     if (isNaN(seq)) return;
@@ -89,7 +114,7 @@ window.fxRailOpen = function () {
     if (advanced) {
       lastAdvance = Date.now();
       advances.push(lastAdvance);
-      if (window.htmx) { window.htmx.trigger(document.body, 'md-update'); }
+      dispatchUpdate();
     }
     // Prioridad del dot: feed caído (rojo) > tick en vivo (verde) > quieto (gris).
     if (feedDown) {
