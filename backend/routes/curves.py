@@ -18,6 +18,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.locale_ar import fmt_pct, parse_ar_num
+from backend.cache_seq import seq_cached
 from backend.services import bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
@@ -394,6 +395,7 @@ async def curves_page(
 
 
 @router.get("/table", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def curve_table_partial(
     request: Request,
     curve: str = "",
@@ -457,6 +459,7 @@ async def mercado_page(
 
 
 @mercado_router.get("/mercado/table", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def mercado_table_partial(
     request: Request,
     curve: str = "",

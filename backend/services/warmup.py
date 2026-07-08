@@ -27,8 +27,9 @@ import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from backend.services import (
     bond_universe,
@@ -59,6 +60,30 @@ WARMUP_CURVE_KEYS = (
 # the request handlers (the < 50 ms p95 target). The per-bond TIR is the
 # only CPU-bound bit; cache hits return immediately.
 _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="warmup")
+
+# ── Refresh vespertino del A3500 oficial ──────────────────────────────────
+# El BCRA publica el A3500 del día ~16:00-17:00. La app carga los índices al
+# BOOT (para no pagar nada por request), así que un server levantado a la
+# mañana valuaba los DLK toda la tarde con el A3500 de AYER aunque el de hoy
+# ya estuviera publicado. Dentro de esta ventana reintentamos el refresh de
+# índices (BCRA + backup json) cada _A3500_RETRY hasta ver publicado el de
+# hoy — todo en el pool, jamás en el path de request ni en el arranque.
+# Bonus: el autosave de 17:01 valúa los DLK con el oficial fresco, y el riel
+# muestra la fecha del A3500 girar a hoy.
+_A3500_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+_A3500_WINDOW = ((16, 0), (19, 0))     # [desde, hasta) hora BA
+_A3500_RETRY_SECONDS = 600.0
+
+
+def a3500_refresh_due(now_ba: datetime, last_iso: Optional[str]) -> bool:
+    """Pura (testeable): ¿corresponde intentar el refresh vespertino?
+    Día hábil + dentro de la ventana + el último A3500 publicado es viejo."""
+    if now_ba.weekday() >= 5:
+        return False
+    t = (now_ba.hour, now_ba.minute)
+    if not (_A3500_WINDOW[0] <= t < _A3500_WINDOW[1]):
+        return False
+    return (last_iso or "") < now_ba.date().isoformat()
 
 
 def prime_calc_engine() -> float:
@@ -189,6 +214,7 @@ class WarmupDaemon:
         self._primed = False
         self._esc_warmed = False        # escenario: 1 warm frío al boot, luego touch
         self._last_index_day: Optional[date] = None   # rollover → refresca inputs (CER/UVA/A3500)
+        self._a3500_last_try = 0.0      # rate-limit del refresh vespertino del A3500
         self._stats: Dict[str, float | int] = {
             "sweeps": 0,
             "last_warmed": 0,
@@ -232,6 +258,7 @@ class WarmupDaemon:
 
         while not self._stop.is_set():
             await self._maybe_refresh_indices()          # rollover de fecha → CER/UVA/A3500 frescos
+            await self._maybe_refresh_a3500_oficial()    # 16-19 h: A3500 del día apenas el BCRA lo publica
             has_data = marketdata_store.get_store().stats().get("symbols", 0) > 0
             wait = self.interval if has_data else self.interval * 4
             if has_data:
@@ -288,6 +315,43 @@ class WarmupDaemon:
                 logger.warning("[warmup] refresh de índices sin datos; reintenta en el próximo ciclo")
         except Exception:  # noqa: BLE001
             logger.exception("[warmup] refresh de índices falló")
+
+    async def _maybe_refresh_a3500_oficial(self) -> None:
+        """Ventana vespertina (16-19 h BA, hábiles): reintenta el refresh de
+        índices cada 10 min hasta que el BCRA publique el A3500 de HOY. El
+        fetch corre en el pool (I/O de red, nunca en el loop) y al lograrlo
+        re-lee la serie macro → el riel muestra la fecha nueva y el cache de
+        métricas (keyeado por índice) recalcula los DLK solo."""
+        from backend.services import historico
+
+        try:
+            pts = historico.series_points("a3500").get("points") or []
+        except Exception:  # noqa: BLE001
+            return
+        last_iso = pts[-1][0] if pts else None
+        if not a3500_refresh_due(datetime.now(_A3500_TZ), last_iso):
+            return
+        if time.monotonic() - self._a3500_last_try < _A3500_RETRY_SECONDS:
+            return
+        self._a3500_last_try = time.monotonic()
+        try:
+            import rentafija
+            loop = asyncio.get_running_loop()
+            ok = await loop.run_in_executor(_pool, rentafija.inputs.refresh)
+            if not ok:
+                logger.info("[warmup] A3500 vespertino: BCRA sin dato nuevo todavía; reintento en %.0f min",
+                            _A3500_RETRY_SECONDS / 60)
+                return
+            # Índices frescos → re-leer el backup para el riel / series macro.
+            snap = await loop.run_in_executor(_pool, historico.refresh)
+            pts = (snap.get("series", {}).get("a3500") or {}).get("points") or []
+            nuevo = pts[-1] if pts else None
+            if nuevo and nuevo[0] == datetime.now(_A3500_TZ).date().isoformat():
+                logger.info("[warmup] A3500 OFICIAL del día publicado: %s = %s", nuevo[0], nuevo[1])
+            else:
+                logger.info("[warmup] índices refrescados; A3500 de hoy aún no publicado")
+        except Exception:  # noqa: BLE001
+            logger.exception("[warmup] refresh vespertino del A3500 falló")
 
     def stats(self) -> Dict[str, float | int | bool]:
         s: Dict[str, float | int | bool] = dict(self._stats)
