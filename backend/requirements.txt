@@ -13,6 +13,8 @@ websockets>=12.0,<14.0
 # Math / data — same versions the legacy app exercises against
 numpy>=1.26
 pandas>=2.0
+# Parquet: espejo rápido del histórico px/tasas (lectura ~100× vs Excel)
+pyarrow>=15
 scipy>=1.11
 python-dateutil>=2.9
 holidays>=0.50

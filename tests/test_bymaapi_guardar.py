@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 _REPO = Path(__file__).resolve().parent.parent
 
@@ -62,6 +63,19 @@ def test_guardar_excel_con_timezones_no_muere(tmp_path) -> None:
     assert back["hora_dato"].dt.tz is None          # quedó naive, misma hora de pared
     assert back["hora_dato"].iloc[0].hour == 15
     assert list(back["Proy"]) == [0, 1]             # sufijo 'j' → proyectado
+
+
+def test_guardar_excel_escribe_espejo_parquet(tmp_path) -> None:
+    ns = _load_funcs("_sin_timezones", "guardar_excel")
+    dest = tmp_path / "Delta - historico_byma_px_tasas.xlsx"
+    ns["guardar_excel"](_df_base(), str(dest))
+    pq = tmp_path / "Delta - historico_byma_px_tasas.parquet"
+    assert pq.is_file(), "el espejo parquet no se escribió"
+    back = pd.read_parquet(pq)
+    assert len(back) == 2
+    assert list(back["Código"]) == ["T30E6", "S31L6j"]
+    # mismas filas que el Excel (espejo fiel de la base)
+    assert back["TIREA"].iloc[0] == pytest.approx(0.3210)
 
 
 def test_guardar_excel_concatena_con_existente(tmp_path) -> None:
