@@ -72,7 +72,7 @@ _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="warmup")
 # muestra la fecha del A3500 girar a hoy.
 _A3500_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 _A3500_WINDOW = ((16, 0), (19, 0))     # [desde, hasta) hora BA
-_A3500_RETRY_SECONDS = 600.0
+_A3500_RETRY_SECONDS = 900.0           # cada 15 min: alcanza de sobra y no molesta
 
 
 def a3500_refresh_due(now_ba: datetime, last_iso: Optional[str]) -> bool:
