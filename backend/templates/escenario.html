@@ -17,8 +17,7 @@
   <div class="curve-picker card">
    <div class="card-body">
     <form id="esc-form" hx-get="/escenario/table" hx-target="#esc-table" hx-swap="innerHTML"
-          hx-indicator="#esc-spin"
-          x-data="escSenderos({{ n_months }}, {{ senderos_json | safe }}, {{ saved_keys_json | safe }}, {{ cats_off_json | safe }})">
+          hx-indicator="#esc-spin" x-data="escSenderosInit()">
       <div class="row-fields">
         <label class="field"><span>Plazo</span>
           <select name="plazo"><option value="24hs" {% if plazo=='24hs' %}selected{% endif %}>24hs</option>
@@ -120,7 +119,16 @@
   <div id="esc-table"></div>
 </section>
 
+<script type="application/json" id="esc-init">{{ esc_init_json | safe }}</script>
 <script>
+  // Bootstrap del grid: la config inicial (defaults + filas fijas + tildes)
+  // viaja en el <script type="application/json"> de arriba — NUNCA en el
+  // atributo x-data, donde las comillas del JSON rompen el HTML.
+  function escSenderosInit() {
+    var cfg = {};
+    try { cfg = JSON.parse(document.getElementById("esc-init").textContent || "{}"); } catch (e) {}
+    return escSenderos(cfg.n_months || 6, cfg.senderos || {}, cfg.saved_keys || [], cfg.cats_off || []);
+  }
   // Senderos mensuales (Escenario). Vienen PRECARGADOS del server con
   // defaults vivos (inflación economista / deva ROFEX / TAMAR actual) más
   // las filas que el usuario dejó FIJAS. Editar una fila la marca dirty y
