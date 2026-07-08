@@ -691,6 +691,42 @@ def process_future_data(
 # =============================================================================
 # Excel
 # =============================================================================
+# Mínimo de bonos con OPERACIONES DE HOY para guardar sin confirmación extra
+# (mismo guard que el autosave del backend: HISTORICO_AUTOSAVE_MIN_OPERADOS).
+MIN_OPERADOS_GUARDAR = 30
+
+
+def _operados_hoy(df: pd.DataFrame) -> int:
+    """Filas con una operación DE HOY: Price Source 'LA' y Price Date de hoy.
+
+    Los last/cierres pegajosos de ruedas anteriores NO cuentan: corriendo esto
+    un finde, feriado o de madrugada la API devuelve precios de la última
+    rueda, y guardarlos estamparía data vieja con fecha_hoy de HOY — filas
+    basura en la base. Con este conteo, ese caso da ~0 y el guardado pide
+    confirmación explícita."""
+    if df is None or len(df) == 0 or "Price Source" not in df.columns:
+        return 0
+    fechas = df["Price Date"] if "Price Date" in df.columns else [None] * len(df)
+    tz_ar = "America/Argentina/Buenos_Aires"
+    hoy = pd.Timestamp.now(tz=tz_ar).date()      # "hoy" SIEMPRE en hora argentina
+    n = 0
+    for src, ts in zip(df["Price Source"], fechas):
+        if src != "LA" or ts is None:
+            continue
+        try:
+            if pd.isna(ts):
+                continue
+            t = ts if isinstance(ts, pd.Timestamp) else pd.Timestamp(str(ts))
+            if t.tzinfo is not None:
+                t = t.tz_convert(tz_ar)
+            d = t.date()
+        except (ValueError, TypeError):
+            continue
+        if d == hoy:
+            n += 1
+    return n
+
+
 def _sin_timezones(df: pd.DataFrame) -> pd.DataFrame:
     """Excel (openpyxl) rechaza datetimes con timezone y el guardado entero
     muere ('Excel does not support datetimes with timezones'). Devuelve una
@@ -1046,7 +1082,19 @@ def main():
         except Exception as exc:  # noqa: BLE001 — nunca romper el guardado por esto
             print(f"[bymaapi] resolvedor multiplataforma no disponible ({exc}); sigo con la ruta clásica.")
 
-    respuesta = input("¿Deseas guardar el DataFrame en un archivo Excel? (S/N): ").strip().upper()
+    # Salvaguarda anti-dedo: si casi nada OPERÓ HOY, los precios que estás por
+    # guardar son de una rueda anterior (finde / feriado / corrida a las 23 h
+    # de un día sin mercado) y quedarían estampados con la fecha de HOY.
+    # En ese caso, un "S" distraído no alcanza: hay que escribir GUARDAR.
+    ops = _operados_hoy(df_combined)
+    if ops >= MIN_OPERADOS_GUARDAR:
+        respuesta = input(f"¿Deseas guardar el DataFrame en un archivo Excel? ({ops} bonos operados hoy) (S/N): ").strip().upper()
+    else:
+        print(f"\n⚠ ATENCIÓN: sólo {ops} bonos tienen operaciones DE HOY (mínimo esperado: {MIN_OPERADOS_GUARDAR}).")
+        print("Los precios parecen de una rueda ANTERIOR (¿finde/feriado/mercado cerrado?) y se")
+        print("guardarían en la base con la fecha de hoy. Casi seguro NO querés guardar esto.")
+        respuesta = input("Escribí GUARDAR para guardar igual (cualquier otra cosa cancela): ").strip().upper()
+        respuesta = "S" if respuesta == "GUARDAR" else "N"
     if respuesta == "S":
         guardar_excel(df_combined, file_path)
     elif respuesta == "N":

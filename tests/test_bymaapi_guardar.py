@@ -94,3 +94,20 @@ def test_sin_timezones_no_toca_columnas_normales() -> None:
     df = pd.DataFrame({"a": [1.5], "b": ["texto"], "c": [date(2026, 7, 6)]})
     out = ns["_sin_timezones"](df)
     pd.testing.assert_frame_equal(out, df)
+
+
+def test_operados_hoy_guard_anti_dedo() -> None:
+    # Salvaguarda del guardado manual: sólo cuentan operaciones (LA) DE HOY.
+    # Un finde/feriado/las 23h de un día sin rueda → ~0 → doble confirmación.
+    ns = _load_funcs("_operados_hoy")
+    hoy = pd.Timestamp.now(tz="America/Argentina/Buenos_Aires")
+    ayer = hoy - pd.Timedelta(days=1)
+    df = pd.DataFrame({
+        "Price Source": ["LA", "LA", "CL", "LA", None],
+        "Price Date":   [hoy,  ayer, hoy,  pd.NaT, hoy],
+    })
+    assert ns["_operados_hoy"](df) == 1          # sólo el LA con fecha de hoy
+
+    # Sin columnas de fuente (flujo viejo) → 0: el guard pide confirmar, nunca revienta.
+    assert ns["_operados_hoy"](pd.DataFrame({"symbol": ["X"]})) == 0
+    assert ns["_operados_hoy"](pd.DataFrame()) == 0
