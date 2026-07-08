@@ -43,6 +43,22 @@ def _pickable(curve: str) -> str:
     pytest.skip(f"sin bono calculable en la curva {curve}")
 
 
+def test_lecap_carry_formula_cerrada_cupon_cero() -> None:
+    """Prueba reina de razonabilidad: una LECAP es cupón cero, así que el
+    carry manteniendo la TIR tiene solución CERRADA independiente del código:
+    (1+TIR)^(días/365) − 1. El motor tiene que clavarla."""
+    code = _pickable("lecap")
+    terminal, settle = _terminal(), _settle()
+    sd, td = tr_svc._parse_d(settle), tr_svc._parse_d(terminal)
+    dias = (td - sd).days
+    y0 = 0.32
+    res = tr_svc._bond_tr(code, y0, y0, terminal, settle, sd, td, 1.0, want_duration=False)
+    assert res is not None
+    teorico = (1.0 + y0) ** (dias / 365.0) - 1.0
+    assert res["carry"] == pytest.approx(teorico, abs=5e-4)   # exacto salvo redondeos de yearfrac
+    assert res["compresion"] == pytest.approx(0.0, abs=1e-12) # y1 == y0 → sin efecto precio
+
+
 def test_lecap_tr_igual_al_calculo_directo() -> None:
     """Tasa fija sin índice: el TR del servicio == calcula_total_return crudo,
     total == real (drift 0) y carry + compresión == real (aditivo exacto)."""
