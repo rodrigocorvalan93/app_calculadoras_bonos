@@ -97,7 +97,7 @@ def _curve_chart(cs: Dict[str, Any], desde: Optional[str] = None, hasta: Optiona
     if not lines:
         return {"loaded": cs.get("loaded", False), "n_lines": 0, "metric": cs.get("metric"),
                 "curve_label": cs.get("curve_label")}
-    scale = 100.0
+    scale = float(cs.get("scale", 100.0))   # métricas: fracción→% · Precio: tal cual
     ends = [p[0] for ln in lines for p in (ln["points"][0], ln["points"][-1])]
     dmin, dmax = (desde or min(ends)), (hasta or max(ends))
     try:
@@ -219,6 +219,95 @@ async def historicos_curva(request: Request, curve: str = "", metric: str = "TIR
                    desde=desde or "", hasta=hasta or "", **ctx)
 
 
+def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> Dict[str, Any]:
+    """SVG scatter 'curva en varias fechas': X = Duration, Y = métrica (%),
+    una serie de puntos por fecha (+ polilínea punteada uniendo por duration,
+    estilo el Excel del usuario). Pura geometría sobre el índice en memoria."""
+    series = sc.get("series") or []
+    if not series:
+        return {"loaded": sc.get("loaded", False), "n": 0, "metric": sc.get("metric"),
+                "curve_label": sc.get("curve_label")}
+    xs = [p["dur"] for s in series for p in s["points"]]
+    ys = [p["v"] * 100.0 for s in series for p in s["points"]]
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    if xmax == xmin:
+        xmax = xmin + 0.1
+    if ymax == ymin:
+        ymax = ymin + 0.1
+    padx, pady = (xmax - xmin) * 0.06, (ymax - ymin) * 0.10
+    xmin -= padx; xmax += padx; ymin -= pady; ymax += pady
+    ml, mr, mt, mb = 62, 16, 14, 42
+    pw, ph = width - ml - mr, height - mt - mb
+
+    def sx(d): return round(ml + (d - xmin) / (xmax - xmin) * pw, 1)
+    def sy(v): return round(mt + (1 - (v - ymin) / (ymax - ymin)) * ph, 1)
+
+    out = []
+    for i, s in enumerate(series):
+        pts = [{"x": sx(p["dur"]), "y": sy(p["v"] * 100.0), "code": p["code"],
+                "dur": p["dur"], "v": p["v"] * 100.0} for p in s["points"]]
+        out.append({"fecha": s["fecha"], "color": _PALETTE[i % len(_PALETTE)], "points": pts,
+                    "path": "M " + " L ".join(f'{p["x"]},{p["y"]}' for p in pts)})
+    yticks = [{"y": sy(ymin + (ymax - ymin) / 5 * i), "v": round(ymin + (ymax - ymin) / 5 * i, 2)}
+              for i in range(6)]
+    xticks = [{"x": sx(xmin + (xmax - xmin) / 6 * i), "v": round(xmin + (xmax - xmin) / 6 * i, 1)}
+              for i in range(7)]
+    return {"loaded": True, "n": len(out), "series": out, "metric": sc.get("metric"),
+            "curve_label": sc.get("curve_label"), "yticks": yticks, "xticks": xticks,
+            "width": width, "height": height, "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph}
+
+
+@router.get("/historicos/curva-fechas", response_class=HTMLResponse)
+async def historicos_curva_fechas(
+    request: Request,
+    curve: str = "", metric: str = "TEM", proy: str = "todos",
+    f1: str = "", f2: str = "", f3: str = "", f4: str = "",
+    trd1: str = "", trd2: str = "",
+) -> HTMLResponse:
+    """Pestaña 'Curva por fecha': la misma curva fotografiada en hasta 4 fechas
+    (Duration vs métrica, como el Excel del usuario) + total return REALIZADO
+    de sus bonos entre dos fechas (ΔP dirty + cupones cobrados, vía la ficha).
+    El scatter es índice en memoria; la tabla TR corre en executor y se cachea
+    (el pasado no cambia)."""
+    from datetime import timedelta
+
+    from backend.services import curves as curves_svc, tr_realizado
+
+    meta = historico_byma.meta()
+    keys = historico_byma.curves_with_history(None, None, proy)
+    labels = {cv.key: cv.label for cv in curves_svc.list_curves()}
+    sel = curve if curve in keys else (keys[0] if keys else None)
+
+    # Defaults: hoy (última fecha de la base) y ~1 mes atrás; TR entre ambas.
+    dmax = meta.get("dmax")
+    if dmax and not f1:
+        f1 = dmax
+    if dmax and not f2:
+        try:
+            from datetime import date as _date
+            f2 = (_date.fromisoformat(dmax) - timedelta(days=30)).isoformat()
+        except ValueError:
+            f2 = ""
+    trd1 = trd1 or f2 or ""
+    trd2 = trd2 or f1 or ""
+
+    fechas = [f for f in (f1, f2, f3, f4) if f]
+    scatter = tr_tabla = None
+    if sel and meta.get("loaded"):
+        loop = asyncio.get_running_loop()
+        scatter = _scatter_chart(historico_byma.scatter_by_dates(sel, fechas, metric, proy))
+        if trd1 and trd2 and trd1 < trd2:
+            tr_tabla = await loop.run_in_executor(
+                None, tr_realizado.tabla, sel, trd1, trd2, proy)
+
+    return _render(request, "partials/historico_curva_fechas.html",
+                   curve_opts=[{"key": k, "label": labels.get(k, k)} for k in keys],
+                   curve_sel=sel, metric=metric, proy=proy,
+                   f1=f1, f2=f2, f3=f3, f4=f4, trd1=trd1, trd2=trd2,
+                   scatter=scatter, tr=tr_tabla, hist_meta=meta)
+
+
 def _unix(iso: str) -> Optional[int]:
     """'YYYY-MM-DD' → epoch seconds (UTC), para el eje temporal de uPlot."""
     from datetime import datetime, timezone
@@ -253,7 +342,7 @@ async def historicos_curva_data(curve: str = "", metric: str = "TIREA",
                              "bands": None, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")})
     all_dates = sorted({d for ln in lines for d, _ in ln["points"]})
     idx = {d: i for i, d in enumerate(all_dates)}
-    scale = 100.0
+    scale = float(cs.get("scale", 100.0))   # métricas: fracción→% · Precio: tal cual
     series = []
     for ln in lines:
         y = [None] * len(all_dates)

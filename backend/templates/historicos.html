@@ -3,7 +3,7 @@
 {% block tab_historicos %}active{% endblock %}
 
 {% block content %}
-<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false }">
+<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false, fechasLoaded: false }">
   <header class="yas-header">
     <h1>Históricos</h1>
     <p class="muted">Series macro del BCRA y evolución histórica de tasas por curva (BYMA). Rango personalizable. Lectura única + cache; <strong>Actualizar</strong> relee.</p>
@@ -28,6 +28,9 @@
     <button @click="tab='curvas'; if(!curvaLoaded){curvaLoaded=true; $nextTick(()=>htmx.trigger('#hist-curva','reveal'))}"
             :style="tab==='curvas' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
             style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Tasas por curva</button>
+    <button @click="tab='fechas'; if(!fechasLoaded){fechasLoaded=true; $nextTick(()=>htmx.trigger('#hist-fechas','reveal'))}"
+            :style="tab==='fechas' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
+            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📐 Curva por fecha + TR</button>
   </div>
 
   {# ── Macro (BCRA) ── #}
@@ -74,6 +77,13 @@
   <div x-show="tab==='curvas'" x-cloak>
     <div id="hist-curva" hx-get="/historicos/curva" hx-trigger="reveal" hx-swap="innerHTML">
       <p class="muted" style="padding:10px">Cargando histórico BYMA…</p>
+    </div>
+  </div>
+
+  {# ── Curva por fecha + TR realizado (lazy: carga al abrir el tab) ── #}
+  <div x-show="tab==='fechas'" x-cloak>
+    <div id="hist-fechas" hx-get="/historicos/curva-fechas" hx-trigger="reveal" hx-swap="innerHTML">
+      <p class="muted" style="padding:10px">Cargando curvas por fecha…</p>
     </div>
   </div>
 </section>
