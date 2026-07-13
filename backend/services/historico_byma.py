@@ -248,7 +248,8 @@ def curve_series(curve_key: str, metric: str = "TIREA", desde: Optional[str] = N
     Devuelve líneas + agregado (prom/mín/máx) para las bandas de referencia."""
     from backend.services import curves, symbols as syms
     c = ensure_loaded()
-    metric = metric if metric in _METRICS else "TIREA"
+    metric = metric if metric in _METRICS + ("Last Price",) else "TIREA"
+    is_price = metric == "Last Price"
     if not c["loaded"]:
         return {"loaded": False, "lines": [], "metric": metric}
     base_set = {syms.calc_to_md_code(x) for x in curves.build_curve_codes().get(curve_key, [])}
@@ -270,9 +271,15 @@ def curve_series(curve_key: str, metric: str = "TIREA", desde: Optional[str] = N
                if v is not None and (not desde or d >= desde) and (not hasta or d <= hasta)]
         if len(pts) < 2:
             continue
-        delta = (pts[-1][1] - pts[0][1]) * dfac
+        if is_price:
+            # Precio: la variación se lee en % (fin/inicio − 1), no en pp.
+            delta = (pts[-1][1] / pts[0][1] - 1.0) * 100.0 if pts[0][1] else 0.0
+            dunit_row = "%"
+        else:
+            delta = (pts[-1][1] - pts[0][1]) * dfac
+            dunit_row = dunit
         lines.append({"code": code, "points": pts, "last": pts[-1][1],
-                      "delta": delta, "delta_unit": dunit})
+                      "delta": delta, "delta_unit": dunit_row})
         all_vals.extend(v for _, v in pts)
     lines.sort(key=lambda ln: ln["last"], reverse=True)
     agg = None
@@ -280,8 +287,62 @@ def curve_series(curve_key: str, metric: str = "TIREA", desde: Optional[str] = N
         agg = {"mean": sum(all_vals) / len(all_vals), "min": min(all_vals),
                "max": max(all_vals), "n": len(all_vals)}
     label = next((cv.label for cv in curves.list_curves() if cv.key == curve_key), curve_key)
+    # scale: las métricas son fracciones (×100 → %); el precio va tal cual.
     return {"loaded": True, "lines": lines, "agg": agg, "metric": metric,
-            "curve_label": label, "is_yield": is_yield}
+            "curve_label": label, "is_yield": is_yield,
+            "scale": 1.0 if is_price else 100.0}
+
+
+def scatter_by_dates(curve_key: str, fechas: List[str], metric: str = "TEM",
+                     proy: str = "todos") -> Dict[str, Any]:
+    """Foto de la curva en VARIAS fechas: por cada fecha, puntos
+    (Duration, metric) de los bonos de la curva con dato a esa fecha (último
+    conocido ≤ fecha, con tolerancia de 7 días). Puro índice en memoria —
+    costo ~µs por punto, sin pricing."""
+    from backend.services import curves, symbols as syms
+    c = ensure_loaded()
+    metric = metric if metric in _METRICS else "TEM"
+    if not c["loaded"]:
+        return {"loaded": False, "series": [], "metric": metric}
+    base_set = {syms.calc_to_md_code(x) for x in curves.build_curve_codes().get(curve_key, [])}
+    series: List[Dict[str, Any]] = []
+    for f in fechas:
+        if not f:
+            continue
+        pts = []
+        lim = (date.fromisoformat(f) - timedelta(days=7)).isoformat()
+        for code, e in c["by_code"].items():
+            if e["base"] not in base_set:
+                continue
+            if proy == "base" and e["proy"] != 0:
+                continue
+            if proy == "proy" and e["proy"] != 1:
+                continue
+            v, dv = _value_and_date_at(e, metric, f)
+            dur, dd = _value_and_date_at(e, "Duration", f)
+            if v is None or dur is None or dv is None or dv < lim or dd is None or dd < lim:
+                continue
+            pts.append({"code": code, "dur": dur, "v": v})
+        if pts:
+            pts.sort(key=lambda p: p["dur"])
+            series.append({"fecha": f, "points": pts})
+    label = next((cv.label for cv in curves.list_curves() if cv.key == curve_key), curve_key)
+    return {"loaded": True, "series": series, "metric": metric, "curve_label": label}
+
+
+def _value_and_date_at(entry: Dict[str, Any], metric: str, target_iso: str
+                       ) -> tuple:
+    """(valor, fecha ISO) de la última observación de `metric` ≤ target."""
+    vals = entry["vals"].get(metric)
+    if not vals:
+        return None, None
+    best_v = best_d = None
+    for d, v in zip(entry["dates"], vals):
+        if d > target_iso:
+            break
+        if v is not None:
+            best_v, best_d = v, d
+    return best_v, best_d
 
 
 # ── Resumen semanal por segmento (Δprecio + ΔTIR) ────────────────────────────

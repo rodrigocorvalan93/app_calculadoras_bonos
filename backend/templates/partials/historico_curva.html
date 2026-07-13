@@ -19,7 +19,7 @@
         <label class="field">
           <span>Métrica</span>
           <select name="metric">
-            {% for m in ["TIREA","TNA","TEM","Paridad"] %}<option value="{{ m }}" {% if m == metric %}selected{% endif %}>{{ m }}</option>{% endfor %}
+            {% for m, lbl in [("TIREA","TIREA"),("TNA","TNA"),("TEM","TEM"),("Paridad","Paridad"),("Last Price","Precio")] %}<option value="{{ m }}" {% if m == metric %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
           </select>
         </label>
         <label class="field">

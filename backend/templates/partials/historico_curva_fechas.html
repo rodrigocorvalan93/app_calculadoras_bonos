@@ -1,0 +1,112 @@
+{% import "partials/_fx_macros.html" as fx %}
+{% if not hist_meta or not hist_meta.loaded %}
+  <div class="alert"><strong>Histórico BYMA no disponible.</strong> Configurá
+    <code>DELTA_HISTORICO_DIR</code> / <code>DELTA_BASES_DIR</code> en <code>secrets.txt</code>.</div>
+{% else %}
+  <div class="curve-picker card">
+    <div class="card-body">
+      <form hx-get="/historicos/curva-fechas" hx-target="#hist-fechas" hx-swap="innerHTML">
+        <div class="row-fields">
+          <label class="field"><span>Curva</span>
+            <select name="curve">
+              {% for o in curve_opts %}<option value="{{ o.key }}" {% if o.key == curve_sel %}selected{% endif %}>{{ o.label }}</option>{% endfor %}
+            </select></label>
+          <label class="field"><span>Métrica</span>
+            <select name="metric">
+              {% for m in ["TEM","TIREA","TNA"] %}<option value="{{ m }}" {% if m == metric %}selected{% endif %}>{{ m }}</option>{% endfor %}
+            </select></label>
+          <label class="field"><span>Fecha 1</span><input type="date" name="f1" value="{{ f1 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
+          <label class="field"><span>Fecha 2</span><input type="date" name="f2" value="{{ f2 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
+          <label class="field"><span>Fecha 3</span><input type="date" name="f3" value="{{ f3 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
+          <label class="field"><span>Fecha 4</span><input type="date" name="f4" value="{{ f4 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
+          <label class="field"><span>Tipo</span>
+            <select name="proy">
+              {% for p, lbl in [("todos","Todos"),("base","Base"),("proy","Proy (j)")] %}<option value="{{ p }}" {% if p == proy %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select></label>
+        </div>
+        <div class="row-fields">
+          <label class="field"><span>TR desde</span><input type="date" name="trd1" value="{{ trd1 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
+          <label class="field"><span>TR hasta</span><input type="date" name="trd2" value="{{ trd2 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
+          <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
+        </div>
+      </form>
+      <p class="muted" style="font-size:11px;margin-top:6px">
+        Foto de la curva ({{ scatter.metric if scatter else metric }} vs Duration) en cada fecha elegida — por bono, el último dato ≤ fecha (tolerancia 7 días).
+        Abajo, el <b>total return realizado</b> entre "TR desde" y "TR hasta": ΔP <i>dirty</i> + cupones/amortizaciones cobrados en la ventana (de la ficha) — el corte de cupón no muerde.
+      </p>
+    </div>
+  </div>
+
+  {% if scatter and scatter.n %}
+  <div class="card" style="margin-top:12px">
+    <div class="card-title"><span>📐 {{ scatter.curve_label }} — {{ scatter.metric }} vs Duration</span>
+      <span class="card-title-aux">{% for s in scatter.series %}<span style="color:{{ s.color }}">● {{ s.fecha }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</span></div>
+    <div class="card-body table-scroll">
+      <svg viewBox="0 0 {{ scatter.width }} {{ scatter.height }}" style="width:100%;max-width:{{ scatter.width }}px" role="img">
+        {% for t in scatter.yticks %}
+          <line x1="{{ scatter.x0 }}" x2="{{ scatter.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+          <text x="{{ scatter.x0 - 8 }}" y="{{ t.y + 4 }}" text-anchor="end" font-size="11" fill="var(--text-muted)">{{ t.v | ar_num(2) }}%</text>
+        {% endfor %}
+        {% for t in scatter.xticks %}
+          <text x="{{ t.x }}" y="{{ scatter.y1 + 18 }}" text-anchor="middle" font-size="11" fill="var(--text-muted)">{{ t.v | ar_num(1) }}</text>
+        {% endfor %}
+        <text x="{{ (scatter.x0 + scatter.x1) / 2 }}" y="{{ scatter.height - 4 }}" text-anchor="middle" font-size="11" fill="var(--text-muted)">Duration</text>
+        {% for s in scatter.series %}
+          <path d="{{ s.path }}" fill="none" stroke="{{ s.color }}" stroke-width="1.4" stroke-dasharray="3 4" opacity="0.7"/>
+          {% for p in s.points %}
+            <circle cx="{{ p.x }}" cy="{{ p.y }}" r="4.2" fill="{{ s.color }}" opacity="0.92">
+              <title>{{ p.code }} · {{ s.fecha }} · dur {{ p.dur | ar_num(2) }} · {{ p.v | ar_num(2) }}%</title>
+            </circle>
+          {% endfor %}
+        {% endfor %}
+      </svg>
+    </div>
+  </div>
+  {% elif scatter %}
+  <div class="alert" style="margin-top:12px">Sin puntos para esas fechas (¿la base tiene datos ahí?).</div>
+  {% endif %}
+
+  {% if tr and tr.rows %}
+  <div class="card" style="margin-top:12px">
+    <div class="card-title"><span>💰 TR realizado — {{ tr.curve_label }} · {{ tr.d1 }} → {{ tr.d2 }}</span>
+      <span class="card-title-aux">ΔP dirty + cupones cobrados (ventana real por bono)</span></div>
+    <div class="card-body table-scroll">
+      <table class="cashflows curve-table mercado-table" data-sortable id="tr-realizado-tbl">
+        <thead><tr>
+          <th style="text-align:left" data-sort>Bono</th><th data-sort>Ventana</th>
+          <th data-sort>P inicial</th><th data-sort>P final</th>
+          <th data-sort>Δ Precio</th><th data-sort>Cupones</th><th data-sort>TR total</th>
+          <th data-sort>TIR ini</th><th data-sort>TIR fin</th><th data-sort>ΔTIR</th>
+        </tr></thead>
+        <tbody>
+          {% for r in tr.rows %}
+          <tr>
+            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
+            <td style="font-size:11px;color:var(--text-muted)">{{ r.f1 }} → {{ r.f2 }}</td>
+            <td>{{ r.p1 | ar_num(2) }}</td>
+            <td>{{ r.p2 | ar_num(2) }}</td>
+            <td class="{{ fx.vcls(r.px_var) }}">{{ r.px_var | ar_pct(2) }}</td>
+            <td>{{ r.cup_pct | ar_pct(2) }}</td>
+            <td class="{{ fx.vcls(r.tr) }}" style="font-weight:700">{{ r.tr | ar_pct(2) }}</td>
+            <td>{{ r.y1 | ar_pct(1) }}</td>
+            <td>{{ r.y2 | ar_pct(1) }}</td>
+            <td class="{{ fx.vcls(-(r.dy_bps or 0)) }}">{{ r.dy_bps | ar_num(0) }} bps</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% if tr.summary %}
+        <tfoot><tr style="font-weight:700;border-top:2px solid var(--border)">
+          <td style="text-align:left">Promedio ({{ tr.summary.n }})</td><td></td><td></td><td></td>
+          <td class="{{ fx.vcls(tr.summary.px_var) }}">{{ tr.summary.px_var | ar_pct(2) }}</td>
+          <td>{{ tr.summary.cup_pct | ar_pct(2) }}</td>
+          <td class="{{ fx.vcls(tr.summary.tr) }}">{{ tr.summary.tr | ar_pct(2) }}</td>
+          <td></td><td></td><td></td>
+        </tr></tfoot>
+        {% endif %}
+      </table>
+    </div>
+  </div>
+  {% elif tr %}
+  <div class="alert" style="margin-top:12px">Sin bonos con precio en ambas fechas para el TR realizado.</div>
+  {% endif %}
+{% endif %}
