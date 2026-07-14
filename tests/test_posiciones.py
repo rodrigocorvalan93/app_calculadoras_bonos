@@ -91,7 +91,10 @@ def test_px_val_reescalado_a_base_del_last() -> None:
 
     assert _px_val_like_last(0.9160, 91.85) == pytest.approx(91.60)
     assert _px_val_like_last(91.60, 91.85) == pytest.approx(91.60)     # misma base: no toca
-    assert _px_val_like_last(5350.0, 5400.0) == pytest.approx(5350.0)  # acciones: no toca
+    assert _px_val_like_last(5350.0, 5400.0) == pytest.approx(5350.0)  # acción en la misma base
+    # acciones valuadas en otra potencia de 10 también se homogeneizan (el
+    # reescalado es genérico por fila, no distingue bonos de acciones)
+    assert _px_val_like_last(3.5, 3512.0) == pytest.approx(3500.0)
     assert _px_val_like_last(1.05, 98.7) == pytest.approx(105.0)       # letra valuada por VN 1
     assert _px_val_like_last(0.916, None) == 0.916                     # sin Last: tal cual
     assert _px_val_like_last(None, 91.85) is None
