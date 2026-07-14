@@ -49,7 +49,7 @@
     </div>
   </div>
 
-  <div id="alertas-tabla" hx-get="/alertas/tabla" hx-trigger="md-update from:body, every 30s" hx-swap="innerHTML">
+  <div id="alertas-tabla" data-skip-same hx-get="/alertas/tabla" hx-trigger="md-update from:body, every 30s" hx-swap="innerHTML">
     {% include "partials/alertas_table.html" %}
   </div>
 </section>

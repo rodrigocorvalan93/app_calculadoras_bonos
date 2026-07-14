@@ -25,10 +25,15 @@
       } catch (e) {}
     })();
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js" defer></script>
+  {# Vendors auto-hospedados (antes jsdelivr): sin CDN externo en el path
+     crítico — el CSS de uPlot bloqueaba el primer paint de CADA página si el
+     CDN andaba lento/filtrado, y la app debe funcionar en LAN/Tailscale sin
+     internet. Mismas versiones exactas; el nombre lleva la versión y /static
+     se sirve immutable. #}
+  <script src="{{ url_for('static', path='vendor/htmx-2.0.4.min.js') }}" defer></script>
+  <script src="{{ url_for('static', path='vendor/alpinejs-3.14.1.min.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/uplot-1.6.31.min.css') }}">
+  <script src="{{ url_for('static', path='vendor/uplot-1.6.31.min.js') }}" defer></script>
 </head>
 <body hx-boost="false"
       x-data="{ railOpen: (function(){ try { return localStorage.getItem('fx_rail') !== '0'; } catch (e) { return true; } })() }">
@@ -39,15 +44,25 @@
       </svg>
       <span class="brand-text">Calculadora · Bonos</span>
     </a>
-    <nav class="tabs">
+    <nav class="tabs" id="nav-tabs">
       {# Sólo las pestañas permitidas para el rol del usuario (auth.nav_for),
          inyectadas por el middleware en request.state. La activa se resuelve
-         por path (request.state.nav_active). #}
+         por path (request.state.nav_active). Con 20+ pestañas ya no entran
+         todas: app.js mide cuántas caben y colapsa el resto en el menú ⋯
+         (priority+; la activa queda siempre visible). #}
       {% for t in request.state.nav_tabs %}
       <a class="tab {{ 'active' if request.state.nav_active == t.key else '' }}" href="{{ t.path }}">{{ t.label }}</a>
       {% endfor %}
     </nav>
+    {# Fuera del <nav>: .tabs tiene overflow:hidden (recorta las que no entran)
+       y adentro también recortaría este dropdown. #}
+    <div class="tab-more" id="nav-more" hidden>
+      <button type="button" id="nav-more-btn" class="tab" title="Más pestañas">⋯</button>
+      <div class="tab-menu" id="nav-more-menu"></div>
+    </div>
     <div class="topbar-meta">
+      <button type="button" class="rail-toggle" onclick="if (window.ckOpen) window.ckOpen()"
+              title="Búsqueda global — Ctrl+K / Cmd+K (bonos y pestañas)">🔍</button>
       <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
       <span id="live-meta" class="live-meta muted"></span>
       {% if request.state.user %}
@@ -81,7 +96,9 @@
     <div id="tape-track" class="tape-track" data-flash-scope></div>
   </div>
 
-  <div id="news-marquee" class="news-marquee news-top"
+  {# data-skip-same: si las noticias no cambiaron, el swap se cancela y la
+     animación del marquee no se reinicia (antes saltaba al inicio cada 180s). #}
+  <div id="news-marquee" class="news-marquee news-top" data-skip-same
        hx-get="/news/marquee" hx-trigger="load, every 180s" hx-swap="innerHTML"></div>
 
   <div class="layout" :class="{ 'rail-closed': !railOpen }">

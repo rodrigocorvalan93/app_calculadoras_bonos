@@ -25,6 +25,26 @@ window.fxRailOpen = function () {
   return !l || !l.classList.contains('rail-closed');
 };
 
+// ── Skip de swaps idénticos ────────────────────────────────────────────────
+// Los paneles live refetchean en cada md-update (~1/s en rueda), pero la
+// MAYORÍA de los ticks no cambian ESE panel: el server ya cachea el render
+// por seq, y acá cortamos el resto — si el HTML que llegó es idéntico al
+// último aplicado, se cancela el swap (cero teardown de DOM, cero re-init de
+// Alpine, cero diff de flashes, el sort/scroll del usuario ni se entera).
+// Registrado ANTES que los hooks de flash, así un swap cancelado tampoco
+// paga el snapshot de celdas. Opt-in: [data-flash-scope] o [data-skip-same].
+(function () {
+  document.body.addEventListener('htmx:beforeSwap', function (evt) {
+    var t = evt.detail.target;
+    if (!t || !t.hasAttribute) return;
+    if (!t.hasAttribute('data-flash-scope') && !t.hasAttribute('data-skip-same')) return;
+    var html = evt.detail.serverResponse;
+    if (typeof html !== 'string') return;
+    if (t.__lastHtml === html) { evt.detail.shouldSwap = false; return; }
+    t.__lastHtml = html;
+  });
+})();
+
 (function () {
   // htmx custom event hooks (debug logging behind a flag).
   if (window.localStorage.getItem('yas_debug') === '1') {
@@ -251,6 +271,7 @@ window.fxRailOpen = function () {
 
   var pre = {};
   document.body.addEventListener('htmx:beforeSwap', function (evt) {
+    if (evt.detail.shouldSwap === false) return;   // swap cancelado (HTML idéntico)
     var t = evt.detail.target;
     if (t && t.hasAttribute && t.hasAttribute('data-flash-scope')) {
       pre[t.id || 'x'] = snapshot(t);
@@ -632,4 +653,75 @@ window.fxRailOpen = function () {
       (box && box.style.display === "flex") ? close() : open();
     }
   });
+  // Entrada visible (botón 🔍 de la topbar) — además es la ÚNICA entrada en
+  // el celu, donde no hay Ctrl+K.
+  window.ckOpen = open;
+})();
+
+// ── Topbar priority+: las pestañas que no entran colapsan en "⋯" ──────────
+// Con 20+ pestañas la nav desbordaba y se cortaba. Acá se mide cuántas caben
+// (más el ancho del botón ⋯) y el resto pasa a un dropdown. La ACTIVA queda
+// siempre a la vista (si cayó en el desborde, desplaza a la última visible).
+// Corre en load y en resize (debounced) — costo: una pasada de offsetWidth
+// sobre ~20 anchors, nada por tick.
+(function () {
+  var t = null;
+  function layout() {
+    var nav = document.getElementById('nav-tabs');
+    var more = document.getElementById('nav-more');
+    var menu = document.getElementById('nav-more-menu');
+    if (!nav || !more || !menu) return;
+    var links = Array.prototype.slice.call(nav.querySelectorAll('a.tab'));
+    if (!links.length) return;
+    // reset: todo visible para medir anchos reales. El ⋯ vive FUERA del nav
+    // (overflow:hidden recortaría su dropdown): mostrarlo achica el nav solo,
+    // así el ancho disponible ya lo descuenta.
+    more.hidden = false;
+    links.forEach(function (a) { a.classList.remove('tab-overflow'); });
+    var avail = nav.clientWidth - 2;
+    var used = 0, cut = links.length;
+    for (var i = 0; i < links.length; i++) {
+      used += links[i].offsetWidth + 4;        // gap
+      if (used > avail) { cut = i; break; }
+    }
+    if (cut >= links.length) {                 // entran todas → sin ⋯
+      more.hidden = true;
+      menu.classList.remove('open');
+      return;
+    }
+    links.slice(cut).forEach(function (a) { a.classList.add('tab-overflow'); });
+    // la activa siempre a la vista: si cayó en el desborde, entra en lugar
+    // de la última que cabía
+    var act = nav.querySelector('a.tab.active.tab-overflow');
+    if (act && cut > 0) {
+      act.classList.remove('tab-overflow');
+      links[cut - 1].classList.add('tab-overflow');
+    }
+    // menú = clones de las ocultas (los originales quedan para re-medir)
+    menu.innerHTML = '';
+    links.forEach(function (a) {
+      if (!a.classList.contains('tab-overflow')) return;
+      var c = a.cloneNode(true);
+      c.classList.remove('tab-overflow');
+      menu.appendChild(c);
+    });
+  }
+  function arm() {
+    var btn = document.getElementById('nav-more-btn');
+    var menu = document.getElementById('nav-more-menu');
+    if (btn && menu) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        menu.classList.toggle('open');
+      });
+      document.addEventListener('click', function () { menu.classList.remove('open'); });
+    }
+    layout();
+  }
+  window.addEventListener('resize', function () {
+    if (t) clearTimeout(t);
+    t = setTimeout(layout, 120);
+  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', arm);
+  else arm();
 })();

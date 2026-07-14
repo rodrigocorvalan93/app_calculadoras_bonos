@@ -59,9 +59,50 @@ async def test_palette_en_app_js() -> None:
         js = await ac.get("/static/js/app.js")
         css = await ac.get("/static/css/style.css")
     assert "ck-overlay" in js.text and "/market/codes" in js.text
+    assert "window.ckOpen" in js.text                     # botón 🔍 de la topbar
     assert "#ck-panel" in css.text
     # pase mobile: sólo bajo media query (desktop intacto)
     assert "max-width: 980px" in css.text
+
+
+# ── Perf percibida: vendors locales + cache fuerte + skip de swaps ──────────
+@pytest.mark.asyncio
+async def test_vendors_locales_sin_cdn() -> None:
+    """Los vendors se sirven de /static/vendor (no jsdelivr): sin CDN externo
+    en el path crítico, la app carga igual en LAN/Tailscale sin internet."""
+    async with _client() as ac:
+        page = await ac.get("/yas")
+        assert "jsdelivr" not in page.text
+        for f in ("vendor/htmx-2.0.4.min.js", "vendor/alpinejs-3.14.1.min.js",
+                  "vendor/uplot-1.6.31.min.css", "vendor/uplot-1.6.31.min.js"):
+            assert f in page.text
+            r = await ac.get(f"/static/{f}")
+            assert r.status_code == 200 and len(r.content) > 1000
+
+
+@pytest.mark.asyncio
+async def test_static_cache_inmutable() -> None:
+    """Assets versionados (?v= / versión en el nombre) → immutable 1 año: el
+    browser no revalida en cada cambio de pestaña (menos RTTs de navegación)."""
+    async with _client() as ac:
+        for path in ("/static/css/style.css", "/static/js/app.js",
+                     "/static/vendor/htmx-2.0.4.min.js"):
+            r = await ac.get(path)
+            assert r.headers.get("cache-control") == "public, max-age=31536000, immutable"
+
+
+@pytest.mark.asyncio
+async def test_topbar_overflow_y_boton_buscar() -> None:
+    """Nav priority+ (las pestañas que no entran van al menú ⋯) + botón 🔍
+    que abre la paleta Ctrl+K (única entrada táctil en el celu)."""
+    async with _client() as ac:
+        page = await ac.get("/yas")
+        js = await ac.get("/static/js/app.js")
+    assert 'id="nav-tabs"' in page.text and 'id="nav-more"' in page.text
+    assert 'id="nav-more-menu"' in page.text
+    assert "window.ckOpen()" in page.text                 # botón 🔍
+    assert "tab-overflow" in js.text                      # layout priority+
+    assert "data-skip-same" in js.text                    # skip de swaps idénticos
 
 
 # ── Heatmap de variaciones ───────────────────────────────────────────────────
