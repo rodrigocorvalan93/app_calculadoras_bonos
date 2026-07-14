@@ -25,6 +25,24 @@ from backend.cache import LockedTTLCache
 logger = logging.getLogger("backend.tr_realizado")
 
 _cache = LockedTTLCache(maxsize=64, ttl=900)
+# Cupones por bono+ventana para "Qué pasó" (~200 bonos por render): frío una
+# vez (~ms/bono, en executor), después lookup ~ns. TTL largo: el pasado no
+# cambia; 6 h cubre el autosave del día sin acumular basura.
+_cup_bond_cache = LockedTTLCache(maxsize=8192, ttl=6 * 3600)
+
+
+def cupones_entre_cached(code: str, d1_iso: str, d2_iso: str) -> float:
+    """Cobros por 100 VN en (d1, d2] (ficha real), cacheado por bono+ventana.
+    Ficha rota / fechas inválidas → 0.0 (y SE CACHEA: el cache no guarda None
+    y una ficha rota recomputaría en cada render de Qué pasó)."""
+    def _factory() -> float:
+        try:
+            cup = _cupones_entre(code, date.fromisoformat(d1_iso), date.fromisoformat(d2_iso))
+        except ValueError:
+            cup = None
+        return float(cup) if cup is not None else 0.0
+
+    return _cup_bond_cache.get_or_compute((code, d1_iso, d2_iso), _factory)
 
 
 def _cupones_entre(code: str, d1: date, d2: date) -> Optional[float]:

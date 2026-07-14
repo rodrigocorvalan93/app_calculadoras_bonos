@@ -29,6 +29,8 @@
     <table class="cashflows curve-table sem-tbl">
       <thead><tr>
         <th style="text-align:left">Segmento</th><th>Δ Precio</th><th>Δ TIR</th>
+        <th title="TIREA promedio del segmento al cierre de la ventana">TIR prom.</th>
+        <th title="Duration promedio del segmento al cierre de la ventana">Dur. prom.</th>
         <th style="text-align:left">Bonos</th>
       </tr></thead>
         {% for s in w.segments %}
@@ -41,14 +43,23 @@
               <b>{{ s.label }}</b> <i class="muted">({{ s.n }})</i>
             </td>
             <td class="{{ 'px-up' if (s.dprice or 0) >= 0 else 'px-down' }}">{{
-              ((s.dprice * 100) | ar_num(2)) ~ '%' if s.dprice is not none else '—' }}</td>
+              ((s.dprice * 100) | ar_num(2)) ~ '%' if s.dprice is not none else '—' }}
+              {%- if s.cup_pct and s.cup_pct > 0.0001 %}
+              {# Se opera dirty: el corte de cupón tira el precio un escalón. Acá
+                 va el cobro promedio de la ventana — Δ Precio + cupones ≈ TR. #}
+              <div class="muted" style="font-size:10px;white-space:nowrap"
+                   title="Promedio de cupones/amortizaciones cobrados en la ventana (% del precio inicial). Δ Precio + cupones ≈ TR realizado.">
+                ✂ cupones +{{ (s.cup_pct * 100) | ar_num(2) }}%</div>
+              {%- endif %}</td>
             <td class="{{ 'px-up' if (s.dtir or 0) <= 0 else 'px-down' }}">{{
               (('+' if s.dtir >= 0 else '') ~ ((s.dtir * 100) | ar_num(2)) ~ ' pp') if s.dtir is not none else '—' }}</td>
+            <td>{{ ((s.tir_avg * 100) | ar_num(1)) ~ '%' if s.tir_avg is not none else '—' }}</td>
+            <td>{{ (s.dur_avg | ar_num(2)) if s.dur_avg is not none else '—' }}</td>
             <td style="text-align:left" class="sem-codes muted">{{ s.members | join(' · ') }}</td>
           </tr>
           {% if s.rows %}
           <tr x-show="open" x-cloak class="sem-detail-row">
-            <td colspan="4">
+            <td colspan="6">
               {% if s.curve %}
               {% set c = s.curve %}
               <div class="sem-curve">
@@ -85,7 +96,9 @@
                   <tr>
                     <td style="text-align:left"><b>{{ b.code }}</b></td>
                     <td class="{{ 'px-up' if (b.dprice or 0) >= 0 else 'px-down' }}">{{
-                      ((b.dprice * 100) | ar_num(2)) ~ '%' if b.dprice is not none else '—' }}</td>
+                      ((b.dprice * 100) | ar_num(2)) ~ '%' if b.dprice is not none else '—' }}
+                      {%- if b.cup_pct and b.cup_pct > 0.0001 %} <span class="muted" style="font-size:10px"
+                        title="Cortó cupón en la ventana: cobro como % del precio inicial">✂ +{{ (b.cup_pct * 100) | ar_num(2) }}%</span>{% endif %}</td>
                     <td class="{{ 'px-up' if (b.dtir or 0) <= 0 else 'px-down' }}">{{
                       (('+' if b.dtir >= 0 else '') ~ ((b.dtir * 100) | ar_num(2)) ~ ' pp') if b.dtir is not none else '—' }}</td>
                     <td class="{{ 'px-up' if (b.dtem or 0) <= 0 else 'px-down' }}">{{
