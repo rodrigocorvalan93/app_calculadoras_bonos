@@ -497,6 +497,8 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
         dprices: List[float] = []
         dtirs: List[float] = []
         cups: List[float] = []
+        tirs_fin: List[float] = []
+        durs_fin: List[float] = []
         members: List[str] = []
         rows: List[Dict[str, Any]] = []
         for code in codes_by_curve.get(cat.curve, []):
@@ -537,6 +539,10 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
                 cups.append(cup_pct or 0.0)   # mismo set que dprices → Δp + cup ≈ TR
             if dtir is not None:
                 dtirs.append(dtir)
+            if t1 is not None:
+                tirs_fin.append(t1)           # nivel de TIR al cierre de la ventana
+            if dur is not None:
+                durs_fin.append(dur)          # duration al cierre de la ventana
             members.append(code)
             rows.append({"code": code, "dur": dur, "dprice": dprice, "dtir": dtir,
                          "cup_pct": cup_pct,
@@ -550,6 +556,7 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
             segments.append({"key": cat.key, "label": cat.label, "n": len(members),
                              "dprice": _avg_seg(dprices), "dtir": _avg_seg(dtirs),
                              "cup_pct": _avg_seg(cups),
+                             "tir_avg": _avg_seg(tirs_fin), "dur_avg": _avg_seg(durs_fin),
                              "members": members, "rows": rows,
                              "has_margen": any(r["margen"] is not None for r in rows)})
     return {"loaded": True, "start": start, "end": end, "days": days,

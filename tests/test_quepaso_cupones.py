@@ -63,6 +63,15 @@ def test_segmento_expone_cupones_promedio(base_lecaps, monkeypatch) -> None:
     assert seg["cup_pct"] == pytest.approx(esperado)
 
 
+def test_segmento_trae_tir_y_duration_promedio(base_lecaps) -> None:
+    w = historico_byma.weekly_segments(days=7)
+    seg = next(s for s in w["segments"]
+               if any(r["code"] == base_lecaps["c1"] for r in s["rows"]))
+    # niveles AL CIERRE de la ventana: TIREA (0,30+0,31)/2 · Duration (0,47+0,82)/2
+    assert seg["tir_avg"] == pytest.approx(0.305)
+    assert seg["dur_avg"] == pytest.approx((0.47 + 0.82) / 2)
+
+
 def test_lecap_sin_cupon_no_ensucia(base_lecaps) -> None:
     # Ficha real: una lecap viva no corta cupón en la ventana → 0 exacto y
     # el chip no aparece (cup_pct bajo el umbral del template).

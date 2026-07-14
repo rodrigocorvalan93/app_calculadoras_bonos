@@ -29,6 +29,8 @@
     <table class="cashflows curve-table sem-tbl">
       <thead><tr>
         <th style="text-align:left">Segmento</th><th>Δ Precio</th><th>Δ TIR</th>
+        <th title="TIREA promedio del segmento al cierre de la ventana">TIR prom.</th>
+        <th title="Duration promedio del segmento al cierre de la ventana">Dur. prom.</th>
         <th style="text-align:left">Bonos</th>
       </tr></thead>
         {% for s in w.segments %}
@@ -51,11 +53,13 @@
               {%- endif %}</td>
             <td class="{{ 'px-up' if (s.dtir or 0) <= 0 else 'px-down' }}">{{
               (('+' if s.dtir >= 0 else '') ~ ((s.dtir * 100) | ar_num(2)) ~ ' pp') if s.dtir is not none else '—' }}</td>
+            <td>{{ ((s.tir_avg * 100) | ar_num(1)) ~ '%' if s.tir_avg is not none else '—' }}</td>
+            <td>{{ (s.dur_avg | ar_num(2)) if s.dur_avg is not none else '—' }}</td>
             <td style="text-align:left" class="sem-codes muted">{{ s.members | join(' · ') }}</td>
           </tr>
           {% if s.rows %}
           <tr x-show="open" x-cloak class="sem-detail-row">
-            <td colspan="4">
+            <td colspan="6">
               {% if s.curve %}
               {% set c = s.curve %}
               <div class="sem-curve">
