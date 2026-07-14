@@ -17,19 +17,29 @@
     <span class="sem-idx-chip"><b>TAMAR</b> {% if w.indices.tamar_fin is not none %}{{ w.indices.tamar_ini | ar_num(2) }} → {{ w.indices.tamar_fin | ar_num(2) }}%{% if w.indices.tamar_delta is not none %} <span class="{{ 'px-down' if w.indices.tamar_delta >= 0 else 'px-up' }}">({{ '+' if w.indices.tamar_delta >= 0 else '' }}{{ w.indices.tamar_delta | ar_num(2) }} pp)</span>{% endif %}{% else %}—{% endif %}</span>
   </div>
   {% endif %}
-  <div class="card-body" style="padding:0">
-    <form hx-get="/historicos/semanal" hx-target="#hist-semanal" hx-swap="innerHTML" class="table-tools muted">
+  <div class="card-body" style="padding:0" x-data="{ ym: 'tir' }">
+    <div class="table-tools muted">
       <span>Ventana:</span>
+      {# hx-get directo por botón (sin form/submitter): a prueba de balas. #}
       {% for d, lbl in [(7, '1 sem'), (14, '2 sem'), (30, '1 mes')] %}
-      <button type="submit" name="dias" value="{{ d }}"
+      <button type="button" hx-get="/historicos/semanal?dias={{ d }}"
+              hx-target="#hist-semanal" hx-swap="innerHTML"
               class="{{ 'btn-primary' if dias == d else '' }}" style="font-size:11px">{{ lbl }}</button>
       {% endfor %}
-    </form>
+      <span style="margin-left:14px">Tasa:</span>
+      {# Toggle TIR ↔ TEM client-side: los dos datasets ya viajan en el render
+         (cero requests extra); Alpine sólo cambia qué columnas se ven. #}
+      <button type="button" @click="ym='tir'" :class="ym==='tir' ? 'btn-primary' : ''" style="font-size:11px">TIR</button>
+      <button type="button" @click="ym='tem'" :class="ym==='tem' ? 'btn-primary' : ''" style="font-size:11px">TEM</button>
+    </div>
     <div class="table-scroll">
     <table class="cashflows curve-table sem-tbl">
       <thead><tr>
-        <th style="text-align:left">Segmento</th><th>Δ Precio</th><th>Δ TIR</th>
-        <th title="TIREA promedio del segmento al cierre de la ventana">TIR prom.</th>
+        <th style="text-align:left">Segmento</th><th>Δ Precio</th>
+        <th x-show="ym==='tir'">Δ TIR</th>
+        <th x-show="ym==='tem'" x-cloak>Δ TEM</th>
+        <th x-show="ym==='tir'" title="TIREA promedio del segmento al cierre de la ventana">TIR prom.</th>
+        <th x-show="ym==='tem'" x-cloak title="TEM promedio del segmento al cierre de la ventana">TEM prom.</th>
         <th title="Duration promedio del segmento al cierre de la ventana">Dur. prom.</th>
         <th style="text-align:left">Bonos</th>
       </tr></thead>
@@ -51,9 +61,12 @@
                    title="Promedio de cupones/amortizaciones cobrados en la ventana (% del precio inicial). Δ Precio + cupones ≈ TR realizado.">
                 ✂ cupones +{{ (s.cup_pct * 100) | ar_num(2) }}%</div>
               {%- endif %}</td>
-            <td class="{{ 'px-up' if (s.dtir or 0) <= 0 else 'px-down' }}">{{
+            <td x-show="ym==='tir'" class="{{ 'px-up' if (s.dtir or 0) <= 0 else 'px-down' }}">{{
               (('+' if s.dtir >= 0 else '') ~ ((s.dtir * 100) | ar_num(2)) ~ ' pp') if s.dtir is not none else '—' }}</td>
-            <td>{{ ((s.tir_avg * 100) | ar_num(1)) ~ '%' if s.tir_avg is not none else '—' }}</td>
+            <td x-show="ym==='tem'" x-cloak class="{{ 'px-up' if (s.dtem or 0) <= 0 else 'px-down' }}">{{
+              (('+' if s.dtem >= 0 else '') ~ ((s.dtem * 100) | ar_num(2)) ~ ' pp') if s.dtem is not none else '—' }}</td>
+            <td x-show="ym==='tir'">{{ ((s.tir_avg * 100) | ar_num(1)) ~ '%' if s.tir_avg is not none else '—' }}</td>
+            <td x-show="ym==='tem'" x-cloak>{{ ((s.tem_avg * 100) | ar_num(2)) ~ '%' if s.tem_avg is not none else '—' }}</td>
             <td>{{ (s.dur_avg | ar_num(2)) if s.dur_avg is not none else '—' }}</td>
             <td style="text-align:left" class="sem-codes muted">{{ s.members | join(' · ') }}</td>
           </tr>

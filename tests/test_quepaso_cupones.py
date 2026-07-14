@@ -72,6 +72,32 @@ def test_segmento_trae_tir_y_duration_promedio(base_lecaps) -> None:
     assert seg["dur_avg"] == pytest.approx((0.47 + 0.82) / 2)
 
 
+def test_segmento_trae_tem_promedio_y_delta(base_lecaps) -> None:
+    w = historico_byma.weekly_segments(days=7)
+    seg = next(s for s in w["segments"]
+               if any(r["code"] == base_lecaps["c1"] for r in s["rows"]))
+    assert seg["tem_avg"] == pytest.approx((0.0221 + 0.0228) / 2)
+    assert seg["dtem"] == pytest.approx(((0.0221 - 0.0245) + (0.0228 - 0.0252)) / 2)
+
+
+def test_ventana_dias_reacciona(base_lecaps) -> None:
+    from datetime import date as _d
+    w7, w14 = historico_byma.weekly_segments(7), historico_byma.weekly_segments(14)
+    assert w7["days"] == 7 and w14["days"] == 14
+    assert (_d.fromisoformat(w14["end"]) - _d.fromisoformat(w14["start"])).days == 14
+
+
+def test_falla_de_ficha_no_se_cachea_ni_rompe(base_lecaps, monkeypatch) -> None:
+    # cupones no calculables (None) → sin chip, el promedio lo trata como 0 y
+    # NO queda envenenado 6 h (el cache ignora None → el próximo render reintenta).
+    monkeypatch.setattr(tr_realizado, "cupones_entre_cached", lambda *a: None)
+    w = historico_byma.weekly_segments(days=7)
+    seg = next(s for s in w["segments"]
+               if any(r["code"] == base_lecaps["c1"] for r in s["rows"]))
+    assert all(r["cup_pct"] is None for r in seg["rows"])
+    assert (seg["cup_pct"] or 0.0) == pytest.approx(0.0)
+
+
 def test_lecap_sin_cupon_no_ensucia(base_lecaps) -> None:
     # Ficha real: una lecap viva no corta cupón en la ventana → 0 exacto y
     # el chip no aparece (cup_pct bajo el umbral del template).
@@ -90,6 +116,11 @@ async def test_http_semanal_muestra_chip_de_cupones(base_lecaps, monkeypatch) ->
                         lambda code, d1, d2: 1.5)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.get("/historicos/semanal", params={"dias": 7})
+        r14 = await ac.get("/historicos/semanal", params={"dias": 14})
     assert r.status_code == 200
     assert "✂ cupones +" in r.text                          # chip del segmento
     assert "✂ +" in r.text                                  # chip por bono
+    # toggle TIR/TEM client-side + botones de ventana con hx-get directo
+    assert "TEM prom." in r.text and "ym==='tem'" in r.text
+    assert 'hx-get="/historicos/semanal?dias=14"' in r.text
+    assert r14.status_code == 200

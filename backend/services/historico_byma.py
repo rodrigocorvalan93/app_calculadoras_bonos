@@ -496,8 +496,10 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
     for cat in esc.CATEGORIES + esc.DUAL_CATEGORIES:
         dprices: List[float] = []
         dtirs: List[float] = []
+        dtems: List[float] = []
         cups: List[float] = []
         tirs_fin: List[float] = []
+        tems_fin: List[float] = []
         durs_fin: List[float] = []
         members: List[str] = []
         rows: List[Dict[str, Any]] = []
@@ -522,7 +524,7 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
             if dprice is not None and f0 and f1 and f0 < f1:
                 from backend.services import tr_realizado
                 cup = tr_realizado.cupones_entre_cached(code, f0, f1)
-                cup_pct = (cup / p0) if p0 else 0.0
+                cup_pct = (cup / p0) if (cup is not None and p0) else None
             dtir = (t1 - t0) if (t0 is not None and t1 is not None) else None
             dtem = (m1 - m0) if (m0 is not None and m1 is not None) else None
             # Margen = TNA(30d) de la TIR − tasa de referencia; SÓLO tasa variable
@@ -539,8 +541,12 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
                 cups.append(cup_pct or 0.0)   # mismo set que dprices → Δp + cup ≈ TR
             if dtir is not None:
                 dtirs.append(dtir)
+            if dtem is not None:
+                dtems.append(dtem)
             if t1 is not None:
                 tirs_fin.append(t1)           # nivel de TIR al cierre de la ventana
+            if m1 is not None:
+                tems_fin.append(m1)           # nivel de TEM al cierre de la ventana
             if dur is not None:
                 durs_fin.append(dur)          # duration al cierre de la ventana
             members.append(code)
@@ -556,6 +562,7 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
             segments.append({"key": cat.key, "label": cat.label, "n": len(members),
                              "dprice": _avg_seg(dprices), "dtir": _avg_seg(dtirs),
                              "cup_pct": _avg_seg(cups),
+                             "dtem": _avg_seg(dtems), "tem_avg": _avg_seg(tems_fin),
                              "tir_avg": _avg_seg(tirs_fin), "dur_avg": _avg_seg(durs_fin),
                              "members": members, "rows": rows,
                              "has_margen": any(r["margen"] is not None for r in rows)})
