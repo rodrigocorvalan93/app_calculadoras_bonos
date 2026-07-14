@@ -1277,3 +1277,36 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .tgt-copy { background: var(--panel-2); color: var(--text-muted); border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 2px 9px; font-size: 11px; cursor: pointer; }
 .tgt-copy:hover { color: var(--text); border-color: var(--accent); }
+
+/* ── Ctrl+K: búsqueda global ─────────────────────────────────────────── */
+#ck-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+  display: none; align-items: flex-start; justify-content: center;
+  z-index: 1000; padding-top: 12vh;
+}
+#ck-panel {
+  width: min(560px, 92vw); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); overflow: hidden;
+}
+#ck-input {
+  width: 100%; padding: 13px 14px; font-size: 15px; background: transparent;
+  border: none; border-bottom: 1px solid var(--border); color: var(--text); outline: none;
+}
+#ck-list { list-style: none; margin: 0; padding: 4px 0; max-height: 46vh; overflow: auto; }
+#ck-list li { padding: 8px 14px; cursor: pointer; font-size: 13px; }
+#ck-list li.ck-sel, #ck-list li:hover { background: var(--panel-2); }
+#ck-hint { padding: 6px 14px 8px; font-size: 10.5px; border-top: 1px solid var(--border); }
+
+/* ── Pase mobile (SOLO ≤980px: desktop intacto) ──────────────────────── */
+@media (max-width: 980px) {
+  /* Primera columna fija al scrollear tablas anchas: el ticker queda como
+     ancla mientras el resto de las columnas scrollea abajo del dedo. */
+  .table-scroll table th:first-child,
+  .table-scroll table td:first-child {
+    position: sticky; left: 0; z-index: 2; background: var(--panel);
+  }
+  /* Targets táctiles decentes (Apple HIG ~44px; 38 alcanza con el padding). */
+  .curve-picker button, .curve-picker select, .curve-picker input,
+  .table-tools button, .btn, .btn-primary { min-height: 38px; }
+}

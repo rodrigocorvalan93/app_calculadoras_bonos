@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Alertas{% endblock %}
+
+{% block content %}
+<section class="curves">
+  <header class="yas-header">
+    <h1>Alertas de precio / TIR</h1>
+    <p class="muted">Umbrales <strong>one-shot</strong> sobre el último dato del feed (chequeo cada ~30 s).
+      Al cruzar, la alerta queda marcada como disparada — con mail opcional — y se re-arma a mano.
+      Precio en la unidad de la columna Last de Curvas; TIR en % TIREA. Sección reservada al superuser.</p>
+  </header>
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <form hx-post="/alertas/crear" hx-target="#alertas-tabla" hx-swap="innerHTML" autocomplete="off">
+        <div class="row-fields">
+          <label class="field">
+            <span>Bono</span>
+            <input type="text" name="code" placeholder="AL30" style="text-transform:uppercase" required>
+          </label>
+          <label class="field">
+            <span>Métrica</span>
+            <select name="metric">
+              <option value="precio">Precio</option>
+              <option value="tirea">TIR (TIREA %)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Condición</span>
+            <select name="op">
+              <option value=">=">≥ mayor o igual</option>
+              <option value="<=">≤ menor o igual</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Valor umbral</span>
+            <input type="text" inputmode="decimal" name="valor" placeholder="1.250,50" required>
+          </label>
+          <label class="field">
+            <span>Mail <small class="muted">(vacío = sólo visual)</small></span>
+            <input type="email" name="email" value="{{ email_default }}" placeholder="opcional">
+          </label>
+          <label class="field">
+            <span>&nbsp;</span>
+            <button type="submit">+ Crear alerta</button>
+          </label>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="alertas-tabla" hx-get="/alertas/tabla" hx-trigger="md-update from:body, every 30s" hx-swap="innerHTML">
+    {% include "partials/alertas_table.html" %}
+  </div>
+</section>
+{% endblock %}

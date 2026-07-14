@@ -541,3 +541,95 @@ window.fxRailOpen = function () {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', reapply);
   else reapply();
 })();
+
+// ── Ctrl+K: búsqueda global (bonos → YAS · pestañas por nombre) ────────────
+// Overlay client-side puro: el universo se baja UNA vez (/market/codes, cache
+// en memoria) y las pestañas se leen del nav ya renderizado (respeta el rol).
+// Cero costo por request: filtrar es un loop en JS sobre ~550 códigos.
+(function () {
+  var codes = null, box = null, inp = null, list = null, sel = 0, items = [];
+
+  function ensureBox() {
+    if (box) return;
+    box = document.createElement("div");
+    box.id = "ck-overlay";
+    box.innerHTML = '<div id="ck-panel"><input id="ck-input" type="text" ' +
+      'placeholder="Bono (T15E7, GD30C…) o pestaña (curvas, escenario…)" autocomplete="off">' +
+      '<ul id="ck-list"></ul><div id="ck-hint" class="muted">↑↓ moverse · Enter abrir · Esc cerrar</div></div>';
+    document.body.appendChild(box);
+    inp = box.querySelector("#ck-input");
+    list = box.querySelector("#ck-list");
+    box.addEventListener("click", function (e) { if (e.target === box) close(); });
+    inp.addEventListener("input", render);
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { sel = Math.min(sel + 1, items.length - 1); paint(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); paint(); e.preventDefault(); }
+      else if (e.key === "Enter") { go(); e.preventDefault(); }
+      else if (e.key === "Escape") { close(); }
+    });
+  }
+  function tabs() {
+    var out = [];
+    document.querySelectorAll(".topbar nav a[href]").forEach(function (a) {
+      var label = (a.textContent || "").trim();
+      if (label) out.push({ kind: "tab", label: label, href: a.getAttribute("href") });
+    });
+    return out;
+  }
+  function open() {
+    ensureBox();
+    box.style.display = "flex";
+    inp.value = ""; sel = 0;
+    if (!codes) {
+      fetch("/market/codes").then(function (r) { return r.json(); })
+        .then(function (d) { codes = d.items || []; render(); }).catch(function () { codes = []; });
+    }
+    render();
+    inp.focus();
+  }
+  function close() { if (box) box.style.display = "none"; }
+  function render() {
+    var q = (inp.value || "").trim().toUpperCase();
+    items = [];
+    if (q) {
+      tabs().forEach(function (t) {
+        if (t.label.toUpperCase().indexOf(q) >= 0) items.push(t);
+      });
+      (codes || []).forEach(function (b) {
+        if (items.length >= 12) return;
+        if (b.c.toUpperCase().indexOf(q) === 0) items.push({ kind: "bond", label: b.c, sub: b.v, href: "/yas?code=" + encodeURIComponent(b.c) });
+      });
+      if (items.length < 12) (codes || []).forEach(function (b) {
+        if (items.length >= 12) return;
+        if (b.c.toUpperCase().indexOf(q) > 0) items.push({ kind: "bond", label: b.c, sub: b.v, href: "/yas?code=" + encodeURIComponent(b.c) });
+      });
+    } else {
+      items = tabs().slice(0, 12);
+    }
+    sel = 0;
+    paint();
+  }
+  function paint() {
+    list.innerHTML = "";
+    items.forEach(function (it, i) {
+      var li = document.createElement("li");
+      li.className = i === sel ? "ck-sel" : "";
+      li.innerHTML = (it.kind === "bond" ? "📈 " : "🗂 ") + "<b></b>" +
+        (it.sub ? ' <span class="muted"></span>' : "");
+      li.querySelector("b").textContent = it.label;
+      if (it.sub) li.querySelector("span").textContent = "vto " + it.sub;
+      li.addEventListener("click", function () { sel = i; go(); });
+      list.appendChild(li);
+    });
+  }
+  function go() {
+    var it = items[sel];
+    if (it && it.href) window.location.href = it.href;
+  }
+  document.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+      e.preventDefault();
+      (box && box.style.display === "flex") ? close() : open();
+    }
+  });
+})();

@@ -41,6 +41,43 @@ def test_prefs_roundtrip_y_reset(prefs_tmp) -> None:
     assert prefs.load() == {}
 
 
+# ── presets nombrados ───────────────────────────────────────────────────────
+def test_presets_fotografian_aplican_y_sobreviven_al_reset(prefs_tmp) -> None:
+    prefs.save(senderos={"infl_path": "2,0"}, cats_off=["dlk"])
+    assert prefs.preset_save("base")
+    prefs.save(senderos={"infl_path": "4,0", "a3500_path": "3,0"}, cats_off=[])
+    assert prefs.preset_save("estrés deva")
+    assert prefs.preset_names() == ["base", "estrés deva"]
+    # apply carga el snapshot como estado activo
+    assert prefs.preset_apply("base")
+    got = prefs.load()
+    assert got["senderos"] == {"infl_path": "2,0"} and got["cats_off"] == ["dlk"]
+    # reset borra lo ACTIVO pero la biblioteca de presets sobrevive
+    prefs.reset()
+    got = prefs.load()
+    assert got["senderos"] == {} and got["cats_off"] == []
+    assert prefs.preset_names() == ["base", "estrés deva"]
+    # delete + inexistentes
+    assert prefs.preset_delete("base")
+    assert not prefs.preset_delete("base")
+    assert not prefs.preset_apply("nunca-existió")
+    assert not prefs.preset_save("")                    # nombre vacío → rechazo
+    assert prefs.preset_names() == ["estrés deva"]
+
+
+@pytest.mark.asyncio
+async def test_preset_endpoint_y_select_en_pagina(prefs_tmp) -> None:
+    async with _client() as ac:
+        r = await ac.post("/escenario/prefs/preset", json={"action": "save", "name": "base"})
+        assert r.status_code == 200 and r.json() == {"ok": True, "presets": ["base"]}
+        page = await ac.get("/escenario")
+        assert 'value="base"' in page.text              # aparece en el <select> de presets
+        r = await ac.post("/escenario/prefs/preset", json={"action": "delete", "name": "base"})
+        assert r.json() == {"ok": True, "presets": []}
+        r = await ac.post("/escenario/prefs/preset", json={"action": "hack", "name": "x"})
+        assert r.json()["ok"] is False
+
+
 # ── defaults ────────────────────────────────────────────────────────────────
 def test_infl_default_alineada_y_extendida(monkeypatch) -> None:
     import indices

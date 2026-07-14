@@ -1,0 +1,46 @@
+{% if error %}<div class="alert">⚠ {{ error }}</div>{% endif %}
+{% if alertas and not smtp_ok %}
+  <p class="muted" style="margin:4px 0 8px">SMTP no configurado (<code>APP_SMTP_*</code>): las alertas se marcan disparadas en esta tabla pero no mandan mail.</p>
+{% endif %}
+
+<div class="table-scroll">
+  <table class="cashflows curve-table mercado-table">
+    <thead>
+      <tr>
+        <th style="text-align:left">Bono</th>
+        <th style="text-align:left">Condición</th>
+        <th>Actual</th>
+        <th style="text-align:left">Estado</th>
+        <th style="text-align:left">Mail</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in alertas %}
+      {% set suf = '' if a.metric == 'precio' else '%' %}
+      <tr>
+        <td style="text-align:left;color:var(--accent);font-weight:600">{{ a.code }}</td>
+        <td style="text-align:left">{{ 'Precio' if a.metric == 'precio' else 'TIR' }} {{ a.op | replace('>=', '≥') | replace('<=', '≤') }} <b>{{ a.valor | ar_num(2) }}{{ suf }}</b></td>
+        <td>{% if a.actual is not none %}{{ a.actual | ar_num(2) }}{{ suf }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td style="text-align:left">
+          {% if a.activa %}
+            <span style="color:var(--accent)">👁 vigilando</span>
+          {% else %}
+            <b class="px-up">🔔 disparada</b>
+            <span class="muted">{{ a.disparada_fmt }}{% if a.disparada_valor is not none %} a {{ a.disparada_valor | ar_num(2) }}{{ suf }}{% endif %}</span>
+          {% endif %}
+        </td>
+        <td style="text-align:left;color:var(--text-muted)">{{ a.email or '—' }}</td>
+        <td style="white-space:nowrap">
+          {% if not a.activa %}
+            <button hx-post="/alertas/rearmar" hx-vals='{"id":"{{ a.id }}"}' hx-target="#alertas-tabla" hx-swap="innerHTML" title="Volver a vigilar el mismo umbral">↻ Re-armar</button>
+          {% endif %}
+          <button hx-post="/alertas/borrar" hx-vals='{"id":"{{ a.id }}"}' hx-target="#alertas-tabla" hx-swap="innerHTML" hx-confirm="¿Borrar la alerta de {{ a.code }}?">🗑</button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted" style="text-align:center">Sin alertas. Creá la primera con el formulario de arriba.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

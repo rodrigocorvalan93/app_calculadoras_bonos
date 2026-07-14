@@ -174,7 +174,8 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
                    cauc_tna_pct=cauc_tna * 100.0, anchor=1.0, n_months=n_months,
                    infl_pct=(infl_pct * 100.0) if infl_pct is not None else None,
                    deva_mens_pct=deva_mens * 100.0, tamar_now=tamar_now,
-                   esc_init_json=esc_init, cats_off=cats_off)
+                   esc_init_json=esc_init, cats_off=cats_off,
+                   presets=escenario_prefs.preset_names())
 
 
 def _per_cat_params(request: Request) -> Tuple[Dict[str, float], Dict[str, float]]:
@@ -308,9 +309,22 @@ async def escenario_prefs_save(payload: Dict[str, Any] = Body(...)) -> JSONRespo
 
 @router.post("/escenario/prefs/reset")
 async def escenario_prefs_reset() -> JSONResponse:
-    """Borra lo guardado → la pestaña vuelve a los defaults vivos."""
+    """Borra lo activo → defaults vivos (los presets nombrados sobreviven)."""
     escenario_prefs.reset()
     return JSONResponse({"ok": True})
+
+
+@router.post("/escenario/prefs/preset")
+async def escenario_preset(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """Presets nombrados del escenario ("base", "estrés deva", …):
+    save = fotografía el estado actual · apply = lo carga como activo ·
+    delete = lo borra. Archivo chico, cero costo de request."""
+    action = str(payload.get("action") or "")
+    name = str(payload.get("name") or "")
+    ok = {"save": escenario_prefs.preset_save,
+          "apply": escenario_prefs.preset_apply,
+          "delete": escenario_prefs.preset_delete}.get(action, lambda _n: False)(name)
+    return JSONResponse({"ok": bool(ok), "presets": escenario_prefs.preset_names()})
 
 
 async def warm_escenario_default(plazo: str = "24hs", refresh_only: bool = False) -> int:

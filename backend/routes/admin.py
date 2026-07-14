@@ -24,7 +24,10 @@ def _guard(request: Request) -> bool:
 
 def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = None) -> HTMLResponse:
     rt = auth.role_tabs()
-    tabs = [{"key": k, "label": lbl} for k, lbl, _ in auth.TABS]
+    # Las tabs superuser-only (Alertas) no se ofrecen como checkbox: aunque se
+    # tildaran, el middleware las corta con 403 — sería un link muerto.
+    tabs = [{"key": k, "label": lbl} for k, lbl, _ in auth.TABS
+            if k not in auth._SUPERUSER_ONLY_TABS]
     return request.app.state.templates.TemplateResponse(
         request, "admin.html",
         {"users": auth.list_users(), "roles": auth.ROLES, "role_labels": auth.ROLE_LABELS,

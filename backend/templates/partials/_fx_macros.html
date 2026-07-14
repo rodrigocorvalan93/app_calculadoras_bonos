@@ -5,3 +5,13 @@
 {%- macro arrow(v) -%}
 {%- if v is none -%}—{%- elif v > 0.00005 -%}▲{%- elif v < -0.00005 -%}▼{%- else -%}■{%- endif -%}
 {%- endmacro -%}
+{# Heatmap de intensidad para celdas de variación (mismo look que Curvas):
+   alpha escala con |v| hasta `cap` (fracción 0.02 = ±2%; para variaciones en
+   PUNTOS —cauciones— pasar cap=1.0). Uso: style="{{ fx.heat(v) }}". #}
+{%- macro heat(v, cap=0.02) -%}
+{%- if v is not none and v == v -%}
+{%- set a = ((v | abs) / cap) -%}
+{%- set a = (a if a < 1.0 else 1.0) * 0.38 -%}
+background-color: rgba({{ '34,197,94' if v >= 0 else '239,68,68' }},{{ '%.2f' | format(a) }})
+{%- endif -%}
+{%- endmacro -%}

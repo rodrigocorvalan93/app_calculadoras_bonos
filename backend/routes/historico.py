@@ -410,6 +410,46 @@ async def que_paso_page(request: Request) -> HTMLResponse:
     return _render(request, "que_paso.html")
 
 
+@router.get("/historicos/semanal.csv")
+async def historicos_semanal_csv(dias: int = 7):
+    """Export del resumen para pegar en el mail del comité: CSV es-AR
+    (';' separador, coma decimal — abre directo en Excel AR). Sale del
+    cache de weekly_segments → costo ~0."""
+    from fastapi.responses import PlainTextResponse
+
+    dias = max(1, min(int(dias or 7), 120))
+    loop = asyncio.get_running_loop()
+    w = await loop.run_in_executor(None, historico_byma.weekly_segments, dias)
+
+    def _n(v, dec=4):
+        return ("" if v is None or v != v else f"{v:.{dec}f}".replace(".", ","))
+
+    lines = [f"Qué pasó;{w.get('start', '')} → {w.get('end', '')};ventana {dias} días", ""]
+    lines.append("Segmento;Bono;Duration;Δ Precio %;Cupones %;Δ TIR pp;Δ TEM pp;TIR ini %;TIR fin %")
+    for s in w.get("segments", []):
+        lines.append(";".join([
+            s["label"], f"PROMEDIO ({s['n']})", _n(s.get("dur_avg"), 2),
+            _n((s.get("dprice") or 0) * 100, 2) if s.get("dprice") is not None else "",
+            _n((s.get("cup_pct") or 0) * 100, 2) if s.get("cup_pct") is not None else "",
+            _n((s.get("dtir") or 0) * 100, 2) if s.get("dtir") is not None else "",
+            _n((s.get("dtem") or 0) * 100, 2) if s.get("dtem") is not None else "",
+            "", _n((s.get("tir_avg") or 0) * 100, 2) if s.get("tir_avg") is not None else "",
+        ]))
+        for r in s.get("rows", []):
+            lines.append(";".join([
+                s["label"], r["code"], _n(r.get("dur"), 2),
+                _n((r.get("dprice") or 0) * 100, 2) if r.get("dprice") is not None else "",
+                _n((r.get("cup_pct") or 0) * 100, 2) if r.get("cup_pct") is not None else "",
+                _n((r.get("dtir") or 0) * 100, 2) if r.get("dtir") is not None else "",
+                _n((r.get("dtem") or 0) * 100, 2) if r.get("dtem") is not None else "",
+                _n((r.get("tir0") or 0) * 100, 2) if r.get("tir0") is not None else "",
+                _n((r.get("tir1") or 0) * 100, 2) if r.get("tir1") is not None else "",
+            ]))
+    csv = "﻿" + "\n".join(lines)          # BOM → Excel abre UTF-8 con acentos bien
+    return PlainTextResponse(csv, media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="que_paso_{dias}d.csv"'})
+
+
 @router.get("/historicos/semanal", response_class=HTMLResponse)
 async def historicos_semanal(request: Request, dias: int = 7) -> HTMLResponse:
     """Resumen de la ventana (default 1 semana) por segmento: Δ Precio % (≈ total

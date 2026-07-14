@@ -31,15 +31,7 @@
                  visual que Curvas: color por signo + heatmap de intensidad,
                  tope ±2%). Aplica a Mayorista y Minorista (loop compartido). #}
               <td class="{{ fx.vcls(r.var_pct) }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
-              {% if r.var_pct is not none %}
-              {% set _a = ((r.var_pct | abs) / 0.02) %}
-              {% set _a = (_a if _a < 1.0 else 1.0) * 0.38 %}
-              <td class="{{ fx.vcls(r.var_pct) }}"
-                  style="background-color: rgba({{ '34,197,94' if r.var_pct >= 0 else '239,68,68' }},{{ '%.2f' | format(_a) }})">
-                {{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}</td>
-              {% else %}
-              <td>—</td>
-              {% endif %}
+              <td class="{{ fx.vcls(r.var_pct) }}" style="{{ fx.heat(r.var_pct) }}">{% if r.var_pct is not none %}{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}{% else %}—{% endif %}</td>
               <td style="font-weight:600">{{ r.tna | ar_pct(2) }}</td>
               <td>{{ r.tem | ar_pct(2) }}</td>
               <td>{{ r.tna_bid | ar_pct(2) }}</td>

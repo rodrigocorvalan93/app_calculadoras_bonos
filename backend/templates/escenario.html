@@ -43,7 +43,17 @@
         <div class="esc-senderos-head">
           <span>Senderos mensuales <i class="muted">(defaults vivos: economista / ROFEX / TAMAR actual · editar una fila la deja fija</i> <b class="muted" x-show="dirty.length" x-text="'· fijas: ' + dirty.join(', ')"></b><i class="muted">)</i></span>
           <span>
-            <button type="button" class="lnk" @click="resetDefaults()" title="Borrar lo fijado y volver a los defaults vivos (economista / ROFEX / TAMAR actual)">↺ defaults</button>
+            {# Presets nombrados: "base", "estrés deva", … — biblioteca de
+               escenarios sobre las prefs persistidas. #}
+            <select x-model="presetSel" style="font-size:11px;max-width:130px" title="Presets guardados">
+              <option value="">— preset —</option>
+              {% for p in presets %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+            </select>
+            <button type="button" class="lnk" @click="presetApply()" title="Cargar el preset elegido como escenario activo">cargar</button>
+            <button type="button" class="lnk" @click="presetSaveAs()" title="Guardar el escenario actual (senderos fijos + tildes) con un nombre">💾 guardar como…</button>
+            <button type="button" class="lnk" @click="presetDelete()" title="Borrar el preset elegido">🗑</button>
+            ·
+            <button type="button" class="lnk" @click="resetDefaults()" title="Borrar lo fijado y volver a los defaults vivos (economista / ROFEX / TAMAR actual). Los presets guardados no se tocan.">↺ defaults</button>
             ·
             <button type="button" class="lnk" @click="clearAll()" title="Vaciar todos los senderos (vacío = serie/proyección actual del sistema)">✕ limpiar</button>
           </span>
@@ -201,6 +211,26 @@
         fetch("/escenario/prefs/reset", { method: "POST" })
           .then(function () { location.reload(); })
           .catch(function () {});
+      },
+      presetSel: "",
+      _preset: function (action, name) {
+        return fetch("/escenario/prefs/preset", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: action, name: name }),
+        }).then(function (r) { return r.json(); });
+      },
+      presetSaveAs: function () {
+        var name = (window.prompt("Nombre del preset (ej: base, estrés deva):") || "").trim();
+        if (!name) return;
+        this._preset("save", name).then(function () { location.reload(); });
+      },
+      presetApply: function () {
+        if (!this.presetSel) return;
+        this._preset("apply", this.presetSel).then(function () { location.reload(); });
+      },
+      presetDelete: function () {
+        if (!this.presetSel || !window.confirm("¿Borrar el preset '" + this.presetSel + "'?")) return;
+        this._preset("delete", this.presetSel).then(function () { location.reload(); });
       },
       clearRow: function (key) {
         this.cells[key] = this.cells[key].map(function () { return ""; });
