@@ -109,3 +109,23 @@ async def test_http_tab_curva_fechas_y_metrica_precio(base_sintetica) -> None:
         # la página muestra el tab nuevo
         page = await ac.get("/historicos")
         assert "Curva por fecha + TR" in page.text
+
+
+@pytest.mark.asyncio
+async def test_csv_export_que_paso(base_sintetica) -> None:
+    """Export CSV es-AR del resumen: ';' separador, coma decimal, BOM y
+    attachment — sale del mismo cache de weekly_segments que la tabla."""
+    from backend.main import app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/historicos/semanal.csv", params={"dias": 30})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "attachment" in r.headers.get("content-disposition", "")
+    assert r.text.startswith("﻿")                             # BOM para Excel
+    assert "Segmento;Bono;Duration;Δ Precio %" in r.text
+    # la lecap de la fixture está, con Δ precio es-AR (100/95−1 = 5,26%)
+    assert base_sintetica["c1"] in r.text and "5,26" in r.text
+    # el botón de descarga está en el partial del resumen
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        h = await ac.get("/historicos/semanal", params={"dias": 30})
+    assert "semanal.csv" in h.text

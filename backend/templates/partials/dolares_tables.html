@@ -32,7 +32,7 @@
                   <td>{{ r.bid | ar_num(2) }}</td>
                   <td class="{{ fx.vcls(r.var_pct) }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
                   <td>{{ r.offer | ar_num(2) }}</td>
-                  <td class="{{ fx.vcls(r.var_pct) }}">{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}</td>
+                  <td class="{{ fx.vcls(r.var_pct) }}" style="{{ fx.heat(r.var_pct) }}">{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}</td>
                   <td style="color:var(--text-muted)">{{ r.vol_usd_m | ar_num(2) }}</td>
                 </tr>
               {% endfor %}
@@ -64,7 +64,7 @@
                 <td>{{ r.bid | ar_pct(2) }}</td>
                 <td class="{{ fx.vcls(r.var_pct) }}" style="font-weight:600">{{ r.last | ar_pct(2) }}</td>
                 <td>{{ r.offer | ar_pct(2) }}</td>
-                <td class="{{ fx.vcls(r.var_pct) }}">{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}</td>
+                <td class="{{ fx.vcls(r.var_pct) }}" style="{{ fx.heat(r.var_pct) }}">{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}</td>
                 <td style="color:var(--text-muted)">{{ r.vol_c_m | ar_num(2) }}</td>
                 <td style="color:var(--text-muted)">{{ r.vol_d_m | ar_num(2) }}</td>
               </tr>

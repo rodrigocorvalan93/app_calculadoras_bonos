@@ -26,6 +26,8 @@
               hx-target="#hist-semanal" hx-swap="innerHTML"
               class="{{ 'btn-primary' if dias == d else '' }}" style="font-size:11px">{{ lbl }}</button>
       {% endfor %}
+      <a href="/historicos/semanal.csv?dias={{ dias }}" class="lnk" style="font-size:11px"
+         title="Descargar el resumen (segmentos + detalle por bono) como CSV es-AR — abre directo en Excel">⬇ CSV</a>
       <span style="margin-left:14px">Tasa:</span>
       {# Toggle TIR ↔ TEM client-side: los dos datasets ya viajan en el render
          (cero requests extra); Alpine sólo cambia qué columnas se ven. #}
