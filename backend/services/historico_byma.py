@@ -496,6 +496,7 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
     for cat in esc.CATEGORIES + esc.DUAL_CATEGORIES:
         dprices: List[float] = []
         dtirs: List[float] = []
+        cups: List[float] = []
         members: List[str] = []
         rows: List[Dict[str, Any]] = []
         for code in codes_by_curve.get(cat.curve, []):
@@ -506,10 +507,20 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
             dur = _value_at(entry, "Duration", end) if entry is not None else None
             if entry is None or not esc.in_bucket(cat, dur):
                 continue
-            p0, p1 = _value_at(entry, "Last Price", start), _value_at(entry, "Last Price", end)
+            p0, f0 = _value_and_date_at(entry, "Last Price", start)
+            p1, f1 = _value_and_date_at(entry, "Last Price", end)
             t0, t1 = _value_at(entry, "TIREA", start), _value_at(entry, "TIREA", end)
             m0, m1 = _value_at(entry, "TEM", start), _value_at(entry, "TEM", end)
             dprice = (p1 / p0 - 1.0) if (p0 and p1 and p0 > 0) else None
+            # Cortes de cupón en la ventana: como se opera DIRTY, el precio cae
+            # discreto el día del corte y el Δ Precio solo "miente". Acá va el
+            # cobro (renta+amort de la ficha, cacheado por bono+ventana) como %
+            # del precio inicial — Δ Precio + cupones ≈ TR realizado.
+            cup_pct = None
+            if dprice is not None and f0 and f1 and f0 < f1:
+                from backend.services import tr_realizado
+                cup = tr_realizado.cupones_entre_cached(code, f0, f1)
+                cup_pct = (cup / p0) if p0 else 0.0
             dtir = (t1 - t0) if (t0 is not None and t1 is not None) else None
             dtem = (m1 - m0) if (m0 is not None and m1 is not None) else None
             # Margen = TNA(30d) de la TIR − tasa de referencia; SÓLO tasa variable
@@ -523,10 +534,12 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
                 dmargen = (mg1 - mg0) if (mg0 is not None and mg1 is not None) else None
             if dprice is not None:
                 dprices.append(dprice)
+                cups.append(cup_pct or 0.0)   # mismo set que dprices → Δp + cup ≈ TR
             if dtir is not None:
                 dtirs.append(dtir)
             members.append(code)
             rows.append({"code": code, "dur": dur, "dprice": dprice, "dtir": dtir,
+                         "cup_pct": cup_pct,
                          "dtem": dtem, "margen": margen, "dmargen": dmargen,
                          # TIREA absoluta al inicio/fin de la ventana → alimenta el
                          # gráfico "curva antes/ahora" (TIR vs duration). El Δ ya está
@@ -536,6 +549,7 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
             rows.sort(key=lambda r: (r["dur"] is None, r["dur"] or 0.0))
             segments.append({"key": cat.key, "label": cat.label, "n": len(members),
                              "dprice": _avg_seg(dprices), "dtir": _avg_seg(dtirs),
+                             "cup_pct": _avg_seg(cups),
                              "members": members, "rows": rows,
                              "has_margen": any(r["margen"] is not None for r in rows)})
     return {"loaded": True, "start": start, "end": end, "days": days,
