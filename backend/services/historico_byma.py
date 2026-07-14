@@ -473,14 +473,28 @@ def _margen_tna(entry: Dict[str, Any], bench_pct: Optional[float],
 
 
 def weekly_segments(days: int = 7) -> Dict[str, Any]:
-    """Resumen de la ventana (default 1 semana) por SEGMENTO —las categorías de
-    Escenario MÁS los segmentos duales (base + pata TAMAR, ver esc.DUAL_CATEGORIES)—:
-    Δ Precio % (Last Price fin/inicio ≈ total return de la ventana, en el precio
-    NATIVO del bono) y Δ TIR (pp). Promedio simple por segmento + `rows` con el
-    detalle por bono (Δprecio / ΔTIR / ΔTEM y margen = TNA 30d de la TIR −
-    TAMAR/BADLAR, sólo tasa variable), más la deva del A3500."""
-    from backend.services import curves, escenario as esc, symbols as syms
+    """Resumen de la ventana por segmento, CACHEADO por (ventana, versión de la
+    base): el cómputo recorre todas las curvas × bonos × fechas (~25 ms con base
+    chica, más con meses de historia) y el resultado sólo cambia cuando la base
+    se recarga (autosave diario / refresh manual) — la identidad del dict de
+    `ensure_loaded()` cambia en cada refresh e invalida sola. Warm: lookup ~ns."""
+    from backend.cache import LockedTTLCache
+    global _weekly_cache
+    if _weekly_cache is None:
+        _weekly_cache = LockedTTLCache(maxsize=8, ttl=600)
     data = ensure_loaded()
+    key = (int(days), id(data), (data.get("bounds") or (None, None))[1])
+    return _weekly_cache.get_or_compute(key, lambda: _weekly_segments_compute(days, data))
+
+
+_weekly_cache = None
+
+
+def _weekly_segments_compute(days: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Cuerpo del resumen (ver weekly_segments): Δ Precio % (dirty) + ✂ cupones,
+    Δ TIR/Δ TEM y niveles promedio al cierre, margen para floaters, por segmento
+    de Escenario + duales."""
+    from backend.services import curves, escenario as esc, symbols as syms
     end = (data.get("bounds") or (None, None))[1]
     if not data.get("loaded") or not end:
         return {"loaded": False, "error": data.get("error") or "sin fechas",
