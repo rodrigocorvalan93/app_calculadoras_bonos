@@ -44,8 +44,21 @@ def _path() -> Path:
 
 
 # ── persistencia ────────────────────────────────────────────────────────────
+_MAX_PRESETS = 20
+
+
+def _sane_senderos(raw: Any) -> Dict[str, str]:
+    return {k: v for k, v in (raw or {}).items()
+            if k in SENDERO_KEYS and isinstance(v, str)}
+
+
+def _sane_cats(raw: Any) -> List[str]:
+    return [c for c in (raw or []) if isinstance(c, str)]
+
+
 def load() -> Dict[str, Any]:
-    """{"senderos": {key: "v1;v2;…"}, "cats_off": [keys]} — {} si no hay nada."""
+    """{"senderos": {...}, "cats_off": [...], "presets": {nombre: {...}}} —
+    {} si no hay nada guardado."""
     p = _path()
     if not p.is_file():
         return {}
@@ -53,41 +66,107 @@ def load() -> Dict[str, Any]:
         data = json.loads(p.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return {}
-        senderos = {k: v for k, v in (data.get("senderos") or {}).items()
-                    if k in SENDERO_KEYS and isinstance(v, str)}
-        cats_off = [c for c in (data.get("cats_off") or []) if isinstance(c, str)]
-        return {"senderos": senderos, "cats_off": cats_off}
+        presets = {}
+        for name, pr in (data.get("presets") or {}).items():
+            if isinstance(name, str) and isinstance(pr, dict):
+                presets[name[:40]] = {"senderos": _sane_senderos(pr.get("senderos")),
+                                      "cats_off": _sane_cats(pr.get("cats_off"))}
+        out = {"senderos": _sane_senderos(data.get("senderos")),
+               "cats_off": _sane_cats(data.get("cats_off"))}
+        if presets:
+            out["presets"] = presets
+        return out
     except (OSError, ValueError):
         logger.exception("[escenario_prefs] archivo ilegible; arranco de defaults")
         return {}
+
+
+def _write(cur: Dict[str, Any]) -> None:
+    p = _path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 def save(senderos: Optional[Dict[str, str]] = None,
          cats_off: Optional[List[str]] = None) -> Dict[str, Any]:
     """Persiste (atómico). `senderos` REEMPLAZA el set guardado (el cliente
     manda sólo las filas tocadas); `cats_off` reemplaza la lista. None = no
-    tocar esa parte."""
+    tocar esa parte. Los presets guardados siempre se preservan."""
     with _lock:
         cur = load()
         if senderos is not None:
             cur["senderos"] = {k: str(v) for k, v in senderos.items() if k in SENDERO_KEYS}
         if cats_off is not None:
             cur["cats_off"] = [str(c) for c in cats_off]
-        p = _path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_name(p.name + ".tmp")
-        tmp.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, p)
+        _write(cur)
         return cur
 
 
 def reset() -> None:
-    """Borra lo guardado → la pestaña vuelve a los defaults vivos."""
+    """Borra lo ACTIVO (senderos fijos + tildes) → defaults vivos. Los presets
+    nombrados sobreviven: son la biblioteca, no el estado."""
     with _lock:
-        try:
-            _path().unlink(missing_ok=True)
-        except OSError:
-            logger.exception("[escenario_prefs] no pude borrar el archivo de prefs")
+        cur = load()
+        presets = cur.get("presets")
+        if presets:
+            _write({"senderos": {}, "cats_off": [], "presets": presets})
+        else:
+            try:
+                _path().unlink(missing_ok=True)
+            except OSError:
+                logger.exception("[escenario_prefs] no pude borrar el archivo de prefs")
+
+
+# ── presets nombrados ("base", "estrés deva", …) ───────────────────────────
+def preset_save(name: str) -> bool:
+    """Fotografía el estado ACTIVO (senderos fijos + tildes) bajo `name`."""
+    name = (name or "").strip()[:40]
+    if not name:
+        return False
+    with _lock:
+        cur = load()
+        presets = cur.get("presets") or {}
+        if name not in presets and len(presets) >= _MAX_PRESETS:
+            return False
+        presets[name] = {"senderos": dict(cur.get("senderos") or {}),
+                         "cats_off": list(cur.get("cats_off") or [])}
+        cur["presets"] = presets
+        _write(cur)
+        return True
+
+
+def preset_apply(name: str) -> bool:
+    """Carga un preset como estado activo (lo que ve la pestaña al abrir)."""
+    with _lock:
+        cur = load()
+        pr = (cur.get("presets") or {}).get((name or "").strip()[:40])
+        if pr is None:
+            return False
+        cur["senderos"] = dict(pr.get("senderos") or {})
+        cur["cats_off"] = list(pr.get("cats_off") or [])
+        _write(cur)
+        return True
+
+
+def preset_delete(name: str) -> bool:
+    with _lock:
+        cur = load()
+        presets = cur.get("presets") or {}
+        if (name or "").strip()[:40] not in presets:
+            return False
+        del presets[name.strip()[:40]]
+        if presets:
+            cur["presets"] = presets
+        else:
+            cur.pop("presets", None)
+        _write(cur)
+        return True
+
+
+def preset_names() -> List[str]:
+    return sorted((load().get("presets") or {}).keys())
 
 
 # ── defaults ────────────────────────────────────────────────────────────────
