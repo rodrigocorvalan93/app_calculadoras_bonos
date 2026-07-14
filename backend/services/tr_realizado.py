@@ -31,16 +31,28 @@ _cache = LockedTTLCache(maxsize=64, ttl=900)
 _cup_bond_cache = LockedTTLCache(maxsize=8192, ttl=6 * 3600)
 
 
-def cupones_entre_cached(code: str, d1_iso: str, d2_iso: str) -> float:
+# Fichas cuyo cálculo de cupones falló — se loguea UNA vez por código (con
+# visibilidad de warning, no debug) para poder diagnosticar por qué un
+# segmento no muestra su ✂.
+_cup_fail_logged: set = set()
+
+
+def cupones_entre_cached(code: str, d1_iso: str, d2_iso: str) -> Optional[float]:
     """Cobros por 100 VN en (d1, d2] (ficha real), cacheado por bono+ventana.
-    Ficha rota / fechas inválidas → 0.0 (y SE CACHEA: el cache no guarda None
-    y una ficha rota recomputaría en cada render de Qué pasó)."""
-    def _factory() -> float:
+
+    Una falla de ficha devuelve None y NO SE CACHEA (el cache ignora None):
+    el próximo render reintenta — una falla transitoria (boot, lock) no deja
+    el ✂ apagado 6 horas — y queda un warning visible con el código."""
+    def _factory() -> Optional[float]:
         try:
             cup = _cupones_entre(code, date.fromisoformat(d1_iso), date.fromisoformat(d2_iso))
         except ValueError:
             cup = None
-        return float(cup) if cup is not None else 0.0
+        if cup is None and code not in _cup_fail_logged:
+            _cup_fail_logged.add(code)
+            logger.warning("[tr_realizado] cupones de %s no calculables (ficha) — "
+                           "el panel lo muestra sin ✂; se reintenta en el próximo render", code)
+        return float(cup) if cup is not None else None
 
     return _cup_bond_cache.get_or_compute((code, d1_iso, d2_iso), _factory)
 
