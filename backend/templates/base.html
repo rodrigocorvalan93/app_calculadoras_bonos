@@ -6,6 +6,13 @@
   <title>{% block title %}Calculadora de Bonos{% endblock %}</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', path='favicon.ico') }}?v={{ asset_v }}">
   <link rel="icon" type="image/png" href="{{ url_for('static', path='favicon.png') }}?v={{ asset_v }}">
+  {# PWA: instalable desde el navegador del celu ("Agregar a inicio") sin
+     service worker — la app es de datos vivos, no queremos cache offline. #}
+  <link rel="manifest" href="{{ url_for('static', path='manifest.webmanifest') }}?v={{ asset_v }}">
+  <meta name="theme-color" content="#0d1117">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='icons/icon-180.png') }}?v={{ asset_v }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}?v={{ asset_v }}">
   <script>
     // Tiny pre-paint theme bootstrap. Reads the user's choice from

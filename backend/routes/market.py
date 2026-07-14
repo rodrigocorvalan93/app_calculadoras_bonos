@@ -73,6 +73,31 @@ async def events() -> StreamingResponse:
     })
 
 
+_codes_cache: Dict[str, Any] = {}
+
+
+@router.get("/codes")
+async def codes() -> Dict[str, Any]:
+    """Universo de códigos para el buscador Ctrl+K: [{c, v}] (código +
+    vencimiento). El universo es estático por proceso → se arma UNA vez y
+    después es un dict lookup (~ns). ~554 bonos ≈ 15 KB gzipeados una vez
+    por sesión de navegador (el cliente lo cachea en memoria)."""
+    if not _codes_cache:
+        from backend.services import bond_universe
+        bond_universe.ensure_loaded()
+        items = []
+        for code in bond_universe.all_codes():
+            o = bond_universe.get(code)
+            v = getattr(o, "vencimiento", None)
+            try:
+                v_iso = (v.date() if hasattr(v, "date") else v).isoformat() if v else ""
+            except Exception:  # noqa: BLE001
+                v_iso = ""
+            items.append({"c": code, "v": v_iso})
+        _codes_cache["items"] = items
+    return {"items": _codes_cache["items"]}
+
+
 @router.get("/diag")
 async def diag() -> Dict[str, Any]:
     ws = primary_ws.get_ws_client()
