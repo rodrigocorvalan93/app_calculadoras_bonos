@@ -65,7 +65,12 @@ TABS: List[Tuple[str, str, str]] = [
     ("creditos",     "Créditos",     "/creditos"),
     ("cafci",        "CAFCI",        "/cafci"),
     ("ordenes",      "Órdenes",      "/ordenes"),
+    ("alertas",      "Alertas",      "/alertas"),
 ]
+# Tabs que NO entran en los defaults de ningún rol: son superuser-only por
+# middleware (main._SUPERUSER_ONLY); listarlas en la nav de premium/básico
+# sólo mostraría un link a un 403.
+_SUPERUSER_ONLY_TABS = ("alertas",)
 TAB_KEYS: Tuple[str, ...] = tuple(k for k, _, _ in TABS)
 _TAB_LABEL: Dict[str, str] = {k: lbl for k, lbl, _ in TABS}
 _TAB_PATH: Dict[str, str] = {k: p for k, _, p in TABS}
@@ -77,7 +82,7 @@ _PAGES_BY_LEN: List[Tuple[str, str]] = sorted(((p, k) for k, _, p in TABS),
 _DEFAULT_BASICO = ["yas", "nueva", "comparador", "curves", "breakeven",
                    "dolares", "tasas", "graficos", "historicos", "quepaso"]
 _DEFAULT_ROLE_TABS: Dict[str, List[str]] = {
-    "premium": list(TAB_KEYS),
+    "premium": [k for k in TAB_KEYS if k not in _SUPERUSER_ONLY_TABS],
     "basico": _DEFAULT_BASICO,
 }
 

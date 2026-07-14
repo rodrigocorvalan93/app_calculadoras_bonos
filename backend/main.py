@@ -28,6 +28,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
+from backend.routes.alertas import router as alertas_router
 from backend.routes.breakeven import router as breakeven_router
 from backend.routes.cafci import router as cafci_router
 from backend.routes.comparador import router as comparador_router
@@ -297,10 +298,27 @@ async def lifespan(app: FastAPI):
 
     snapshot_task = asyncio.create_task(_snapshot_saver(), name="store-persist")
 
+    # Chequeo de alertas (superuser): cada ~30 s, en el threadpool. Sin alertas
+    # activas el pase es un JSON chico + return — costo despreciable, no toca
+    # el event loop ni el hot path de requests.
+    from backend.services import alertas as alertas_svc
+
+    async def _alertas_checker() -> None:
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(alertas_svc.CHECK_EVERY_SECONDS)
+            try:
+                await loop.run_in_executor(None, alertas_svc.check_once)
+            except Exception:  # noqa: BLE001
+                logger.exception("[main] alertas check failed")
+
+    alertas_task = asyncio.create_task(_alertas_checker(), name="alertas-check")
+
     yield
 
     logger.info("[main] shutting down")
     snapshot_task.cancel()
+    alertas_task.cancel()
     if autosave is not None:
         try:
             await autosave.stop()
@@ -347,6 +365,11 @@ def create_app() -> FastAPI:
     templates.env.globals["asset_v"] = _asset_v
     app.state.templates = templates
 
+    # .webmanifest no está en el registro de mimetypes de Python → StaticFiles
+    # lo serviría como octet-stream; algunos navegadores lo rechazan como PWA.
+    import mimetypes
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
+
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(auth_router)
     app.include_router(admin_router)
@@ -371,6 +394,7 @@ def create_app() -> FastAPI:
     app.include_router(posiciones_router)
     app.include_router(market_router)
     app.include_router(tape_router)
+    app.include_router(alertas_router)
 
     # ── Login wall + gating por rol ───────────────────────────────────────
     # Público (sin sesión): login/recuperación, estáticos, health, favicon.
@@ -382,7 +406,7 @@ def create_app() -> FastAPI:
     # (kill-switch del desk) son operaciones de mesa, no de un usuario cualquiera
     # con la pestaña Órdenes: se restringen a superuser además del gating por tab.
     _SUPERUSER_ONLY = ("/admin", "/conexion", "/ordenes/live", "/ordenes/kill",
-                       "/historicos/guardar-base")
+                       "/historicos/guardar-base", "/alertas")
 
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
