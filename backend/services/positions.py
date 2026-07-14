@@ -71,13 +71,19 @@ def _f(x: Any) -> Optional[float]:
 
 
 _PLAZO_SUFFIX = re.compile(r"\s+(CI|24HS|24|48HS|48|T\+?[012])$")
+# Ticker estilo Bloomberg del sistema de carteras: 'LOMA AR' / 'GGAL AR EQUITY'.
+# BYMA usa el ticker pelado ('LOMA'), así que el sufijo de país se descarta.
+_BBG_SUFFIX = re.compile(r"\s+AR(\s+EQUITY)?$")
 
 
 def _strip_plazo(s: str) -> str:
     """'S31L6 CI' / 'S31L6 24HS' → 'S31L6': mismo bono, distinto plazo de
     liquidación (un fondo opera normal, otro CI). Para posición / comparador /
-    clasificaciones es el mismo papel, así que se ignora el sufijo de plazo."""
-    return _PLAZO_SUFFIX.sub("", s).strip()
+    clasificaciones es el mismo papel, así que se ignora el sufijo de plazo.
+    También 'LOMA AR' (Bloomberg) → 'LOMA' (ticker BYMA): sin esto las
+    acciones de la cartera no matcheaban el store y quedaban sin Last."""
+    s = _PLAZO_SUFFIX.sub("", s).strip()
+    return _BBG_SUFFIX.sub("", s).strip()
 
 
 def _norm_code(x: Any) -> Optional[str]:

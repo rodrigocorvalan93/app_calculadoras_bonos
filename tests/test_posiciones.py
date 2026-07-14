@@ -67,6 +67,36 @@ async def test_posiciones_endpoint_ok() -> None:
     assert r.status_code == 200 and r.text          # degrada solo si no hay carteras
 
 
+def test_ticker_bloomberg_ar_se_normaliza_a_byma() -> None:
+    """El sistema de carteras trae acciones estilo Bloomberg ('LOMA AR');
+    BYMA usa el ticker pelado. Sin normalizar, esas filas no matcheaban el
+    store y quedaban sin Last."""
+    from backend.services import positions
+
+    assert positions._norm_code("LOMA AR") == "LOMA"
+    assert positions._norm_code("loma ar") == "LOMA"
+    assert positions._norm_code("GGAL AR EQUITY") == "GGAL"
+    assert positions._norm_code("LOMA AR CI") == "LOMA"     # plazo + país
+    # tickers/bonos SIN el sufijo no se tocan (SUPV no pierde la V, etc.)
+    assert positions._norm_code("SUPV") == "SUPV"
+    assert positions._norm_code("TXAR") == "TXAR"
+    assert positions._norm_code("AL30") == "AL30"
+    assert positions._norm_code("S31L6 CI") == "S31L6"
+
+
+def test_px_val_reescalado_a_base_del_last() -> None:
+    """El Excel valúa por VN 1 (TXMD8 0,9160) y BYMA cotiza por VN 100
+    (91,85): la columna Px val se muestra en la base del Last."""
+    from backend.routes.posiciones import _px_val_like_last
+
+    assert _px_val_like_last(0.9160, 91.85) == pytest.approx(91.60)
+    assert _px_val_like_last(91.60, 91.85) == pytest.approx(91.60)     # misma base: no toca
+    assert _px_val_like_last(5350.0, 5400.0) == pytest.approx(5350.0)  # acciones: no toca
+    assert _px_val_like_last(1.05, 98.7) == pytest.approx(105.0)       # letra valuada por VN 1
+    assert _px_val_like_last(0.916, None) == 0.916                     # sin Last: tal cual
+    assert _px_val_like_last(None, 91.85) is None
+
+
 def test_acciones_levantan_last_del_store() -> None:
     """Especies fuera del universo de bonos (acciones/CEDEARs) toman el Last
     directo del store del WS — antes quedaban sin precio en Posiciones."""

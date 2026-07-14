@@ -26,7 +26,7 @@
             <th data-sort>VN</th>
             <th data-sort>Valor</th>
             <th data-sort>% PN</th>
-            <th data-sort class="grp" title="Precio de valuación = Valor / VN">Px val</th>
+            <th data-sort class="grp" title="Precio de valuación = Valor / VN, reescalado a la base del Last BYMA (potencias de 10) para comparar a simple vista">Px val</th>
             <th title="Last BYMA — editable para simular">Last ✎</th>
             <th data-sort title="Last vs Px val (escala auto)">Ret. día</th>
             <th data-sort class="grp">TIREA</th>
@@ -49,7 +49,10 @@
               <td>{{ r.cantidad | ar_int }}</td>
               <td>{{ r.valor | ar_int }}</td>
               <td>{{ (r.pct_pn * 100) | ar_pct_pp(2) if r.pct_pn is not none else "—" }}</td>
-              <td class="grp" style="font-weight:600">{{ r.px_val | ar_num(4) }}</td>
+              {# En base Last (reescalado server-side): 2 decimales alcanzan;
+                 si quedó sin reescalar (sin Last) y es chico, 4 para no perder
+                 precisión de la valuación por VN 1. #}
+              <td class="grp" style="font-weight:600">{{ r.px_val | ar_num(4 if r.px_val is not none and r.px_val < 10 else 2) }}</td>
               <td class="pos-last-cell"><input class="pos-last cell-edit" type="text" inputmode="decimal"
                      value="{{ r.last | ar_num(2) if r.last is not none else '' }}" placeholder="—"></td>
               <td class="pos-ret">—</td>

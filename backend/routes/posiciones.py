@@ -157,6 +157,25 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float]) -> Dict[
     return out
 
 
+def _px_val_like_last(px_val: Optional[float], last: Optional[float]) -> Optional[float]:
+    """Reescala el precio de valuación a la MISMA base que el Last BYMA por
+    potencias de 10 (el Excel valúa por VN 1 → 0,9160; BYMA cotiza por VN 100
+    → 91,85). Mismo criterio de escala automática que usa el Ret. día en el
+    navegador, así la columna queda comparable a simple vista. Sin Last usable
+    (o escala irreconciliable) se muestra tal cual."""
+    if not px_val or not last or px_val <= 0 or last <= 0:
+        return px_val
+    f, k = 1.0, 0
+    while last * f / px_val > 5 and k < 8:
+        f /= 10.0
+        k += 1
+    while last * f / px_val < 0.2 and k < 16:
+        f *= 10.0
+        k += 1
+    ratio = last * f / px_val
+    return px_val / f if 0.2 < ratio < 5 else px_val
+
+
 def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[Dict[str, Any]]:
     # Denominador del peso por tenencia: PN, si no Σ Valor invertido (fallback legacy).
     total_valor = sum(h["valor"] for h in hs if h.get("valor"))
@@ -181,9 +200,12 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
                     eq_last, eq_src = eq["close"], "CL"
         valor = h.get("valor")
         cant = h.get("cantidad")
-        # Precio al que está valuada la tenencia (monto / VN). El retorno del
-        # día (vs Last, editable) se calcula EN EL NAVEGADOR — cero requests.
+        last_val = (m or {}).get("last") if m is not None else eq_last
+        # Precio al que está valuada la tenencia (monto / VN), reescalado a la
+        # base del Last BYMA para que las columnas sean comparables. El retorno
+        # del día (vs Last, editable) se calcula EN EL NAVEGADOR — cero requests.
         px_val = (valor / cant) if (valor and cant) else None
+        px_val = _px_val_like_last(px_val, last_val)
         rows.append({
             **h,
             "in_universe": m is not None,
@@ -196,7 +218,7 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             "tna": (m or {}).get("tna"),
             "tna_convention_label": (m or {}).get("tna_convention_label"),
             "duration": (m or {}).get("duration"),
-            "last": (m or {}).get("last") if m is not None else eq_last,
+            "last": last_val,
             "price_source": (m or {}).get("price_source") if m is not None else eq_src,
         })
     rows.sort(key=lambda r: (r.get("valor") or 0.0), reverse=True)
