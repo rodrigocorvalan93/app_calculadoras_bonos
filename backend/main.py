@@ -370,7 +370,19 @@ def create_app() -> FastAPI:
     import mimetypes
     mimetypes.add_type("application/manifest+json", ".webmanifest")
 
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    # Estáticos con cache fuerte: TODO lo servido bajo /static va versionado
+    # (?v={{ asset_v }} en los templates; los vendors llevan la versión en el
+    # nombre), así que el browser puede cachear 1 año sin revalidar. Antes,
+    # cada cambio de pestaña re-preguntaba por CSS/JS/íconos (~6-8 GETs 304)
+    # — RTTs puros que se sentían como lentitud de navegación, sobre todo vía
+    # Tailscale/celu. Cambia un archivo ⇒ cambia la URL ⇒ cache nueva.
+    class _StaticInmutable(StaticFiles):
+        def file_response(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            resp = super().file_response(*args, **kwargs)
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return resp
+
+    app.mount("/static", _StaticInmutable(directory=str(STATIC_DIR)), name="static")
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(yas_router)
@@ -478,8 +490,10 @@ def create_app() -> FastAPI:
     # y con él el tiempo de transferencia en links remotos. minimum_size=1024 deja
     # sin comprimir las respuestas chicas (p. ej. /market/seq, un entero plano),
     # donde el overhead no compensa. Se agrega ÚLTIMO → queda como el middleware
-    # más externo y comprime todo lo que sale.
-    app.add_middleware(GZipMiddleware, minimum_size=1024)
+    # más externo y comprime todo lo que sale. compresslevel 6 (el default de
+    # Starlette es 9): en tablas de 70-110 KB comprime ~4× más rápido por
+    # apenas ~2% más de bytes — CPU que se libera en cada refresh live.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
     # El SSE de /market/events NO debe pasar por gzip: GZipMiddleware acumula
     # los chunks de un streaming en el buffer de zlib hasta juntar bytes, así
