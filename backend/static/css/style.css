@@ -195,24 +195,25 @@ select {
   letter-spacing: 0.01em;
 }
 
-/* Relojes de mercado ARG/NY (topbar): verde abierto / rojo cerrado.
-   tabular-nums para que los segundos no hagan bailar el ancho. */
-.mkt-clocks { display: inline-flex; gap: 6px; }
-.mkt-clock {
-  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+/* Relojes de mercado ARG/NY (topbar): UNA píldora con las dos plazas
+   apiladas; cada línea en verde (abierto) o rojo (cerrado). text-align
+   right + tabular-nums → los HH:MM:SS quedan alineados en columna y los
+   segundos no hacen bailar el ancho. */
+.mkt-clocks {
+  display: inline-flex; flex-direction: column; align-items: stretch;
   background: var(--panel-2); border: 1px solid var(--border);
-  color: var(--text-soft); padding: 3px 8px; border-radius: 999px;
+  border-radius: 10px; padding: 2px 9px;
+  /* come el padding vertical de la topbar en vez de engordarla: la barra
+     sigue midiendo lo mismo que con el badge de una línea. */
+  margin: -5px 0;
+}
+.mkt-clock {
+  font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: var(--text-soft); line-height: 1.3; text-align: right;
   letter-spacing: 0.01em; white-space: nowrap;
 }
-.mkt-clock.mkt-open {
-  color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
-  background: color-mix(in srgb, var(--green) 10%, var(--panel-2));
-}
-.mkt-clock.mkt-closed {
-  color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 40%, var(--border));
-}
+.mkt-clock.mkt-open { color: var(--green); }
+.mkt-clock.mkt-closed { color: var(--red); }
 
 /* ── Theme switcher (segmented control) ───────────────────────────── */
 .theme-switch {
