@@ -658,6 +658,49 @@ window.fxRailOpen = function () {
   window.ckOpen = open;
 })();
 
+// ── Relojes de mercado ARG/NY (topbar) ─────────────────────────────────────
+// Client-side puro (cero requests): hora local de cada plaza vía Intl con su
+// timezone — el DST de NY lo resuelve el navegador solo. Verde si el mercado
+// está abierto por HORARIO (BYMA 11:00–17:00 BA, NYSE 9:30–16:00 ET, lun-vie);
+// feriados no se contemplan. Un setInterval de 1 s con dos formatToParts: µs.
+(function () {
+  var MKTS = [
+    { id: 'clock-ar', label: 'ARG', tz: 'America/Argentina/Buenos_Aires', open: 11 * 60, close: 17 * 60 },
+    { id: 'clock-ny', label: 'NY', tz: 'America/New_York', open: 9 * 60 + 30, close: 16 * 60 },
+  ];
+  var fmts;
+  try {
+    fmts = MKTS.map(function (m) {
+      // en-GB: 24 h con 2 dígitos y weekday 'Sat'/'Sun' estable para detectar finde.
+      return new Intl.DateTimeFormat('en-GB', { timeZone: m.tz, hour12: false,
+        weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    });
+  } catch (e) { return; }                      // sin soporte de TZ: dejamos los --:--:--
+  function tick() {
+    if (document.hidden) return;               // el interval de una pestaña oculta ya
+    var now = new Date();                      // viene throttled; esto lo hace gratis
+    for (var i = 0; i < MKTS.length; i++) {
+      var el = document.getElementById(MKTS[i].id);
+      if (!el) return;
+      var parts = {};
+      fmts[i].formatToParts(now).forEach(function (p) { parts[p.type] = p.value; });
+      var mins = (parseInt(parts.hour, 10) % 24) * 60 + parseInt(parts.minute, 10);
+      var finde = parts.weekday === 'Sat' || parts.weekday === 'Sun';
+      var abierto = !finde && mins >= MKTS[i].open && mins < MKTS[i].close;
+      el.textContent = MKTS[i].label + ' ' + (parseInt(parts.hour, 10) % 24 < 10 ? '0' : '') +
+        (parseInt(parts.hour, 10) % 24) + ':' + parts.minute + ':' + parts.second;
+      el.classList.toggle('mkt-open', abierto);
+      el.classList.toggle('mkt-closed', !abierto);
+      el.title = MKTS[i].label + (abierto ? ' — mercado abierto' : ' — mercado cerrado') +
+        (MKTS[i].label === 'ARG' ? ' (BYMA 11:00–17:00)' : ' (NYSE 9:30–16:00 ET)');
+    }
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+  setInterval(tick, 1000);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick);
+  else tick();
+})();
+
 // ── Topbar priority+: las pestañas que no entran colapsan en "⋯" ──────────
 // Con 20+ pestañas la nav desbordaba y se cortaba. Acá se mide cuántas caben
 // (más el ancho del botón ⋯) y el resto pasa a un dropdown. La ACTIVA queda

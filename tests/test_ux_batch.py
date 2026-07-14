@@ -105,6 +105,24 @@ async def test_topbar_overflow_y_boton_buscar() -> None:
     assert "data-skip-same" in js.text                    # skip de swaps idénticos
 
 
+# ── Relojes de mercado ARG/NY (topbar) ───────────────────────────────────────
+@pytest.mark.asyncio
+async def test_relojes_de_mercado_en_topbar() -> None:
+    """El badge 'Fase 1 · YAS' fue reemplazado por los relojes ARG/NY: verde
+    con el mercado abierto (BYMA 11–17 BA, NYSE 9:30–16 ET), rojo cerrado.
+    Client-side puro — acá se verifica el markup y que el JS traiga la lógica."""
+    async with _client() as ac:
+        page = await ac.get("/yas")
+        js = await ac.get("/static/js/app.js")
+    assert "Fase 1" not in page.text
+    assert 'id="clock-ar"' in page.text and 'id="clock-ny"' in page.text
+    assert "America/Argentina/Buenos_Aires" in js.text and "America/New_York" in js.text
+    assert "mkt-open" in js.text and "mkt-closed" in js.text
+    # horarios: BYMA 11–17, NYSE 9:30–16
+    assert "11 * 60" in js.text and "17 * 60" in js.text
+    assert "9 * 60 + 30" in js.text and "16 * 60" in js.text
+
+
 # ── Heatmap de variaciones ───────────────────────────────────────────────────
 def test_macro_heat_intensidad_y_signo() -> None:
     from jinja2 import Environment, FileSystemLoader
