@@ -51,7 +51,10 @@ async def test_tape_merval_usd_aparece() -> None:
                          {"IV": {"price": 2_500_000.0}, "CL": {"price": 2_450_000.0}})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         tp = await ac.get("/tape")
-    assert tp.status_code == 200 and "MERVAL US$" in tp.text     # Merval / CCL en la barra
+    assert tp.status_code == 200
+    # DOS entradas: nivel en $ (índice crudo, 0 decimales) y en US$ (por CCL)
+    assert ">MERVAL<" in tp.text and "MERVAL US$" in tp.text
+    assert "2.500.000" in tp.text                                # nivel ARS sin decimales
 
 
 @pytest.mark.asyncio
