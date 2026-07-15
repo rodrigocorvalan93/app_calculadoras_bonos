@@ -663,12 +663,61 @@ window.lsSet = function (k, v) {
   window.ckOpen = open;
 })();
 
+// ── Campana de alertas (topbar, sólo superuser) ────────────────────────────
+// El server sólo renderiza #alert-bell para el superuser; acá se sondea
+// /alertas/estado cada 30 s y se pinta el badge con las DISPARADAS sin
+// re-armar. Sin campana en el DOM → cero requests.
+(function () {
+  var bell = null;
+  function poll() {
+    if (document.hidden || !bell) return;
+    fetch('/alertas/estado', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var badge = document.getElementById('alert-bell-badge');
+        if (!badge) return;
+        var n = d.disparadas || 0;
+        badge.hidden = n === 0;
+        badge.textContent = n > 9 ? '9+' : String(n);
+        bell.title = n > 0 ? (n + ' alerta' + (n > 1 ? 's' : '') + ' disparada' + (n > 1 ? 's' : '') + ' — click para ver')
+                           : 'Alertas de precio/TIR';
+      })
+      .catch(function () { });
+  }
+  function arm() {
+    bell = document.getElementById('alert-bell');
+    if (!bell) return;
+    poll();
+    setInterval(poll, 30000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', arm);
+  else arm();
+})();
+
 // ── Relojes de mercado ARG/NY (topbar) ─────────────────────────────────────
 // Client-side puro (cero requests): hora local de cada plaza vía Intl con su
 // timezone — el DST de NY lo resuelve el navegador solo. Verde si el mercado
 // está abierto por HORARIO (BYMA 11:00–17:00 BA, NYSE 9:30–16:00 ET, lun-vie);
 // feriados no se contemplan. Un setInterval de 1 s con dos formatToParts: µs.
 (function () {
+  // Feriados con mercado CERRADO, por plaza ('YYYY-MM-DD' en el tz local de
+  // cada una). ACTUALIZAR UNA VEZ POR AÑO (los trasladables/puentes ARG salen
+  // por decreto; acá van los confirmados). Año sin datos → cae al criterio
+  // de horario+finde solo (como antes).
+  var FERIADOS = {
+    ARG: ['2026-01-01', '2026-02-16', '2026-02-17', '2026-03-24', '2026-04-02',
+          '2026-04-03', '2026-05-01', '2026-05-25', '2026-06-17', '2026-07-09',
+          '2026-08-17', '2026-10-12', '2026-11-20', '2026-12-08', '2026-12-25',
+          '2027-01-01', '2027-02-08', '2027-02-09', '2027-03-24', '2027-03-25',
+          '2027-03-26', '2027-04-02', '2027-05-01', '2027-05-25', '2027-06-17',
+          '2027-07-09', '2027-12-08', '2027-12-25'],
+    NY:  ['2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25',
+          '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
+          '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31',
+          '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24'],
+  };
   var MKTS = [
     { id: 'clock-ar', label: 'ARG', tz: 'America/Argentina/Buenos_Aires', open: 11 * 60, close: 17 * 60 },
     { id: 'clock-ny', label: 'NY', tz: 'America/New_York', open: 9 * 60 + 30, close: 16 * 60 },
@@ -678,7 +727,8 @@ window.lsSet = function (k, v) {
     fmts = MKTS.map(function (m) {
       // en-GB: 24 h con 2 dígitos y weekday 'Sat'/'Sun' estable para detectar finde.
       return new Intl.DateTimeFormat('en-GB', { timeZone: m.tz, hour12: false,
-        weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit' });
     });
   } catch (e) { return; }                      // sin soporte de TZ: dejamos los --:--:--
   function tick() {
@@ -691,12 +741,14 @@ window.lsSet = function (k, v) {
       fmts[i].formatToParts(now).forEach(function (p) { parts[p.type] = p.value; });
       var mins = (parseInt(parts.hour, 10) % 24) * 60 + parseInt(parts.minute, 10);
       var finde = parts.weekday === 'Sat' || parts.weekday === 'Sun';
-      var abierto = !finde && mins >= MKTS[i].open && mins < MKTS[i].close;
+      var fecha = parts.year + '-' + parts.month + '-' + parts.day;
+      var feriado = (FERIADOS[MKTS[i].label] || []).indexOf(fecha) >= 0;
+      var abierto = !finde && !feriado && mins >= MKTS[i].open && mins < MKTS[i].close;
       el.textContent = MKTS[i].label + ' ' + (parseInt(parts.hour, 10) % 24 < 10 ? '0' : '') +
         (parseInt(parts.hour, 10) % 24) + ':' + parts.minute + ':' + parts.second;
       el.classList.toggle('mkt-open', abierto);
       el.classList.toggle('mkt-closed', !abierto);
-      el.title = MKTS[i].label + (abierto ? ' — mercado abierto' : ' — mercado cerrado') +
+      el.title = MKTS[i].label + (abierto ? ' — mercado abierto' : (feriado ? ' — feriado' : ' — mercado cerrado')) +
         (MKTS[i].label === 'ARG' ? ' (BYMA 11:00–17:00)' : ' (NYSE 9:30–16:00 ET)');
     }
   }

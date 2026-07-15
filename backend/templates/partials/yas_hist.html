@@ -1,0 +1,40 @@
+{# Mini-histórico de la ficha YAS: precio + TIREA desde la base BYMA diaria.
+   Carga lazy (la ficha no lo espera); chips 30/90/180 ruedas. #}
+{% if charts %}
+<div class="card yas-hist-card">
+  <div class="card-title">
+    <span>Histórico <span class="muted">({{ charts[0].d0_fmt }} → {{ charts[0].d1_fmt }})</span></span>
+    <span class="card-title-aux">
+      {% for d in (30, 90, 180) %}
+      <button class="lnk {{ 'yas-hist-on' if d == dias else '' }}"
+              hx-get="/yas/hist?dias={{ d }}" hx-include="[name=code]"
+              hx-target="#yas-hist" hx-swap="innerHTML">{{ d }}r</button>
+      {% endfor %}
+    </span>
+  </div>
+  <div class="card-body yas-hist-grid">
+    {% for ch in charts %}
+    <div class="yas-hist-item" title="{{ ch.label }} · {{ ch.n }} ruedas · mín {{ ch.vmin | ar_num(2) }} / máx {{ ch.vmax | ar_num(2) }}">
+      <div class="yas-hist-head">
+        <span class="muted">{{ ch.label }}</span>
+        <b>{{ ch.last | ar_num(2) }}{{ ch.unit }}</b>
+        {# delta_up: para el precio sube=verde; para la TIR BAJA=verde (rally). #}
+        {% if ch.delta is not none %}
+        <span class="{{ 'px-up' if ch.delta_up else 'px-down' }}">{{ '+' if ch.delta >= 0 else '' }}{{ ch.delta | ar_num(2) }}{{ ch.delta_unit }}</span>
+        {% endif %}
+      </div>
+      <svg class="yas-hist-svg" viewBox="0 0 {{ ch.w }} {{ ch.h }}" preserveAspectRatio="none" aria-hidden="true">
+        <path d="{{ ch.path }}" fill="none" stroke="var(--accent)" stroke-width="1.6"
+              vector-effect="non-scaling-stroke"/>
+        <circle cx="{{ ch.x1 }}" cy="{{ ch.y1 }}" r="2.4" fill="var(--accent)"/>
+      </svg>
+      <div class="yas-hist-range muted">
+        <span>{{ ch.vmin | ar_num(2) }}</span><span>{{ ch.vmax | ar_num(2) }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% elif hist_loaded and code %}
+<p class="muted" style="font-size:11px;margin:6px 2px">Sin histórico en la base para {{ code }}.</p>
+{% endif %}

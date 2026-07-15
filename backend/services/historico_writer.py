@@ -287,6 +287,13 @@ class HistoricoAutosave:
                 r = self.last_result
                 if r.get("ok"):
                     logger.info("[historico_writer] autosave OK: %s filas de hoy", r["rows"])
+                    # Mail de cierre con el "Qué pasó" del día (best-effort,
+                    # en el threadpool; SMTP apagado → no-op logueado).
+                    try:
+                        from backend.services import quepaso_report
+                        await loop.run_in_executor(None, quepaso_report.send_close_mail)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("[historico_writer] mail de cierre falló")
                 elif r.get("skipped"):
                     logger.info("[historico_writer] autosave salteado: %s", r["skipped"])
                 else:

@@ -314,11 +314,31 @@ async def lifespan(app: FastAPI):
 
     alertas_task = asyncio.create_task(_alertas_checker(), name="alertas-check")
 
+    # Watchdog del feed: mail si el WS del broker cae >N min en horario de
+    # rueda (y otro al recuperarse). Chequeo liviano cada 60 s; sólo lee flags.
+    watchdog_task = None
+    if settings.feed_watchdog:
+        from backend.services import watchdog as watchdog_svc
+
+        async def _feed_watchdog() -> None:
+            loop = asyncio.get_running_loop()
+            wd = watchdog_svc.get_watchdog()
+            while True:
+                await asyncio.sleep(watchdog_svc.CHECK_EVERY_SECONDS)
+                try:
+                    await loop.run_in_executor(None, wd.check_once)
+                except Exception:  # noqa: BLE001
+                    logger.exception("[main] feed watchdog check failed")
+
+        watchdog_task = asyncio.create_task(_feed_watchdog(), name="feed-watchdog")
+
     yield
 
     logger.info("[main] shutting down")
     snapshot_task.cancel()
     alertas_task.cancel()
+    if watchdog_task is not None:
+        watchdog_task.cancel()
     if autosave is not None:
         try:
             await autosave.stop()
@@ -441,6 +461,7 @@ def create_app() -> FastAPI:
         request.state.user = None
         request.state.nav_tabs = []
         request.state.nav_active = None
+        request.state.is_superuser = False    # gatea widgets SU de la topbar (🔔)
 
         path = request.url.path
         if not settings.auth_enabled or _is_public(path):
@@ -448,6 +469,7 @@ def create_app() -> FastAPI:
                 # sin muro: mostrar todo (dev). Nav = todas las pestañas.
                 request.state.nav_tabs = auth_svc.nav_for("superuser")
                 request.state.nav_active = auth_svc.active_tab(path)
+                request.state.is_superuser = True
             return await call_next(request)
 
         username = request.session.get("user")
@@ -458,6 +480,7 @@ def create_app() -> FastAPI:
         request.state.user = {"username": username, "role": role}
         request.state.nav_tabs = auth_svc.nav_for(role)
         request.state.nav_active = auth_svc.active_tab(path)
+        request.state.is_superuser = (role == "superuser")
 
         if any(path == p or path.startswith(p + "/") for p in _SUPERUSER_ONLY) and role != "superuser":
             return HTMLResponse("<h1>403</h1><p>Sección reservada al superuser.</p>", status_code=403)

@@ -61,6 +61,14 @@
       <div class="tab-menu" id="nav-more-menu"></div>
     </div>
     <div class="topbar-meta">
+      {% if request.state.is_superuser %}
+      {# Campana de alertas (sólo superuser, como toda /alertas): badge rojo =
+         alertas disparadas sin re-armar. app.js la sondea cada ~30 s. #}
+      <button type="button" id="alert-bell" class="rail-toggle" style="position:relative"
+              onclick="window.location.href='/alertas'" title="Alertas de precio/TIR">
+        🔔<span id="alert-bell-badge" class="bell-badge" hidden></span>
+      </button>
+      {% endif %}
       <button type="button" class="rail-toggle" onclick="if (window.ckOpen) window.ckOpen()"
               title="Búsqueda global — Ctrl+K / Cmd+K (bonos y pestañas)">🔍</button>
       <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>

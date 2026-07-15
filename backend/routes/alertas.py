@@ -65,6 +65,18 @@ async def alertas_tabla(request: Request) -> HTMLResponse:
     return _render(request, "partials/alertas_table.html", **ctx)
 
 
+@router.get("/estado")
+async def alertas_estado() -> dict:
+    """Para la campana 🔔 de la topbar (sólo superuser — todo /alertas lo es):
+    cuántas alertas están DISPARADAS sin re-armar y cuántas vigilando. JSON
+    chico; el front lo sondea cada ~30 s."""
+    def _count() -> dict:
+        xs = alertas_svc.list_alertas()
+        return {"disparadas": sum(1 for a in xs if not a["activa"] and a.get("disparada_at")),
+                "activas": sum(1 for a in xs if a["activa"])}
+    return await asyncio.get_running_loop().run_in_executor(None, _count)
+
+
 @router.post("/crear", response_class=HTMLResponse)
 async def alertas_crear(request: Request,
                         code: str = Form(""),
