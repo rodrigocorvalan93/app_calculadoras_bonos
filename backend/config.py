@@ -133,9 +133,15 @@ class Settings(BaseSettings):
     # las 17:01 (sólo si el guardado corrió OK — finde/feriado no manda nada).
     quepaso_mail: bool = True
     # Watchdog del feed: mail si el WS del broker está caído más de N minutos
-    # en horario de rueda (11–17 BA, hábiles). FEED_WATCHDOG=0 lo apaga.
+    # en horario de rueda (hábiles). FEED_WATCHDOG=0 lo apaga.
     feed_watchdog: bool = True
     feed_watchdog_min: int = 5
+
+    # ── Horarios de mercado (relojes de la topbar + rueda del watchdog) ───
+    # Formato "HH:MM-HH:MM" en hora local de cada plaza. Override por env
+    # (MKT_HORARIO_ARG / MKT_HORARIO_NY) si BYMA/NYSE cambian el horario.
+    mkt_horario_arg: str = "10:30-17:00"
+    mkt_horario_ny: str = "09:30-16:00"
 
 
 settings = Settings()

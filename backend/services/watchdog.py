@@ -21,7 +21,18 @@ logger = logging.getLogger("backend.watchdog")
 
 _TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 CHECK_EVERY_SECONDS = 60.0
-_RUEDA = (11 * 60, 17 * 60)          # BYMA, minutos desde medianoche BA
+
+
+def _rueda() -> tuple:
+    """Horario de rueda BYMA en minutos desde medianoche BA — MISMO setting
+    que los relojes de la topbar (MKT_HORARIO_ARG, 'HH:MM-HH:MM')."""
+    import re
+    from backend.config import settings
+    m = re.match(r"^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$",
+                 (settings.mkt_horario_arg or "").strip())
+    if not m:
+        return (10 * 60 + 30, 17 * 60)
+    return (int(m[1]) * 60 + int(m[2]), int(m[3]) * 60 + int(m[4]))
 
 
 def _feed_down() -> bool:
@@ -36,7 +47,8 @@ def _feed_down() -> bool:
 def en_rueda(now: Optional[datetime] = None) -> bool:
     now = now or datetime.now(_TZ)
     mins = now.hour * 60 + now.minute
-    return now.weekday() < 5 and _RUEDA[0] <= mins < _RUEDA[1]
+    o, c = _rueda()
+    return now.weekday() < 5 and o <= mins < c
 
 
 class FeedWatchdog:

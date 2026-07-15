@@ -89,11 +89,12 @@
         <button type="button" role="tab" :aria-selected="theme==='light'" :class="{ active: theme==='light' }" @click="set('light')" title="Light">Light</button>
         <button type="button" role="tab" :aria-selected="theme==='delta'" :class="{ active: theme==='delta' }" @click="set('delta')" title="Delta">Delta</button>
       </div>
-      {# Relojes de mercado (client-side puro, cero requests): BYMA 11–17 BA y
-         NYSE 9:30–16 ET (DST de NY lo resuelve el timezone del navegador).
-         Verde = abierto, rojo = cerrado. Sólo horario + fin de semana; los
-         feriados no se contemplan. #}
-      <span class="mkt-clocks" title="BYMA 11:00–17:00 BA · NYSE 9:30–16:00 NY — verde = mercado abierto">
+      {# Relojes de mercado (client-side puro, cero requests): verde = abierto
+         por horario (data-arg/data-ny, configurable vía MKT_HORARIO_*), rojo =
+         cerrado/finde/feriado. El DST de NY lo resuelve el timezone del
+         navegador. #}
+      <span class="mkt-clocks" data-arg="{{ mkt_horarios.arg }}" data-ny="{{ mkt_horarios.ny }}"
+            title="BYMA {{ mkt_horarios.arg }} BA · NYSE {{ mkt_horarios.ny }} NY — verde = mercado abierto">
         <span id="clock-ar" class="mkt-clock">ARG --:--:--</span>
         <span id="clock-ny" class="mkt-clock">NY --:--:--</span>
       </span>
