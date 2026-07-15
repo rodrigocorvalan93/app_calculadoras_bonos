@@ -46,9 +46,12 @@
     </div>
   </div>
 
+  {# hx-include manda también los tildes de la tabla (checkbox destildado no
+     viaja, como en un form) + incl_set → el refresh live preserva la
+     selección del usuario en vez de resetearla. #}
   <div id="be-table" data-flash-scope
        hx-get="/breakeven/table" hx-trigger="md-update from:body, every 30s"
-       hx-swap="innerHTML" hx-include="[name=plazo]">
+       hx-swap="innerHTML" hx-include="[name=plazo], #be-table input">
     {% include "partials/breakeven_table.html" %}
   </div>
 </section>

@@ -24,6 +24,19 @@ _TIR_MIN, _TIR_MAX = -0.90, 2.0
 _MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 
 
+def fecha_fix(venc, lag_habiles=-10):
+    """Fecha en que el bono CER fija su ajuste: vto + lag días HÁBILES
+    (lag de la especie, típ. −10). None si no hay vencimiento."""
+    if venc is None:
+        return None
+    try:
+        from dias_habiles import n_dias_laborales
+        return n_dias_laborales(venc, int(lag_habiles or -10))
+    except Exception:  # noqa: BLE001 — sin módulo de feriados: aprox 5/7
+        from datetime import timedelta
+        return venc + timedelta(days=round(int(lag_habiles or -10) * 7 / 5))
+
+
 def mes_referencia(venc, lag_habiles=-10) -> Optional[str]:
     """Último mes de inflación que el break-even del bono CER realmente captura.
 
@@ -38,14 +51,12 @@ def mes_referencia(venc, lag_habiles=-10) -> Optional[str]:
     Ej.: TZXO6 vence 31/10/26 → fix 19/10 → BE captura inflación HASTA sep-26
     (no "fines de octubre"). Devuelve 'sep-26' o None si no se puede calcular.
     """
-    if venc is None:
+    return _mes_ref_de_fix(fecha_fix(venc, lag_habiles))
+
+
+def _mes_ref_de_fix(f) -> Optional[str]:
+    if f is None:
         return None
-    try:
-        from dias_habiles import n_dias_laborales
-        f = n_dias_laborales(venc, int(lag_habiles or -10))
-    except Exception:  # noqa: BLE001 — sin módulo de feriados: aprox 5/7
-        from datetime import timedelta
-        f = venc + timedelta(days=round(int(lag_habiles or -10) * 7 / 5))
     m = f.month - (1 if f.day >= 16 else 2)
     y = f.year
     while m <= 0:
@@ -90,8 +101,18 @@ def _interp(pts: List[Tuple[float, float, str]], x: float) -> Tuple[Optional[flo
 
 
 def compute_fisher(cer_rows: List[Dict[str, Any]],
-                   lecap_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Tabla break-even por bono CER + resumen. Todo en fracción (0.07 = 7%)."""
+                   lecap_rows: List[Dict[str, Any]],
+                   cer_conocido_hasta=None,
+                   incluir: Optional[set] = None) -> Dict[str, Any]:
+    """Tabla break-even por bono CER + resumen. Todo en fracción (0.07 = 7%).
+
+    `cer_conocido_hasta` (date): última fecha de la serie CER PUBLICADA — un
+    bono cuyo fix (vto + lag) cae dentro de la serie ya tiene el ajuste
+    DETERMINADO: su "break-even" no es más una expectativa (flag `definido`).
+    `incluir`: set de códigos que entran al resumen/gráfico. None = default
+    (todos menos los definidos). Las filas excluidas se muestran igual
+    (`incluido=False`) — el usuario puede re-tildar cualquiera.
+    """
     lecap = _clean_points(lecap_rows)
     cer = _clean_points(cer_rows)
 
@@ -112,6 +133,7 @@ def compute_fisher(cer_rows: List[Dict[str, Any]],
 
     rows: List[Dict[str, Any]] = []
     bes: List[float] = []
+    n_definidos = 0
     for p in cer:
         dur, tir_real, code = p["d"], p["t"], p["code"]
         par = _pair(p.get("venc"))
@@ -123,13 +145,23 @@ def compute_fisher(cer_rows: List[Dict[str, Any]],
         if tir_nom is not None and (1.0 + tir_real) != 0.0:
             be_anual = (1.0 + tir_nom) / (1.0 + tir_real) - 1.0
             be_tem = (1.0 + be_anual) ** (30.0 / 360.0) - 1.0
+        # Definido: la serie CER publicada ya cubre el fix del bono → el
+        # ajuste está determinado, no hay inflación "por conocer". El fix se
+        # calcula UNA vez (camina días hábiles) y de ahí sale el mes_ref.
+        fx = fecha_fix(p.get("venc"), p.get("lag"))
+        definido = bool(cer_conocido_hasta is not None and fx is not None
+                        and fx <= cer_conocido_hasta)
+        n_definidos += definido
+        incluido = (code in incluir) if incluir is not None else (not definido)
+        if be_anual is not None and incluido:
             bes.append(be_anual)
         rows.append({
             "code": code, "duration": dur,
             "tirea_real": tir_real, "tirea_nom": tir_nom,
             "be_anual": be_anual, "be_tem": be_tem, "extrapolado": extrap,
             "par": par["code"] if par is not None else None,
-            "mes_ref": mes_referencia(p.get("venc"), p.get("lag")),
+            "mes_ref": _mes_ref_de_fix(fx),
+            "definido": definido, "incluido": incluido,
         })
     rows.sort(key=lambda r: r["duration"])
     resumen = None
@@ -143,5 +175,5 @@ def compute_fisher(cer_rows: List[Dict[str, Any]],
         }
     return {
         "rows": rows, "resumen": resumen,
-        "n_cer": len(cer), "n_lecap": len(lecap),
+        "n_cer": len(cer), "n_lecap": len(lecap), "n_definidos": n_definidos,
     }

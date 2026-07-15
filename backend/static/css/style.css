@@ -226,6 +226,11 @@ select {
   font-variant-numeric: tabular-nums; margin-top: 2px; }
 .yas-hist-on { font-weight: 700; text-decoration: underline; }
 
+/* Break-even: filas excluidas del promedio/gráfico + candado de definidos. */
+#be-tbl tr.be-off td { opacity: 0.45; }
+#be-tbl tr.be-off td:first-child { opacity: 1; }   /* el tilde queda clickeable/visible */
+.be-lock { font-size: 10px; margin-left: 4px; }
+
 /* Badge de la campana de alertas (topbar, superuser). */
 .bell-badge {
   position: absolute; top: -5px; right: -6px; min-width: 15px; height: 15px;
