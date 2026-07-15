@@ -47,8 +47,11 @@ BACKOFF_MAX = 30.0
 SUBSCRIBE_CHUNK = 20
 
 # Entries Primary will accept. Confirmed: WA / TC are rejected and make
-# the whole query return empty. Same list the legacy app uses.
-ENTRIES = ["BI", "OF", "LA", "OP", "CL", "HI", "LO", "EV", "TV", "NV"]
+# the whole query return empty. Same list the legacy app uses, MÁS "IV"
+# (Index Value): es el ÚNICO entry que publican los índices (I.MERVAL) —
+# sin pedirlo, el índice quedaba suscripto pero nunca mandaba nada y el
+# Merval no aparecía en el tape. Para bonos/acciones IV viene vacío (no-op).
+ENTRIES = ["BI", "OF", "LA", "OP", "CL", "HI", "LO", "EV", "TV", "NV", "IV"]
 
 
 def _ws_header_kwarg() -> str:

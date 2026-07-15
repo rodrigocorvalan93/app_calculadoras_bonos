@@ -153,6 +153,19 @@ class MarketDataStore:
                     if levels:
                         snap.offers = levels
 
+            # IV (Index Value): lo que publica un índice (I.MERVAL) en vez de
+            # LA — se mapea a `last` así el tape/equities lo leen igual que a
+            # cualquier papel. Bonos/acciones nunca traen IV (no-op).
+            iv = market_data.get("IV")
+            if iv is not None:
+                p = _md_value(iv, "price")
+                if p is not None:
+                    snap.last = p
+                    d = iv[0] if (isinstance(iv, list) and iv) else iv
+                    ts = d.get("date") if isinstance(d, dict) else None
+                    if ts:
+                        snap.last_ts = str(ts)
+
             for entry, attr in (
                 ("OP", "open"),
                 ("CL", "close"),
