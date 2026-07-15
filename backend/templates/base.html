@@ -115,7 +115,12 @@
        vez; al re-abrirlo, el @click del toggle dispara un load para refrescarlo. #}
     <aside class="fx-rail" x-show="railOpen" x-cloak data-flash-scope
            hx-get="/dolares/rail"
-           hx-trigger="load, md-update from:body [fxRailOpen()], every 30s [fxRailOpen()]"
+           {# Sintaxis htmx: el filtro [cond] va PEGADO al nombre del evento,
+              ANTES de los modificadores (event[filter] from:body). Con el
+              filtro después del modificador, htmx tiraba 9 syntax-errors por
+              página y registraba el trigger SIN filtro → el riel plegado
+              seguía re-renderizando en cada tick. #}
+           hx-trigger="load, md-update[fxRailOpen()] from:body, every 30s [fxRailOpen()]"
            hx-swap="innerHTML">
       <div class="muted" style="padding:12px;font-size:12px">Cargando dólar…</div>
     </aside>

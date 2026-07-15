@@ -266,17 +266,27 @@ def _fondo_ctx(selected: Optional[int], plazo: str) -> Dict[str, Any]:
     }
 
 
+def _fondo_param(fondo: Optional[str]) -> Optional[int]:
+    """`?fondo=` puede venir VACÍO (sin carteras / sin selección): con
+    Optional[int] FastAPI devolvía 422 por el string vacío. Se parsea a mano
+    y cualquier cosa no numérica degrada a None (panel vacío, nunca error)."""
+    try:
+        return int(fondo) if fondo not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 @router.get("/posiciones/table", response_class=HTMLResponse)
-async def posiciones_table(request: Request, fondo: Optional[int] = None, plazo: str = "24hs") -> HTMLResponse:
+async def posiciones_table(request: Request, fondo: Optional[str] = None, plazo: str = "24hs") -> HTMLResponse:
     # `fondo` opcional: el poll live (md-update) puede llegar sin selección
     # (sin carteras cargadas) y no debe romper con 422.
     bond_universe.ensure_loaded()
-    ctx = await asyncio.get_running_loop().run_in_executor(None, _fondo_ctx, fondo, plazo)
+    ctx = await asyncio.get_running_loop().run_in_executor(None, _fondo_ctx, _fondo_param(fondo), plazo)
     return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **ctx)
 
 
 @router.get("/posiciones/targets", response_class=HTMLResponse)
-async def posiciones_targets(request: Request, fondo: Optional[int] = None,
+async def posiciones_targets(request: Request, fondo: Optional[str] = None,
                              plazo: str = "24hs") -> HTMLResponse:
     """Cuadro Target vs Actual por categoría — SEPARADO del panel live (no lleva
     `md-update` en el trigger) para no pisar la edición de los targets en cada
@@ -284,15 +294,16 @@ async def posiciones_targets(request: Request, fondo: Optional[int] = None,
     sólo aporta el % actual de cada categoría (snapshot por selección de fondo).
     Composición barata: suma de Valor por categoría, sin pricing por bono."""
     bond_universe.ensure_loaded()
+    f = _fondo_param(fondo)
     cat_actual: List[Dict[str, Any]] = []
     nombre = ""
-    if fondo is not None:
-        summary = _composicion_summary(positions.holdings(fondo), positions.pn_of(fondo))
+    if f is not None:
+        summary = _composicion_summary(positions.holdings(f), positions.pn_of(f))
         cat_actual = [{"cat": r["cat"], "actual": r["pct"]}
                       for r in summary.get("Categoría", []) if r.get("pct") is not None]
-        nombre = positions.fondo_label(fondo)
+        nombre = positions.fondo_label(f)
     return _render(request, "partials/posiciones_targets.html",
-                   cat_actual=cat_actual, fondo=fondo, nombre=nombre)
+                   cat_actual=cat_actual, fondo=f, nombre=nombre)
 
 
 # ── Matriz de tenencias (pestaña aparte) ───────────────────────────────────

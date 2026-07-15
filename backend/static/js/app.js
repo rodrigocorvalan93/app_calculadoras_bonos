@@ -25,6 +25,11 @@ window.fxRailOpen = function () {
   return !l || !l.classList.contains('rail-closed');
 };
 
+// localStorage seguro para expresiones Alpine (que no admiten try/catch).
+window.lsSet = function (k, v) {
+  try { localStorage.setItem(k, v); } catch (e) { }
+};
+
 // ── Skip de swaps idénticos ────────────────────────────────────────────────
 // Los paneles live refetchean en cada md-update (~1/s en rueda), pero la
 // MAYORÍA de los ticks no cambian ESE panel: el server ya cachea el render
