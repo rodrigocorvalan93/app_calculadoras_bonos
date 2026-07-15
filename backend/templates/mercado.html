@@ -115,8 +115,11 @@
        :class="{ 'hide-oclh': !oclh, 'hide-mae': !mae }">
   <div class="table-tools muted">
     <span>Columnas:</span>
-    <label><input type="checkbox" x-model="oclh" @change="try{localStorage.setItem('m_oclh', oclh?'1':'0')}catch(e){}"> OCLH</label>
-    <label><input type="checkbox" x-model="mae" @change="try{localStorage.setItem('m_mae', mae?'1':'0')}catch(e){}"> MAE</label>
+    {# Alpine evalúa EXPRESIONES, no sentencias: un try{} acá tiraba
+       "Alpine Expression Error" y el toggle no se persistía. lsSet (app.js)
+       envuelve el try/catch. #}
+    <label><input type="checkbox" x-model="oclh" @change="lsSet('m_oclh', oclh?'1':'0')"> OCLH</label>
+    <label><input type="checkbox" x-model="mae" @change="lsSet('m_mae', mae?'1':'0')"> MAE</label>
   </div>
   {# Filtros client-side (cero requests): por ticker (texto) + reglas numéricas
      ≥/≤ por columna (ej Bid sz ≥ 1.000.000, TIREA@Last ≤ 60). Persisten al refresh. #}
