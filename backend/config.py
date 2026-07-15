@@ -125,6 +125,18 @@ class Settings(BaseSettings):
     app_smtp_password: str = ""
     app_smtp_from: str = ""
 
+    # ── Mails operativos (cierre + watchdog del feed) ─────────────────────
+    # Destino de los mails operativos. Vacío → mail del superuser del store
+    # (o la casilla SMTP como último recurso).
+    app_ops_mail_to: str = ""
+    # Mail automático con el resumen "Qué pasó" del día tras el autosave de
+    # las 17:01 (sólo si el guardado corrió OK — finde/feriado no manda nada).
+    quepaso_mail: bool = True
+    # Watchdog del feed: mail si el WS del broker está caído más de N minutos
+    # en horario de rueda (11–17 BA, hábiles). FEED_WATCHDOG=0 lo apaga.
+    feed_watchdog: bool = True
+    feed_watchdog_min: int = 5
+
 
 settings = Settings()
 

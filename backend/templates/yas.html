@@ -106,6 +106,13 @@
     <!-- partials/yas_result.html populated by htmx -->
   </div>
 
+  {# Mini-histórico (precio + TIR): carga LAZY después de la ficha — la
+     página nunca lo espera. Sigue al bono del form (change) y data-skip-same
+     evita re-renders idénticos cuando cambia otra cosa del form. #}
+  <div id="yas-hist" data-skip-same
+       hx-get="/yas/hist" hx-trigger="load, change from:#yas-form"
+       hx-include="[name=code]" hx-swap="innerHTML"></div>
+
   <details class="conv-note">
     <summary>Convención de TNA · tabla de detección</summary>
     <table class="conv-table">

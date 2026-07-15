@@ -215,6 +215,25 @@ select {
 .mkt-clock.mkt-open { color: var(--green); }
 .mkt-clock.mkt-closed { color: var(--red); }
 
+/* Mini-histórico de la ficha YAS (sparklines precio + TIR). */
+.yas-hist-card { margin-top: 12px; }
+.yas-hist-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 700px) { .yas-hist-grid { grid-template-columns: 1fr; } }
+.yas-hist-head { display: flex; gap: 8px; align-items: baseline; font-size: 12px;
+  font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+.yas-hist-svg { display: block; width: 100%; height: 64px; }
+.yas-hist-range { display: flex; justify-content: space-between; font-size: 10px;
+  font-variant-numeric: tabular-nums; margin-top: 2px; }
+.yas-hist-on { font-weight: 700; text-decoration: underline; }
+
+/* Badge de la campana de alertas (topbar, superuser). */
+.bell-badge {
+  position: absolute; top: -5px; right: -6px; min-width: 15px; height: 15px;
+  padding: 0 3px; border-radius: 999px; background: var(--red); color: #fff;
+  font-size: 9.5px; font-weight: 700; line-height: 15px; text-align: center;
+  font-variant-numeric: tabular-nums; pointer-events: none;
+}
+
 /* ── Theme switcher (segmented control) ───────────────────────────── */
 .theme-switch {
   display: inline-flex;
