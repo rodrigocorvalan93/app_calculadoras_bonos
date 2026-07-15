@@ -46,8 +46,9 @@ async def test_tape_merval_usd_aparece() -> None:
         base = c[:-1] if c.endswith("C") else c
         store.update_from_md(syms.md_symbol(base, "24hs"), {"LA": {"price": 70000.0}})
         store.update_from_md(syms.md_symbol(base + "C", "24hs"), {"LA": {"price": 70.0}})
+    # El índice llega por IV (Index Value), NO por LA — el shape real del feed.
     store.update_from_md("MERV - XMEV - I.MERVAL - spot",
-                         {"LA": {"price": 2_500_000.0}, "CL": {"price": 2_450_000.0}})
+                         {"IV": {"price": 2_500_000.0}, "CL": {"price": 2_450_000.0}})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         tp = await ac.get("/tape")
     assert tp.status_code == 200 and "MERVAL US$" in tp.text     # Merval / CCL en la barra

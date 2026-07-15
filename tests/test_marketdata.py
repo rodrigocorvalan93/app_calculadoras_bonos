@@ -90,7 +90,27 @@ def test_subscribe_payload_shape() -> None:
     assert parsed["type"] == "smd"
     assert parsed["level"] == 1
     assert "BI" in parsed["entries"]
+    # IV (Index Value): sin pedirlo, los índices (I.MERVAL) no mandan NADA.
+    assert "IV" in parsed["entries"]
     assert parsed["products"] == [{"symbol": "MERV - XMEV - GD30 - 24hs", "marketId": "ROFX"}]
+
+
+def test_iv_de_indice_mapea_a_last() -> None:
+    """Los índices publican IV (no LA): el store lo mapea a `last` — el shape
+    real del feed, que era por qué el Merval no aparecía en el tape."""
+    from backend.services.marketdata_store import MarketDataStore
+
+    store = MarketDataStore()
+    # dict con fecha (shape típico)
+    s = store.update_from_md("MERV - XMEV - I.MERVAL",
+                             {"IV": {"price": 2_501_234.5, "date": 1752585600000}})
+    assert s.last == 2_501_234.5 and s.last_ts == "1752585600000"
+    # escalar pelado (Primary es inconsistente entre entries)
+    s = store.update_from_md("MERV - XMEV - I.MERVAL", {"IV": 2_502_000.0})
+    assert s.last == 2_502_000.0
+    # sin IV → no toca el last existente (sticky)
+    s = store.update_from_md("MERV - XMEV - I.MERVAL", {"CL": {"price": 2_450_000.0}})
+    assert s.last == 2_502_000.0 and s.close == 2_450_000.0
 
 
 # ── Symbol helpers ───────────────────────────────────────────────────
