@@ -76,12 +76,16 @@ def _items(plazo: str = "24hs") -> List[Dict[str, Any]]:
             return None
         return (1.0 + var_ars) / (1.0 + ccl_var) - 1.0
 
-    # Merval: nivel en US$ (último / CCL) + variación en $ Y en US$.
+    # Merval: DOS entradas — nivel en $ (índice crudo, var en pesos) y nivel
+    # en US$ (último / CCL, var "vista en cable"). La de $ no depende del CCL.
     msnap = equities.merval_snapshot()
-    if msnap is not None and msnap.last is not None and ccl:
+    if msnap is not None and msnap.last is not None:
         var_ars = _var(msnap.last, msnap.close)
-        items.append({"code": "MERVAL US$", "px": msnap.last / ccl,
-                      "var": _cable(var_ars), "var_ars": var_ars, "kind": "usd"})
+        items.append({"code": "MERVAL", "px": msnap.last, "var": var_ars,
+                      "kind": "ars", "dec": 0})
+        if ccl:
+            items.append({"code": "MERVAL US$", "px": msnap.last / ccl,
+                          "var": _cable(var_ars), "kind": "usd"})
     # EWZ / SPY vistos en cable (precio ARS/CCL; var ajustada por CCL).
     for code in ("EWZ", "SPY"):
         r = equities.row_for(code, plazo)
