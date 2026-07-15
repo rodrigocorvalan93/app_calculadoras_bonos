@@ -8096,6 +8096,98 @@ PLC4O = {
     "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/415f278f-6962-46ef-89be-0bd999a4562b""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/1889184d-cdd8-4a9b-bd45-1f847a4a0f6f"""
 }
+PLC7O = {
+    "Nombre Security": "ON Pluspetrol S.A. Clase 7 Vto 30 09 2037",
+    "Código": "PLUSPE 37",
+    "ISIN": "USP7924AAD02",
+    "Calificación": None,
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Energy",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "30/06/2026",
+    "Vencimiento": "30/09/2037",
+    "Fecha Primer Cupón": "30/03/2027",
+    "Cupón / Spread": 7.55,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Personalizado",
+    "Convención de devengamiento": "ISMA-30",
+    "Convención Base": 360.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "30/03/2027", "30/09/2027", "30/03/2028", "30/09/2028",
+        "30/03/2029", "30/09/2029", "30/03/2030", "30/09/2030",
+        "30/03/2031", "30/09/2031", "30/03/2032", "30/09/2032",
+        "30/03/2033", "30/09/2033", "30/03/2034", "30/09/2034",
+        "30/03/2035", "30/09/2035", "30/03/2036", "30/09/2036",
+        "30/03/2037", "30/09/2037",
+    ],
+    "Amortización": ([0] * 17 + [33., 0, 33., 0, 34.]),
+    "Callable": True,
+    "Tipo de Call": "Make-whole (Tasa Tesoro +50bps) hasta 30/09/2031; luego call por tramos",
+    "Fecha Call": "30/09/2031",
+    "Precio Call": {"2031": 1.03775, "2032": 1.01888, "2033": 1.00944, "2034 en adelante": 1.0},
+    "Comentarios": "ON Ley Nueva York (144A US72942BAC90 / RegS USP7924AAD02). Precio emision 97,693%, rendimiento 7,875%. Devengamiento 30/360. Antes del 30/09/2031: make-whole = mayor entre VP a Tasa Tesoro+50bps y 100%. Equity clawback: hasta 35% al 107,550% antes del 30/09/2031.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/a8066042-7b25-4b6c-9866-0beb6aaecab1",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/ce2ec815-c214-4f7c-a6c6-2d4a764b2afa"
+}
+PLC7C = {
+    "Nombre Security": "ON Pluspetrol S.A. Clase 7 Vto 30 09 2037",
+    "Código": "PLUSPE 37",
+    "ISIN": "USP7924AAD02",
+    "Calificación": None,
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Energy",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "30/06/2026",
+    "Vencimiento": "30/09/2037",
+    "Fecha Primer Cupón": "30/03/2027",
+    "Cupón / Spread": 7.55,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Personalizado",
+    "Convención de devengamiento": "ISMA-30",
+    "Convención Base": 360.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "30/03/2027", "30/09/2027", "30/03/2028", "30/09/2028",
+        "30/03/2029", "30/09/2029", "30/03/2030", "30/09/2030",
+        "30/03/2031", "30/09/2031", "30/03/2032", "30/09/2032",
+        "30/03/2033", "30/09/2033", "30/03/2034", "30/09/2034",
+        "30/03/2035", "30/09/2035", "30/03/2036", "30/09/2036",
+        "30/03/2037", "30/09/2037",
+    ],
+    "Amortización": ([0] * 17 + [33., 0, 33., 0, 34.]),
+    "Callable": True,
+    "Tipo de Call": "Make-whole (Tasa Tesoro +50bps) hasta 30/09/2031; luego call por tramos",
+    "Fecha Call": "30/09/2031",
+    "Precio Call": {"2031": 1.03775, "2032": 1.01888, "2033": 1.00944, "2034 en adelante": 1.0},
+    "Comentarios": "ON Ley Nueva York (144A US72942BAC90 / RegS USP7924AAD02). Precio emision 97,693%, rendimiento 7,875%. Devengamiento 30/360. Antes del 30/09/2031: make-whole = mayor entre VP a Tasa Tesoro+50bps y 100%. Equity clawback: hasta 35% al 107,550% antes del 30/09/2031.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/a8066042-7b25-4b6c-9866-0beb6aaecab1",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/ce2ec815-c214-4f7c-a6c6-2d4a764b2afa"
+}
 YMCUO = {
     "Nombre Security": "ON YPF S.A. Clase XXIII Vto 17 01 2031",
     "Código": "YPFDAR 31",
@@ -14045,6 +14137,52 @@ NZC2D = {
     "Aviso Resultados": "https://www.bna.com.ar",
     "Suplemento Prospecto": "https://www.bna.com.ar"
 }
+NZC5D = {
+    "Nombre Security": "Título de Deuda Banco de la Nación Argentina Clase 5 Vto 14 07 2029",
+    "Código": "NZC5D",
+    "ISIN": "AR0729422482",
+    "Calificación": "AAA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Financials",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "14/07/2026",
+    "Vencimiento": "14/07/2029",
+    "Fecha Primer Cupón": "14/01/2027",
+    "Cupón / Spread": 6.00,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "14/01/2027",
+        "14/07/2027",
+        "14/01/2028",
+        "14/07/2028",
+        "14/01/2029",
+        "14/07/2029",
+    ],
+    "Amortización": None,
+    "Callable": True,
+    "Tipo de Call": "Call total a opción del Banco a partir del mes 12 de emitido, en tramos de precio decrecientes",
+    "Fecha Call": "14/07/2027",
+    "Precio Call": {"m12 al 30": 1.02, "m30 al 33": 1.01, "m33 en adelante": 1.00},
+    "Comentarios": "Rescatable a opción del Banco desde el mes 12 (inclusive): 102% hasta el mes 30, 101% hasta el mes 33, 100% desde el mes 33 hasta vencimiento. Pata dirty/USB de NZC5O.",
+    "Aviso Resultados": "https://macrosecurities.cmail19.com/t/j-l-ydujhdid-hykjnkity-r/",
+    "Suplemento Prospecto": "https://bna.com.ar/Downloads/Home_TitulosDeDeuda_Suplemento%20de%20prospecto%20firmado.pdf"
+}   
 NPCDD = {
     "Nombre Security": "ON Central Puerto S.A. Clase D Vto 30 04 2030",
     "Código": "NPCDD",
@@ -18879,6 +19017,50 @@ NZC1O = {
     "Comentarios": "Tasa de Referencia TAMAR Privada + Margen 4,25% n.a. Lag de índice no confirmado (sin Suplemento): default casa -7. Régimen de rescate no confirmado.",
     "Aviso Resultados": "https://www.bna.com.ar",
     "Suplemento Prospecto": "https://www.bna.com.ar"
+}
+NZC4O = {
+    "Nombre Security": "Título de Deuda Banco de la Nación Argentina Clase 4 Vto 14 07 2027",
+    "Código": "NZC4O",
+    "ISIN": "AR0670828547",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "14/07/2026",
+    "Vencimiento": "14/07/2027",
+    "Fecha Primer Cupón": "14/10/2026",
+    "Cupón / Spread": 3.25,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "VARIABLE",
+    "Index": "TAMAR",
+    "Días Lag índice desde inc": -7,
+    "Días Lag índice hasta inc": -7,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "14/10/2026",
+        "14/01/2027",
+        "14/04/2027",
+        "14/07/2027",
+    ],
+    "Amortización": None,
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "No podrán ser rescatados total o parcialmente a opción de la Emisora con anterioridad a su vencimiento.",
+    "Aviso Resultados": "https://macrosecurities.cmail19.com/t/j-l-ydujhdid-hykjnkity-r/",
+    "Suplemento Prospecto": "https://bna.com.ar/Downloads/Home_TitulosDeDeuda_Suplemento%20de%20prospecto%20firmado.pdf"
 }
 SXC5O = {
     "Nombre Security": "ON Mercado Pago Servicios de Procesamiento S.R.L. Clase 5 Vto 18 11 2026",
@@ -25633,6 +25815,103 @@ NZC3Oj = {
     "Aviso Resultados": "https://www.bna.com.ar",
     "Suplemento Prospecto": "https://www.bna.com.ar"
 }
+NZC6O = {
+    "Nombre Security": "Título de Deuda Banco de la Nación Argentina Clase 6 Vto 14 07 2028",
+    "Código": "NZC6O",
+    "ISIN": "AR0145117005",
+    "Calificación": "AAA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo UVA",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "14/07/2026",
+    "Vencimiento": "14/07/2028",
+    "Fecha Primer Cupón": "14/10/2026",
+    "Cupón / Spread": 6.50,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "UVA",
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": -5,
+    "Días lag Ajuste": -5,
+    "Fechas de cupón": [
+        "14/10/2026",
+        "14/01/2027",
+        "14/04/2027",
+        "14/07/2027",
+        "14/10/2027",
+        "14/01/2028",
+        "14/04/2028",
+        "14/07/2028",
+    ],
+    "Amortización": ([0] * 3 + [20.] * 5),
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "No podrán ser rescatados total o parcialmente a opción de la Emisora con anterioridad a su vencimiento. Valor UVA Inicial: 2.021,05.",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": "https://bna.com.ar/Downloads/Home_TitulosDeDeuda_Suplemento%20de%20prospecto%20firmado.pdf"
+}
+
+NZC6Oj = {
+    "Nombre Security": "Título de Deuda Banco de la Nación Argentina Clase 6 Vto 14 07 2028",
+    "Código": "NZC6O",
+    "ISIN": "AR0145117005",
+    "Calificación": "AAA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo UVA",
+    "Industria": "Financials Proyectado",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "14/07/2026",
+    "Vencimiento": "14/07/2028",
+    "Fecha Primer Cupón": "14/10/2026",
+    "Cupón / Spread": 6.50,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "UVA PROYECTADO",
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": -5,
+    "Días lag Ajuste": -5,
+    "Fechas de cupón": [
+        "14/10/2026",
+        "14/01/2027",
+        "14/04/2027",
+        "14/07/2027",
+        "14/10/2027",
+        "14/01/2028",
+        "14/04/2028",
+        "14/07/2028",
+    ],
+    "Amortización": ([0] * 3 + [20.] * 5),
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "No podrán ser rescatados total o parcialmente a opción de la Emisora con anterioridad a su vencimiento. Valor UVA Inicial: 2.021,05. Ficha proyectada de NZC6O.",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": "https://bna.com.ar/Downloads/Home_TitulosDeDeuda_Suplemento%20de%20prospecto%20firmado.pdf"
+}
 TY41O = {
     "Nombre Security": "ON Toyota Compañía Financiera de Argentina S.A. Clase 41 Vto 22 06 2028",
     "Código": "TY41O",
@@ -27654,6 +27933,7 @@ TMG28 = rentafija.Bono(TMG28)
 T661O = rentafija.Bono(T661O)
 T671O = rentafija.Bono(T671O)
 NZC1O = rentafija.Bono(NZC1O)
+NZC4O = rentafija.Bono(NZC4O)
 RC6CO = rentafija.Bono(RC6CO)
 TY34O = rentafija.Bono(TY34O)
 HBCBO = rentafija.Bono(HBCBO)
@@ -27702,6 +27982,8 @@ TLCJO = rentafija.Bono(TLCJO)
 TLCJOj = rentafija.Bono(TLCJOj)
 NZC3O = rentafija.Bono(NZC3O)
 NZC3Oj = rentafija.Bono(NZC3Oj)
+NZC6O = rentafija.Bono(NZC6O)
+NZC6Oj = rentafija.Bono(NZC6Oj)
 FTL1O = rentafija.Bono(FTL1O)
 FTL1Oj = rentafija.Bono(FTL1Oj)
 FTM1O = rentafija.Bono(FTM1O)
@@ -27798,6 +28080,8 @@ TSC4O = rentafija.Bono(TSC4O)
 TSC4C = rentafija.Bono(TSC4C)
 PLC5O = rentafija.Bono(PLC5O)
 PLC5C = rentafija.Bono(PLC5C)
+PLC7O = rentafija.Bono(PLC7O)
+PLC7C = rentafija.Bono(PLC7C)
 MGC3O = rentafija.Bono(MGC3O)
 MGC3C = rentafija.Bono(MGC3C)
 YMCJO = rentafija.Bono(YMCJO)
@@ -27930,6 +28214,7 @@ OTS6D = rentafija.Bono(OTS6D)
 LOC5D = rentafija.Bono(LOC5D)
 LOC6D = rentafija.Bono(LOC6D)
 NZC2D = rentafija.Bono(NZC2D)
+NZC5D = rentafija.Bono(NZC5D)
 TTC9D = rentafija.Bono(TTC9D)
 TTCBD = rentafija.Bono(TTCBD)
 IRCOD = rentafija.Bono(IRCOD)
@@ -28306,7 +28591,7 @@ todos_los_bonos = [
 
     T661O, TY34O, HBCBO, BYY1O, SXC5O,
     RB59O, RB61O, BNCXO, SXC6O, TY39O, MTC3O,
-    SXC1O, BDCKO, DHSGO, BF46O,
+    SXC1O, BDCKO, DHSGO, BF46O, NZC4O,
     PVC4O, TLCRO, ZPC1O, PS37O, PVC6O, BNCYO,
     RC3CO, RVS1O, PS35O, NZC1O, RC6CO, BF47O, ICC7O,
     LNS3P, VWCDO, RB64O, TY37O, SXC3O, FTN3O, VWCGO,
@@ -28318,7 +28603,7 @@ todos_los_bonos = [
     TLCJO, FTL1O, FTM1O,
     RB60O, PSSXO, PS34O, RB66O,
     VWCFO, ZPC4O, FTN1O, BCIUO,
-    BCIUP, SNSDP, TY41O, 
+    BCIUP, SNSDP, TY41O, NZC6O, NZC3O,
 
     # CORPORATIVOS DÓLAR LINKED
 
@@ -28344,7 +28629,7 @@ todos_los_bonos = [
     YMCXO, YMCXC, IRCFO, IRCFC, YMCUO, YMCUC, YMC1O, YMC1C, YM39O, YM39C, MGCOO, MGCOC, MGCRO, MGCRC, RUCDO, RUCDC,
     DNC7O, DNC7C, TLCMO, TLCMC, LMS8D, IRCPO, IRCPC, VSCOD, VSCUO, VSCUC, VSCVO, VSCVC,
     CP38O, CP38C, TLCTO, TLCTC, VSCXO, VSCXC, BACHO, BACHC, TTCAO, TTCAC, DNCAO, DNCAC, T673C,
-    BYY3C, EAC4C,
+    BYY3C, EAC4C, PLC7O, PLC7C,
 
     # CORPORATIVOS HARD DÓLAR MEP
 
@@ -28358,7 +28643,7 @@ todos_los_bonos = [
     CS49D, CS50D, PN37D, CIC8D, CIC9D, CICAD, HJCKD, CP40D, TLCUD, CS53D,
     PECGD, PQCRD, PQCTD, HJCGD, HBCAD, HBCDD, YMCYD, LUC5D, MIC6D, JNC7D,
     YMCZD, MGCND, MGCQD, OLC5D, OLC6D, DNC5D, PZCGD, HJCHD, MRCUD, MRCYD,
-    CRCJD, RZABD, LECED, XMC1D, MSSFD, RCCRD, AFCMD, PFC3D, TLCWD,
+    CRCJD, RZABD, LECED, XMC1D, MSSFD, RCCRD, AFCMD, PFC3D, TLCWD, NZC5D,
     RC2CD, TTC8D, IRCND, ZPC2D, PN34D, LDCGD, CP36D, MIC4D, NPCDD, RC5CD,
     CP37D, MR35D, YFCID, PECAD, IRCJD, SNSDO, HJCFD, OLC7D, TTCED, SIC2D, 
     HJCID, HJCJD, CS44D, DNC3D, CIC7D, SIC1D, SNSBD, PLC6D, BPCVO, PVC5D,
