@@ -7,9 +7,9 @@ sub-50 ms que /curves/table. NO toca proyecciones de inflación ni itera.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _rows_for
@@ -26,7 +26,21 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
 
 
-async def _ctx(plazo: str) -> Dict[str, Any]:
+def _cer_conocido_hasta():
+    """Última fecha de la serie CER PUBLICADA (BCRA la publica hacia adelante
+    una vez que sale el IPC): hasta ahí el ajuste ya está determinado."""
+    try:
+        from backend.services.pricing import _last_series_value
+        fecha, _ = _last_series_value("CER", "CER")
+        if fecha is None:
+            return None
+        return fecha.date() if hasattr(fecha, "date") else fecha
+    except Exception:  # noqa: BLE001 — sin serie: nadie se marca definido
+        return None
+
+
+async def _ctx(plazo: str, incl: Optional[List[str]] = None,
+               incl_set: bool = False) -> Dict[str, Any]:
     import json
 
     cer_rows, _ = await _rows_for("cer", plazo, only_quoting=True)
@@ -35,9 +49,15 @@ async def _ctx(plazo: str) -> Dict[str, Any]:
     for r in cer_rows:
         obj = bond_universe.get(r.get("code", ""))
         r["lag"] = getattr(obj, "dias_lag_ajuste", -10) if obj is not None else -10
-    data = be_svc.compute_fisher(cer_rows, lecap_rows)
-    # JSON para el gráfico de barras (TEM/TIR en pp, client-side, sin endpoint extra).
-    chart = [r for r in data["rows"] if r.get("be_anual") is not None]
+    # `incl` = tildes del usuario (viaja en cada request; `incl_set` distingue
+    # "primera carga" de "destildó todo"). Sin tildes explícitos → default:
+    # todos menos los DEFINIDOS (CER ya publicado cubre su fix).
+    incluir = set(incl or []) if incl_set else None
+    data = be_svc.compute_fisher(cer_rows, lecap_rows,
+                                 cer_conocido_hasta=_cer_conocido_hasta(),
+                                 incluir=incluir)
+    # JSON para el gráfico de barras (sólo bonos INCLUIDOS, como el resumen).
+    chart = [r for r in data["rows"] if r.get("be_anual") is not None and r.get("incluido")]
     be_json = json.dumps({
         "labels": [r["code"] for r in chart],
         "mes": [r.get("mes_ref") or "" for r in chart],
@@ -54,6 +74,9 @@ async def breakeven_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
 
 
 @router.get("/breakeven/table", response_class=HTMLResponse)
-async def breakeven_table(request: Request, plazo: str = "24hs") -> HTMLResponse:
+async def breakeven_table(request: Request, plazo: str = "24hs",
+                          incl: Optional[List[str]] = Query(None),
+                          incl_set: Optional[str] = None) -> HTMLResponse:
     bond_universe.ensure_loaded()
-    return _render(request, "partials/breakeven_table.html", **(await _ctx(plazo)))
+    return _render(request, "partials/breakeven_table.html",
+                   **(await _ctx(plazo, incl=incl, incl_set=bool(incl_set))))

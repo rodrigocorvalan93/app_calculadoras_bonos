@@ -90,6 +90,50 @@ async def test_breakeven_chart_y_columna() -> None:
     assert ("Infla. hasta" in t.text) == ("be-tbl" in t.text)   # columna sólo con filas
 
 
+def test_fisher_marca_definidos_y_los_excluye_del_resumen() -> None:
+    """El caso X31L6: si la serie CER publicada ya cubre el fix del bono
+    (vto + lag), su BE está DETERMINADO → flag `definido` y fuera del
+    promedio/gráfico por default. `incluir` explícito lo puede re-sumar."""
+    from datetime import date
+    lecap = [_row("S1", 0.02, 0.40), _row("S2", 1.0, 0.40)]
+    cer = [{**_row("X31L6", 0.04, 0.08), "vencimiento": date(2026, 7, 31), "lag": -10},
+           {**_row("TZXO6", 0.30, 0.07), "vencimiento": date(2026, 10, 31), "lag": -10}]
+    # serie CER publicada hasta el 15/8 (salió el IPC de junio) → el fix de
+    # X31L6 (~17/7) está cubierto; el de TZXO6 (19/10) no.
+    out = compute_fisher(cer, lecap, cer_conocido_hasta=date(2026, 8, 15))
+    by = {r["code"]: r for r in out["rows"]}
+    assert by["X31L6"]["definido"] and not by["X31L6"]["incluido"]
+    assert not by["TZXO6"]["definido"] and by["TZXO6"]["incluido"]
+    assert out["n_definidos"] == 1
+    assert out["resumen"]["n"] == 1                       # sólo TZXO6 promedia
+    # el usuario lo re-tilda → entra; y puede destildar el otro
+    out2 = compute_fisher(cer, lecap, cer_conocido_hasta=date(2026, 8, 15),
+                          incluir={"X31L6"})
+    by2 = {r["code"]: r for r in out2["rows"]}
+    assert by2["X31L6"]["incluido"] and not by2["TZXO6"]["incluido"]
+    assert out2["resumen"]["n"] == 1
+    # sin fecha de serie (BCRA caído): nadie se marca definido
+    out3 = compute_fisher(cer, lecap, cer_conocido_hasta=None)
+    assert out3["n_definidos"] == 0 and out3["resumen"]["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_breakeven_tildes_en_endpoint() -> None:
+    """La tabla trae checkbox por bono + incl_set (el estado viaja en cada
+    refresh); con incl explícito el server respeta la selección."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        t = await ac.get("/breakeven/table")
+        assert t.status_code == 200
+        if "be-tbl" in t.text:                            # sólo si hay filas (feed)
+            assert 'name="incl"' in t.text and 'name="incl_set"' in t.text
+        t2 = await ac.get("/breakeven/table", params={"incl_set": "1", "incl": ["TX26"]})
+        assert t2.status_code == 200
+
+
 def test_fisher_empareja_por_vencimiento() -> None:
     """TZXO6 (31/10) se compara contra la letra que vence el 30/10, no contra
     la interpolación; sin letra cercana (±45d) cae a interpolación."""

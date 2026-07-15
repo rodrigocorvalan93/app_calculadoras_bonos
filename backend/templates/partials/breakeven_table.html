@@ -4,24 +4,30 @@
 {% if not rows %}
   <div class="alert">Sin bonos CER con cotización para despejar el break-even (¿broker offline?).</div>
 {% else %}
+{# incl_set: distingue "primera carga" (defaults: todo menos definidos) de un
+   estado tildado por el usuario. Viaja con cada refresh (hx-include del
+   contenedor) → los tildes sobreviven al refresh live. #}
+<input type="hidden" name="incl_set" value="1">
 {% if resumen %}
 <div class="mae-strip" style="margin-bottom:12px">
   <span class="mae-tag">BE Fisher</span>
   <span>BE anual prom <b>{{ resumen.be_anual_prom | ar_pct(2) }}</b></span>
   <span>BE TEM prom <b>{{ resumen.be_tem_prom | ar_pct(2) }}</b></span>
-  <span class="muted">rango {{ resumen.be_anual_min | ar_pct(2) }} – {{ resumen.be_anual_max | ar_pct(2) }} · {{ resumen.n }} bonos · {{ n_lecap }} tasa fija · plazo {{ plazo }}</span>
+  <span class="muted">rango {{ resumen.be_anual_min | ar_pct(2) }} – {{ resumen.be_anual_max | ar_pct(2) }} · {{ resumen.n }} bonos incluidos · {{ n_lecap }} tasa fija · plazo {{ plazo }}</span>
+  {% if n_definidos %}<span class="muted" title="Bonos cuyo CER fix ya está cubierto por la serie publicada: su BE está determinado, no es expectativa. Se destildan solos; podés re-tildarlos.">🔒 {{ n_definidos }} con CER ya publicado</span>{% endif %}
 </div>
 {% endif %}
 <div class="card">
   <div class="card-title">
     <span>Break-even por bono CER</span>
-    <span class="card-title-aux">nominal = TIREA tasa fija interpolada a la misma duration</span>
+    <span class="card-title-aux">tilde = entra al promedio y al gráfico · 🔒 = CER ya publicado (BE definido, se destilda solo)</span>
   </div>
   <div class="card-body" style="padding:0">
     <div class="table-scroll">
     <table id="be-tbl" class="cashflows curve-table" data-sortable>
       <thead>
         <tr>
+          <th title="Incluir en el promedio y el gráfico"></th>
           <th data-sort style="text-align:left">Bono CER</th>
           <th data-sort>Dur</th>
           <th data-sort title="Última inflación mensual que este BE captura (CER fix = vto + lag hábiles; metodología INDEC)">Infla. hasta</th>
@@ -35,9 +41,14 @@
       </thead>
       <tbody>
         {% for r in rows %}
-          <tr>
+          <tr class="{{ 'be-off' if not r.incluido else '' }}">
+            <td><input type="checkbox" name="incl" value="{{ r.code }}" {% if r.incluido %}checked{% endif %}
+                   title="{{ 'Sacar del' if r.incluido else 'Incluir en el' }} promedio/gráfico"
+                   hx-get="/breakeven/table" hx-target="#be-table" hx-swap="innerHTML"
+                   hx-trigger="change" hx-include="[name=plazo], #be-table input"></td>
             <td style="text-align:left;color:var(--accent);font-weight:600">
               <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a>
+              {% if r.definido %}<span class="be-lock" title="La serie CER publicada ya cubre el fix de este bono: su break-even está DETERMINADO (no es expectativa)">🔒</span>{% endif %}
             </td>
             <td>{{ r.duration | ar_num(2) }}</td>
             <td style="color:var(--cyan);font-weight:600">{{ r.mes_ref or "—" }}</td>
@@ -46,7 +57,7 @@
             <td style="color:var(--cyan);font-size:11px">{{ r.par or "interp." }}</td>
             <td class="grp" style="font-weight:650;color:var(--accent)">{{ r.be_anual | ar_pct(2) }}</td>
             <td style="font-weight:600">{{ r.be_tem | ar_pct(2) }}</td>
-            <td class="muted" style="font-size:10.5px">{% if r.extrapolado %}extrap.{% endif %}</td>
+            <td class="muted" style="font-size:10.5px">{% if r.definido %}definido{% elif r.extrapolado %}extrap.{% endif %}</td>
           </tr>
         {% endfor %}
       </tbody>
