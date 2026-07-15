@@ -145,11 +145,19 @@ def test_watchdog_fuera_de_rueda_no_alarma() -> None:
     assert wd2.check_once() is None and mails2 == []
 
 
-def test_en_rueda() -> None:
+def test_en_rueda(monkeypatch) -> None:
     assert en_rueda(datetime(2026, 7, 15, 12, 0, tzinfo=_TZ))
-    assert not en_rueda(datetime(2026, 7, 15, 10, 59, tzinfo=_TZ))
+    assert en_rueda(datetime(2026, 7, 15, 10, 44, tzinfo=_TZ))      # 10:30 ya abrió
+    assert not en_rueda(datetime(2026, 7, 15, 10, 29, tzinfo=_TZ))
     assert not en_rueda(datetime(2026, 7, 15, 17, 0, tzinfo=_TZ))
     assert not en_rueda(datetime(2026, 7, 18, 12, 0, tzinfo=_TZ))   # sábado
+    # configurable: MISMO setting que los relojes (MKT_HORARIO_ARG)
+    monkeypatch.setattr(settings, "mkt_horario_arg", "11:00-16:30")
+    assert not en_rueda(datetime(2026, 7, 15, 10, 44, tzinfo=_TZ))
+    assert en_rueda(datetime(2026, 7, 15, 16, 15, tzinfo=_TZ))
+    assert not en_rueda(datetime(2026, 7, 15, 16, 45, tzinfo=_TZ))
+    monkeypatch.setattr(settings, "mkt_horario_arg", "basura")      # ilegible → default
+    assert en_rueda(datetime(2026, 7, 15, 10, 44, tzinfo=_TZ))
 
 
 # ── Campana de alertas (superuser) ──────────────────────────────────────────

@@ -118,9 +118,10 @@ async def test_relojes_de_mercado_en_topbar() -> None:
     assert 'id="clock-ar"' in page.text and 'id="clock-ny"' in page.text
     assert "America/Argentina/Buenos_Aires" in js.text and "America/New_York" in js.text
     assert "mkt-open" in js.text and "mkt-closed" in js.text
-    # horarios: BYMA 11–17, NYSE 9:30–16
-    assert "11 * 60" in js.text and "17 * 60" in js.text
-    assert "9 * 60 + 30" in js.text and "16 * 60" in js.text
+    # horarios configurables: el server los inyecta (MKT_HORARIO_*) y el JS
+    # los parsea con fallback BYMA 10:30-17 / NYSE 9:30-16
+    assert 'data-arg="10:30-17:00"' in page.text and 'data-ny="09:30-16:00"' in page.text
+    assert "10 * 60 + 30" in js.text and "9 * 60 + 30" in js.text
 
 
 # ── Heatmap de variaciones ───────────────────────────────────────────────────

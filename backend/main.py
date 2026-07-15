@@ -383,6 +383,9 @@ def create_app() -> FastAPI:
     except OSError:
         _asset_v = 1
     templates.env.globals["asset_v"] = _asset_v
+    # Horarios de mercado para los relojes de la topbar (configurables por env).
+    templates.env.globals["mkt_horarios"] = {"arg": settings.mkt_horario_arg,
+                                             "ny": settings.mkt_horario_ny}
     app.state.templates = templates
 
     # .webmanifest no está en el registro de mimetypes de Python → StaticFiles

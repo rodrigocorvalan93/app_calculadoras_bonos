@@ -718,9 +718,25 @@ window.lsSet = function (k, v) {
           '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31',
           '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24'],
   };
+  // Horarios configurables desde el server (MKT_HORARIO_ARG / MKT_HORARIO_NY,
+  // "HH:MM-HH:MM" en data-arg/data-ny del contenedor). Fallback: BYMA
+  // 10:30-17:00, NYSE 9:30-16:00.
+  function rango(s, defO, defC) {
+    var m = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(s || '');
+    if (!m) return [defO, defC];
+    return [(+m[1]) * 60 + (+m[2]), (+m[3]) * 60 + (+m[4])];
+  }
+  var cfg = document.querySelector('.mkt-clocks');
+  var rAR = rango(cfg && cfg.getAttribute('data-arg'), 10 * 60 + 30, 17 * 60);
+  var rNY = rango(cfg && cfg.getAttribute('data-ny'), 9 * 60 + 30, 16 * 60);
+  function hhmm(mins) {
+    return ('0' + Math.floor(mins / 60)).slice(-2) + ':' + ('0' + (mins % 60)).slice(-2);
+  }
   var MKTS = [
-    { id: 'clock-ar', label: 'ARG', tz: 'America/Argentina/Buenos_Aires', open: 11 * 60, close: 17 * 60 },
-    { id: 'clock-ny', label: 'NY', tz: 'America/New_York', open: 9 * 60 + 30, close: 16 * 60 },
+    { id: 'clock-ar', label: 'ARG', tz: 'America/Argentina/Buenos_Aires', open: rAR[0], close: rAR[1],
+      plaza: 'BYMA ' + hhmm(rAR[0]) + '–' + hhmm(rAR[1]) },
+    { id: 'clock-ny', label: 'NY', tz: 'America/New_York', open: rNY[0], close: rNY[1],
+      plaza: 'NYSE ' + hhmm(rNY[0]) + '–' + hhmm(rNY[1]) + ' ET' },
   ];
   var fmts;
   try {
@@ -749,7 +765,7 @@ window.lsSet = function (k, v) {
       el.classList.toggle('mkt-open', abierto);
       el.classList.toggle('mkt-closed', !abierto);
       el.title = MKTS[i].label + (abierto ? ' — mercado abierto' : (feriado ? ' — feriado' : ' — mercado cerrado')) +
-        (MKTS[i].label === 'ARG' ? ' (BYMA 11:00–17:00)' : ' (NYSE 9:30–16:00 ET)');
+        ' (' + MKTS[i].plaza + ')';
     }
   }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
