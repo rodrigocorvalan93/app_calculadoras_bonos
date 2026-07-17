@@ -338,15 +338,35 @@ def refresh() -> Dict[str, Any]:
     return _cache
 
 
+def _current() -> Dict[str, Any]:
+    """Fuente EFECTIVA del vector: la API de CAFCI si hay token y su snapshot
+    trae filas a la altura del Excel (el guard vive en cafci_api._rows_usable);
+    si no, el Excel del bot de siempre. El fx del strip se toma del Excel YA
+    cacheado cuando la API no lo trae — sin forzar su carga (OneDrive) desde
+    el path API."""
+    from backend.services import cafci_api
+    if cafci_api.enabled():
+        v = cafci_api.vector_snapshot()
+        if v["n"] > 0:
+            c = _cache
+            fx = dict(c.get("fx") or {}) if c else {}
+            return {"loaded": True, "error": None, "fecha": v["fecha"], "fx": fx,
+                    "rows": v["rows"], "n": v["n"], "fuente": "api"}
+    out = dict(ensure_loaded())
+    out["fuente"] = "excel"
+    return out
+
+
 def status() -> Dict[str, Any]:
-    c = ensure_loaded()
-    return {"loaded": c["loaded"], "error": c["error"], "fecha": c["fecha"], "n": c["n"], "fx": c["fx"]}
+    c = _current()
+    return {"loaded": c["loaded"], "error": c["error"], "fecha": c["fecha"],
+            "n": c["n"], "fx": c["fx"], "fuente": c["fuente"]}
 
 
 def search(q: str = "", limit: int = 200) -> Tuple[List[Dict[str, Any]], int]:
     """Filas que matchean `q` (ISIN/BYMA/CAFCI), capadas a `limit`. Devuelve
     (filas, total_match) — no renderiza las ~6k filas enteras."""
-    c = ensure_loaded()
+    c = _current()
     rows = c["rows"]
     ql = (q or "").strip().lower()
     if ql:

@@ -111,10 +111,82 @@ def _fecha_ddmm(iso: Any) -> Optional[str]:
     return s or None
 
 
+def _prev_habil(d, n: int = 1):
+    from datetime import timedelta
+    while n > 0:
+        d -= timedelta(days=1)
+        if d.weekday() < 5:
+            n -= 1
+    return d
+
+
+def _rows_de(payload) -> List[Dict[str, Any]]:
+    """Ubica la lista de precios en la respuesta (defensivo: `records.precios`
+    confirmado por el legacy, con fallbacks por si el shape difiere)."""
+    if isinstance(payload, list):
+        return [r for r in payload if isinstance(r, dict)]
+    if not isinstance(payload, dict):
+        return []
+    rec = payload.get("records", payload)
+    if isinstance(rec, list):
+        return [r for r in rec if isinstance(r, dict)]
+    if isinstance(rec, dict):
+        pre = rec.get("precios")
+        if isinstance(pre, list):
+            return [r for r in pre if isinstance(r, dict)]
+        for v in rec.values():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                return v
+    return []
+
+
+def _rows_usable(rows: List[Dict[str, Any]]) -> bool:
+    """La API sólo TOMA EL MANDO del vector si sus filas están a la altura del
+    Excel: volumen razonable, mayoría con precio y una fracción con TIR (el
+    valor de la pestaña son las analíticas). Si trae menos —p. ej. sólo
+    precios— el Excel sigue primario y la pestaña no pierde nada."""
+    if len(rows) < 100:
+        return False
+    muestra = rows[:500]
+    con_cdo = sum(1 for r in muestra if r.get("cdo") is not None)
+    con_tir = sum(1 for r in muestra if r.get("tir") is not None)
+    return con_cdo >= 0.5 * len(muestra) and con_tir >= 0.2 * len(muestra)
+
+
+def _refresh_vector() -> None:
+    """Vector de cierre por activo (closing_prices): prueba hoy y hasta 5
+    hábiles atrás; guarda el primer día con filas usables. Si la API no trae
+    campos a la altura del Excel, deja el vector vacío → el arbitraje en
+    cafci.py sigue con el Excel (nunca degrada la pestaña)."""
+    from datetime import date as _date
+    d = _date.today()
+    for intento in range(6):                     # hoy + 5 hábiles atrás
+        payload = _get("vectores/cafci_closing_prices", {"date": d.isoformat()})
+        crudas = _rows_de(payload) if payload is not None else []
+        rows = [n for r in crudas if (n := _normalize_precio(r)) is not None]
+        if rows and _rows_usable(rows):
+            with _lock:
+                _snap["rows"] = rows
+                _snap["fecha"] = d.strftime("%Y%m%d")   # el strip slicea AAAAMMDD
+                _snap["n"] = len(rows)
+            logger.info("[cafci_api] vector por API: %d filas (fecha %s)", len(rows), d)
+            return
+        if crudas and rows and not _rows_usable(rows):
+            logger.info("[cafci_api] vector API con campos insuficientes "
+                        "(%d filas, pocas con cdo/tir) — sigue el Excel", len(rows))
+            return                                # hay data pero no alcanza: no insistir
+        d = _prev_habil(d)
+    logger.info("[cafci_api] closing_prices sin filas usables en 6 fechas — sigue el Excel")
+
+
 def refresh() -> bool:
-    """Relee el daily de CAFCI (sync, blocking — sólo poller/botón)."""
+    """Relee daily + vector de CAFCI (sync, blocking — sólo poller/botón)."""
     if not enabled():
         return False
+    try:
+        _refresh_vector()
+    except Exception:  # noqa: BLE001 — el vector nunca voltea el daily
+        logger.exception("[cafci_api] refresh del vector falló")
     data = _get("reports/daily")
     records = (data or {}).get("records") if isinstance(data, dict) else None
     if not isinstance(records, list):
@@ -152,6 +224,12 @@ def funds() -> Tuple[List[Dict[str, Any]], Optional[str], Optional[str]]:
     """(fondos, fecha, error) — lectura de cache, ~µs."""
     with _lock:
         return list(_snap["funds"]), _snap["funds_fecha"], _snap["error"]
+
+
+def vector_snapshot() -> Dict[str, Any]:
+    """Vector por API para el arbitraje de cafci.py — lectura de cache, ~µs."""
+    with _lock:
+        return {"rows": _snap["rows"], "fecha": _snap["fecha"], "n": _snap["n"]}
 
 
 def status() -> Dict[str, Any]:

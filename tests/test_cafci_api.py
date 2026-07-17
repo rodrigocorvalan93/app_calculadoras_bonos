@@ -95,6 +95,81 @@ def test_normalize_precio_defensiva() -> None:
     assert cafci_api._normalize_precio({"Precio": "10,0"}) is None    # sin id
 
 
+# ── Vector por API (fase B1): walk-back + guard de calidad + arbitraje ──────
+def _filas_api(n=150, con_tir=True):
+    out = []
+    for i in range(n):
+        r = {"Código": str(10000 + i), "ISIN": f"ARARGE{i:06d}", "Precio": "1.234,56"}
+        if con_tir and i % 2 == 0:               # 50% con TIR (≥ umbral del 20%)
+            r["TIR"] = "12,5"
+        out.append(r)
+    return out
+
+
+def test_vector_walk_back_guarda_primer_dia_usable(monkeypatch) -> None:
+    from datetime import date
+    monkeypatch.setenv("CAFCI_TOKEN", "Bearer test")
+    hoy = date.today().isoformat()
+
+    def _fake_get(path, params=None):
+        if "closing_prices" in path:
+            if (params or {}).get("date") == hoy:
+                return {"records": {"precios": []}}          # t-0 todavía no publica
+            return {"records": {"precios": _filas_api()}}    # día previo: completo
+        return {"records": []}
+    monkeypatch.setattr(cafci_api, "_get", _fake_get)
+    cafci_api.refresh()
+    v = cafci_api.vector_snapshot()
+    assert v["n"] == 150 and len(v["fecha"]) == 8            # AAAAMMDD para el strip
+    assert v["rows"][0]["cdo"] == pytest.approx(1234.56)
+
+
+def test_vector_solo_precios_no_toma_el_mando(monkeypatch) -> None:
+    """API con filas SIN TIR (menos que el Excel) → el vector API queda vacío
+    y la pestaña sigue con el Excel — nunca degrada."""
+    monkeypatch.setenv("CAFCI_TOKEN", "Bearer test")
+    monkeypatch.setattr(cafci_api, "_get",
+                        lambda p, params=None: {"records": {"precios": _filas_api(con_tir=False)}}
+                        if "closing_prices" in p else {"records": []})
+    cafci_api.refresh()
+    assert cafci_api.vector_snapshot()["n"] == 0
+
+
+def test_arbitraje_api_vs_excel(monkeypatch) -> None:
+    import time as _t
+
+    from backend.services import cafci
+    excel_cache = {"loaded": True, "error": None, "path": "x", "resolved": "x",
+                   "fecha": "20260715", "fx": {"USD": 1480.0},
+                   "rows": [{"isin": "EXCEL1", "byma": "AL30", "cafci": "1",
+                             "moneda": "$", "cdo": 80.0, "var_cdo": None, "mod_dur": None,
+                             "tir": 0.11, "tna": None, "spread": None, "zspread": None,
+                             "_key": "excel1 al30 1"}], "n": 1}
+    monkeypatch.setattr(cafci, "_cache", excel_cache)
+    monkeypatch.setattr(cafci, "_last_check", _t.time())
+    # sin token → Excel manda
+    assert cafci.status()["fuente"] == "excel"
+    # con token + snapshot API usable → API manda y el fx del Excel se mergea
+    monkeypatch.setenv("CAFCI_TOKEN", "Bearer test")
+    with cafci_api._lock:
+        cafci_api._snap["rows"] = [{"isin": "APIROW1", "byma": "GD30", "cafci": "2",
+                                    "moneda": "$", "cdo": 70.0, "var_cdo": None,
+                                    "mod_dur": None, "tir": 0.12, "tna": None,
+                                    "spread": None, "zspread": None,
+                                    "_key": "apirow1 gd30 2"}]
+        cafci_api._snap["fecha"] = "20260716"
+        cafci_api._snap["n"] = 1
+    st = cafci.status()
+    assert st["fuente"] == "api" and st["fecha"] == "20260716"
+    assert st["fx"] == {"USD": 1480.0}                       # fx heredado del Excel
+    rows, total = cafci.search("gd30")
+    assert total == 1 and rows[0]["isin"] == "APIROW1"
+    # API vacía (aún sin snapshot) → vuelve al Excel
+    with cafci_api._lock:
+        cafci_api._snap["rows"], cafci_api._snap["n"] = [], 0
+    assert cafci.status()["fuente"] == "excel"
+
+
 # ── HTTP + gating superuser ─────────────────────────────────────────────────
 def _client() -> AsyncClient:
     from backend.main import app
