@@ -94,6 +94,29 @@
         </form>
       </div>
     </div>
+
+    {# ── Features por rol (paneles opcionales) ── #}
+    <div class="card">
+      <div class="card-title"><span>Features por rol</span>
+        <span class="card-title-aux">paneles opcionales — el superuser las tiene todas</span></div>
+      <div class="card-body">
+        <form method="post" action="/admin/features">
+          <table class="cashflows admin-tabs">
+            <thead><tr><th style="text-align:left">Feature</th><th>Premium</th><th>Básico</th></tr></thead>
+            <tbody>
+              {% for f in features %}
+              <tr>
+                <td style="text-align:left">{{ f.label }}</td>
+                <td><input type="checkbox" name="feat_premium_{{ f.key }}" {{ 'checked' if f.key in role_features.premium else '' }}></td>
+                <td><input type="checkbox" name="feat_basico_{{ f.key }}" {{ 'checked' if f.key in role_features.basico else '' }}></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <div style="margin-top:10px"><button class="btn-primary" type="submit">Guardar features</button></div>
+        </form>
+      </div>
+    </div>
   </div>
 </section>
 {% endblock %}

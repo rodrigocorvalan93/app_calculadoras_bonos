@@ -27,8 +27,9 @@
     </div>
   </div>
 
-  {% if request.state.is_superuser %}
-  {# Panel VCP de fondos propios (API CAFCI) — sólo superuser, lazy: sin
+  {% if 'cafci_fondos' in request.state.features %}
+  {# Panel VCP de fondos propios (API CAFCI) — feature por rol (superuser
+     siempre; premium/básico si el superuser la tilda en /admin). Lazy: sin
      token el partial vuelve vacío y no ocupa lugar. #}
   <div id="cafci-fondos" data-skip-same hx-get="/cafci/fondos" hx-trigger="load, every 300s" hx-swap="innerHTML"></div>
   {% endif %}

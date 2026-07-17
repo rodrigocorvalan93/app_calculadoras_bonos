@@ -71,6 +71,17 @@ TABS: List[Tuple[str, str, str]] = [
 # middleware (main._SUPERUSER_ONLY); listarlas en la nav de premium/básico
 # sólo mostraría un link a un 403.
 _SUPERUSER_ONLY_TABS = ("alertas",)
+
+# ── Features por rol (paneles/funciones sueltas, no pestañas) ────────────────
+# Registro de features gateables desde el panel del superuser: el superuser
+# las tiene TODAS siempre; premium/básico arrancan sin ninguna (default
+# restrictivo) hasta que el superuser las tilda en /admin. Agregar una feature
+# nueva = una línea acá + su gate en main._FEATURE_PATHS / el template.
+# (Alertas NO es una feature: es superuser-exclusiva por diseño.)
+FEATURES: List[Tuple[str, str]] = [
+    ("cafci_fondos", "Panel VCP fondos propios (API CAFCI)"),
+]
+FEATURE_KEYS: Tuple[str, ...] = tuple(k for k, _ in FEATURES)
 TAB_KEYS: Tuple[str, ...] = tuple(k for k, _, _ in TABS)
 _TAB_LABEL: Dict[str, str] = {k: lbl for k, lbl, _ in TABS}
 _TAB_PATH: Dict[str, str] = {k: p for k, _, p in TABS}
@@ -122,6 +133,7 @@ def _load() -> Dict[str, Any]:
         raise RuntimeError(f"auth_store con formato inesperado ({path}): se esperaba un objeto JSON.")
     data.setdefault("users", {})
     data.setdefault("role_tabs", {k: list(v) for k, v in _DEFAULT_ROLE_TABS.items()})
+    data.setdefault("role_features", {})     # rol → features tildadas (default: ninguna)
     data.setdefault("secret", "")
     return data
 
@@ -165,6 +177,7 @@ def refresh() -> None:
     with _lock:
         _cache = _load()
         _nav_cache.clear()
+        _feat_cache.clear()
 
 
 # ── Hashing ──────────────────────────────────────────────────────────────────
@@ -428,6 +441,44 @@ def set_role_tabs(role: str, tabs: List[str]) -> None:
         data["role_tabs"][role] = clean
         _save_locked(data)
         _nav_cache.pop(role, None)
+
+
+# ── Features por rol ─────────────────────────────────────────────────────────
+_feat_cache: Dict[str, frozenset] = {}
+
+
+def role_features() -> Dict[str, List[str]]:
+    return _store().get("role_features", {})
+
+
+def features_for(role: Optional[str]) -> frozenset:
+    """Features habilitadas para el rol (cacheado — el middleware lo pide en
+    CADA request). Superuser → todas, siempre."""
+    key = role or ""
+    cached = _feat_cache.get(key)
+    if cached is None:
+        if role == "superuser":
+            cached = frozenset(FEATURE_KEYS)
+        else:
+            cached = frozenset(k for k in role_features().get(key, []) if k in FEATURE_KEYS)
+        _feat_cache[key] = cached
+    return cached
+
+
+def can_feature(role: Optional[str], key: str) -> bool:
+    return key in features_for(role)
+
+
+def set_role_features(role: str, keys: List[str]) -> None:
+    if role not in ("premium", "basico"):
+        raise AuthError("Sólo se configuran features de premium y básico "
+                        "(el superuser las tiene todas).")
+    clean = [k for k in keys if k in FEATURE_KEYS]
+    with _lock:
+        data = _store()
+        data.setdefault("role_features", {})[role] = clean
+        _save_locked(data)
+        _feat_cache.pop(role, None)
 
 
 def _count_superusers(data: Dict[str, Any]) -> int:
