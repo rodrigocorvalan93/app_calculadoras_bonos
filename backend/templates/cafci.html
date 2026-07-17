@@ -27,6 +27,12 @@
     </div>
   </div>
 
+  {% if request.state.is_superuser %}
+  {# Panel VCP de fondos propios (API CAFCI) — sólo superuser, lazy: sin
+     token el partial vuelve vacío y no ocupa lugar. #}
+  <div id="cafci-fondos" data-skip-same hx-get="/cafci/fondos" hx-trigger="load, every 300s" hx-swap="innerHTML"></div>
+  {% endif %}
+
   <!-- Carga lazy: la pestaña abre al instante; el vector (que puede tardar la
        primera vez por el Excel/OneDrive) llega por htmx con un spinner. -->
   <div id="cafci-body" hx-get="/cafci/table?q={{ q | urlencode }}" hx-trigger="load" hx-swap="innerHTML">

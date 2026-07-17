@@ -39,4 +39,20 @@ async def cafci_page(request: Request, q: str = "") -> HTMLResponse:
 async def cafci_table(request: Request, q: str = "", refresh: bool = False) -> HTMLResponse:
     if refresh:                                  # botón "Actualizar" → relee el Excel
         await asyncio.get_running_loop().run_in_executor(None, cafci.refresh)
+        # Si hay token, refresca también el snapshot de la API (VCP fondos).
+        from backend.services import cafci_api
+        if cafci_api.enabled():
+            await asyncio.get_running_loop().run_in_executor(None, cafci_api.refresh)
     return _render(request, "partials/cafci_table.html", **(await _ctx(q)))
+
+
+@router.get("/cafci/fondos", response_class=HTMLResponse)
+async def cafci_fondos(request: Request) -> HTMLResponse:
+    """Panel VCP de fondos propios (API CAFCI) — SOLO SUPERUSER: la ruta está
+    en _SUPERUSER_ONLY (main) y el div lazy sólo se renderiza para ese rol.
+    Lectura de cache pura (~µs), sin executor."""
+    from backend.services import cafci_api
+    fondos, fecha, error = cafci_api.funds()
+    return _render(request, "partials/cafci_fondos.html",
+                   fondos=fondos, fecha=fecha, error=error,
+                   enabled=cafci_api.enabled())

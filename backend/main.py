@@ -266,6 +266,14 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] MAE poller start failed")
 
+    # Poller API CAFCI (VCP fondos propios, panel superuser): sólo con
+    # CAFCI_TOKEN; dato diario → cada 30 min. Request path = cache puro.
+    from backend.services import cafci_api as cafci_api_svc
+    try:
+        await cafci_api_svc.get_poller().start()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] CAFCI API poller start failed")
+
     # Noticias (RSS): poller en thread daemon — el request sólo lee cache.
     try:
         from backend.services import news
@@ -366,6 +374,10 @@ async def lifespan(app: FastAPI):
         await mae_svc.get_poller().stop()
     except Exception:  # noqa: BLE001
         logger.exception("[main] MAE poller stop failed")
+    try:
+        await cafci_api_svc.get_poller().stop()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] CAFCI API poller stop failed")
     if warmup is not None:
         try:
             await warmup.stop()
@@ -455,7 +467,7 @@ def create_app() -> FastAPI:
     # (kill-switch del desk) son operaciones de mesa, no de un usuario cualquiera
     # con la pestaña Órdenes: se restringen a superuser además del gating por tab.
     _SUPERUSER_ONLY = ("/admin", "/conexion", "/ordenes/live", "/ordenes/kill",
-                       "/historicos/guardar-base", "/alertas")
+                       "/historicos/guardar-base", "/alertas", "/cafci/fondos")
 
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
