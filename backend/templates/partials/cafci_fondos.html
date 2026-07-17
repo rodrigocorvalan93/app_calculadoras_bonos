@@ -1,0 +1,39 @@
+{# Panel VCP de fondos propios (API CAFCI, sólo superuser). Sin token o sin
+   datos todavía → mensajes suaves; nunca ruido para quien no lo usa. #}
+{% if enabled %}
+<div class="card" style="margin-bottom:12px">
+  <div class="card-title">
+    <span>Fondos propios · VCP <span class="muted">(API CAFCI{% if fecha %} · {{ fecha }}{% endif %})</span></span>
+  </div>
+  <div class="card-body" style="padding:0">
+    {% if error and not fondos %}
+      <div class="alert" style="margin:10px">⚠ {{ error }}</div>
+    {% elif not fondos %}
+      <p class="muted" style="padding:10px;font-size:12px">Esperando el primer snapshot de la API CAFCI…</p>
+    {% else %}
+      <div class="table-scroll">
+        <table class="cashflows curve-table" data-sortable id="cafci-fondos-tbl">
+          <thead>
+            <tr>
+              <th data-sort style="text-align:left">Fondo</th>
+              <th data-sort>Moneda</th>
+              <th data-sort>Fecha</th>
+              <th data-sort>VCP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in fondos %}
+            <tr>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ f.nombre }}</td>
+              <td>{{ f.moneda or "—" }}</td>
+              <td style="color:var(--text-muted)">{{ f.fecha or "—" }}</td>
+              <td style="font-weight:650">{{ f.vcp | ar_num(6) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
