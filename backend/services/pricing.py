@@ -143,6 +143,51 @@ def _last_series_value(key: str, colname: str) -> Tuple[Optional[Any], float]:
         return None, float("nan")
 
 
+# ── FX aplicable a DLK (A3500 cierre vs mayorista intradía) ─────────────────
+# Durante la rueda, la serie A3500 tiene el dato de AYER (el BCRA publica el
+# del día a la tarde) y el mercado valúa los DLK contra el mayorista del día
+# (SIOPEL). Regla: serie con fecha de HOY (cierre ya publicado) manda; si no,
+# intradía de HOY si existe; si no, la serie (último dato). Cacheado 2 s —
+# las tablas de curvas lo consultan por fila. (El cache se instancia más
+# abajo, junto a los otros: LockedTTLCache se importa diferido por un ciclo.)
+
+
+def a3500_aplicable() -> Dict[str, Any]:
+    """{'value', 'fuente' ('A3500'|'SIOPEL'|'DLR/SPOT'), 'fecha', 'intradia'}."""
+    def _compute() -> Dict[str, Any]:
+        fecha, serie = _last_series_value("a3500", "tca3500")
+        out = {"value": serie if np.isfinite(serie) else float("nan"),
+               "fuente": "A3500", "fecha": fecha, "intradia": False}
+        from backend.config import settings
+        if not settings.dlk_fx_intradia:
+            return out
+        # ¿La serie ya tiene el A3500 de HOY? → es el cierre oficial, manda.
+        try:
+            f = fecha.date() if hasattr(fecha, "date") else fecha
+            if f is not None and f >= date.today():
+                return out
+        except Exception:  # noqa: BLE001
+            pass
+        from backend.services import dolares
+        intra = dolares.oficial_intradia_hoy()
+        if intra is not None:
+            return {"value": intra["last"], "fuente": intra["source"],
+                    "fecha": None, "intradia": True}
+        return out
+
+    return _a3500_aplicable_cache.get_or_compute("v", _compute)
+
+
+def _dlk_fx_auto() -> Optional[float]:
+    """Override automático para un DLK sin TC custom: el mayorista intradía
+    de HOY cuando el A3500 del día todavía no está publicado. None = usar la
+    serie (sin override), el comportamiento de siempre."""
+    a = a3500_aplicable()
+    if a.get("intradia") and a.get("value") == a.get("value"):
+        return float(a["value"])
+    return None
+
+
 def index_applied(obj) -> Dict[str, Any]:
     """Identifies the index that prices this bond and returns its current value.
 
@@ -175,8 +220,11 @@ def index_applied(obj) -> Dict[str, Any]:
         return out
 
     if "A3500" in ajuste or moneda == "DLK":
-        fecha, val = _last_series_value("a3500", "tca3500")
-        out.update({"kind": "FX", "label": "FX A3500 aplicable", "value": val, "value_fmt_hint": "decimal", "fecha": fecha})
+        a = a3500_aplicable()
+        label = ("FX aplicable — mayorista intradía (" + a["fuente"] + ")"
+                 if a.get("intradia") else "FX A3500 aplicable (cierre)")
+        out.update({"kind": "FX", "label": label, "value": a["value"],
+                    "value_fmt_hint": "decimal", "fecha": a.get("fecha")})
         return out
 
     if tipo in ("VARIABLE", "VARIABLE_CAP") and idx in ("TAMAR", "BADLAR"):
@@ -436,6 +484,14 @@ def compute_metrics(
             obj._a3500_override = float(fx_override)
         except (TypeError, ValueError):
             pass
+    elif obj_override is None and _bond_index_kind(code) == "a3500":
+        # DLK sin TC custom: durante la rueda el mercado valúa contra el
+        # mayorista del día (SIOPEL), no contra el A3500 de ayer. El auto-
+        # override sólo aplica mientras el A3500 de HOY no está publicado;
+        # después manda la serie (cierre). Costo: dict lookup + cache 2 s.
+        auto = _dlk_fx_auto()
+        if auto is not None:
+            obj._a3500_override = auto
 
     try:
         if mode == "precio":
@@ -559,6 +615,7 @@ _curve_metrics_cache = LockedTTLCache(maxsize=16384, ttl=3600)
 # se refleja en ~2 s sin perder el cacheo cuando el índice está quieto.
 _index_kind: Dict[str, str] = {}                       # code → "a3500"/"cer"/"uva"/"" (estático)
 _index_val_cache = LockedTTLCache(maxsize=8, ttl=2)    # valor actual del índice (lectura barata)
+_a3500_aplicable_cache = LockedTTLCache(maxsize=2, ttl=2)   # FX aplicable a DLK (cierre vs intradía)
 _INDEX_COLS = {"a3500": ("a3500", "tca3500"), "cer": ("CER", "CER"), "uva": ("UVA", "UVA")}
 
 
@@ -585,6 +642,15 @@ def _index_fingerprint(kind: str) -> float:
         return 0.0
 
     def _f() -> float:
+        # DLK: el fingerprint es el FX que se APLICA (intradía o serie) — si
+        # el SIOPEL tickea, la key del cache de métricas cambia y la TIR del
+        # DLK se recalcula con el dólar nuevo (antes sólo miraba la serie).
+        if kind == "a3500":
+            v = a3500_aplicable().get("value")
+            try:
+                return round(float(v), 6) if v == v else 0.0
+            except (TypeError, ValueError):
+                return 0.0
         cols = _INDEX_COLS.get(kind)
         if not cols:
             return 0.0

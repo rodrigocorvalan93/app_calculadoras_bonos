@@ -30,6 +30,7 @@ import math
 import os
 import threading
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from backend.cache import LockedTTLCache
@@ -280,6 +281,32 @@ def _spot_official() -> Optional[Dict[str, Any]]:
         "volume": _pos(snap.volume),
         "hora": None,
     }
+
+
+_SIOPEL_FRESCO_SECONDS = 900.0        # snap MAE con <15 min ⇒ dato del día
+
+
+def oficial_intradia_hoy() -> Optional[Dict[str, Any]]:
+    """Mayorista intradía CON DATO DE HOY, para valuar DLK durante la rueda:
+    {'last', 'source', 'hora'} o None. Preferencia SIOPEL (MAE en vivo; el
+    poller sólo escribe cuando el fetch sale bien → ts fresco ⇒ dato de hoy),
+    fallback DLR/SPOT del store SI su last_ts es de hoy (el snapshot puede
+    venir restaurado de disco con el last de ayer — sin este check, un DLK se
+    valuaría contra un spot viejo). Sólo lecturas de memoria (~µs)."""
+    with _mae_lock:
+        ust = _mae_snap.get("ust")
+        ts = _mae_snap.get("ts") or 0.0
+    if ust and ust.get("last") and (time.time() - ts) < _SIOPEL_FRESCO_SECONDS:
+        return {"last": float(ust["last"]), "source": "SIOPEL", "hora": ust.get("hora")}
+    snap = marketdata_store.get_store().get(SPOT_SYMBOL)
+    if snap is not None and snap.last and snap.last > 0 and snap.last_ts:
+        from zoneinfo import ZoneInfo
+
+        from backend.services.historico_writer import _fecha_dato
+        hoy = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date()
+        if _fecha_dato(snap.last_ts) == hoy:
+            return {"last": float(snap.last), "source": "DLR/SPOT", "hora": None}
+    return None
 
 
 def a3500_official() -> Dict[str, Any]:

@@ -137,6 +137,14 @@ class Settings(BaseSettings):
     feed_watchdog: bool = True
     feed_watchdog_min: int = 5
 
+    # ── Valuación DLK intradía ────────────────────────────────────────────
+    # Durante la rueda, el A3500 publicado es el de AYER y el mercado valúa
+    # los dólar-linked contra el mayorista del día (SIOPEL / DLR-SPOT). Con
+    # esto prendido, los DLK sin TC custom usan el intradía de HOY hasta que
+    # el BCRA publica el A3500 del día (ahí manda la serie). DLK_FX_INTRADIA=0
+    # vuelve al comportamiento anterior (siempre serie).
+    dlk_fx_intradia: bool = True
+
     # ── Horarios de mercado (relojes de la topbar + rueda del watchdog) ───
     # Formato "HH:MM-HH:MM" en hora local de cada plaza. Override por env
     # (MKT_HORARIO_ARG / MKT_HORARIO_NY) si BYMA/NYSE cambian el horario.
