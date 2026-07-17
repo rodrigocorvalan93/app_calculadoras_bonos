@@ -467,7 +467,11 @@ def create_app() -> FastAPI:
     # (kill-switch del desk) son operaciones de mesa, no de un usuario cualquiera
     # con la pestaña Órdenes: se restringen a superuser además del gating por tab.
     _SUPERUSER_ONLY = ("/admin", "/conexion", "/ordenes/live", "/ordenes/kill",
-                       "/historicos/guardar-base", "/alertas", "/cafci/fondos")
+                       "/historicos/guardar-base", "/alertas")
+    # Paths gateados por FEATURE (administrable desde /admin, a diferencia de
+    # _SUPERUSER_ONLY que es fijo): superuser siempre pasa; premium/básico
+    # sólo si el superuser les tildó la feature.
+    _FEATURE_PATHS = (("/cafci/fondos", "cafci_fondos"),)
 
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
@@ -491,6 +495,7 @@ def create_app() -> FastAPI:
         request.state.nav_tabs = []
         request.state.nav_active = None
         request.state.is_superuser = False    # gatea widgets SU de la topbar (🔔)
+        request.state.features = frozenset()  # features del rol (paneles opcionales)
 
         path = request.url.path
         if not settings.auth_enabled or _is_public(path):
@@ -499,6 +504,7 @@ def create_app() -> FastAPI:
                 request.state.nav_tabs = auth_svc.nav_for("superuser")
                 request.state.nav_active = auth_svc.active_tab(path)
                 request.state.is_superuser = True
+                request.state.features = auth_svc.features_for("superuser")
             return await call_next(request)
 
         username = request.session.get("user")
@@ -510,9 +516,14 @@ def create_app() -> FastAPI:
         request.state.nav_tabs = auth_svc.nav_for(role)
         request.state.nav_active = auth_svc.active_tab(path)
         request.state.is_superuser = (role == "superuser")
+        request.state.features = auth_svc.features_for(role)
 
         if any(path == p or path.startswith(p + "/") for p in _SUPERUSER_ONLY) and role != "superuser":
             return HTMLResponse("<h1>403</h1><p>Sección reservada al superuser.</p>", status_code=403)
+        for p, feat in _FEATURE_PATHS:
+            if (path == p or path.startswith(p + "/")) and feat not in request.state.features:
+                return HTMLResponse("<h1>403</h1><p>Panel no habilitado para tu rol.</p>",
+                                    status_code=403)
         if not auth_svc.can_access_path(role, path):
             return HTMLResponse(
                 "<h1>403</h1><p>No tenés acceso a esta sección. "

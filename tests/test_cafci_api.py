@@ -126,7 +126,9 @@ async def test_panel_sin_token_vacio() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fondos_solo_superuser(tmp_path, monkeypatch) -> None:
+async def test_feature_por_rol_ciclo_completo(tmp_path, monkeypatch) -> None:
+    """Default: sólo superuser. El superuser puede HABILITARLA a premium desde
+    el box de config (/admin/features) y volver a sacarla — sin tocar código."""
     monkeypatch.setattr(settings, "auth_enabled", True)
     monkeypatch.setattr(settings, "app_users_path", str(tmp_path / "store.json"))
     auth.refresh()
@@ -134,12 +136,32 @@ async def test_fondos_solo_superuser(tmp_path, monkeypatch) -> None:
     async with _client() as su:
         await su.post("/login", data={"username": "rodricor93", "password": "Rc_874562", "next": "/yas"})
         await su.post("/admin/users", data={"username": "prem", "password": "clave123", "role": "premium"})
+        # superuser: siempre panel + div, y el box muestra el checkbox
         assert (await su.get("/cafci/fondos")).status_code == 200
         assert 'id="cafci-fondos"' in (await su.get("/cafci")).text
+        assert "feat_premium_cafci_fondos" in (await su.get("/admin")).text
     async with _client() as ac:
         await ac.post("/login", data={"username": "prem", "password": "clave123", "next": "/yas"})
-        assert (await ac.get("/cafci/fondos")).status_code == 403       # endpoint gateado
+        # default restrictivo: 403 + sin div
+        assert (await ac.get("/cafci/fondos")).status_code == 403
         page = await ac.get("/cafci")
-        assert page.status_code == 200                                  # la pestaña sigue global
-        assert 'id="cafci-fondos"' not in page.text                     # sin div lazy
+        assert page.status_code == 200 and 'id="cafci-fondos"' not in page.text
+    # el superuser la tilda para premium
+    async with _client() as su:
+        await su.post("/login", data={"username": "rodricor93", "password": "Rc_874562", "next": "/yas"})
+        r = await su.post("/admin/features", data={"feat_premium_cafci_fondos": "on"})
+        assert r.status_code == 200 and "actualizadas" in r.text
+    assert auth.can_feature("premium", "cafci_fondos")
+    assert not auth.can_feature("basico", "cafci_fondos")
+    async with _client() as ac:
+        await ac.post("/login", data={"username": "prem", "password": "clave123", "next": "/yas"})
+        assert (await ac.get("/cafci/fondos")).status_code == 200        # ahora pasa
+        assert 'id="cafci-fondos"' in (await ac.get("/cafci")).text      # y ve el div
+    # la destilda → vuelve el 403
+    async with _client() as su:
+        await su.post("/login", data={"username": "rodricor93", "password": "Rc_874562", "next": "/yas"})
+        await su.post("/admin/features", data={})
+    async with _client() as ac:
+        await ac.post("/login", data={"username": "prem", "password": "clave123", "next": "/yas"})
+        assert (await ac.get("/cafci/fondos")).status_code == 403
     auth.refresh()

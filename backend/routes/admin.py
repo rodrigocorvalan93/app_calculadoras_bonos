@@ -28,10 +28,13 @@ def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = Non
     # tildaran, el middleware las corta con 403 — sería un link muerto.
     tabs = [{"key": k, "label": lbl} for k, lbl, _ in auth.TABS
             if k not in auth._SUPERUSER_ONLY_TABS]
+    rf = auth.role_features()
     return request.app.state.templates.TemplateResponse(
         request, "admin.html",
         {"users": auth.list_users(), "roles": auth.ROLES, "role_labels": auth.ROLE_LABELS,
          "tabs": tabs, "role_tabs": {r: set(rt.get(r, [])) for r in ("premium", "basico")},
+         "features": [{"key": k, "label": lbl} for k, lbl in auth.FEATURES],
+         "role_features": {r: set(rf.get(r, [])) for r in ("premium", "basico")},
          "msg": msg, "error": error},
     )
 
@@ -105,5 +108,22 @@ async def set_tabs(request: Request) -> HTMLResponse:
             keys = [k[len(prefix):] for k in form.keys() if k.startswith(prefix)]
             auth.set_role_tabs(role, keys)
         return _ctx(request, msg="Permisos de pestañas actualizados.")
+    except auth.AuthError as exc:
+        return _ctx(request, error=str(exc))
+
+
+@router.post("/features", response_class=HTMLResponse)
+async def set_features(request: Request) -> HTMLResponse:
+    """Features (paneles opcionales) por rol — checkboxes `feat_<role>_<key>`,
+    mismo esquema que /admin/tabs. El superuser las tiene todas siempre."""
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    form = await request.form()
+    try:
+        for role in ("premium", "basico"):
+            prefix = f"feat_{role}_"
+            keys = [k[len(prefix):] for k in form.keys() if k.startswith(prefix)]
+            auth.set_role_features(role, keys)
+        return _ctx(request, msg="Features por rol actualizadas.")
     except auth.AuthError as exc:
         return _ctx(request, error=str(exc))
