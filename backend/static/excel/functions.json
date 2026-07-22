@@ -1,0 +1,72 @@
+{
+  "functions": [
+    {
+      "id": "QUOTE",
+      "name": "QUOTE",
+      "description": "Dato de mercado en vivo de una especie (BYMA o MAE). Campos: last, bid, ask, bid_size, ask_size, close, close_date, var, vol, nominal, trades, vwap, open, high, low, last_ts.",
+      "result": { "type": "any" },
+      "parameters": [
+        { "name": "especie", "type": "string", "description": "Ticker (GD30, AL30D, S31L6...)" },
+        { "name": "campo", "type": "string", "description": "last (default), bid, ask, close, var, vol...", "optional": true },
+        { "name": "plazo", "type": "string", "description": "24hs (default) | CI. 48hs se mapea a 24hs.", "optional": true },
+        { "name": "mercado", "type": "string", "description": "byma (default) | mae", "optional": true }
+      ],
+      "options": { "stream": true, "cancelable": true }
+    },
+    {
+      "id": "FX",
+      "name": "FX",
+      "description": "Dólares de referencia en vivo: mep, ccl, canje, mep_ci, ccl_ci, mayorista, a3500.",
+      "result": { "type": "any" },
+      "parameters": [
+        { "name": "tipo", "type": "string", "description": "mep | ccl | canje | mayorista | a3500 | mep_ci | ccl_ci" }
+      ],
+      "options": { "stream": true, "cancelable": true }
+    },
+    {
+      "id": "ROFEX",
+      "name": "ROFEX",
+      "description": "Futuro de dólar DLR en vivo. Campos: last, bid, ask, close, var, tna, tem, td, dias, vto, vol.",
+      "result": { "type": "any" },
+      "parameters": [
+        { "name": "contrato", "type": "any", "description": "DLR/AGO26M, 'Ago-26' o posición 1..14" },
+        { "name": "campo", "type": "string", "description": "last (default), tna, tem, bid, ask...", "optional": true },
+        { "name": "canal", "type": "string", "description": "may (default, mayorista) | min (minorista)", "optional": true }
+      ],
+      "options": { "stream": true, "cancelable": true }
+    },
+    {
+      "id": "CAUCION",
+      "name": "CAUCION",
+      "description": "Caución BYMA por plazo, en vivo. Campos: tasa, bid, ask, close, var, vol.",
+      "result": { "type": "any" },
+      "parameters": [
+        { "name": "dias", "type": "number", "description": "Plazo en días (1, 7, 14, 28...)" },
+        { "name": "campo", "type": "string", "description": "tasa (default), bid, ask, close, var, vol", "optional": true },
+        { "name": "moneda", "type": "string", "description": "ARS (default) | USD", "optional": true }
+      ],
+      "options": { "stream": true, "cancelable": true }
+    },
+    {
+      "id": "TABLA",
+      "name": "TABLA",
+      "description": "Tabla completa en vivo (spill): quotes, futuros, cauciones, fx o mae.",
+      "result": { "type": "any", "dimensionality": "matrix" },
+      "parameters": [
+        { "name": "panel", "type": "string", "description": "quotes | futuros | cauciones | fx | mae" },
+        { "name": "opcion", "type": "string", "description": "quotes: plazo (24hs/CI) · futuros: canal (may/min) · cauciones: moneda (ARS/USD)", "optional": true }
+      ],
+      "options": { "stream": true, "cancelable": true }
+    },
+    {
+      "id": "HIST",
+      "name": "HIST",
+      "description": "Serie histórica macro (spill): a3500, badlar, tamar, cer, uva. Reemplaza RHistory.",
+      "result": { "type": "any", "dimensionality": "matrix" },
+      "parameters": [
+        { "name": "serie", "type": "string", "description": "a3500 | badlar | tamar | cer | uva" },
+        { "name": "dias", "type": "number", "description": "Últimos N días (opcional; default toda la serie)", "optional": true }
+      ]
+    }
+  ]
+}

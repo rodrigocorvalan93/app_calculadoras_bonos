@@ -100,6 +100,33 @@ async def delete_user(request: Request, username: str = Form(...)) -> HTMLRespon
         return _ctx(request, error=str(exc))
 
 
+@router.post("/users/excel", response_class=HTMLResponse)
+async def set_excel(request: Request, username: str = Form(...), enabled: str = Form("0")) -> HTMLResponse:
+    """Habilita/corta el acceso del add-in de Excel para un usuario (token por
+    usuario; cortar invalida el token al instante sin borrarlo)."""
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    try:
+        on = enabled == "1"
+        auth.set_excel_access(username, on)
+        verbo = "habilitado" if on else "cortado"
+        return _ctx(request, msg=f"Acceso Excel {verbo} para '{username.strip().lower()}'.")
+    except auth.AuthError as exc:
+        return _ctx(request, error=str(exc))
+
+
+@router.post("/users/excel/regen", response_class=HTMLResponse)
+async def regen_excel(request: Request, username: str = Form(...)) -> HTMLResponse:
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    try:
+        auth.regen_excel_token(username)
+        return _ctx(request, msg=f"Token de Excel de '{username.strip().lower()}' regenerado "
+                                 "(el anterior dejó de valer).")
+    except auth.AuthError as exc:
+        return _ctx(request, error=str(exc))
+
+
 @router.post("/tabs", response_class=HTMLResponse)
 async def set_tabs(request: Request) -> HTMLResponse:
     """Guarda las pestañas visibles por rol. El form manda checkboxes

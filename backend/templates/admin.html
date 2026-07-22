@@ -38,7 +38,7 @@
       <div class="card-body" style="padding:0">
         <table class="cashflows admin-users">
           <thead><tr><th style="text-align:left">Usuario</th><th style="text-align:left">Email</th>
-            <th>Categoría</th><th>Contraseña</th><th></th></tr></thead>
+            <th>Categoría</th><th>Contraseña</th><th>Excel</th><th></th></tr></thead>
           <tbody>
             {% for u in users %}
             <tr>
@@ -58,6 +58,28 @@
                   <input type="password" name="password" placeholder="nueva" minlength="6" required style="width:90px" autocomplete="new-password">
                   <button type="submit" class="btn-mini">↻</button>
                 </form>
+              </td>
+              <td style="white-space:nowrap">
+                {% if u.excel_enabled %}
+                <input readonly value="{{ u.excel_token }}" style="width:130px" title="Token del add-in — click = copiar"
+                       onclick="this.select();navigator.clipboard&&navigator.clipboard.writeText(this.value)">
+                <form method="post" action="/admin/users/excel/regen" style="display:inline"
+                      onsubmit="return confirm('¿Regenerar el token de {{ u.username }}? El anterior deja de valer.')">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <button type="submit" class="btn-mini" title="Regenerar token">⟳</button>
+                </form>
+                <form method="post" action="/admin/users/excel" style="display:inline">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <input type="hidden" name="enabled" value="0">
+                  <button type="submit" class="btn-mini btn-danger" title="Cortar acceso Excel">⏻</button>
+                </form>
+                {% else %}
+                <form method="post" action="/admin/users/excel" style="display:inline">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <input type="hidden" name="enabled" value="1">
+                  <button type="submit" class="btn-mini" title="Generar token y habilitar el add-in de Excel">Habilitar</button>
+                </form>
+                {% endif %}
               </td>
               <td>
                 <form method="post" action="/admin/users/delete" onsubmit="return confirm('¿Borrar {{ u.username }}?')">
