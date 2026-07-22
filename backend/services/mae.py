@@ -222,6 +222,8 @@ class _Poller:
                 pass
 
     async def start(self) -> None:
+        if self._task and not self._task.done():
+            return                               # ya corriendo (start doble)
         if not enabled():
             logger.info("[mae] MAE_API_KEY ausente; renta fija/cauciones/repo deshabilitado")
             return

@@ -10,6 +10,7 @@ the same templates as the legacy app.
 """
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from dataclasses import asdict, dataclass, field, fields
@@ -227,9 +228,15 @@ class MarketDataStore:
     # ── persistencia entre reinicios (ver store_persist) ────────────────
     def to_persist(self) -> Dict[str, Dict[str, Any]]:
         """Estado serializable de todos los snapshots (sin vwap, que es
-        derivado). Para volcar a disco y reponer al próximo boot."""
+        derivado). Para volcar a disco y reponer al próximo boot.
+
+        El lock se sostiene sólo para la copia SHALLOW (~µs): el asdict
+        recursivo de ~1000 dataclasses corre fuera — antes retenía el lock
+        global del store varios ms cada 5 min, frenando los ticks del WS y
+        los store.get()/seq() del hot path en esa ventana."""
         with self._lock:
-            return {sym: asdict(snap) for sym, snap in self._data.items()}
+            items = [(sym, copy.copy(snap)) for sym, snap in self._data.items()]
+        return {sym: asdict(snap) for sym, snap in items}
 
     def restore(self, symbols: Dict[str, Any]) -> int:
         """Repone snapshots persistidos SIN bumpear la secuencia: no son

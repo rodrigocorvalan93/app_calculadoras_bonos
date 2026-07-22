@@ -19,7 +19,7 @@ import numpy as np
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.locale_ar import parse_ar_num
+from backend.locale_ar import hoy_ba, parse_ar_num
 from backend.routes.curves import _rows_for, _row_pool
 from backend.services import bond_universe, curves, total_return as tr_svc
 
@@ -35,7 +35,7 @@ def _num(s: Any) -> Optional[float]:
 
 
 def _default_terminal() -> str:
-    return (date.today() + timedelta(days=120)).strftime("%d/%m/%Y")
+    return (hoy_ba() + timedelta(days=120)).strftime("%d/%m/%Y")
 
 
 async def _nss_defaults(curve: str, plazo: str) -> Optional[Dict[str, Any]]:

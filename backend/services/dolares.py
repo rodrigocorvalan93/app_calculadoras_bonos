@@ -482,6 +482,8 @@ class _MaePoller:
                 pass
 
     async def start(self) -> None:
+        if self._task and not self._task.done():
+            return                               # ya corriendo (start doble)
         if not _mae_enabled():
             logger.info("[dolares] MAE_API_KEY ausente; SIOPEL deshabilitado (uso A3500)")
             return

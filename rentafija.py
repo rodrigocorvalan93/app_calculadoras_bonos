@@ -13,6 +13,18 @@ from utils import *
 
 warnings.filterwarnings("error", category=RuntimeWarning)
 
+from zoneinfo import ZoneInfo
+
+_TZ_BA = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def hoy_ar():
+    """Fecha de HOY en Buenos Aires. `date.today()` usa el reloj del server:
+    corriendo en UTC, a las 21:00 BA ya devuelve "mañana" y el settlement
+    default salta un día hábil de más (sesgo de carry/TIR de un día en letras
+    cortas para todo uso vespertino). Todo lo fecha-sensible usa esto."""
+    return datetime.now(_TZ_BA).date()
+
 # Lazy inputs: evita llamar indices.main() (6+ HTTP requests) al importar el módulo.
 # Se inicializa en el primer acceso a inputs[key].
 class _LazyInputs(dict):
@@ -54,10 +66,12 @@ class _LazyInputs(dict):
         ve corrupción (a lo sumo una mezcla transitoria viejo/nuevo, aceptable en
         índices que cambian lento). Devuelve True si trajo datos.
 
-        Limitación conocida: los cupones proyectados de floaters (TAMAR/BADLAR)
-        se fijan en Bono.__init__ al importar especies y NO se reconstruyen acá;
-        el ajuste de capital CER/UVA/A3500, que sí se lee dinámico de inputs, se
-        actualiza. Debe correr en un thread (indices.main hace HTTP bloqueante)."""
+        Los cupones proyectados de floaters (TAMAR/BADLAR) se fijan en
+        Bono.__init__ y NO se reconstruyen acá: el caller (warmup del backend)
+        debe invocar `Bono.recalcula_cupon_variable()` sobre cada singleton
+        después de un refresh exitoso. El ajuste de capital CER/UVA/A3500 sí se
+        lee dinámico de inputs y se actualiza solo. Debe correr en un thread
+        (indices.main hace HTTP bloqueante)."""
         try:
             data = indices.main()
         except Exception:  # noqa: BLE001
@@ -333,6 +347,44 @@ class Bono:
             cupon_aplicable = ((1 + tamar_tem_100 / 100) ** (dca * 12)) - 1
             self.intereses = cupon_aplicable * vr
 
+    def recalcula_cupon_variable(self):
+        """Recomputa `self.intereses` de un floater desde `inputs` FRESCO.
+
+        El cupón de VARIABLE / VARIABLE_CAP se congela en __init__ con la
+        proyección TAMAR/BADLAR vigente al importar `especies`; `inputs.refresh()`
+        actualiza las series pero NO este atributo, así que un server de varios
+        días seguía priceando floaters con la proyección del boot. El backend
+        llama esto sobre cada singleton tras cada refresh de índices (bajo el
+        lock per-code de pricing). Réplica exacta de las ramas de __init__
+        (mismo orden de matching, mismo fallback BADLAR del `else`). No-op para
+        FIJA / step-up."""
+        if self.step_up or self.tipo_tasa_interes not in ("VARIABLE", "VARIABLE_CAP"):
+            return
+        fechas = self.fechas_devengo_intereses_habil
+        dca = self.dias_entre_cupones_anual
+        vr = self.valores_residuales
+        es_tamar_cap = self.tipo_tasa_interes == "VARIABLE_CAP" and self.index == "TAMAR"
+        serie, col = (('tamar_proyectado', 'TAMAR')
+                      if self.index == "TAMAR" else ('badlar_proyectado', 'BADLAR'))
+        index_premium = []
+        tamar_tem_100 = 0.0
+        for i in range(len(fechas) - 1):
+            inicio, fin = fechas[i], fechas[i + 1]
+            s = inputs[serie]
+            promedio = s[(s.index >= inicio) & (s.index < fin)][col].mean()
+            if es_tamar_cap:
+                tamar_tem_100 = 100 * ((((1 + (((promedio + self.cupon_spread) / 100) / (365 / 32))) ** (365 / 32)) ** (1 / 12)) - 1)
+                index_premium.append(tamar_tem_100)
+            else:
+                index_premium.append(promedio)
+        if es_tamar_cap:
+            self.tamar_tem = index_premium
+            cupon_aplicable = ((1 + tamar_tem_100 / 100) ** (dca * 12)) - 1
+            self.intereses = cupon_aplicable * vr
+        else:
+            cupon_aplicable = np.array([tv + self.cupon_spread for tv in index_premium])
+            self.intereses = dca * cupon_aplicable / 100 * vr
+
     def generate_cashflows(self, settlement_date=None):
         '''
         Calcula y genera los flujos de caja para un instrumento financiero, considerando
@@ -360,7 +412,7 @@ class Bono:
         los flujos de caja filtrados desde la fecha de liquidación.
         '''
         if settlement_date is None:
-            settlement_date = n_dias_laborales(date.today(), self.plazo_habitual_liquidacion)
+            settlement_date = n_dias_laborales(hoy_ar(), self.plazo_habitual_liquidacion)
         else:
             settlement_date = datetime.strptime(settlement_date, '%d/%m/%Y').date()
 
@@ -931,7 +983,7 @@ class Bono:
         """
         # Fx aplicable ad hoc para instrumentos dlk actualiza ultimo fx a3500
         if tipo_de_cambio_aplicable is not None:
-            fecha_especifica_override = date.today().isoformat()  # Formato 'YYYY-MM-DD'
+            fecha_especifica_override = hoy_ar().isoformat()  # Formato 'YYYY-MM-DD' (fecha BA)
             a3500_override = tipo_de_cambio_aplicable  # USBMEPSIOPEL0MAY Valor que desea establecer
             inputs['a3500'].loc[fecha_especifica_override, 'tca3500'] = a3500_override
 
@@ -1027,7 +1079,7 @@ class Bono:
         """
         #
         if tipo_de_cambio_aplicable is not None:
-            fecha_especifica_override = date.today().isoformat()  # Formato 'YYYY-MM-DD'
+            fecha_especifica_override = hoy_ar().isoformat()  # Formato 'YYYY-MM-DD' (fecha BA)
             a3500_override = tipo_de_cambio_aplicable  # USBMEPSIOPEL0MAY Valor que desea establecer
             inputs['a3500'].loc[fecha_especifica_override, 'tca3500'] = a3500_override
 
@@ -1112,7 +1164,7 @@ class Bono:
         """
         #
         if tipo_de_cambio_aplicable is not None:
-            fecha_especifica_override = date.today().isoformat()  # Formato 'YYYY-MM-DD'
+            fecha_especifica_override = hoy_ar().isoformat()  # Formato 'YYYY-MM-DD' (fecha BA)
             a3500_override = tipo_de_cambio_aplicable  # USBMEPSIOPEL0MAY Valor que desea establecer
             inputs['a3500'].loc[fecha_especifica_override, 'tca3500'] = a3500_override
 
@@ -1323,14 +1375,14 @@ class Bono:
 
 
         ticket = {
-            'Fecha': date.today().strftime("%d/%m/%Y"),
+            'Fecha': hoy_ar().strftime("%d/%m/%Y"),
             'Fondo': fondo,
             'CNV': obtener_cnv(fondo),
             'Operacion': operacion,
             'Contraparte': contraparte,
             'Codigo': self.codigo,
             'VN': "{:,.0f}".format(int(nominales_ticket)),
-            'Plazo': (self.fecha_settlement - datetime.today().date()).days,
+            'Plazo': (self.fecha_settlement - hoy_ar()).days,
             'Moneda ': self.moneda,
             'Precio Full': self.precio,
             'Producido': "{:,.2f}".format(nominales_ticket * self.precio).replace(",", "X").replace(".", ",").replace("X", "."),
@@ -1385,7 +1437,7 @@ class Bono:
         - tabla comparando bonos
         """
         if settlement_date is None:
-            settlement_date_dt = n_dias_laborales(date.today(), bono2.plazo_habitual_liquidacion)
+            settlement_date_dt = n_dias_laborales(hoy_ar(), bono2.plazo_habitual_liquidacion)
         else:
             settlement_date_dt = datetime.strptime(settlement_date, '%d/%m/%Y').date()
 

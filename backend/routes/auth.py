@@ -81,6 +81,14 @@ async def login_submit(request: Request, username: str = Form(...),
         request.session["user"] = username.strip().lower()
         return RedirectResponse(url=_safe_next(next), status_code=303)
     _login_fails[ip].append(time.time())
+    if len(_login_fails) > 256:
+        # Sweep global: sin esto, cada IP distinta que falla una vez deja su
+        # entrada para siempre (la poda por-key de _login_throttled sólo corre
+        # si ESA ip vuelve a intentar) → crecimiento sin tope ante scans.
+        now = time.time()
+        for k in [k for k, ts in _login_fails.items()
+                  if not ts or now - ts[-1] >= _LOGIN_WINDOW]:
+            _login_fails.pop(k, None)
     return _render(request, "login.html", status=401, next=_safe_next(next),
                    error="Usuario o contraseña incorrectos.",
                    no_superuser=not auth.has_any_superuser())
@@ -140,7 +148,11 @@ async def reset_submit(request: Request, token: str = Form(...),
         return _render(request, "reset.html", token=token, valid=True, done=False,
                        username=user, error="Las contraseñas no coinciden.")
     try:
-        auth.set_password(user, password)
+        # PBKDF2 (200k iteraciones, ~50 ms GIL-bound) + fsync del store: al
+        # threadpool, igual que el login — en el event loop congelaba los
+        # paneles live de todos mientras se re-hasheaba.
+        import asyncio
+        await asyncio.get_running_loop().run_in_executor(None, auth.set_password, user, password)
     except auth.AuthError as exc:
         return _render(request, "reset.html", token=token, valid=True, done=False,
                        username=user, error=str(exc))

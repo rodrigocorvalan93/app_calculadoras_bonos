@@ -7,6 +7,7 @@ mensaje de resultado (sin htmx: es un panel de baja frecuencia).
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Form, Request
@@ -52,7 +53,9 @@ async def create_user(request: Request, username: str = Form(...), password: str
     if not _guard(request):
         return HTMLResponse("<h1>403</h1>", status_code=403)
     try:
-        auth.create_user(username, password, role, email)
+        # PBKDF2 (~50 ms GIL-bound) + fsync → threadpool, como el login.
+        await asyncio.get_running_loop().run_in_executor(
+            None, auth.create_user, username, password, role, email)
         return _ctx(request, msg=f"Usuario '{username.strip().lower()}' creado.")
     except auth.AuthError as exc:
         return _ctx(request, error=str(exc))
@@ -63,7 +66,9 @@ async def reset_password(request: Request, username: str = Form(...), password: 
     if not _guard(request):
         return HTMLResponse("<h1>403</h1>", status_code=403)
     try:
-        auth.set_password(username, password)
+        # PBKDF2 (~50 ms GIL-bound) + fsync → threadpool, como el login.
+        await asyncio.get_running_loop().run_in_executor(
+            None, auth.set_password, username, password)
         return _ctx(request, msg=f"Contraseña de '{username}' actualizada.")
     except auth.AuthError as exc:
         return _ctx(request, error=str(exc))

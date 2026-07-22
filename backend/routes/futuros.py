@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.locale_ar import parse_ar_num
+from backend.locale_ar import hoy_ba, parse_ar_num
 from backend.services import bond_universe, futuros as fut, marketdata_store
 
 router = APIRouter(tags=["futuros"])
@@ -117,7 +117,7 @@ async def futuros_book(request: Request, code: str = "", spot_override: str = ""
     snap = store.get(code)
     sp = _parse_num(spot_override) or fut.spot()
     vto = fut._parse_vto(code)
-    dias = (vto - date.today()).days if vto else None
+    dias = (vto - hoy_ba()).days if vto else None
 
     def impl(px):
         return fut._impl(px, sp, dias)[1]   # TNA implícita

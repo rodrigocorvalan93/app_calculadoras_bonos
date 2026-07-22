@@ -180,7 +180,7 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
     # Denominador del peso por tenencia: PN, si no Σ Valor invertido (fallback legacy).
     total_valor = sum(h["valor"] for h in hs if h.get("valor"))
     denom = pn if (pn and pn > 0) else (total_valor if total_valor > 0 else None)
-    settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = None → t+1
+    settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = t+1 (fecha BA)
     rows: List[Dict[str, Any]] = []
     for h in hs:
         code = h.get("cod_delta")
