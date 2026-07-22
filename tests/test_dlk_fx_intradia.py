@@ -48,6 +48,32 @@ def test_intradia_spot_de_ayer_no_vale(monkeypatch) -> None:
     assert dolares.oficial_intradia_hoy() is None
 
 
+def test_official_fx_fecha_del_siopel_no_de_la_serie(monkeypatch) -> None:
+    """Regresión del riel: con SIOPEL operando HOY, la fecha mostrada era la
+    de la serie A3500 (AYER). Cada fuente pone SU fecha."""
+    from datetime import date, timedelta
+    ayer = (date.today() - timedelta(days=1)).isoformat()
+    monkeypatch.setattr(dolares, "a3500_official",
+                        lambda: {"source": "A3500", "last": 1477.7, "close": 1474.7,
+                                 "var_pct": 0.002, "date": ayer,
+                                 "bid": None, "offer": None, "volume": None})
+    # SIOPEL fresco (fetch de hoy) → date = HOY
+    monkeypatch.setitem(dolares._mae_snap, "ust", {"last": 1478.5, "hora": "12:30"})
+    monkeypatch.setitem(dolares._mae_snap, "ts", time.time())
+    of = dolares.official_fx()
+    assert of["source"] == "SIOPEL" and of["date"] == date.today().isoformat()
+    # sin SIOPEL → DLR/SPOT con last_ts de hoy → date = HOY
+    monkeypatch.setitem(dolares._mae_snap, "ust", None)
+    mds.get_store().update_from_md(dolares.SPOT_SYMBOL,
+                                   {"LA": {"price": 1479.0, "date": str(int(time.time() * 1000))}})
+    of = dolares.official_fx()
+    assert of["source"] == "DLR/SPOT" and of["date"] == date.today().isoformat()
+    # sólo serie → conserva la fecha de la serie (AYER), como corresponde
+    monkeypatch.setattr(dolares, "_spot_official", lambda: None)
+    of = dolares.official_fx()
+    assert of["source"] == "A3500" and of["date"] == ayer
+
+
 # ── pricing.a3500_aplicable — la regla de arbitraje ─────────────────────────
 def _con_serie(monkeypatch, fecha, valor=1474.7):
     monkeypatch.setattr(pricing, "_last_series_value",
