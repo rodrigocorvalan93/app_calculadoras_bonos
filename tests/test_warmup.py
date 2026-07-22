@@ -60,12 +60,15 @@ async def test_warm_curves_once_fills_metrics_cache() -> None:
 
     # The exact key the curves route would look up is now cached: a
     # get_or_compute with a sentinel factory must NOT call the factory.
-    # La key incluye el fingerprint del índice (DLK/CER/UVA — para nominales es 0)
-    # y el día ordinal (invalidación por rollover de fecha).
-    from datetime import date
+    # La key incluye el settle EXPLÍCITO de la pestaña (24hs = t+1, igual que
+    # pasa la ruta de curvas — el warmup debe calentar la MISMA key), el
+    # fingerprint del índice (DLK/CER/UVA — para nominales es 0) y el día
+    # ordinal BA (invalidación por rollover de fecha).
+    from backend.locale_ar import hoy_ba
     sentinel = object()
-    key = (code, round(price, 2), "", pricing._index_fingerprint(pricing._bond_index_kind(code)),
-           date.today().toordinal())
+    key = (code, round(price, 2), pricing.settlement_date_str("24hs") or "",
+           pricing._index_fingerprint(pricing._bond_index_kind(code)),
+           hoy_ba().toordinal())
     cached = pricing._curve_metrics_cache.get_or_compute(key, lambda: sentinel)
     assert cached is not sentinel
 

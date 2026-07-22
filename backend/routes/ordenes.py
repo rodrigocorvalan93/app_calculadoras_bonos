@@ -8,6 +8,7 @@ y el blotter leen del store / del audit acotado.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Form, Request
@@ -53,13 +54,20 @@ def _num_px(s: Any) -> Optional[float]:
 def _theo_ref(code: str) -> Optional[float]:
     """Valor técnico del bono como referencia TEÓRICA para la banda fat-finger
     cuando no hay cotización de mercado. Es yield-independiente (no depende del
-    precio): sólo sirve para descartar errores de orden de magnitud."""
+    precio): sólo sirve para descartar errores de orden de magnitud.
+    Sync GIL-bound (~18-100 ms un CER pesado): llamar SIEMPRE vía
+    `await _theo_ref_async(code)` desde los handlers — en el event loop
+    congelaba /market/seq y los paneles live de todos."""
     try:
         m = pricing.compute_metrics(code, "tir", 10.0)
         vt = (m or {}).get("valor_tecnico")
         return float(vt) if vt is not None and vt == vt and vt > 0 else None
     except Exception:  # noqa: BLE001
         return None
+
+
+async def _theo_ref_async(code: str) -> Optional[float]:
+    return await asyncio.get_running_loop().run_in_executor(None, _theo_ref, code)
 
 
 def _base_ctx() -> Dict[str, Any]:
@@ -165,8 +173,9 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
                        error="Cantidad/precio inválidos.", **_base_ctx())
     moneda = _moneda(code)
     ref = _last_ref(code, plazo)
+    theo = await _theo_ref_async(code)          # GIL-bound → threadpool
     motivo = oms.validate(code, side, fqty, fpx, account, ref, moneda, ordtype,
-                          theo_ref=_theo_ref(code), confirmed=(confirm_no_ref == "1"))
+                          theo_ref=theo, confirmed=(confirm_no_ref == "1"))
     if motivo:
         oms.audit("rechazada_pretrade", {"code": code, "side": side, "qty": fqty,
                                          "price": fpx, "account": account,
@@ -217,7 +226,7 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
                        error="Precio inválido (Limit).", **_base_ctx())
     moneda = _moneda(code)
     ref = _last_ref(code, plazo)
-    theo = _theo_ref(code)
+    theo = await _theo_ref_async(code)          # GIL-bound → threadpool
     confirmed = (confirm_no_ref == "1")
     est_px = fpx if ordtype != "market" else (ref or theo)
     batch: List[Dict[str, Any]] = []

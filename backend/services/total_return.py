@@ -55,15 +55,17 @@ def settle_str(plazo: str) -> str:
     siguiente_dia_habil_ar(today), que devuelve HOY cuando hoy es hábil → TR y
     Escenario liquidaban a CI (t+0), inconsistente con Curvas/YAS y sobrestimando
     el carry en un día."""
+    from backend.locale_ar import hoy_ba
     from backend.services import pricing
     s = pricing.settlement_date_str(plazo)
     if s:
         return s
+    # Fallback (plazo desconocido): t+1 hábil desde la fecha BA.
     try:
         import rentafija
-        return rentafija.n_dias_laborales(date.today(), 1).strftime("%d/%m/%Y")
+        return rentafija.n_dias_laborales(hoy_ba(), 1).strftime("%d/%m/%Y")
     except Exception:  # noqa: BLE001
-        return date.today().strftime("%d/%m/%Y")
+        return hoy_ba().strftime("%d/%m/%Y")
 
 
 def _nearest_prior(df, target, col) -> Optional[float]:

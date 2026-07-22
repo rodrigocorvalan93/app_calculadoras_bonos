@@ -17,6 +17,7 @@ from calendar import monthrange
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.locale_ar import hoy_ba
 from backend.services import dolares, marketdata_store
 
 _MES = {1: "JAN", 2: "FEB", 3: "MAR", 4: "APR", 5: "MAY", 6: "JUN",
@@ -30,7 +31,7 @@ _MES_ES = {1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
 def symbols(canal: str = "may", n_months: int = _N_MONTHS) -> List[str]:
     """DLR/MMMYY (minorista) o DLR/MMMYYM (mayorista), desde el mes actual."""
     suf = "M" if canal == "may" else ""
-    today = date.today()
+    today = hoy_ba()   # el mes "actual" de la tira es el de BA, no el del server
     y, m = today.year, today.month
     out: List[str] = []
     for _ in range(n_months):
@@ -87,7 +88,7 @@ def rows(canal: str = "may", spot_v: Optional[float] = None) -> List[Dict[str, A
     `spot_v` overridea el spot oficial (para el input de la pestaña)."""
     store = marketdata_store.get_store()
     sp = spot_v if (spot_v and spot_v > 0) else spot()
-    today = date.today()
+    today = hoy_ba()   # días al vto en fecha BA: naive restaba 1 día de más de noche (TNA implícita sesgada)
     out: List[Dict[str, Any]] = []
     for sym in symbols(canal):
         snap = store.get(sym)

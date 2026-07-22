@@ -21,7 +21,7 @@ from fastapi import APIRouter, Body, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.cache import LockedTTLCache
-from backend.locale_ar import parse_ar_num
+from backend.locale_ar import hoy_ba, parse_ar_num
 from backend.routes.curves import _rows_for, _row_pool
 from backend.services import bond_universe, escenario as esc, escenario_prefs, total_return as tr_svc
 
@@ -59,7 +59,7 @@ def _parse_path(s: Any, scale: float = 0.01) -> Optional[tuple]:
 
 
 def _default_terminal() -> str:
-    return (date.today() + timedelta(days=120)).strftime("%d/%m/%Y")
+    return (hoy_ba() + timedelta(days=120)).strftime("%d/%m/%Y")
 
 
 def _parse_d(s: str) -> Optional[date]:
@@ -158,7 +158,7 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
     # lectura de memoria/archivo chico: el render no paga nada.
     prefs = escenario_prefs.load()
     saved = prefs.get("senderos") or {}
-    defaults = escenario_prefs.defaults(_parse_d(settle) or date.today(), n_months,
+    defaults = escenario_prefs.defaults(_parse_d(settle) or hoy_ba(), n_months,
                                         tamar_now, deva_mens)
     senderos = {**defaults, **saved}
     cats_off = prefs.get("cats_off") or []

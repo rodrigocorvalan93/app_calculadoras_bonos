@@ -12,19 +12,21 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import date, datetime
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+
+from backend.locale_ar import hoy_ba
 
 logger = logging.getLogger("backend.bonds")
 
 
 def _is_future_vto(vto: object) -> bool:
-    """True si la fecha de vencimiento (DD/MM/AAAA o ISO) es hoy o futura."""
+    """True si la fecha de vencimiento (DD/MM/AAAA o ISO) es hoy o futura (BA)."""
     if not vto:
         return False
     for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
         try:
-            return datetime.strptime(str(vto), fmt).date() >= date.today()
+            return datetime.strptime(str(vto), fmt).date() >= hoy_ba()
         except ValueError:
             continue
     return False

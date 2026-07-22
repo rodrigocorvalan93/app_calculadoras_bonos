@@ -152,8 +152,10 @@ def _warm_code(code: str, plazo: str) -> bool:
     """Populate the metrics cache for one code at its current live price.
 
     Mirrors the cached path of `routes.curves._row_for_code` exactly so
-    the cache key lines up: same `md_symbol`, same precio de referencia,
-    settle defaulted to None. Returns True if a price was present and warmed.
+    the cache key lines up: same `md_symbol`, same precio de referencia y el
+    MISMO settle explícito de la pestaña (`settlement_date_str(plazo)`) — si
+    acá fuera None y la tabla pasara la fecha, la key no coincidiría y el
+    warmup calentaría entradas que nadie lee. Returns True if warmed.
 
     Clave para curvas anchas y COMBINADAS: la tabla usa `last` si el bono
     operó hoy, y si no **cae a `close`**. Antes sólo calentábamos `last`, así
@@ -172,11 +174,12 @@ def _warm_code(code: str, plazo: str) -> bool:
     else:
         return False
     warmed = False
+    settle = pricing.settlement_date_str(plazo)
     for px in prices:
         if px is None:
             continue
         try:
-            pricing.metrics_for_market_price(code, px)
+            pricing.metrics_for_market_price(code, px, settle)
             warmed = True
         except Exception as exc:  # noqa: BLE001
             logger.debug("[warmup] warm %s @ %s failed: %s", code, px, exc)
@@ -245,7 +248,7 @@ class WarmupDaemon:
         try:
             self._stats["prime_seconds"] = await loop.run_in_executor(_pool, prime_calc_engine)
             self._primed = True
-            self._last_index_day = date.today()   # el prime cargó los índices de HOY
+            self._last_index_day = datetime.now(_A3500_TZ).date()   # el prime cargó los índices de HOY (fecha BA)
         except Exception:  # noqa: BLE001
             logger.exception("[warmup] prime step failed")
 
@@ -297,7 +300,7 @@ class WarmupDaemon:
         price con los índices del boot (drift ~0,05-0,1%/día en los ajustados).
         HTTP bloqueante → al pool. Best-effort: un fallo reintenta al día siguiente
         (o en el próximo ciclo si `refresh` devolvió False)."""
-        today = date.today()
+        today = datetime.now(_A3500_TZ).date()   # rollover por fecha BA, no la del server
         if self._last_index_day is None:      # aún no primó; el prime lo siembra
             return
         if today == self._last_index_day:
@@ -308,9 +311,15 @@ class WarmupDaemon:
             ok = await loop.run_in_executor(_pool, rentafija.inputs.refresh)
             if ok:
                 self._last_index_day = today
-                # Los caches de métricas keyean por día (ver pricing): las TIRs
-                # viejas se recalculan solas con inputs ya fresco.
-                logger.info("[warmup] índices refrescados por rollover de fecha (%s)", today)
+                # Floaters: el cupón se congela en Bono.__init__, el refresh de
+                # inputs NO lo actualiza — recomputarlo acá o las TAMAR/BADLAR
+                # siguen con la proyección del boot. En el pool (hace pandas).
+                nf = await loop.run_in_executor(_pool, pricing.refresh_floater_coupons)
+                # Los caches de métricas keyean por día + fingerprint del índice
+                # (ver pricing): las TIRs viejas se recalculan solas con inputs
+                # ya fresco.
+                logger.info("[warmup] índices refrescados por rollover de fecha (%s); "
+                            "%d cupones floater recomputados", today, nf)
             else:
                 logger.warning("[warmup] refresh de índices sin datos; reintenta en el próximo ciclo")
         except Exception:  # noqa: BLE001

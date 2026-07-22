@@ -46,6 +46,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from backend.locale_ar import hoy_ba
 from . import bond_universe
 
 logger = logging.getLogger("backend.pricing")
@@ -80,6 +81,32 @@ def _bond_obj_copy(code: str):
         return copy.copy(obj)
 
 
+def refresh_floater_coupons() -> int:
+    """Recomputa el cupón de TODOS los floaters (TAMAR/BADLAR) del universo
+    desde `rentafija.inputs` fresco. El cupón se congela en `Bono.__init__` al
+    importar especies; sin esto, tras `inputs.refresh()` un server de varios
+    días seguía priceando floaters con la proyección del boot (ALTA de la
+    auditoría). Muta el SINGLETON bajo el mismo lock per-code que usa
+    `_bond_obj_copy`, así ninguna copia en vuelo se lleva un objeto a medio
+    escribir. Llamar desde un thread (hace pandas), nunca en el event loop.
+    Devuelve cuántos bonos recomputó."""
+    n = 0
+    for code in bond_universe.all_codes():
+        meta = bond_meta(code) or {}
+        if (meta.get("tipo_tasa_interes") or "").upper() not in ("VARIABLE", "VARIABLE_CAP"):
+            continue
+        obj = bond_universe.get(code)
+        if obj is None or not hasattr(obj, "recalcula_cupon_variable"):
+            continue
+        try:
+            with _bond_locks[code]:
+                obj.recalcula_cupon_variable()
+            n += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[pricing] recalcula_cupon_variable(%s) falló: %s", code, exc)
+    return n
+
+
 def _safe_settle(settle: Optional[str]) -> Optional[str]:
     if settle is None:
         return None
@@ -95,11 +122,20 @@ def _safe_settle(settle: Optional[str]) -> Optional[str]:
 
 
 def settlement_date_str(plazo: str) -> Optional[str]:
+    """Fecha de liquidación EXPLÍCITA de la pestaña: CI → hoy hábil, 24hs → t+1
+    hábil (fecha BA). Antes 24hs devolvía None y compute_metrics caía al default
+    de la ficha (`plazo_habitual_liquidacion`): para una ficha con habitual ≠ 1,
+    la TIR de la tabla (y0) y el carry de TR/Escenario (que fuerzan t+1) usaban
+    fechas de liquidación DISTINTAS → descomposición carry/compresión
+    internamente inconsistente. Ahora 24hs es t+1 para todos, igual que opera
+    BYMA. Plazos desconocidos siguen devolviendo None (default de la ficha)."""
     import rentafija
 
-    if str(plazo).upper() == "CI":
-        d = rentafija.n_dias_laborales(date.today(), 0)
-        return d.strftime("%d/%m/%Y")
+    p = str(plazo).upper()
+    if p == "CI":
+        return rentafija.n_dias_laborales(hoy_ba(), 0).strftime("%d/%m/%Y")
+    if p == "24HS":
+        return rentafija.n_dias_laborales(hoy_ba(), 1).strftime("%d/%m/%Y")
     return None
 
 
@@ -164,7 +200,7 @@ def a3500_aplicable() -> Dict[str, Any]:
         # ¿La serie ya tiene el A3500 de HOY? → es el cierre oficial, manda.
         try:
             f = fecha.date() if hasattr(fecha, "date") else fecha
-            if f is not None and f >= date.today():
+            if f is not None and f >= hoy_ba():
                 return out
         except Exception:  # noqa: BLE001
             pass
@@ -508,8 +544,14 @@ def compute_metrics(
         elif mode == "margen":
             idx_name = getattr(obj, "index", None)
             bench_pct = _bench_pct(idx_name)
-            ajuste = bench_pct if np.isfinite(bench_pct) else 0.0
-            tna_target = (ajuste / 100.0) + float(value)
+            if not np.isfinite(bench_pct):
+                # Sin serie del benchmark (BCRA caído / índice desconocido) el
+                # fallback ajuste=0 produciría un precio/TIR plausible pero
+                # errado — mejor un error visible que un número mentiroso.
+                base["error"] = (f"Benchmark {idx_name or '?'} sin datos: "
+                                 "no se puede pricear por margen.")
+                return base
+            tna_target = (bench_pct / 100.0) + float(value)
             obj.generate_cashflows(canonical_settle)
             tir = tirea_from_tna(obj, tna_target, freq_override, base_override)
             obj.calcula_precio(tir, canonical_settle)
@@ -613,9 +655,14 @@ _curve_metrics_cache = LockedTTLCache(maxsize=16384, ttl=3600)
 # cambiar el índice la TIR queda vieja hasta el TTL (20 s). Metemos el valor del
 # índice en la key — leído con un cache corto para que sea barato — así el cambio
 # se refleja en ~2 s sin perder el cacheo cuando el índice está quieto.
-_index_kind: Dict[str, str] = {}                       # code → "a3500"/"cer"/"uva"/"" (estático)
+_index_kind: Dict[str, str] = {}                       # code → "a3500"/"cer"/"uva"/"tamar"/"badlar"/"" (estático)
 _index_val_cache = LockedTTLCache(maxsize=8, ttl=2)    # valor actual del índice (lectura barata)
 _a3500_aplicable_cache = LockedTTLCache(maxsize=2, ttl=2)   # FX aplicable a DLK (cierre vs intradía)
+# Errores transitorios de compute_metrics: cache CORTO y separado. Si fueran al
+# cache grande (TTL 1 h), un fallo puntual sobre un bono no-indexado (fingerprint
+# constante) quedaba "pegado" en guiones hasta el rollover de día; sin cachearlos,
+# un bono roto permanente se recomputaría (~20 ms) en cada render.
+_curve_metrics_err_cache = LockedTTLCache(maxsize=1024, ttl=120)
 _INDEX_COLS = {"a3500": ("a3500", "tca3500"), "cer": ("CER", "CER"), "uva": ("UVA", "UVA")}
 
 
@@ -625,32 +672,57 @@ def _bond_index_kind(code: str) -> str:
         m = bond_meta(code) or {}
         aj = (m.get("ajuste_sobre_capital") or "").upper()
         mon = (m.get("moneda") or "").upper()
+        tipo = (m.get("tipo_tasa_interes") or "").upper()
         if "A3500" in aj or mon == "DLK":
             k = "a3500"
         elif "CER" in aj:
             k = "cer"
         elif "UVA" in aj:
             k = "uva"
+        elif tipo in ("VARIABLE", "VARIABLE_CAP"):
+            # Floaters: la TIR/margen a un precio dado depende del benchmark
+            # vivo (últimas obs. BCRA) y de la proyección del cupón. Sin kind,
+            # el fingerprint era 0.0 y una TAMAR/BADLAR nueva dejaba margen_tna
+            # stale hasta 1 h (TTL) en bonos cuyo precio no se movía.
+            k = "tamar" if (m.get("index") or "").upper() == "TAMAR" else "badlar"
         else:
             k = ""
         _index_kind[code] = k
     return k
 
 
-def _index_fingerprint(kind: str) -> float:
+def _index_fingerprint(kind: str) -> Any:
     if not kind:
         return 0.0
+    if kind == "a3500":
+        # DLK: el fingerprint es el FX que se APLICA (intradía o serie) — si el
+        # SIOPEL tickea, la key del cache de métricas cambia y la TIR se
+        # recalcula con el dólar nuevo. SIN memoización extra acá:
+        # a3500_aplicable() ya cachea 2 s; el doble cache (esto dentro de
+        # _index_val_cache) encadenaba la staleness hasta ~4 s y limpiar un
+        # solo cache no invalidaba (bug destapado por la auditoría).
+        v = a3500_aplicable().get("value")
+        try:
+            return round(float(v), 6) if v == v else 0.0
+        except (TypeError, ValueError):
+            return 0.0
 
-    def _f() -> float:
-        # DLK: el fingerprint es el FX que se APLICA (intradía o serie) — si
-        # el SIOPEL tickea, la key del cache de métricas cambia y la TIR del
-        # DLK se recalcula con el dólar nuevo (antes sólo miraba la serie).
-        if kind == "a3500":
-            v = a3500_aplicable().get("value")
+    def _f() -> Any:
+        if kind in ("tamar", "badlar"):
+            # Huella del floater: benchmark (tail-5 mean, mueve margen_tna) +
+            # último valor de la proyección (mueve el cupón → TIR). Cualquiera
+            # de los dos cambia tras un refresh de índices → key nueva.
+            import rentafija
+
+            col = kind.upper()
+            bench = _bench_pct(col)
             try:
-                return round(float(v), 6) if v == v else 0.0
-            except (TypeError, ValueError):
-                return 0.0
+                proy = rentafija.inputs.get(f"{kind}_proyectado")
+                pv = float(proy[col].iloc[-1]) if proy is not None and len(proy) else 0.0
+            except Exception:  # noqa: BLE001
+                pv = 0.0
+            return (round(bench, 6) if bench == bench else 0.0,
+                    round(pv, 6) if pv == pv else 0.0)
         cols = _INDEX_COLS.get(kind)
         if not cols:
             return 0.0
@@ -686,15 +758,20 @@ def metrics_for_market_price(
         return None
 
     bucket = round(v, 2)
-    # La key incluye el valor del índice (DLK/CER/UVA → un cambio del A3500/CER/UVA
-    # la invalida) y el día ordinal (rollover de fecha con settle=None → recomputa
-    # con el settlement del día nuevo, no el cacheado de ayer).
+    # La key incluye el valor del índice (DLK/CER/UVA/floater → un cambio del
+    # A3500/CER/UVA/benchmark la invalida) y el día ordinal BA (rollover de fecha
+    # con settle=None → recomputa con el settlement del día nuevo, no el de ayer).
     key = (code, bucket, settle or "", _index_fingerprint(_bond_index_kind(code)),
-           date.today().toordinal())
+           hoy_ba().toordinal())
 
-    def _factory() -> Dict[str, Any]:
+    # ¿Falló hace <120 s con esta misma key? → guiones sin recomputar (evita
+    # martillar un calc roto en cada poll) pero SIN pegar el error 1 h/1 día.
+    if _curve_metrics_err_cache.get(key) is not None:
+        return None
+
+    def _factory() -> Optional[Dict[str, Any]]:
         try:
-            return compute_metrics(
+            res = compute_metrics(
                 code=code,
                 mode="precio",
                 value=bucket,
@@ -703,12 +780,15 @@ def metrics_for_market_price(
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("[pricing] metrics_for_market_price(%s, %s) failed: %s", code, bucket, exc)
-            return {"error": str(exc)}
+            res = {"error": str(exc)}
+        if res.get("error"):
+            # Al cache corto de errores; devolver None evita que el cache
+            # grande (TTL 1 h) lo retenga.
+            _curve_metrics_err_cache.get_or_compute(key, lambda: res)
+            return None
+        return res
 
-    res = _curve_metrics_cache.get_or_compute(key, _factory)
-    if res.get("error"):
-        return None
-    return res
+    return _curve_metrics_cache.get_or_compute(key, _factory)
 
 
 def ticket_rows(metrics: Dict[str, Any], nominales: float = 1_000_000.0) -> Dict[str, Any]:

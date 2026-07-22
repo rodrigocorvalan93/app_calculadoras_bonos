@@ -105,7 +105,10 @@ async def conexion_login(
     settings.primary_pass = pwd
     try:
         from backend.main import _initial_symbols     # import diferido (sin ciclo)
-        seed = _initial_symbols()
+        # _initial_symbols lee Excel/CSV del universo (decenas de ms, GIL-bound)
+        # → threadpool para no frenar el event loop con el WS ya vivo.
+        import asyncio
+        seed = await asyncio.get_running_loop().run_in_executor(None, _initial_symbols)
         await ws.start(symbols=seed)
         msg = f"Conectado a {url} — {len(seed)} símbolos suscriptos."
     except Exception as exc:  # noqa: BLE001
