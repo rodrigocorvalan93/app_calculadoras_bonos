@@ -80,6 +80,14 @@ class LockedTTLCache:
             for k in oldest[: over + self._maxsize // 10 + 1]:
                 self._store.pop(k, None)
 
+    def get(self, key: Hashable, default: Any = None) -> Any:
+        """Lectura pura, lock-free (mismo hit path que get_or_compute): valor
+        cacheado y vigente, o `default`. No computa ni toca TTLs."""
+        ent = self._store.get(key)
+        if ent is not None and ent[1] > time.monotonic():
+            return ent[0]
+        return default
+
     def touch(self, key: Hashable) -> bool:
         """Extiende el TTL de una entrada YA presente, SIN recomputar. Para un
         keep-warm gentil (no compite por el GIL recalculando). True si estaba."""

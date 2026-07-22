@@ -350,7 +350,12 @@ class PrimaryWS:
         logger.info("[primary_ws] lote rechazado (%d símbolos); reintentando %d de a uno",
                     len(syms), len(pending))
         try:
-            asyncio.create_task(self._resubscribe_individually(pending))
+            # Guardar la referencia: asyncio sólo tiene weak-refs a las tasks
+            # y un fire-and-forget puede ser recolectado por el GC a mitad de
+            # la re-suscripción — justo el path de recuperación que cubre.
+            t = asyncio.create_task(self._resubscribe_individually(pending))
+            self._resub_task = t
+            t.add_done_callback(lambda _t: setattr(self, "_resub_task", None))
         except RuntimeError:
             pass  # sin loop corriendo
 

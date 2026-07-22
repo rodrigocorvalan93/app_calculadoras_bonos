@@ -158,8 +158,8 @@ def _refresh_vector() -> None:
     hábiles atrás; guarda el primer día con filas usables. Si la API no trae
     campos a la altura del Excel, deja el vector vacío → el arbitraje en
     cafci.py sigue con el Excel (nunca degrada la pestaña)."""
-    from datetime import date as _date
-    d = _date.today()
+    from backend.locale_ar import hoy_ba
+    d = hoy_ba()   # CAFCI publica con fecha BA; naive pediría "mañana" de noche
     for intento in range(6):                     # hoy + 5 hábiles atrás
         payload = _get("vectores/cafci_closing_prices", {"date": d.isoformat()})
         crudas = _rows_de(payload) if payload is not None else []
@@ -304,6 +304,8 @@ class _Poller:
                 pass
 
     async def start(self) -> None:
+        if self._task and not self._task.done():
+            return                               # ya corriendo (start doble)
         if not enabled():
             logger.info("[cafci_api] CAFCI_TOKEN ausente; panel VCP deshabilitado (la pestaña usa el Excel)")
             return

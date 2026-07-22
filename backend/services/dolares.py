@@ -32,6 +32,9 @@ import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+_TZ_BA = ZoneInfo("America/Argentina/Buenos_Aires")
 
 from backend.cache import LockedTTLCache
 from backend.services import fx as fx_svc, historico, marketdata_store, symbols as syms
@@ -271,6 +274,11 @@ def _spot_official() -> Optional[Dict[str, Any]]:
     last = _pos(snap.last)
     if last is None:
         return None
+    fecha = None
+    if snap.last_ts:
+        from backend.services.historico_writer import _fecha_dato
+        d = _fecha_dato(snap.last_ts)
+        fecha = d.isoformat() if d else None
     return {
         "source": "DLR/SPOT",
         "last": last,
@@ -280,6 +288,7 @@ def _spot_official() -> Optional[Dict[str, Any]]:
         "var_pct": None,
         "volume": _pos(snap.volume),
         "hora": None,
+        "date": fecha,
     }
 
 
@@ -300,10 +309,8 @@ def oficial_intradia_hoy() -> Optional[Dict[str, Any]]:
         return {"last": float(ust["last"]), "source": "SIOPEL", "hora": ust.get("hora")}
     snap = marketdata_store.get_store().get(SPOT_SYMBOL)
     if snap is not None and snap.last and snap.last > 0 and snap.last_ts:
-        from zoneinfo import ZoneInfo
-
         from backend.services.historico_writer import _fecha_dato
-        hoy = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date()
+        hoy = datetime.now(_TZ_BA).date()
         if _fecha_dato(snap.last_ts) == hoy:
             return {"last": float(snap.last), "source": "DLR/SPOT", "hora": None}
     return None
@@ -362,6 +369,11 @@ def official_fx() -> Dict[str, Any]:
                 "var_pct": ust.get("var_pct"), "volume": ust.get("volume"),
                 "hora": ust.get("hora"), "siopel_ts": ts,
             })
+            # La fecha del dato es la del último fetch OK del poller (BA) —
+            # NO la de la serie A3500, que intradía es la de AYER (el riel
+            # mostraba "al 21/7" con el operado SIOPEL del 22/7).
+            if ts:
+                out["date"] = datetime.fromtimestamp(ts, _TZ_BA).date().isoformat()
             if out["var_pct"] is None and a3500.get("close"):
                 out["var_pct"] = _var(out["last"], a3500["close"])
             return out
@@ -375,6 +387,8 @@ def official_fx() -> Dict[str, Any]:
                 "bid": spot.get("bid"), "offer": spot.get("offer"),
                 "var_pct": _var(spot.get("last"), close), "volume": spot.get("volume"),
             })
+            if spot.get("date"):                 # fecha real del último trade
+                out["date"] = spot["date"]
             return out
 
         # 3) A3500 de la serie (día/día).
@@ -468,6 +482,8 @@ class _MaePoller:
                 pass
 
     async def start(self) -> None:
+        if self._task and not self._task.done():
+            return                               # ya corriendo (start doble)
         if not _mae_enabled():
             logger.info("[dolares] MAE_API_KEY ausente; SIOPEL deshabilitado (uso A3500)")
             return

@@ -14,6 +14,7 @@ request sobre una copia y se descarta. Reusa `pricing.compute_metrics` vía
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Form, Request
@@ -45,10 +46,12 @@ async def nueva_page(request: Request) -> HTMLResponse:
     return _render(request, "nueva.html")
 
 
-def _panel(request: Request, token: str, ficha: dict, *, mode: str = "precio",
-           value: float = 100.0, settle: str = "") -> HTMLResponse:
-    """Panel completo: encabezado + form de cálculo + primer resultado."""
-    metrics = adhoc.compute(token, mode, value, settle=settle or None)
+async def _panel(request: Request, token: str, ficha: dict, *, mode: str = "precio",
+                 value: float = 100.0, settle: str = "") -> HTMLResponse:
+    """Panel completo: encabezado + form de cálculo + primer resultado.
+    El pricing ad-hoc es GIL-bound (decenas de ms) → threadpool, como YAS."""
+    metrics = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: adhoc.compute(token, mode, value, settle=settle or None))
     ticket = pricing.ticket_rows(metrics) if not metrics.get("error") else {}
     return _render(
         request, "partials/nueva_panel.html",
@@ -105,7 +108,7 @@ async def nueva_parse(
         token, _code = adhoc.register(ficha)
     except ValueError as exc:
         return _render(request, "partials/nueva_error.html", error=str(exc))
-    return _panel(request, token, ficha)
+    return await _panel(request, token, ficha)
 
 
 @router.post("/recompute", response_class=HTMLResponse)
@@ -126,7 +129,10 @@ async def nueva_recompute(
                        metrics={"error": "Ingresá un valor numérico."}, ticket={}, token=token,
                        existe=adhoc.especie_existe(str(ficha.get("Código") or "")),
                        can_save=_can_save(request))
-    metrics = adhoc.compute(token, mode, parsed, settle=settle_custom.strip() or None)
+    # GIL-bound → threadpool: cada retoque del form recalcula; en el event
+    # loop congelaba /market/seq y los paneles live de todos.
+    metrics = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: adhoc.compute(token, mode, parsed, settle=settle_custom.strip() or None))
     ticket = pricing.ticket_rows(metrics) if not metrics.get("error") else {}
     return _render(request, "partials/nueva_result.html",
                    metrics=metrics, ticket=ticket, token=token,

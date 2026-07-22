@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from backend.locale_ar import fmt_pct, parse_ar_num
+from backend.locale_ar import fmt_pct, hoy_ba, parse_ar_num
 from backend.cache_seq import seq_cached
 from backend.services import bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
 
@@ -109,8 +109,8 @@ def _dur_sort_key(r: dict):
 
 def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: bool = False,
                   fuente: str = "byma", settle: str | None = None) -> dict | None:
-    # `settle` = fecha de liquidación del plazo elegido (CI = hoy, 24hs = None →
-    # t+1 por default). SIN esto, un precio Contado-Inmediato se descontaba desde
+    # `settle` = fecha de liquidación del plazo elegido (CI = hoy, 24hs = t+1,
+    # ambos explícitos en fecha BA). SIN esto, un precio Contado-Inmediato se descontaba desde
     # t+1: un día de carry mal atribuido → hasta ~150-200 bps de sesgo de TIR en
     # letras cortas, y el mismo bono mostraba TIRs distintas entre YAS-CI (que sí
     # pasa settle) y Curvas-CI. La cache key incluye settle, así CI/24hs no se
@@ -202,7 +202,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     emis = meta.get("emision")
     estreno = False
     try:
-        estreno = emis is not None and (date.today() - emis).days <= 5
+        estreno = emis is not None and (hoy_ba() - emis).days <= 5
     except TypeError:
         pass
     # Posición del Last dentro del rango del día (0=Low, 1=High) para la
@@ -316,7 +316,7 @@ async def _rows_for(
     # Only the ARS leg needs the FX reference (pesos → native basis); the
     # native / USD / USB legs price straight off their own ticker.
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
-    # Fecha de liquidación del plazo (CI = hoy, 24hs = None → t+1). Se computa UNA
+    # Fecha de liquidación del plazo (CI = hoy, 24hs = t+1, fecha BA). Se computa UNA
     # vez y se pasa a cada fila para que la TIR se descuente desde el settlement
     # correcto (antes CI se valuaba a t+1, con hasta ~200 bps de sesgo).
     settle = pricing.settlement_date_str(plazo)
@@ -507,7 +507,7 @@ async def mercado_book(
     meta = pricing.bond_meta(code) or {}
     native = meta.get("moneda") or "USD"
     fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
-    settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = None → t+1
+    settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = t+1 (fecha BA)
 
     def cp(px):
         if px is None:
@@ -659,9 +659,11 @@ def _matrix_from_rows(rows: list[dict], include: set[str] | None = None) -> dict
 
 
 def _whatif_from_rows(rows: list[dict], include: set[str] | None,
-                      overrides: dict[str, float]):
+                      overrides: dict[str, float], settle: str | None = None):
     """(filas editables, matriz). Un bono SIN editar reusa la TIR/Duration ya
-    calculada en su fila (cero pricing extra); sólo los editados recalculan."""
+    calculada en su fila (cero pricing extra); sólo los editados recalculan —
+    con el MISMO settle de la pestaña, así la TIR editada es comparable con
+    las filas no editadas (y pega el cache de curvas, no una key aparte)."""
     if include is not None:
         rows = [r for r in rows if r["code"] in include]
     capped, trunc, total = _fwd_points(rows)   # mismo tope/criterio que la matriz
@@ -671,7 +673,7 @@ def _whatif_from_rows(rows: list[dict], include: set[str] | None,
         mkt = r.get("px_calc")            # precio nativo de mercado (el que valuó la fila)
         ov = overrides.get(code)
         if ov is not None:
-            m = pricing.metrics_for_market_price(code, ov) or {}
+            m = pricing.metrics_for_market_price(code, ov, settle) or {}
             tirea, duration, price = m.get("tirea"), m.get("duration"), ov
         else:                              # reusa lo ya calculado en la fila
             tirea, duration, price = r.get("tirea"), r.get("duration"), mkt
@@ -723,7 +725,8 @@ async def _whatif_rows(curve_key: str, plazo: str, only_quoting: bool, leg: str,
     # con precios editados/stale son cache-misses (~27 ms c/u, hasta ~1,35 s en el
     # peor caso). Fuera del event loop, como todo el resto del pricing de curvas.
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_row_pool, _whatif_from_rows, rows, include, overrides)
+    settle = pricing.settlement_date_str(plazo)
+    return await loop.run_in_executor(_row_pool, _whatif_from_rows, rows, include, overrides, settle)
 
 
 @forwards_router.get("/forwards", response_class=HTMLResponse)

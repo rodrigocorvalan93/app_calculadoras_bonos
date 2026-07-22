@@ -9,6 +9,18 @@ from __future__ import annotations
 import math
 from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
+
+# Zona canónica de la app: TODO lo fecha-sensible (settlement, días al vto,
+# rollover de caches) usa la fecha de Buenos Aires, no la del server. Con el
+# proceso en UTC, `date.today()` naive ya es "mañana" a las 21:00 BA → el
+# settlement saltaba un día hábil y la TIR de letras cortas se sesgaba.
+TZ_BA = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def hoy_ba() -> date:
+    """La fecha de HOY en Buenos Aires (no la del reloj del server)."""
+    return datetime.now(TZ_BA).date()
 
 try:
     import numpy as np
@@ -157,7 +169,8 @@ def fmt_ts(ts: Any) -> str:
     if ms <= 0:
         return DASH
     try:
-        return datetime.fromtimestamp(ms / 1000.0).strftime("%d/%m %H:%M:%S")
+        # tz-aware: con el server en UTC el naive mostraba la hora UTC (+3 h)
+        return datetime.fromtimestamp(ms / 1000.0, TZ_BA).strftime("%d/%m %H:%M:%S")
     except (OverflowError, OSError, ValueError):
         return DASH
 

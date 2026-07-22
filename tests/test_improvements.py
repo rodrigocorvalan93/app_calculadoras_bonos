@@ -104,14 +104,28 @@ def test_dlk_tir_reacts_to_a3500() -> None:
             break
     if price is None:
         pytest.skip("el DLK no pricea en este entorno")
+    # Este test verifica la reacción al cambio de la SERIE A3500: si otro test
+    # dejó un snap SIOPEL "fresco" en dolares (leak de test_dlk_fx_intradia),
+    # el DLK valúa contra el intradía y la serie mutada no mueve la TIR — un
+    # falso negativo por orden de ejecución. Se desactiva el intradía acá.
+    from backend.config import settings as _settings
+    prev_intradia = _settings.dlk_fx_intradia
+    _settings.dlk_fx_intradia = False
+    pricing._a3500_aplicable_cache.clear()
     try:
         t1 = pricing.metrics_for_market_price(dlk, price)["tirea"]
         df.iloc[-1, col] = orig * 1.10                          # +10% A3500
-        pricing._index_val_cache.clear()                       # fingerprint lo toma ya
+        # El fingerprint DLK lee a3500_aplicable() (cache propio de 2 s) — se
+        # limpia ESE cache para simular la expiración; antes el doble cache
+        # (fingerprint también memoizado en _index_val_cache) encadenaba la
+        # staleness a ~4 s y limpiar uno solo no invalidaba.
+        pricing._a3500_aplicable_cache.clear()
         t2 = pricing.metrics_for_market_price(dlk, price)["tirea"]
         assert abs(t1 - t2) > 1e-9                              # la TIR reaccionó
     finally:
+        _settings.dlk_fx_intradia = prev_intradia
         df.iloc[-1, col] = orig
+        pricing._a3500_aplicable_cache.clear()
         pricing._index_val_cache.clear()
         pricing._curve_metrics_cache.clear()
 
