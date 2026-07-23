@@ -122,6 +122,52 @@ async def yas_recompute(
     )
 
 
+@router.post("/tr", response_class=HTMLResponse)
+async def yas_tr(
+    request: Request,
+    code: str = Form(...),
+    mode: str = Form("precio"),
+    value: str = Form(""),
+    nominales: str = Form("1000000"),
+    plazo: str = Form("24hs"),
+    settle_custom: str = Form(""),
+    fx_override: str = Form(""),
+    freq_override: str = Form(""),
+    base_override: str = Form(""),
+    tasa_salida: str = Form(""),
+    fecha_salida: str = Form(""),
+) -> HTMLResponse:
+    """Total return puntual de la ficha: entrada al estado actual del form YAS
+    (hx-include), salida a `tasa_salida` (TIREA decimal; vacío = flat) en
+    `fecha_salida` (DD/MM/AAAA; vacío = settle + 90 días). GIL-bound → pool."""
+    parsed_value = _parse_ar_number(value)
+    parsed_nom = _parse_ar_number(nominales) or 1_000_000.0
+    parsed_fx = _parse_ar_number(fx_override)
+    parsed_freq = _parse_ar_number(freq_override)
+    parsed_base = _parse_ar_number(base_override)
+    parsed_salida = _parse_ar_number(tasa_salida)
+
+    if parsed_value is None:
+        return _render(request, "partials/yas_tr.html",
+                       tr={"error": "Ingresá un valor en la ficha (precio / TIR / TNA / margen)."},
+                       tasa_salida=tasa_salida, fecha_salida=fecha_salida)
+
+    settle = settle_custom.strip() or pricing.settlement_date_str(plazo)
+
+    def _calc():
+        return pricing.tr_puntual(
+            code=code, mode=mode, value=parsed_value, settle=settle,
+            tir_salida=parsed_salida, fecha_salida=fecha_salida.strip() or None,
+            nominales=parsed_nom, fx_override=parsed_fx,
+            freq_override=int(parsed_freq) if parsed_freq else None,
+            base_override=int(parsed_base) if parsed_base else None,
+        )
+
+    tr = await asyncio.get_running_loop().run_in_executor(None, _calc)
+    return _render(request, "partials/yas_tr.html", tr=tr,
+                   tasa_salida=tasa_salida, fecha_salida=fecha_salida)
+
+
 @router.get("/meta/{code}", response_class=HTMLResponse)
 async def yas_meta(request: Request, code: str) -> HTMLResponse:
     """Used by the dropdown to refresh the header strip when the bond changes."""

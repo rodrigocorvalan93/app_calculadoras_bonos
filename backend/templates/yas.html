@@ -106,6 +106,40 @@
     <!-- partials/yas_result.html populated by htmx -->
   </div>
 
+  {# Total return puntual: entrada = la ficha de arriba (hx-include del form
+     YAS); salida = tasa/fecha de este mini-form. Sigue al bono (change del
+     form principal) y recalcula al tocar tasa/fecha. #}
+  <div class="card" id="yas-tr-card" style="margin-top:14px">
+    <div class="card-title">
+      <span>Total return puntual</span>
+      <span class="card-title-aux">salida a tasa · fecha</span>
+    </div>
+    <div class="card-body">
+      <form
+        id="yas-tr-form"
+        class="form-row"
+        hx-post="/yas/tr"
+        hx-target="#yas-tr-body"
+        hx-swap="innerHTML"
+        hx-include="#yas-form"
+        hx-trigger="submit, change, keyup changed delay:400ms from:input[name=tasa_salida], keyup changed delay:400ms from:input[name=fecha_salida], change from:#yas-form delay:200ms, load delay:600ms"
+      >
+        <label class="field">
+          <span>TIREA salida (decimal)</span>
+          <input type="text" inputmode="decimal" name="tasa_salida" placeholder="vacío = flat (misma TIR)" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Fecha salida (DD/MM/AAAA)</span>
+          <input type="text" name="fecha_salida" placeholder="vacío = settle + 90 días" autocomplete="off">
+        </label>
+        <button type="submit" class="btn-primary" style="align-self:end">Calcular</button>
+      </form>
+      <div id="yas-tr-body">
+        <p class="muted" style="font-size:12px;padding:6px 0">Calculando total return…</p>
+      </div>
+    </div>
+  </div>
+
   {# Mini-histórico (precio + TIR): carga LAZY después de la ficha — la
      página nunca lo espera. Sigue al bono del form (change) y data-skip-same
      evita re-renders idénticos cuando cambia otra cosa del form. #}
