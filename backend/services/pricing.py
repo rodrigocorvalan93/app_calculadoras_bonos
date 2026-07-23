@@ -816,3 +816,152 @@ def ticket_rows(metrics: Dict[str, Any], nominales: float = 1_000_000.0) -> Dict
         "principal": principal,
         "interes": interes,
     }
+
+
+# ── Total return puntual (ficha YAS) ─────────────────────────────────────────
+
+
+def tr_puntual(
+    code: str,
+    mode: str,
+    value: float,
+    settle: Optional[str] = None,
+    tir_salida: Optional[float] = None,
+    fecha_salida: Optional[str] = None,
+    nominales: float = 1_000_000.0,
+    fx_override: Optional[float] = None,
+    freq_override: Optional[int] = None,
+    base_override: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Total return puntual de la ficha YAS, vía `Bono.calcula_total_return`.
+
+    Entrada = el estado actual de la ficha (mode/value/settle, con los mismos
+    overrides de FX/convención); salida = `tir_salida` (TIREA decimal, default
+    flat: la misma TIR de entrada) en `fecha_salida` (DD/MM/AAAA, default
+    settle + 90 días corridos; puede ser ≥ vencimiento → hold to maturity,
+    donde la tasa de salida no juega). Devuelve el desglose del período:
+    px inicial/final, P&L de capital, interés y amortización cobrados (con
+    ajuste de capital aplicado), TR directo / TEA / TNA y montos en $ por
+    `nominales`. Cupones SIN reinversión (metodología del legacy). GIL-bound
+    (~2 calcs completos): SIEMPRE correr en un executor, nunca en el loop."""
+    out: Dict[str, Any] = {"error": None, "codigo": code}
+
+    m = compute_metrics(code=code, mode=mode, value=value, settle=settle,
+                        fx_override=fx_override, freq_override=freq_override,
+                        base_override=base_override, include_cashflows=False)
+    if m.get("error"):
+        out["error"] = m["error"]
+        return out
+    tir_ini = m.get("tirea")
+    if tir_ini is None or not np.isfinite(tir_ini):
+        out["error"] = "La ficha no produce una TIREA finita — no se puede proyectar el total return."
+        return out
+
+    f_settle = m.get("fecha_settlement")            # date (del calc de entrada)
+    if f_settle is None:
+        out["error"] = "Sin fecha de liquidación en la ficha."
+        return out
+
+    salida_flat = tir_salida is None or not np.isfinite(tir_salida)
+    tir_fin = float(tir_ini) if salida_flat else float(tir_salida)
+
+    from datetime import timedelta
+    canonical_salida = _safe_settle(fecha_salida)
+    if fecha_salida and str(fecha_salida).strip() and canonical_salida is None:
+        out["error"] = f"Fecha de salida inválida: {fecha_salida!r}. Usá DD/MM/AAAA."
+        return out
+    if canonical_salida is None:
+        canonical_salida = (f_settle + timedelta(days=90)).strftime("%d/%m/%Y")
+    terminal_dt = datetime.strptime(canonical_salida, "%d/%m/%Y").date()
+    if terminal_dt <= f_settle:
+        out["error"] = (f"La fecha de salida ({canonical_salida}) debe ser posterior "
+                        f"a la liquidación ({f_settle.strftime('%d/%m/%Y')}).")
+        return out
+
+    obj = _bond_obj_copy(code)
+    if obj is None:
+        out["error"] = f"Bono '{code}' no encontrado."
+        return out
+    # Mismos overrides de FX que la ficha (custom o auto-DLK intradía): la
+    # entrada del TR tiene que pricear EXACTAMENTE como el ticket de arriba.
+    if fx_override is not None:
+        try:
+            obj._a3500_override = float(fx_override)
+        except (TypeError, ValueError):
+            pass
+    elif _bond_index_kind(code) == "a3500":
+        auto = _dlk_fx_auto()
+        if auto is not None:
+            obj._a3500_override = auto
+
+    canonical_settle = _safe_settle(settle)
+    try:
+        df = obj.calcula_total_return(float(tir_ini), tir_fin, canonical_salida, canonical_settle)
+        vals = df["Total Return Valores"]
+        px_ini = float(vals["Px inicial"])
+        px_fin = float(vals["Px final"])
+        pnl_cap = float(vals["P&L Capital"])
+        cobrado = float(vals["Cupones Cobrados"])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[pricing] tr_puntual(%s) failed: %s", code, exc)
+        out["error"] = f"{type(exc).__name__}: {exc}"
+        return out
+    if not (np.isfinite(px_ini) and px_ini > 0):
+        out["error"] = "El precio inicial del período no es finito."
+        return out
+
+    # Desglose interés vs capital de los flujos cobrados (mismo filtro que usa
+    # calcula_total_return sobre cashflow_cpn_full; Total = (int+amort)·ajuste/VN).
+    full = obj.cashflow_cpn_full
+    mask = (full["Fechas"] > obj.fecha_settlement) & (full["Fechas"] <= terminal_dt)
+    rows = full.loc[mask]
+    vn = float(obj.valor_nominal) or 100.0
+    interes = float((rows["Intereses"] * rows["Ajuste"]).sum()) / vn
+    capital = float((rows["Amortización"] * rows["Ajuste"]).sum()) / vn
+    flujos = [{
+        "fecha": f.strftime("%d/%m/%Y") if hasattr(f, "strftime") else str(f),
+        "interes_pct": float(i) * float(a) / vn * 100.0,
+        "capital_pct": float(am) * float(a) / vn * 100.0,
+        "total_pct": float(t) * 100.0,
+        "total_m": float(t) * nominales,
+    } for f, i, am, a, t in zip(rows["Fechas"], rows["Intereses"], rows["Amortización"],
+                                rows["Ajuste"], rows["Total"])]
+
+    dias = (terminal_dt - obj.fecha_settlement).days
+    tr = (pnl_cap + cobrado) / px_ini
+    tea = (1.0 + tr) ** (365.0 / dias) - 1.0 if dias > 0 and tr > -1.0 else float("nan")
+    tna = tr * 365.0 / dias if dias > 0 else float("nan")
+    venc = getattr(obj, "vencimiento", None)
+    if isinstance(venc, datetime):                  # Timestamp/datetime → date
+        venc = venc.date()
+    a_vencimiento = bool(isinstance(venc, date) and terminal_dt >= venc)
+
+    out.update({
+        "fecha_entrada": obj.fecha_settlement.strftime("%d/%m/%Y"),
+        "fecha_salida": canonical_salida,
+        "dias": dias,
+        "tir_entrada": float(tir_ini),
+        "tir_salida": tir_fin,
+        "salida_flat": salida_flat,
+        "a_vencimiento": a_vencimiento,
+        "px_ini_pct": px_ini * 100.0,
+        "px_fin_pct": px_fin * 100.0,
+        "pnl_capital_pct": pnl_cap * 100.0,
+        "interes_pct": interes * 100.0,
+        "capital_pct": capital * 100.0,
+        "cobrado_pct": cobrado * 100.0,
+        "n_flujos": int(len(flujos)),
+        "flujos": flujos,
+        "tr": tr,
+        "tea": tea,
+        "tna": tna,
+        "nominales": nominales,
+        "monto_ini": px_ini * nominales,
+        "monto_fin": px_fin * nominales,
+        "interes_m": interes * nominales,
+        "capital_m": capital * nominales,
+        "cobrado_m": cobrado * nominales,
+        "pnl_capital_m": pnl_cap * nominales,
+        "pnl_total_m": (pnl_cap + cobrado) * nominales,
+    })
+    return out
