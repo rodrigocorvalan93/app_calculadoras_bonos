@@ -1,0 +1,69 @@
+{# Total return puntual — swapped por hx-post /yas/tr (form del cuadro TR,
+   con hx-include del form YAS: la entrada es SIEMPRE la ficha de arriba). #}
+{% if tr.error %}
+  <p class="muted" style="font-size:12px;padding:6px 0;color:var(--red,#ef4444)">{{ tr.error }}</p>
+{% else %}
+  <div class="metrics-grid" style="margin-bottom:10px">
+    <div class="metric">
+      <span class="metric-label">TR período · {{ tr.dias | ar_int }} días</span>
+      <span class="metric-value" style="color:{{ 'var(--green,#22c55e)' if tr.tr >= 0 else 'var(--red,#ef4444)' }}">{{ tr.tr | ar_pct(4) }}</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">TEA equivalente</span>
+      <span class="metric-value">{{ tr.tea | ar_pct(4) }}</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">TNA período (365)</span>
+      <span class="metric-value">{{ tr.tna | ar_pct(4) }}</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">P&amp;L total · VN {{ tr.nominales | ar_int }}</span>
+      <span class="metric-value" style="color:{{ 'var(--green,#22c55e)' if tr.pnl_total_m >= 0 else 'var(--red,#ef4444)' }}">{{ tr.pnl_total_m | ar_int }}</span>
+    </div>
+  </div>
+
+  <table class="cashflows">
+    <tbody>
+      <tr><th style="text-align:left">Entrada</th>
+          <td>{{ tr.fecha_entrada }} · TIR {{ tr.tir_entrada | ar_pct(2) }} · Px {{ tr.px_ini_pct | ar_num(4) }}</td></tr>
+      <tr><th style="text-align:left">Salida{% if tr.a_vencimiento %} (a vencimiento){% endif %}</th>
+          <td>{{ tr.fecha_salida }}{% if not tr.a_vencimiento %} · TIR {{ tr.tir_salida | ar_pct(2) }}{{ " (flat)" if tr.salida_flat else "" }} · Px {{ tr.px_fin_pct | ar_num(4) }}{% endif %}</td></tr>
+      <tr><th style="text-align:left">P&amp;L capital (px)</th>
+          <td>{{ tr.pnl_capital_pct | ar_num(4) }} % VN · $ {{ tr.pnl_capital_m | ar_int }}</td></tr>
+      <tr><th style="text-align:left">Interés cobrado</th>
+          <td>{{ tr.interes_pct | ar_num(4) }} % VN · $ {{ tr.interes_m | ar_int }}</td></tr>
+      <tr><th style="text-align:left">Capital cobrado</th>
+          <td>{{ tr.capital_pct | ar_num(4) }} % VN · $ {{ tr.capital_m | ar_int }}</td></tr>
+      <tr><th style="text-align:left">Total cobrado · {{ tr.n_flujos }} flujo{{ "s" if tr.n_flujos != 1 else "" }}</th>
+          <td>{{ tr.cobrado_pct | ar_num(4) }} % VN · $ {{ tr.cobrado_m | ar_int }}</td></tr>
+    </tbody>
+  </table>
+
+  {% if tr.flujos %}
+  <details style="margin-top:8px">
+    <summary style="cursor:pointer;color:var(--cyan);font-size:12px">Flujos cobrados en el período ({{ tr.n_flujos }})</summary>
+    <div style="max-height:180px;overflow-y:auto;margin-top:6px">
+      <table class="cashflows">
+        <thead><tr><th>Fecha</th><th>Interés %VN</th><th>Capital %VN</th><th>Total %VN</th><th>$ (VN ticket)</th></tr></thead>
+        <tbody>
+          {% for f in tr.flujos %}
+          <tr>
+            <td>{{ f.fecha }}</td>
+            <td>{{ f.interes_pct | ar_num(4) }}</td>
+            <td>{{ f.capital_pct | ar_num(4) }}</td>
+            <td>{{ f.total_pct | ar_num(4) }}</td>
+            <td>{{ f.total_m | ar_int }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+
+  <p class="muted" style="font-size:11px;margin-top:8px">
+    Metodología <code>calcula_total_return</code>: cupones sumados sin reinversión;
+    px final = PV de los flujos remanentes a la TIR de salida.
+    {% if tr.a_vencimiento %}Salida ≥ vencimiento: se cobran todos los flujos y la tasa de salida no juega.{% endif %}
+  </p>
+{% endif %}
