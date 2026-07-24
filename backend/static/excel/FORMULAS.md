@@ -103,9 +103,11 @@ Futuros de dólar DLR (Matba-Rofex) con tasas implícitas vs el mayorista.
 |---|---|---|
 | `last` | Último precio | `ultimo`, vacío |
 | `bid` / `ask` | Puntas | `compra` / `venta`, `offer` |
+| `bid_size` / `ask_size` | Contratos en cada punta | `volbid` / `volask` |
 | `close` | Cierre anterior | `cierre` |
 | `var` | Variación vs cierre | `variacion` |
 | `vol` | Volumen | `volumen` |
+| `oi` | Interés abierto (contratos) | `interes_abierto` |
 | `tna` | TNA implícita (decimal) del último | |
 | `tna_bid` / `tna_ask` | TNA implícita de cada punta | |
 | `tem` | TEM implícita (decimal) | |

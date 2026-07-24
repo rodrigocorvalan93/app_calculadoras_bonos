@@ -112,7 +112,8 @@ var FIELD_ALIASES = {
   "high": "high", "max": "high", "low": "low", "min": "low",
   "vol": "vol", "volumen": "vol", "monto": "vol", "nominal": "nominal", "nominales": "nominal",
   "trades": "trades", "operaciones": "trades", "vwap": "vwap",
-  "var": "var", "variacion": "var", "variación": "var", "last_ts": "last_ts", "hora": "last_ts"
+  "var": "var", "variacion": "var", "variación": "var", "last_ts": "last_ts", "hora": "last_ts",
+  "oi": "oi", "interes_abierto": "oi", "interés_abierto": "oi"
 };
 var MAE_FIELDS = {
   "last": "last", "close": "close", "var": "var_pct", "vol": "volumen",
