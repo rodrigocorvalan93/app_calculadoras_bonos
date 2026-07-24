@@ -23,6 +23,9 @@ var · vol · nominal · trades · vwap · open · high · low · last_ts` (con 
 es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
 (default; `48hs` se mapea acá) y `CI`.
 
+**Referencia completa de todas las funciones, campos, alias y unidades:
+[FORMULAS.md](FORMULAS.md).**
+
 ## Instalación (una vez por PC)
 
 1. **Habilitar el usuario**: el superuser entra a `/admin` → tabla Usuarios →
