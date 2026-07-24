@@ -47,11 +47,20 @@ es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
   el **modo hoja CRUDA** del panel: escribe todo en la hoja `OMS_DATA` una vez
   por tick y el libro sigue con `VLOOKUP` (keys `GD30|24hs`, `FX|MEP`,
   `FUT|DLR/AGO26M`, `CAU|ARS|7D`, `MAE|GD30`).
-- Office exige **HTTPS** para el manifest y los assets, salvo `localhost`.
-  - Server local: `http://localhost:8000` funciona tal cual.
+- Office exige **HTTPS en TODAS las URLs del manifest** — también en localhost.
+  Un manifest bajado por `http://` es rechazado con "el manifiesto no es válido"
+  (Excel web lo corta en el upload; el desktop tampoco lo carga).
+  - Server local (Windows): certificado con [mkcert](https://github.com/FiloSottile/mkcert)
+    — una vez: `mkcert -install` y `mkcert localhost 127.0.0.1`; después correr
+
+        uvicorn backend.main:app --port 8443 --ssl-certfile localhost+1.pem --ssl-keyfile localhost+1-key.pem
+
+    y bajar el manifest de `https://localhost:8443/excel/manifest.xml` (las URLs
+    salen con el esquema/host desde donde se lo descarga).
   - Server en la red: con Tailscale, `tailscale cert` emite un certificado
     válido `*.ts.net`; si no, un cert interno (mkcert) confiado en cada PC.
-  - Setear `APP_BASE_URL=https://…` para que el manifest salga con esa URL.
+  - Setear `APP_BASE_URL=https://…` para fijar la URL del manifest sin depender
+    del host del request.
 - `office.js` se carga del CDN de Microsoft (obligatorio para add-ins): las PCs
   necesitan salida a `appsforoffice.microsoft.com`.
 
