@@ -5,7 +5,7 @@
   <div class="card-title">
     <span>Profundidad · {{ label }} <span class="muted" style="font-size:11px">{{ code }}</span></span>
     <span class="card-title-aux">
-      {% if dias %}{{ dias }}d · {% endif %}Last <b>{{ snap.last | ar_num(2) }}</b>{% if tna_last is not none %} · TNA impl {{ tna_last | ar_pct(2) }}{% endif %} · spot {{ spot | ar_num(2) }}
+      {% if dias %}{{ dias }}d · {% endif %}Last <b>{{ snap.last | ar_num(2) }}</b>{% if tna_last is not none %} · TNA impl {{ tna_last | ar_pct(2) }}{% endif %}{% if snap.volume %} · Vol {{ snap.volume | ar_hum }}{% endif %}{% if snap.open_interest %} · OI {{ snap.open_interest | ar_hum }}{% endif %} · spot {{ spot | ar_num(2) }}
     </span>
   </div>
   <div class="card-body">

@@ -53,6 +53,17 @@ SUBSCRIBE_CHUNK = 20
 # Merval no aparecía en el tape. Para bonos/acciones IV viene vacío (no-op).
 ENTRIES = ["BI", "OF", "LA", "OP", "CL", "HI", "LO", "EV", "TV", "NV", "IV"]
 
+# OI (interés abierto) sólo lo publican los futuros: se pide únicamente en los
+# lotes DLR/…. Si matrizoms rechazara el entry, la recuperación de errores
+# resuscribe esos símbolos con ENTRIES estándar y el feed sigue (sin OI) en
+# vez de perder los futuros enteros.
+ENTRIES_FUT = ENTRIES + ["OI"]
+
+
+def _is_futuro(symbol: str) -> bool:
+    """Futuro DLR nativo (excluye el spot, que no tiene interés abierto)."""
+    return symbol.startswith("DLR/") and symbol != "DLR/SPOT"
+
 
 def _ws_header_kwarg() -> str:
     """Nombre del kwarg de headers en `websockets.connect`.
@@ -116,11 +127,12 @@ def _cookie_header(cookies: httpx.Cookies) -> str:
     return "; ".join(parts)
 
 
-def _subscribe_payload(symbols: Iterable[str], depth: int = 3) -> str:
+def _subscribe_payload(symbols: Iterable[str], depth: int = 3,
+                       entries: Optional[List[str]] = None) -> str:
     return json.dumps({
         "type": "smd",
         "level": 1,
-        "entries": ENTRIES,
+        "entries": list(entries) if entries else ENTRIES,
         "products": [{"symbol": s, "marketId": "ROFX"} for s in sorted(symbols)],
         "depth": depth,
     })
@@ -166,6 +178,9 @@ class PrimaryWS:
         # reintentamos de a uno (evita loops de re-subscripción).
         self._rejected: Set[str] = set()
         self._retried_individually: Set[str] = set()
+        # Futuros que ya reintentamos sin el entry OI (un rechazo con OI puede
+        # ser por el entry, no por el símbolo — no descartar sin probar).
+        self._retried_no_oi: Set[str] = set()
 
     # ── API ─────────────────────────────────────────────────────────
 
@@ -300,48 +315,67 @@ class PrimaryWS:
 
         matrizoms ignora un subscribe con demasiados productos; mandar de a
         pocos (acumulan entre mensajes) sí funciona. Un pequeño sleep entre
-        lotes evita saturar el socket.
+        lotes evita saturar el socket. Los futuros DLR van en lotes propios
+        con el entry OI extra (interés abierto).
         """
         syms = sorted(s for s in symbols if s not in self._rejected)
-        total = len(syms)
-        for i in range(0, total, SUBSCRIBE_CHUNK):
-            chunk = syms[i:i + SUBSCRIBE_CHUNK]
-            await ws.send(_subscribe_payload(chunk))
-            await asyncio.sleep(0.05)
-        if total:
-            n_lotes = (total + SUBSCRIBE_CHUNK - 1) // SUBSCRIBE_CHUNK
-            logger.info("[primary_ws] subscribe en %d lotes de <=%d (%d símbolos)",
-                        n_lotes, SUBSCRIBE_CHUNK, total)
+        futs = [s for s in syms if _is_futuro(s)]
+        rest = [s for s in syms if not _is_futuro(s)]
+        n_lotes = 0
+        for group, entries in ((rest, None), (futs, ENTRIES_FUT)):
+            for i in range(0, len(group), SUBSCRIBE_CHUNK):
+                await ws.send(_subscribe_payload(group[i:i + SUBSCRIBE_CHUNK], entries=entries))
+                n_lotes += 1
+                await asyncio.sleep(0.05)
+        if syms:
+            logger.info("[primary_ws] subscribe en %d lotes de <=%d (%d símbolos, %d futuros)",
+                        n_lotes, SUBSCRIBE_CHUNK, len(syms), len(futs))
 
     @staticmethod
-    def _symbols_from_error(message: Any) -> List[str]:
-        """Extrae los símbolos del payload 'smd' que el server eco-devuelve
-        dentro de la respuesta ERROR (campo 'message', es JSON string)."""
+    def _payload_from_error(message: Any) -> Dict[str, Any]:
+        """Payload 'smd' que el server eco-devuelve dentro de la respuesta
+        ERROR (campo 'message', es JSON string)."""
         if not isinstance(message, str):
-            return []
+            return {}
         try:
             payload = json.loads(message)
         except (ValueError, TypeError):
-            return []
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _symbols_from_error(message: Any) -> List[str]:
+        """Extrae los símbolos del payload 'smd' eco-devuelto en el ERROR."""
         out: List[str] = []
-        for p in payload.get("products", []) or []:
+        for p in PrimaryWS._payload_from_error(message).get("products", []) or []:
             sym = p.get("symbol") if isinstance(p, dict) else None
             if sym:
                 out.append(sym)
         return out
 
     def _recover_from_error(self, message: Any) -> None:
-        syms = self._symbols_from_error(message)
+        payload = self._payload_from_error(message)
+        syms = [p.get("symbol") for p in payload.get("products", []) or []
+                if isinstance(p, dict) and p.get("symbol")]
         if not syms:
             return
+        entries = [e for e in payload.get("entries", []) or [] if isinstance(e, str)]
         if len(syms) == 1:
-            # rechazo de un único símbolo -> es inválido, lo descartamos.
             bad = syms[0]
+            if "OI" in entries and bad not in self._retried_no_oi:
+                # el rechazo puede ser por el ENTRY OI y no por el símbolo:
+                # un intento con los entries estándar antes de descartar.
+                self._retried_no_oi.add(bad)
+                logger.info("[primary_ws] %s rechazado con OI; reintento sin OI", bad)
+                self._spawn_resub([bad], None)
+                return
+            # rechazo de un único símbolo -> es inválido, lo descartamos.
             if bad not in self._rejected:
                 self._rejected.add(bad)
                 logger.warning("[primary_ws] símbolo inválido descartado: %s", bad)
             return
-        # lote rechazado: reintentar de a uno los que aún no probamos solos.
+        # lote rechazado: reintentar de a uno (con los MISMOS entries del lote,
+        # así los futuros conservan el OI) los que aún no probamos solos.
         pending = [s for s in syms
                    if s not in self._rejected and s not in self._retried_individually]
         if not pending:
@@ -349,17 +383,21 @@ class PrimaryWS:
         self._retried_individually.update(pending)
         logger.info("[primary_ws] lote rechazado (%d símbolos); reintentando %d de a uno",
                     len(syms), len(pending))
+        self._spawn_resub(pending, entries or None)
+
+    def _spawn_resub(self, symbols: List[str], entries: Optional[List[str]]) -> None:
         try:
             # Guardar la referencia: asyncio sólo tiene weak-refs a las tasks
             # y un fire-and-forget puede ser recolectado por el GC a mitad de
             # la re-suscripción — justo el path de recuperación que cubre.
-            t = asyncio.create_task(self._resubscribe_individually(pending))
+            t = asyncio.create_task(self._resubscribe_individually(symbols, entries))
             self._resub_task = t
             t.add_done_callback(lambda _t: setattr(self, "_resub_task", None))
         except RuntimeError:
             pass  # sin loop corriendo
 
-    async def _resubscribe_individually(self, symbols: List[str]) -> None:
+    async def _resubscribe_individually(self, symbols: List[str],
+                                        entries: Optional[List[str]] = None) -> None:
         ws = self._ws
         if ws is None:
             return
@@ -367,7 +405,7 @@ class PrimaryWS:
             if s in self._rejected:
                 continue
             try:
-                await ws.send(_subscribe_payload([s]))
+                await ws.send(_subscribe_payload([s], entries=entries))
                 await asyncio.sleep(0.02)
             except (ConnectionClosed, WebSocketException):
                 return

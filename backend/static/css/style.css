@@ -1236,6 +1236,16 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .tr-chart .tr-dot { fill: var(--text); stroke: var(--panel); stroke-width: 1; }
 .tr-chart .tr-legend text { fill: var(--text-muted); font-size: 11px; }
 
+/* ── Futuros — curva TNA implícita + sendero de deva (SVG server-side) ── */
+.fut-chart { display: block; width: 100%; height: auto; font-variant-numeric: tabular-nums; }
+.fut-chart .fc-grid { stroke: var(--border-soft); stroke-width: 1; }
+.fut-chart .fc-zero { stroke: var(--border); stroke-width: 1.4; }
+.fut-chart .fc-vlabel, .fut-chart .fc-xlabel { fill: var(--text-muted); font-size: 11px; }
+.fut-chart .fc-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.fut-chart .fc-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 1; }
+.fut-chart .fc-bar { fill: var(--cyan); }
+.fut-chart .fc-blabel { fill: var(--text-soft); font-size: 10.5px; font-weight: 600; }
+
 /* ── Escenario — inputs por categoría + tabla agrupada ─────────────────── */
 .esc-cats { display: grid; gap: 4px; margin: 10px 0 2px; max-width: 560px; }
 .esc-cats-head, .esc-cat-row { display: grid; grid-template-columns: 1fr 120px 120px; gap: 8px; align-items: center; }

@@ -35,6 +35,7 @@ class MarketSnapshot:
     volume: Optional[float] = None       # EV — accumulated $ traded
     trade_count: Optional[float] = None  # TV — # of trades today
     nominal: Optional[float] = None      # NV — accumulated nominal
+    open_interest: Optional[float] = None  # OI — interés abierto (futuros)
     bids: Optional[List[Dict[str, Any]]] = None    # profundidad BI (hasta 5 niveles)
     offers: Optional[List[Dict[str, Any]]] = None  # profundidad OF (hasta 5 niveles)
     updated_at: float = field(default_factory=time.time)
@@ -175,11 +176,15 @@ class MarketDataStore:
                 ("EV", "volume"),
                 ("TV", "trade_count"),
                 ("NV", "nominal"),
+                ("OI", "open_interest"),
             ):
                 raw = market_data.get(entry)
                 if raw is None:
                     continue
                 v = _md_value(raw, "price") if entry in ("OP", "CL", "HI", "LO") else _md_value(raw, "size")
+                if v is None and entry == "OI":
+                    # OI viene {"size": contratos}; algún gateway lo manda en "price".
+                    v = _md_value(raw, "price")
                 if v is not None:
                     setattr(snap, attr, v)
                 if entry == "CL":

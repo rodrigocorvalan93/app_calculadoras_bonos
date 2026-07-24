@@ -96,8 +96,16 @@ async def _ctx(spot_override: str = "") -> Dict[str, Any]:
         ars.append(a)
     ars.sort(key=lambda x: x["duration"])
 
+    # Gráficos: curva de TNA implícita + sendero de deva mensual. Sobre el
+    # mayorista (referencia); si está frío, caen al minorista.
+    base_rows, charts_canal = may_rows, "mayorista (DLR/…M)"
+    if not any(r.get("tna") is not None for r in may_rows):
+        base_rows, charts_canal = min_rows, "minorista (DLR/…)"
     return {"may_rows": may_rows, "min_rows": min_rows, "spot": spot, "near": near,
-            "dlk": dlk, "ars": ars, "spot_override": spot_override or ""}
+            "dlk": dlk, "ars": ars, "spot_override": spot_override or "",
+            "curve_chart": fut.rate_curve_chart(base_rows),
+            "deva_chart": fut.deva_path_chart(base_rows, spot),
+            "charts_canal": charts_canal}
 
 
 @router.get("/futuros", response_class=HTMLResponse)

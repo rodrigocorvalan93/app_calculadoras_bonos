@@ -92,7 +92,60 @@ def test_subscribe_payload_shape() -> None:
     assert "BI" in parsed["entries"]
     # IV (Index Value): sin pedirlo, los índices (I.MERVAL) no mandan NADA.
     assert "IV" in parsed["entries"]
+    # OI sólo va en los lotes de futuros (entries explícitos), no en el default.
+    assert "OI" not in parsed["entries"]
     assert parsed["products"] == [{"symbol": "MERV - XMEV - GD30 - 24hs", "marketId": "ROFX"}]
+    fut_raw = json.loads(pws._subscribe_payload(["DLR/AGO26M"], entries=pws.ENTRIES_FUT))
+    assert "OI" in fut_raw["entries"] and "BI" in fut_raw["entries"]
+    assert pws._is_futuro("DLR/AGO26M") and not pws._is_futuro("DLR/SPOT")
+
+
+def test_oi_decodifica_interes_abierto() -> None:
+    """OI (interés abierto, futuros): {'size': contratos}, escalar pelado, o
+    {'price': …} según el gateway — las tres formas cargan open_interest."""
+    store = mds.MarketDataStore()
+    s = store.update_from_md("DLR/AGO26M", {"OI": {"size": 123_456.0}})
+    assert s.open_interest == 123_456.0
+    s = store.update_from_md("DLR/AGO26M", {"OI": 130_000.0})
+    assert s.open_interest == 130_000.0
+    s = store.update_from_md("DLR/AGO26M", {"OI": {"price": 140_000.0}})
+    assert s.open_interest == 140_000.0
+    # sticky: un tick sin OI no lo pisa
+    s = store.update_from_md("DLR/AGO26M", {"LA": {"price": 1500.0}})
+    assert s.open_interest == 140_000.0
+
+
+@pytest.mark.asyncio
+async def test_rechazo_con_oi_reintenta_sin_oi_antes_de_descartar() -> None:
+    """Un ERROR single-symbol de un 'smd' con OI puede ser por el ENTRY y no
+    por el símbolo: primero se reintenta con ENTRIES estándar; recién si vuelve
+    a fallar sin OI se descarta. Un lote rechazado se reintenta de a uno con
+    los MISMOS entries (los futuros conservan el OI)."""
+    import asyncio
+    import json
+
+    client = pws.PrimaryWS("https://example.invalid/", store=mds.MarketDataStore())
+    sent: list = []
+
+    class FakeWS:
+        async def send(self, raw: str) -> None:
+            sent.append(json.loads(raw))
+
+    client._ws = FakeWS()
+    # 1) single con OI rechazado → reintento sin OI, sin descartar
+    client._recover_from_error(pws._subscribe_payload(["DLR/AGO26M"], entries=pws.ENTRIES_FUT))
+    await asyncio.sleep(0.05)
+    assert sent and sent[0]["entries"] == pws.ENTRIES
+    assert "DLR/AGO26M" not in client._rejected
+    # 2) vuelve a fallar ya sin OI → ahora sí es el símbolo: descartado
+    client._recover_from_error(pws._subscribe_payload(["DLR/AGO26M"]))
+    assert "DLR/AGO26M" in client._rejected
+    # 3) lote de futuros rechazado → individual conservando ENTRIES_FUT
+    sent.clear()
+    client._recover_from_error(pws._subscribe_payload(["DLR/DIC26M", "DLR/ENE27M"],
+                                                      entries=pws.ENTRIES_FUT))
+    await asyncio.sleep(0.05)
+    assert len(sent) == 2 and all(p["entries"] == pws.ENTRIES_FUT for p in sent)
 
 
 def test_iv_de_indice_mapea_a_last() -> None:

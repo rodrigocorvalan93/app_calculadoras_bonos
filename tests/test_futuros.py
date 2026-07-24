@@ -18,6 +18,45 @@ def test_symbols_and_vto() -> None:
     assert fut._parse_vto("basura") is None
 
 
+def test_symbols_meses_en_espanol() -> None:
+    """ROFEX/A3 abrevia el mes en ESPAÑOL. Regresión: la tira generada en
+    inglés hacía que DLR/AUG26M no matcheara ningún símbolo real y agosto
+    (también ENE/ABR/DIC) desaparecía de la tabla aunque estuviera operando."""
+    joined = " ".join(fut.symbols("may"))          # 14 meses cubren los 12
+    for mes in ("ENE", "ABR", "AGO", "DIC"):
+        assert mes in joined
+    for mes in ("JAN", "APR", "AUG", "DEC"):
+        assert mes not in joined
+    # ambos idiomas parsean al mismo vencimiento
+    assert fut._parse_vto("DLR/AGO26M") == date(2026, 8, 31)
+    assert fut._parse_vto("DLR/AUG26M") == date(2026, 8, 31)
+    # alias sólo para los 4 meses que difieren, en ambas direcciones
+    assert fut._alias("DLR/AGO26M") == "DLR/AUG26M"
+    assert fut._alias("DLR/AUG26") == "DLR/AGO26"
+    assert fut._alias("DLR/FEB26") is None
+    # la siembra del WS incluye los dos códigos (el broker descarta el falso)
+    alls = fut.all_symbols()
+    ags = [s for s in alls if "AGO" in s]
+    assert ags and all(s.replace("AGO", "AUG") in alls for s in ags)
+
+
+def test_rows_lee_data_bajo_alias_ingles() -> None:
+    """Data llegada (o persistida de versiones viejas) bajo el código inglés
+    alimenta la fila del contrato canónico; `code` expone el símbolo real con
+    data para que el click al book pegue en el store."""
+    from backend.services import marketdata_store as mds
+
+    sym = next(s for s in fut.symbols("may") if "AGO" in s)
+    alias = fut._alias(sym)
+    sp = fut.spot() or 1000.0
+    mds.get_store().update_from_md(alias, {"LA": {"price": sp * 1.05},
+                                           "OI": {"size": 4321.0}})
+    r = next((x for x in fut.rows("may") if x["code"] == alias), None)
+    assert r is not None and r["last"] == pytest.approx(sp * 1.05)
+    assert r["oi"] == 4321.0 and r["label"].startswith("Ago")
+    assert r["tna"] is not None
+
+
 def test_implied_rate_math() -> None:
     td, tna, tem = fut._impl(110.0, 100.0, 365)      # +10% en 1 año
     assert td == pytest.approx(0.10)
@@ -71,3 +110,31 @@ async def test_futuros_override_and_book() -> None:
         bk = await ac.get("/futuros/book", params={"code": sym})
     assert ov.status_code == 200 and "1.500,00" in ov.text       # usó el override
     assert bk.status_code == 200 and "Profundidad" in bk.text and "Compras" in bk.text
+
+
+@pytest.mark.asyncio
+async def test_futuros_tabla_puntas_oi_y_graficos() -> None:
+    """La tabla muestra puntas × size, Vol y OI con la Σ al pie, y con ≥2
+    contratos con precio se dibujan la curva de TNA y el sendero de deva."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import marketdata_store as mds
+
+    sp = 1400.0
+    s1, s2 = fut.symbols("may")[0], fut.symbols("may")[1]
+    st = mds.get_store()
+    st.update_from_md(s1, {"LA": {"price": sp * 1.02},
+                           "BI": [{"price": sp * 1.015, "size": 120}],
+                           "OF": [{"price": sp * 1.025, "size": 80}],
+                           "EV": 50_000.0, "OI": {"size": 1_000.0}})
+    st.update_from_md(s2, {"LA": {"price": sp * 1.04}, "OI": {"size": 2_500.0}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        t = await ac.get("/futuros/table?spot_override=1400")
+    assert t.status_code == 200
+    assert "Bid × size" in t.text and "OI" in t.text
+    assert "×120" in t.text                                       # size de la punta
+    assert "Σ volumen / interés abierto" in t.text                # footer con la suma
+    assert "Curva de tasas implícitas" in t.text                  # línea (SVG)
+    assert "Sendero de devaluación mensual" in t.text             # barras (SVG)
+    assert "fc-bar" in t.text and "fc-line" in t.text

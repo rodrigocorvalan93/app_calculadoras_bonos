@@ -191,7 +191,8 @@ function rofexGet(s, contrato, campo, canal) {
   var map = { "last": "last", "bid": "bid", "ask": "offer", "close": "close",
               "var": "var_pct", "vol": "volume", "tna": "tna", "tem": "tem",
               "td": "td", "directo": "td", "dias": "dias", "vto": "vto",
-              "label": "label", "code": "code", "tna_bid": "tna_bid", "tna_ask": "tna_offer" };
+              "label": "label", "code": "code", "tna_bid": "tna_bid", "tna_ask": "tna_offer",
+              "oi": "oi", "bid_size": "bid_size", "ask_size": "offer_size" };
   var v = r[map[f] || f];
   return v == null ? "" : v;
 }
