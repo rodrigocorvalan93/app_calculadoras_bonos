@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMS Bonos</title>
+<!-- office.js es obligatorio para add-ins y SOLO se distribuye por el CDN de
+     Microsoft (no se puede self-hostear con soporte). Es la única excepción a
+     la regla "sin libs externas" del repo. -->
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script src="functions.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 14px; background: #0d1117; color: #e6e6e6;
+         font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 15px; margin: 0 0 2px; font-weight: 650; }
+  .muted { color: #8b949e; font-size: 12px; }
+  .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px;
+          padding: 12px; margin-top: 12px; }
+  .card h2 { font-size: 12px; margin: 0 0 8px; text-transform: uppercase;
+             letter-spacing: .04em; color: #8b949e; font-weight: 600; }
+  label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid #30363d;
+    background: #0d1117; color: #e6e6e6; font: inherit; }
+  button { padding: 6px 12px; border-radius: 6px; border: 1px solid #30363d;
+           background: #21262d; color: #e6e6e6; font: inherit; cursor: pointer; margin-top: 8px; }
+  button:hover { background: #30363d; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #6e7681; display: inline-block; }
+  .dot.live { background: #3fb950; box-shadow: 0 0 6px #3fb95088; }
+  .dot.idle { background: #d29922; }
+  .dot.auth, .dot.error { background: #f85149; }
+  code { background: #0d1117; border: 1px solid #21262d; border-radius: 4px;
+         padding: 1px 5px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .ok { color: #3fb950; } .err { color: #f85149; }
+  ul { padding-left: 18px; margin: 6px 0; }
+  li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+  <h1>OMS Bonos</h1>
+  <div class="muted">Datos de la calculadora de bonos en tiempo real.</div>
+
+  <div class="card">
+    <h2>Conexión</h2>
+    <label for="token">Token de acceso (lo da el superuser desde /admin)</label>
+    <input type="password" id="token" autocomplete="off" placeholder="pegá tu token acá">
+    <div class="row">
+      <button class="primary" id="save">Guardar y conectar</button>
+      <button id="test">Probar</button>
+      <span style="margin-left:auto"><span class="dot" id="dot"></span> <span id="status" class="muted">—</span></span>
+    </div>
+    <div id="test-result" class="muted" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Modo hoja CRUDA</h2>
+    <div class="muted">Escribe todos los datos en la hoja <code>OMS_DATA</code> una vez por tick
+      (para libros con VLOOKUP o Excel sin funciones custom).</div>
+    <div class="row">
+      <button id="cruda">Activar</button>
+      <span id="cruda-status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Fórmulas</h2>
+    <ul class="muted">
+      <li><code>=OMS.QUOTE("GD30";"last")</code> — último BYMA 24hs</li>
+      <li><code>=OMS.QUOTE("S31L6";"bid";"CI")</code> — bid contado inmediato</li>
+      <li><code>=OMS.QUOTE("GD30";"vol";;"mae")</code> — cinta MAE</li>
+      <li><code>=OMS.FX("mep")</code> · <code>=OMS.FX("ccl")</code> · <code>=OMS.FX("mayorista")</code></li>
+      <li><code>=OMS.ROFEX(1;"tna")</code> — TNA implícita del 1er DLR</li>
+      <li><code>=OMS.CAUCION(7;"tasa")</code> — caución ARS a 7 días</li>
+      <li><code>=OMS.TABLA("futuros")</code> — tabla completa (spill)</li>
+      <li><code>=OMS.HIST("a3500";365)</code> — serie histórica (spill)</li>
+    </ul>
+  </div>
+
+  <script src="taskpane.js"></script>
+</body>
+</html>

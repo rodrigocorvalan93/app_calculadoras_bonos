@@ -196,6 +196,13 @@ def match(code: str, leg: str = "native") -> Optional[Dict[str, Any]]:
     }
 
 
+def tickers() -> List[str]:
+    """Tickers de renta fija presentes en el snapshot MAE (p. ej. para armar la
+    cinta cross-venue completa del snapshot de Excel)."""
+    with _lock:
+        return list(_snap["by_ticker"].keys())
+
+
 def volume_for(code: str, leg: str = "native") -> Optional[float]:
     """Volumen MAE (VN nominal) del bono en su leg — para sumar al de BYMA."""
     m = match(code, leg)

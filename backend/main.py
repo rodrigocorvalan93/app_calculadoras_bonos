@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -41,6 +41,7 @@ from backend.routes.mae import router as tasas_router
 from backend.routes.ordenes import router as ordenes_router
 from backend.routes.total_return import router as total_return_router
 from backend.routes.escenario import router as escenario_router
+from backend.routes.excel import router as excel_router
 from backend.routes.historico import router as historico_router
 from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
@@ -64,7 +65,8 @@ class _QuietPolls(logging.Filter):
     """Silencia el access-log de los endpoints de polling (1 req/s): /market/seq
     y los partials live. Costo-0: menos I/O de log y consola legible; los
     endpoints 'reales' se siguen logueando igual."""
-    _NOISY = ("/market/seq", "/tape", "/dolares/rail", "/news/marquee")
+    _NOISY = ("/market/seq", "/tape", "/dolares/rail", "/news/marquee",
+              "/excel/v1/seq", "/excel/v1/snapshot")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -456,6 +458,7 @@ def create_app() -> FastAPI:
     app.include_router(market_router)
     app.include_router(tape_router)
     app.include_router(alertas_router)
+    app.include_router(excel_router)
 
     # ── Login wall + gating por rol ───────────────────────────────────────
     # Público (sin sesión): login/recuperación, estáticos, health, favicon.
@@ -498,6 +501,21 @@ def create_app() -> FastAPI:
         request.state.features = frozenset()  # features del rol (paneles opcionales)
 
         path = request.url.path
+        # ── API del add-in de Excel: token por usuario, sin cookie ────────────
+        # El superuser habilita/corta cada token desde /admin (deshabilitar
+        # invalida al instante). Sin token válido → 401 JSON: el add-in muestra
+        # "token inválido" en la celda/taskpane, no hay redirect a /login.
+        # El manifest es público (es el instalador del add-in, no expone datos).
+        if path.startswith("/excel/") and settings.auth_enabled:
+            if path == "/excel/manifest.xml":
+                return await call_next(request)
+            token = request.headers.get("x-oms-token") or request.query_params.get("token")
+            uname = auth_svc.user_for_excel_token(token)
+            if uname is None:
+                return JSONResponse({"error": "Token de Excel inválido o deshabilitado."},
+                                    status_code=401)
+            request.state.user = {"username": uname, "role": auth_svc.role_of(uname)}
+            return await call_next(request)
         if not settings.auth_enabled or _is_public(path):
             if not settings.auth_enabled:
                 # sin muro: mostrar todo (dev). Nav = todas las pestañas.

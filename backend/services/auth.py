@@ -173,11 +173,12 @@ def _store() -> Dict[str, Any]:
 
 
 def refresh() -> None:
-    global _cache
+    global _cache, _excel_index
     with _lock:
         _cache = _load()
         _nav_cache.clear()
         _feat_cache.clear()
+        _excel_index = None
 
 
 # ── Hashing ──────────────────────────────────────────────────────────────────
@@ -276,7 +277,9 @@ def get_user(username: str) -> Optional[Dict[str, Any]]:
 
 def list_users() -> List[Dict[str, Any]]:
     out = [{"username": name, "role": u.get("role"), "email": u.get("email", ""),
-            "created": u.get("created")} for name, u in _store()["users"].items()]
+            "created": u.get("created"),
+            "excel_enabled": bool(u.get("excel_enabled")),
+            "excel_token": u.get("excel_token") or ""} for name, u in _store()["users"].items()]
     out.sort(key=lambda x: (x["role"] != "superuser", x["username"]))
     return out
 
@@ -395,6 +398,9 @@ def set_password(username: str, password: str) -> None:
         if not u:
             raise AuthError(f"El usuario '{name}' no existe.")
         rec = _make_record(password, u.get("role", "basico"), u.get("email", ""))
+        # el reset de contraseña no debe cortar el acceso Excel ya otorgado
+        rec["excel_enabled"] = bool(u.get("excel_enabled"))
+        rec["excel_token"] = u.get("excel_token", "")
         data["users"][name] = rec
         _save_locked(data)
 
@@ -419,6 +425,7 @@ def update_user(username: str, role: Optional[str] = None, email: Optional[str] 
 
 
 def delete_user(username: str) -> None:
+    global _excel_index
     name = _norm(username)
     with _lock:
         data = _store()
@@ -429,6 +436,7 @@ def delete_user(username: str) -> None:
             raise AuthError("No podés borrar al último superuser.")
         del data["users"][name]
         _save_locked(data)
+        _excel_index = None    # su token de Excel (si tenía) deja de valer ya
 
 
 def set_role_tabs(role: str, tabs: List[str]) -> None:
@@ -483,6 +491,75 @@ def set_role_features(role: str, keys: List[str]) -> None:
 
 def _count_superusers(data: Dict[str, Any]) -> int:
     return sum(1 for u in data["users"].values() if u.get("role") == "superuser")
+
+
+# ── Acceso Excel (add-in) por usuario ────────────────────────────────────────
+# El add-in de Excel no navega el login wall (no tiene cookie de sesión): se
+# autentica con un token POR USUARIO que sólo el superuser habilita/corta desde
+# /admin. El hot path (1 req/s por libro abierto) es un dict en memoria
+# token→username (O(1), sin I/O ni hashing); se reconstruye lazy tras cada
+# mutación / refresh().
+_excel_index: Optional[Dict[str, str]] = None
+
+
+def _excel_index_live() -> Dict[str, str]:
+    global _excel_index
+    with _lock:
+        if _excel_index is None:
+            _excel_index = {
+                u["excel_token"]: name
+                for name, u in _store()["users"].items()
+                if u.get("excel_enabled") and u.get("excel_token")
+            }
+        return _excel_index
+
+
+def user_for_excel_token(token: Optional[str]) -> Optional[str]:
+    """Username dueño del token, o None si es inválido o está deshabilitado.
+    Deshabilitar/regenerar desde /admin invalida el token viejo al instante."""
+    if not token:
+        return None
+    return _excel_index_live().get(str(token).strip())
+
+
+def excel_info(username: str) -> Dict[str, Any]:
+    u = _store()["users"].get(_norm(username)) or {}
+    return {"enabled": bool(u.get("excel_enabled")), "token": u.get("excel_token") or None}
+
+
+def set_excel_access(username: str, enabled: bool) -> Optional[str]:
+    """Habilita/corta el acceso Excel de un usuario (panel del superuser). Al
+    habilitar por primera vez genera el token; al deshabilitar lo CONSERVA
+    (re-habilitar no obliga a reconfigurar los libros ya armados) pero deja de
+    validar. Devuelve el token vigente si quedó habilitado."""
+    global _excel_index
+    name = _norm(username)
+    with _lock:
+        data = _store()
+        u = data["users"].get(name)
+        if not u:
+            raise AuthError(f"El usuario '{name}' no existe.")
+        u["excel_enabled"] = bool(enabled)
+        if enabled and not u.get("excel_token"):
+            u["excel_token"] = secrets.token_urlsafe(24)
+        _save_locked(data)
+        _excel_index = None
+        return u.get("excel_token") if enabled else None
+
+
+def regen_excel_token(username: str) -> str:
+    """Rota el token de Excel del usuario (el anterior deja de valer ya)."""
+    global _excel_index
+    name = _norm(username)
+    with _lock:
+        data = _store()
+        u = data["users"].get(name)
+        if not u:
+            raise AuthError(f"El usuario '{name}' no existe.")
+        u["excel_token"] = secrets.token_urlsafe(24)
+        _save_locked(data)
+        _excel_index = None
+        return u["excel_token"]
 
 
 # ── Tokens de reset (firmados, con expiración, single-use) ───────────────────
