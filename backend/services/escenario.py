@@ -56,6 +56,9 @@ CATEGORIES: List[Cat] = [
     Cat("tamar",         "TAMAR",           "tamar",         0.0, 1e9,   "", tamar_leg=True),
     Cat("dual_tamar_cer", "Dual TAMAR/CER", "dualtamar_cer", 0.0, 1e9,   "", tamar_leg=True),
     Cat("dual_cer",      "Dual CER/TAMAR",  "dualcer",       0.0, 1e9,   ""),
+    # Dual TAMAR/DLK (TMVE8): la pata v recibe el sendero TAMAR; la base DLK ya
+    # entra por la categoría "dlk" (bucket dolarlinked, ver curves).
+    Cat("dual_tamar_dlk", "Dual TAMAR/DLK", "dualtamar_dlk", 0.0, 1e9,   "", tamar_leg=True),
     Cat("globales",      "Globales",        "globales",      0.0, 1e9,   "ccl"),
     Cat("bonares",       "Bonares",         "bonares",       0.0, 1e9,   "mep"),
 ]
@@ -71,6 +74,8 @@ DUAL_CATEGORIES: List[Cat] = [
     Cat("dual_tamar_cer",  "Dual TAMAR/CER",  "dualtamar_cer",  0.0, 1e9, ""),
     Cat("dual_fija",       "Dual Fija/TAMAR", "dualfija",       0.0, 1e9, ""),
     Cat("dual_tamar_fija", "Dual TAMAR/Fija", "dualtamar_fija", 0.0, 1e9, ""),
+    Cat("dual_dlk",        "Dual DLK/TAMAR",  "dualdlk",        0.0, 1e9, ""),
+    Cat("dual_tamar_dlk",  "Dual TAMAR/DLK",  "dualtamar_dlk",  0.0, 1e9, ""),
 ]
 
 

@@ -38,6 +38,7 @@ CURVES: List[CurveDef] = [
     CurveDef("dualfija", "Dual Fija (base)", "dual"),
     CurveDef("dualtamar", "Dual TAMAR (v)", "dual"),
     CurveDef("dualcer", "Dual CER (base)", "dual"),
+    CurveDef("dualdlk", "Dual DLK (base)", "dual"),
     CurveDef("corp_tamar", "Corp. TAMAR", "tamar"),
     CurveDef("corp_badlar", "Corp. BADLAR", "tamar"),
     CurveDef("corp_tasafija", "Corp. Tasa Fija", "lecap"),
@@ -183,11 +184,21 @@ def build_curve_codes() -> Dict[str, List[str]]:
         c for c, clas, _ in _all("Soberano ARS Dual CER/Tamar")
         if clas == "Soberano"
     })
-    dualtamar = sorted({_apply_curve_suffix("dualtamar", c) for c in dualfija + dualcer})
+    # Dual TAMAR / Dólar Linked (TMVE8): la base es una pata DLK pura (VNO en
+    # USD, ajuste A3500) — entra TAMBIÉN a la curva Dólar Linked, donde compite
+    # con las LELINK y alimenta los sintéticos de Futuros; su pata 'v' va a la
+    # curva Dual TAMAR como las de los CER/Fija.
+    dualdlk = sorted({
+        c for c, clas, _ in _all("Soberano Moneda Dual DLK/Tamar")
+        if clas == "Soberano"
+    })
+    dolarlinked = sorted(set(dolarlinked) | set(dualdlk))
+    dualtamar = sorted({_apply_curve_suffix("dualtamar", c) for c in dualfija + dualcer + dualdlk})
     # Patas TAMAR partidas por tipo de dual (para segmentar "Qué pasó"): Tamar/Fija
-    # vs Tamar/CER. Mismo sufijo 'v' aplicado sobre la base correspondiente.
+    # vs Tamar/CER vs Tamar/DLK. Mismo sufijo 'v' aplicado sobre la base correspondiente.
     dualtamar_fija = sorted({_apply_curve_suffix("dualtamar", c) for c in dualfija})
     dualtamar_cer = sorted({_apply_curve_suffix("dualtamar", c) for c in dualcer})
+    dualtamar_dlk = sorted({_apply_curve_suffix("dualtamar", c) for c in dualdlk})
 
     bonares = sorted({
         c for c, qpc in by_ind_clas.get(("Soberano USD Ley Argentina D", "Soberano"), [])
@@ -241,9 +252,11 @@ def build_curve_codes() -> Dict[str, List[str]]:
         "bopreales": bopreales,
         "dualfija": dualfija,
         "dualcer": dualcer,
+        "dualdlk": dualdlk,
         "dualtamar": dualtamar,
         "dualtamar_fija": dualtamar_fija,
         "dualtamar_cer": dualtamar_cer,
+        "dualtamar_dlk": dualtamar_dlk,
         "corp_tamar": sorted(corp_tamar_set),
         "corp_badlar": sorted(corp_badlar_set),
         "corp_tasafija": sorted(corp_tasafija_set),
