@@ -182,8 +182,10 @@ class MarketDataStore:
                 if raw is None:
                     continue
                 v = _md_value(raw, "price") if entry in ("OP", "CL", "HI", "LO") else _md_value(raw, "size")
-                if v is None and entry == "OI":
-                    # OI viene {"size": contratos}; algún gateway lo manda en "price".
+                if v is None and entry in ("EV", "TV", "NV", "OI"):
+                    # Los acumulados suelen venir {"size": …} o escalar, pero
+                    # algún gateway los manda como {"price": …} (visto en OI y
+                    # en el EV de ROFEX): probamos la otra clave antes de tirar.
                     v = _md_value(raw, "price")
                 if v is not None:
                     setattr(snap, attr, v)

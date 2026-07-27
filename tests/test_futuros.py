@@ -57,6 +57,28 @@ def test_rows_lee_data_bajo_alias_ingles() -> None:
     assert r["tna"] is not None
 
 
+def test_rows_tea_y_volumen_fallback_nominal() -> None:
+    """TEA = TIR efectiva anual directa del td; sin EV el volumen cae al
+    nominal (NV, contratos) para no mostrar '—' con mercado operando."""
+    from backend.services import marketdata_store as mds
+
+    sym = fut.symbols("may")[2]
+    sp = fut.spot() or 1000.0
+    mds.get_store().update_from_md(sym, {"LA": {"price": sp * 1.06}, "NV": {"size": 7777.0}})
+    r = next(x for x in fut.rows("may") if x["code"] == sym)
+    assert r["tea"] == pytest.approx((1.0 + r["td"]) ** (365.0 / r["dias"]) - 1.0)
+    assert r["volume"] == 7777.0
+
+
+def test_deva_chart_promedio() -> None:
+    """La línea 'prom' es la TEM constante que compone al mismo punto final."""
+    rws = [{"label": "A", "dias": 30, "last": 1030.0},
+           {"label": "B", "dias": 61, "last": 1060.0}]
+    ch = fut.deva_path_chart(rws, 1000.0)
+    assert ch and ch["avg"] is not None
+    assert ch["avg"]["val"] == pytest.approx((1060.0 / 1000.0) ** (30.4375 / 61.0) - 1.0)
+
+
 def test_implied_rate_math() -> None:
     td, tna, tem = fut._impl(110.0, 100.0, 365)      # +10% en 1 año
     assert td == pytest.approx(0.10)
@@ -132,9 +154,12 @@ async def test_futuros_tabla_puntas_oi_y_graficos() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         t = await ac.get("/futuros/table?spot_override=1400")
     assert t.status_code == 200
-    assert "Bid × size" in t.text and "OI" in t.text
+    assert "Bid × size" in t.text and "OI" in t.text and "TEA" in t.text
     assert "×120" in t.text                                       # size de la punta
     assert "Σ volumen / interés abierto" in t.text                # footer con la suma
+    assert "Σ OI" in t.text                                       # strip: OI total
     assert "Curva de tasas implícitas" in t.text                  # línea (SVG)
     assert "Sendero de devaluación mensual" in t.text             # barras (SVG)
     assert "fc-bar" in t.text and "fc-line" in t.text
+    assert "TEM promedio" in t.text and "fc-avg" in t.text        # sendero promedio
+    assert 'class="fut-tables"' in t.text                         # tiras apiladas

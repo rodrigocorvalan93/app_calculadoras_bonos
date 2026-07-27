@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.locale_ar import hoy_ba, parse_ar_num
-from backend.services import bond_universe, futuros as fut, marketdata_store
+from backend.services import bond_universe, dolares, futuros as fut, marketdata_store
 
 router = APIRouter(tags=["futuros"])
 
@@ -101,8 +101,14 @@ async def _ctx(spot_override: str = "") -> Dict[str, Any]:
     base_rows, charts_canal = may_rows, "mayorista (DLR/…M)"
     if not any(r.get("tna") is not None for r in may_rows):
         base_rows, charts_canal = min_rows, "minorista (DLR/…)"
+    # Variación del oficial para la strip — sólo sin override (la var es DEL
+    # oficial; al lado de un spot manual sería engañosa).
+    spot_var = None if sp_over else (dolares.official_fx() or {}).get("var_pct")
+    oi_may = sum(r["oi"] for r in may_rows if r.get("oi"))
+    oi_min = sum(r["oi"] for r in min_rows if r.get("oi"))
     return {"may_rows": may_rows, "min_rows": min_rows, "spot": spot, "near": near,
             "dlk": dlk, "ars": ars, "spot_override": spot_override or "",
+            "spot_var": spot_var, "oi_may": oi_may, "oi_min": oi_min,
             "curve_chart": fut.rate_curve_chart(base_rows),
             "deva_chart": fut.deva_path_chart(base_rows, spot),
             "charts_canal": charts_canal}
