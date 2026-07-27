@@ -5681,7 +5681,7 @@ TMVE8v = {
     "Días Lag índice hasta inc": -10, # enteros negativos
     "Valor Nominal": 100.,
     "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": 1480.0, # ← PLACEHOLDER: TC Inicial = A3500 del 28/07/2026 PENDIENTE (peso-base congelado de la pata TAMAR: VNO USD × TCI)
+    "Factor Capitalización": 1497.0, # ← PLACEHOLDER: TC Inicial = A3500 del 28/07/2026 PENDIENTE (peso-base congelado de la pata TAMAR: VNO USD × TCI)
     "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": 0,
     "Fechas de cupón": ['28/01/2028'], # Lista de fechas como ejemplo
