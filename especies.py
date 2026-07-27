@@ -571,6 +571,43 @@ S30S6 = {
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
 }
+S16O6 = {
+    "Nombre Security": "Letra del Tesoro Nacional en Pesos Capitalizable Vto 16 10 2026",
+    "Código": "S16O6",
+    "ISIN": "PENDIENTE", # CRYL / Aviso de Resultados 29/07/2026
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberano Letras Zero Cupón (Ledes y Letes)",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "31/07/2026",
+    "Vencimiento": "16/10/2026",
+    "Fecha Primer Cupón": None,
+    "Cupón / Spread": 0, # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": (1+0.0200)**((76/360)*12), # TEM 2,00% PROVISORIA (indicación del usuario) — ajustar con el corte de la licitación del 29/07/2026 (DIAS360 emisión→vto = 76)
+    "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": 0,
+    "Fechas de cupón": ['16/10/2026'], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,  # Precio Call
+    "Aviso Resultados": """https://www.argentina.gob.ar/noticias/llamado-licitacion-de-instrumentos-del-tesoro-nacional-denominados-en-pesos-y-en-dolares-8"""
+}
 S30O6 = {
     "Nombre Security": "Letra del Tesoro Nacional en Pesos Capitalizable Vto 30 10 2026",
     "Código": "S30O6",
@@ -1224,6 +1261,80 @@ D30S6 = {
     "Tipo de Call": None,
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
+}
+D15E7 = {
+    "Nombre Security": "Letra del Tesoro Vinculada al Dólar Cero Cupón Vto 15 01 2027",
+    "Código": "D15E7",
+    "ISIN": "PENDIENTE", # CRYL / Aviso de Resultados 29/07/2026
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberanos Dolar Linked",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "31/07/2026",
+    "Vencimiento": "15/01/2027",
+    "Fecha Primer Cupón": "15/01/2027",
+    "Cupón / Spread": 0., # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "A3500", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -3, # → A3500 del 28/07/2026 (T-1 de la licitación) desde emisión 31/07
+    "Días lag Ajuste": -3, # pago al A3500 del 3er día hábil previo (textual del llamado)
+    "Fechas de cupón": ["15/01/2027"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,  # Precio Call
+    "Aviso Resultados": """https://www.argentina.gob.ar/noticias/llamado-licitacion-de-instrumentos-del-tesoro-nacional-denominados-en-pesos-y-en-dolares-8"""
+}
+TMVE8 = {
+    "Nombre Security": "Bono del Tesoro en Moneda Dual TAMAR/Dolar Linked Vto 28 01 2028",
+    "Código": "TMVE8",
+    "ISIN": "PENDIENTE", # CRYL / Aviso de Resultados 29/07/2026
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberano Moneda Dual DLK/Tamar",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "31/07/2026",
+    "Vencimiento": "28/01/2028",
+    "Fecha Primer Cupón": "28/01/2028",
+    "Cupón / Spread": 0., # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "A3500", # pata DLK: max(A3500 aplicable, TCI × TAMAR cap) — la pata TAMAR es TMVE8v
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -3, # → A3500 del 28/07/2026 = TC Inicial (T-1 de la licitación)
+    "Días lag Ajuste": -3, # pago al A3500 del 3er día hábil previo (textual del llamado)
+    "Fechas de cupón": ["28/01/2028"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,  # Precio Call
+    "Aviso Resultados": """https://www.argentina.gob.ar/noticias/llamado-licitacion-de-instrumentos-del-tesoro-nacional-denominados-en-pesos-y-en-dolares-8"""
 }
 D31M7 = {
     "Nombre Security": "Bono del Tesoro Vinculado al Dólar Vto 31 03 2027",
@@ -5543,6 +5654,43 @@ TXMJ9v = {
     "Tipo de Call": None,
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
+}
+TMVE8v = {
+    "Nombre Security": "Bono del Tesoro en Moneda Dual TAMAR/Dolar Linked Vto 28 01 2028",
+    "Código": "TMVE8v",
+    "ISIN": "PENDIENTE", # CRYL / Aviso de Resultados 29/07/2026
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberano Moneda Dual Tamar/DLK",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "31/07/2026",
+    "Vencimiento": "28/01/2028",
+    "Fecha Primer Cupón": None,
+    "Cupón / Spread": 0., # SIN margen: la fórmula del llamado es TAMAR TEM pura (≠ TXM +3)
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "VARIABLE_CAP", # FIJA o VARIABLE o VARIABLE_CAP(para tamar)
+    "Index": "TAMAR", # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": -10, # ventana TAMAR −10 hábiles (textual del llamado)
+    "Días Lag índice hasta inc": -10, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1480.0, # ← PLACEHOLDER: TC Inicial = A3500 del 28/07/2026 PENDIENTE (peso-base congelado de la pata TAMAR: VNO USD × TCI)
+    "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
+    "Días lag Ajuste": 0,
+    "Fechas de cupón": ['28/01/2028'], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,  # Precio Call
+    "Aviso Resultados": """https://www.argentina.gob.ar/noticias/llamado-licitacion-de-instrumentos-del-tesoro-nacional-denominados-en-pesos-y-en-dolares-8"""
 }
 TXMD8v = {
     "Nombre Security": "Bono de la Nacion Argentina Dual CER TAMAR 2028 Vto 15 12 2028",
@@ -28272,6 +28420,7 @@ S14G6 = rentafija.Bono(S14G6)
 S31G6 = rentafija.Bono(S31G6)
 S15S6 = rentafija.Bono(S15S6)
 S30S6 = rentafija.Bono(S30S6)
+S16O6 = rentafija.Bono(S16O6)
 S30O6 = rentafija.Bono(S30O6)
 S13N6 = rentafija.Bono(S13N6)
 S30N6 = rentafija.Bono(S30N6)
@@ -28344,6 +28493,9 @@ CUAP = rentafija.Bono(CUAP)
 D31L6 = rentafija.Bono(D31L6)
 D31G6 = rentafija.Bono(D31G6)
 D30S6 = rentafija.Bono(D30S6)
+D15E7 = rentafija.Bono(D15E7)
+TMVE8 = rentafija.Bono(TMVE8)
+TMVE8v = rentafija.Bono(TMVE8v)
 D31M7 = rentafija.Bono(D31M7)
 TZV27 = rentafija.Bono(TZV27)
 TZV28 = rentafija.Bono(TZV28)
@@ -28448,7 +28600,7 @@ todos_los_bonos = [
     # SOBERANOS PESOS (SOBS)
 
     S31L6, S14G6, S31G6, S15S6, S13N6,
-    S30S6, S30O6, S30N6,
+    S30S6, S16O6, S30O6, S30N6,
     TO26, TTS26, TTD26,
     TTS26v, TTD26v,
     T15E7, T30A7, T31Y7, T30J7, TY30P,
@@ -28461,8 +28613,8 @@ todos_los_bonos = [
     TZXS8j, TZX28j, TZXM7j, TZXM8j, TZXD8j, TZXM9j,
     X31L6j, TZXO6j, X30N6j, X30S6j,
     DICP, PARP, CUAP,
-    D31L6, D31G6, D30S6, TZVD8,
-    D31M7, TZV27, TZV28,
+    D31L6, D31G6, D30S6, D15E7, TZVD8,
+    D31M7, TMVE8, TMVE8v, TZV27, TZV28,
     TXMJ9, TXMJ9v, TXMJ9j,
     TXMJ8, TXMJ8v, TXMJ8j,
     TXMD8, TXMD8v, TXMD8j,

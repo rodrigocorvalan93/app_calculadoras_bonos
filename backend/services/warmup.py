@@ -49,7 +49,7 @@ logger = logging.getLogger("backend.warmup")
 WARMUP_CURVE_KEYS = (
     "cer", "lecap", "tamar",
     "globales", "bonares", "dolarlinked", "bopreales",
-    "dualfija", "dualcer", "dualtamar",
+    "dualfija", "dualcer", "dualdlk", "dualtamar",
     "cerproy", "todos_ars_proyectado",
     "corp_badlar", "corp_tasafija", "corp_uva",
     "corp_tamar", "corp_dlk", "corp_hdmep", "corp_hdcable",
