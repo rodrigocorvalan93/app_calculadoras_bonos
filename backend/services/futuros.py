@@ -134,6 +134,12 @@ def rows(canal: str = "may", spot_v: Optional[float] = None) -> List[Dict[str, A
         td, tna_last, tem_last = _impl(last, sp, dias)
         _, tna_bid, _ = _impl(bid, sp, dias)
         _, tna_off, _ = _impl(offer, sp, dias)
+        tea = None                                   # TIR efectiva anual directa
+        if td is not None and dias and dias > 0 and td > -1.0:
+            try:
+                tea = (1.0 + td) ** (365.0 / dias) - 1.0
+            except (ValueError, OverflowError, ZeroDivisionError):
+                tea = None
         var = None
         try:
             if last is not None and close not in (None, 0):
@@ -146,8 +152,11 @@ def rows(canal: str = "may", spot_v: Optional[float] = None) -> List[Dict[str, A
             "code": snap.symbol, "label": _label(sym), "vto": vto.isoformat() if vto else None,
             "dias": dias, "last": last, "bid": bid, "offer": offer, "close": close,
             "bid_size": snap.bid_size, "offer_size": snap.offer_size,
-            "var_pct": var, "td": td, "tna": tna_last, "tem": tem_last,
-            "tna_bid": tna_bid, "tna_offer": tna_off, "volume": snap.volume,
+            "var_pct": var, "td": td, "tna": tna_last, "tea": tea, "tem": tem_last,
+            "tna_bid": tna_bid, "tna_offer": tna_off,
+            # ROFEX no siempre publica EV: el volumen cae al NV (nominal
+            # acumulado, contratos) para no mostrar "—" con mercado operando.
+            "volume": snap.volume if snap.volume is not None else snap.nominal,
             "oi": snap.open_interest,
         })
     out.sort(key=lambda r: (r["dias"] if r["dias"] is not None else 9999))
@@ -270,6 +279,13 @@ def deva_path_chart(rws: List[Dict[str, Any]], spot_v: Optional[float], *,
         prev_d, prev_px = float(r["dias"]), float(px)
     if not segs:
         return None
+    # TEM promedio del sendero: la tasa mensual CONSTANTE que compone al mismo
+    # punto final (geométrica spot → último contrato). Cae dentro del rango de
+    # las barras, así que no altera la escala.
+    try:
+        avg_val = (prev_px / float(spot_v)) ** (_DIAS_MES / prev_d) - 1.0
+    except (ValueError, ZeroDivisionError, OverflowError):
+        avg_val = None
     vals = [s["val"] for s in segs]
     ymin, ymax = min(0.0, min(vals)), max(0.0, max(vals))
     span = (ymax - ymin) or 0.01
@@ -292,6 +308,7 @@ def deva_path_chart(rws: List[Dict[str, Any]], spot_v: Optional[float], *,
                      "w": round(bw, 2), "y": y_top,
                      "h": round(max(y_bot - y_top, 0.75), 2),
                      "label_y": (y_top - 5) if s["val"] >= 0 else (y_bot + 12)})
-    return {"w": width, "h": height, "x0": pad_l, "x1": width - pad_r,
+    return {"w": width, "h": height, "x0": pad_l, "x1": width - pad_r, "y0": pad_t,
             "zero_y": Y(0.0), "xlabel_y": height - pad_b + 15, "bars": bars,
+            "avg": ({"val": avg_val, "y": Y(avg_val)} if avg_val is not None else None),
             "yticks": [{"v": v, "y": Y(v)} for v in _nice_ticks(ymin, ymax, 4)]}

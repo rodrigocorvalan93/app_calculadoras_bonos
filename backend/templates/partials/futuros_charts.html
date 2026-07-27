@@ -31,7 +31,7 @@
 <div class="card" style="margin-top:14px">
   <div class="card-title">
     <span>Sendero de devaluación mensual · TEM implícita</span>
-    <span class="card-title-aux">{{ charts_canal }} · tramo contrato vs anterior, normalizado a 30,4 días</span>
+    <span class="card-title-aux">{{ charts_canal }} · tramo contrato vs anterior, normalizado a 30,4 días{% if deva_chart.avg %} · <span style="color:var(--accent)">TEM promedio {{ deva_chart.avg.val | ar_pct(2) }}</span>{% endif %}</span>
   </div>
   <div class="card-body">
     <svg class="fut-chart" viewBox="0 0 {{ deva_chart.w }} {{ deva_chart.h }}" width="100%"
@@ -48,6 +48,15 @@
         <text class="fc-xlabel" x="{{ b.cx }}" y="{{ deva_chart.xlabel_y }}" text-anchor="end"
               transform="rotate(-32 {{ b.cx }} {{ deva_chart.xlabel_y }})">{{ b.label }}</text>
       {% endfor %}
+      {# Sendero promedio: la TEM constante que compone al mismo punto final.
+         El label va arriba a la derecha del plot (sobre la línea chocaba con
+         los valores de las barras cortas, que la rozan). #}
+      {% if deva_chart.avg %}
+        <line class="fc-avg" x1="{{ deva_chart.x0 }}" y1="{{ deva_chart.avg.y }}" x2="{{ deva_chart.x1 }}" y2="{{ deva_chart.avg.y }}">
+          <title>TEM promedio del sendero: {{ deva_chart.avg.val | ar_pct(2) }}</title></line>
+        <line class="fc-avg" x1="{{ deva_chart.x1 - 96 }}" y1="{{ deva_chart.y0 + 8 }}" x2="{{ deva_chart.x1 - 80 }}" y2="{{ deva_chart.y0 + 8 }}"/>
+        <text class="fc-avg-label" x="{{ deva_chart.x1 - 74 }}" y="{{ deva_chart.y0 + 11.5 }}">prom {{ deva_chart.avg.val | ar_pct(2) }}</text>
+      {% endif %}
     </svg>
   </div>
 </div>

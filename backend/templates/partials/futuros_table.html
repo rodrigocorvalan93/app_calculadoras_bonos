@@ -1,7 +1,11 @@
 {% import "partials/_fx_macros.html" as fx %}
 <div class="mae-strip" style="margin-bottom:12px">
   <span class="mae-tag">Spot A3500{% if spot_override %} (override){% endif %}</span>
-  <span><b>{{ spot | ar_num(2) if spot is not none else "—" }}</b></span>
+  <span><b>{{ spot | ar_num(2) if spot is not none else "—" }}</b>{% if spot_var is not none %}
+    <span class="{{ fx.vcls(spot_var) }}">{{ fx.arrow(spot_var) }} {{ spot_var | ar_pct(2) }}</span>{% endif %}</span>
+  {% if oi_may or oi_min %}
+    <span>· Σ OI <b>{{ oi_may | ar_hum if oi_may else "—" }}</b> may{% if oi_min %} · <b>{{ oi_min | ar_hum }}</b> min{% endif %}</span>
+  {% endif %}
   {% if near %}
     <span>· más cercano <b>{{ near.label }}</b> ({{ near.dias }}d): TNA impl
       <b class="{{ 'px-up' if (near.tna and near.tna > 0) else '' }}">{{ near.tna | ar_pct(2) }}</b>
@@ -9,15 +13,16 @@
   {% endif %}
 </div>
 
-{# ── Futuros arriba: mayorista + minorista ── #}
-<div class="dolar-tables">
+{# ── Futuros: mayorista arriba, minorista abajo (apiladas — con 14 columnas
+     el lado a lado no entra en una pantalla normal) ── #}
+<div class="fut-tables">
   {% for title, rws in [("📈 Mayorista (DLR/…M)", may_rows), ("📈 Minorista (DLR/…)", min_rows)] %}
   <div class="dolar-tbl">
     <div class="dolar-tbl-h">{{ title }}</div>
     <div class="table-scroll">
       <table class="cashflows curve-table mercado-table">
         <thead>
-          <tr><th style="text-align:left">Contrato</th><th style="text-align:left">Código</th><th>Días</th><th>Last</th><th>Var%</th><th>Bid × size</th><th>Offer × size</th><th>TNA impl</th><th>TEM</th><th>Bid TNA</th><th>Offer TNA</th><th>Vol</th><th>OI</th></tr>
+          <tr><th style="text-align:left">Contrato</th><th style="text-align:left">Código</th><th>Días</th><th>Last</th><th>Var%</th><th>Bid × size</th><th>Offer × size</th><th>TNA impl</th><th>TEA</th><th>TEM</th><th>Bid TNA</th><th>Offer TNA</th><th>Vol</th><th>OI</th></tr>
         </thead>
         <tbody>
           {% for r in rws %}
@@ -36,6 +41,7 @@
               <td style="color:var(--green)">{{ r.bid | ar_num(2) }}{% if r.bid_size %} <small class="muted">×{{ r.bid_size | ar_int }}</small>{% endif %}</td>
               <td style="color:var(--red)">{{ r.offer | ar_num(2) }}{% if r.offer_size %} <small class="muted">×{{ r.offer_size | ar_int }}</small>{% endif %}</td>
               <td style="font-weight:600">{{ r.tna | ar_pct(2) }}</td>
+              <td>{{ r.tea | ar_pct(2) }}</td>
               <td>{{ r.tem | ar_pct(2) }}</td>
               <td>{{ r.tna_bid | ar_pct(2) }}</td>
               <td>{{ r.tna_offer | ar_pct(2) }}</td>
@@ -43,7 +49,7 @@
               <td>{{ r.oi | ar_hum }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="13" class="muted" style="text-align:center">Sin futuros en el store (¿broker offline u horario cerrado?).</td></tr>
+            <tr><td colspan="14" class="muted" style="text-align:center">Sin futuros en el store (¿broker offline u horario cerrado?).</td></tr>
           {% endfor %}
         </tbody>
         {% if rws %}
@@ -51,7 +57,7 @@
         {% set tot_vol = rws | selectattr("volume") | map(attribute="volume") | sum %}
         <tfoot>
           <tr style="border-top:1px solid var(--border)">
-            <td colspan="11" style="text-align:right;color:var(--text-muted);font-weight:600">Σ volumen / interés abierto</td>
+            <td colspan="12" style="text-align:right;color:var(--text-muted);font-weight:600">Σ volumen / interés abierto</td>
             <td style="font-weight:600">{{ tot_vol | ar_hum if tot_vol else "—" }}</td>
             <td style="font-weight:600;color:var(--accent)" title="Suma del interés abierto de la tira">{{ tot_oi | ar_hum if tot_oi else "—" }}</td>
           </tr>

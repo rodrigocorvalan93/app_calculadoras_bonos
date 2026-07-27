@@ -110,6 +110,7 @@ Futuros de dólar DLR (Matba-Rofex) con tasas implícitas vs el mayorista.
 | `oi` | Interés abierto (contratos) | `interes_abierto` |
 | `tna` | TNA implícita (decimal) del último | |
 | `tna_bid` / `tna_ask` | TNA implícita de cada punta | |
+| `tea` | TIR efectiva anual implícita (decimal) | `tir` |
 | `tem` | TEM implícita (decimal) | |
 | `td` | Devaluación directa al vencimiento (decimal) | `directo` |
 | `dias` | Días al vencimiento | |

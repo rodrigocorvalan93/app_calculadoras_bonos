@@ -113,6 +113,9 @@ def test_oi_decodifica_interes_abierto() -> None:
     # sticky: un tick sin OI no lo pisa
     s = store.update_from_md("DLR/AGO26M", {"LA": {"price": 1500.0}})
     assert s.open_interest == 140_000.0
+    # el EV con forma {"price": …} (visto en ROFEX) también carga volume
+    s = store.update_from_md("DLR/AGO26M", {"EV": {"price": 999.0}})
+    assert s.volume == 999.0
 
 
 @pytest.mark.asyncio
