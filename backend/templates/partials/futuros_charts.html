@@ -1,0 +1,54 @@
+{# Curva de TNA implícita + sendero de devaluación mensual (TEM). SVG
+   server-side (geometría en services.futuros) — sin JS, mismo patrón que
+   _bar_chart. Sólo se dibujan con ≥2 contratos con precio. #}
+{% if curve_chart %}
+<div class="card" style="margin-top:14px">
+  <div class="card-title">
+    <span>Curva de tasas implícitas · TNA</span>
+    <span class="card-title-aux">{{ charts_canal }} · vs spot {{ spot | ar_num(2) }}</span>
+  </div>
+  <div class="card-body">
+    <svg class="fut-chart" viewBox="0 0 {{ curve_chart.w }} {{ curve_chart.h }}" width="100%"
+         preserveAspectRatio="xMidYMid meet" role="img" aria-label="Curva de TNA implícita de futuros DLR">
+      {% for t in curve_chart.yticks %}
+        <line class="fc-grid" x1="{{ curve_chart.x0 }}" y1="{{ t.y }}" x2="{{ curve_chart.x1 }}" y2="{{ t.y }}"/>
+        <text class="fc-vlabel" x="{{ curve_chart.x0 - 6 }}" y="{{ t.y + 3.5 }}" text-anchor="end">{{ t.v | ar_pct(0) }}</text>
+      {% endfor %}
+      <polyline class="fc-line" points="{{ curve_chart.poly }}"/>
+      {% for n in curve_chart.nodes %}
+        <circle class="fc-dot" cx="{{ n.cx }}" cy="{{ n.cy }}" r="3.6">
+          <title>{{ n.label }} · {{ n.dias }}d · TNA {{ n.tna | ar_pct(2) }} · TEM {{ n.tem | ar_pct(2) }}{% if n.px is not none %} · {{ n.px | ar_num(2) }}{% endif %}</title>
+        </circle>
+        <text class="fc-xlabel" x="{{ n.cx }}" y="{{ curve_chart.xlabel_y }}" text-anchor="end"
+              transform="rotate(-32 {{ n.cx }} {{ curve_chart.xlabel_y }})">{{ n.label }}</text>
+      {% endfor %}
+    </svg>
+  </div>
+</div>
+{% endif %}
+
+{% if deva_chart %}
+<div class="card" style="margin-top:14px">
+  <div class="card-title">
+    <span>Sendero de devaluación mensual · TEM implícita</span>
+    <span class="card-title-aux">{{ charts_canal }} · tramo contrato vs anterior, normalizado a 30,4 días</span>
+  </div>
+  <div class="card-body">
+    <svg class="fut-chart" viewBox="0 0 {{ deva_chart.w }} {{ deva_chart.h }}" width="100%"
+         preserveAspectRatio="xMidYMid meet" role="img" aria-label="Devaluación mensual implícita entre contratos DLR">
+      {% for t in deva_chart.yticks %}
+        <line class="fc-grid" x1="{{ deva_chart.x0 }}" y1="{{ t.y }}" x2="{{ deva_chart.x1 }}" y2="{{ t.y }}"/>
+        <text class="fc-vlabel" x="{{ deva_chart.x0 - 6 }}" y="{{ t.y + 3.5 }}" text-anchor="end">{{ t.v | ar_pct(1) }}</text>
+      {% endfor %}
+      <line class="fc-zero" x1="{{ deva_chart.x0 }}" y1="{{ deva_chart.zero_y }}" x2="{{ deva_chart.x1 }}" y2="{{ deva_chart.zero_y }}"/>
+      {% for b in deva_chart.bars %}
+        <rect class="fc-bar" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1">
+          <title>{{ b.label }} · deva mensual {{ b.val | ar_pct(2) }} · tramo {{ b.dias }}d · {{ b.px | ar_num(2) }}</title></rect>
+        <text class="fc-blabel" x="{{ b.cx }}" y="{{ b.label_y }}" text-anchor="middle">{{ b.val | ar_pct(1) }}</text>
+        <text class="fc-xlabel" x="{{ b.cx }}" y="{{ deva_chart.xlabel_y }}" text-anchor="end"
+              transform="rotate(-32 {{ b.cx }} {{ deva_chart.xlabel_y }})">{{ b.label }}</text>
+      {% endfor %}
+    </svg>
+  </div>
+</div>
+{% endif %}
