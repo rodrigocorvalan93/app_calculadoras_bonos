@@ -20,10 +20,15 @@ def test_mgcto_esta_en_el_universo() -> None:
 
 
 def test_is_future_vto() -> None:
-    from datetime import date, timedelta
+    from datetime import timedelta
 
-    ayer = (date.today() - timedelta(days=1)).strftime("%d/%m/%Y")
-    manana = (date.today() + timedelta(days=1)).strftime("%d/%m/%Y")
+    from backend.locale_ar import hoy_ba
+
+    # Fechas relativas a HOY BA (no date.today() naive): el container en UTC ya
+    # está en el día siguiente entre 00:00 y 03:00 UTC y el "ayer" naive caía
+    # en el hoy de BA, que _is_future_vto (correctamente) considera vigente.
+    ayer = (hoy_ba() - timedelta(days=1)).strftime("%d/%m/%Y")
+    manana = (hoy_ba() + timedelta(days=1)).strftime("%d/%m/%Y")
     assert bond_universe._is_future_vto(manana) is True
     assert bond_universe._is_future_vto(ayer) is False
     assert bond_universe._is_future_vto(None) is False
