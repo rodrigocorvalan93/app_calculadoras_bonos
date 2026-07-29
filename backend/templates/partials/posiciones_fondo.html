@@ -36,7 +36,21 @@
           </tr>
         </thead>
         <tbody>
-          {% for r in rows %}
+          {# Ramas por Categoría (estilo Excel de carteras): encabezado de grupo
+             con subtotal Valor / %PN / Ret. día (recalculado en el navegador),
+             click = plegar/desplegar. El sort y los filtros son group-aware
+             (app.js): se ordena/filtra DENTRO de cada grupo. #}
+          {% for g in grupos %}
+          <tr class="pos-grp" data-grp="{{ g.cat }}" title="Click para plegar/desplegar">
+            <td colspan="4" style="text-align:left"><span class="grp-caret">▾</span>{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
+            <td></td>
+            <td>{{ g.valor | ar_int }}</td>
+            <td>{{ (g.pct_pn * 100) | ar_pct_pp(2) if g.pct_pn is not none else "—" }}</td>
+            <td></td><td></td>
+            <td class="pos-grp-ret">—</td>
+            <td colspan="4"></td>
+          </tr>
+          {% for r in g.rows %}
             <tr data-esp="{{ r.especie }}"
                 data-pxval="{{ r.px_val if r.px_val is not none else '' }}"
                 data-valor="{{ r.valor if r.valor is not none else '' }}">
@@ -64,6 +78,7 @@
               <td>{{ r.duration | ar_num(2) }}</td>
               <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
             </tr>
+          {% endfor %}
           {% endfor %}
         </tbody>
       </table>

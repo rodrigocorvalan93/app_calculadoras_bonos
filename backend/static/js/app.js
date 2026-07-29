@@ -353,7 +353,7 @@ window.lsSet = function (k, v) {
     var tbody = table.tBodies[0];
     if (!tbody) return;
     var rows = Array.prototype.slice.call(tbody.rows);
-    rows.sort(function (a, b) {
+    function cmp(a, b) {
       var va = cellVal(a, st.idx), vb = cellVal(b, st.idx);
       var na = parseAr(va), nb = parseAr(vb);
       var r;
@@ -362,8 +362,26 @@ window.lsSet = function (k, v) {
       else if (nb !== null) r = 1;
       else r = va.localeCompare(vb, 'es');
       return st.dir * r;
-    });
-    for (var i = 0; i < rows.length; i++) tbody.appendChild(rows[i]);
+    }
+    // Tabla agrupada (encabezados .pos-grp): se ordena DENTRO de cada grupo
+    // y los encabezados mantienen su posición — el sort no rompe las ramas.
+    var hasGrp = false;
+    for (var h = 0; h < rows.length; h++) if (rows[h].classList.contains('pos-grp')) { hasGrp = true; break; }
+    if (hasGrp) {
+      var segs = [{ g: null, rows: [] }], cur = segs[0];
+      for (var s = 0; s < rows.length; s++) {
+        if (rows[s].classList.contains('pos-grp')) { cur = { g: rows[s], rows: [] }; segs.push(cur); }
+        else cur.rows.push(rows[s]);
+      }
+      for (var s2 = 0; s2 < segs.length; s2++) {
+        segs[s2].rows.sort(cmp);
+        if (segs[s2].g) tbody.appendChild(segs[s2].g);
+        for (var r2 = 0; r2 < segs[s2].rows.length; r2++) tbody.appendChild(segs[s2].rows[r2]);
+      }
+    } else {
+      rows.sort(cmp);
+      for (var i = 0; i < rows.length; i++) tbody.appendChild(rows[i]);
+    }
     var ths = table.querySelectorAll('th[data-sort]');
     for (var j = 0; j < ths.length; j++) ths[j].classList.remove('sort-asc', 'sort-desc');
     var th = table.rows[0] && table.rows[0].cells[st.idx];
@@ -440,12 +458,23 @@ window.lsSet = function (k, v) {
     if (!table || !table.tBodies[0]) return;
     var q = (s.text || '').toLowerCase(), rows = table.tBodies[0].rows;
     for (var i = 0; i < rows.length; i++) {
-      var r = rows[i], ok = !q || (r.textContent || '').toLowerCase().indexOf(q) >= 0;
+      var r = rows[i];
+      if (r.classList.contains('pos-grp')) continue;   // encabezados: abajo
+      var ok = !q || (r.textContent || '').toLowerCase().indexOf(q) >= 0;
       for (var k = 0; ok && k < s.rules.length; k++) {
         var rule = s.rules[k], v = parseNum(cellVal(r, rule.idx));
         ok = (v !== null) && (rule.op === '>=' ? v >= rule.val : v <= rule.val);
       }
       r.style.display = ok ? '' : 'none';
+    }
+    // Encabezado de grupo visible sólo si le queda alguna fila que matchee
+    for (var gi = 0; gi < rows.length; gi++) {
+      var gr = rows[gi];
+      if (!gr.classList.contains('pos-grp')) continue;
+      var vis = false;
+      for (var m = gi + 1; m < rows.length && !rows[m].classList.contains('pos-grp'); m++)
+        if (rows[m].style.display !== 'none') { vis = true; break; }
+      gr.style.display = vis ? '' : 'none';
     }
   }
   function initAll() {
@@ -505,9 +534,23 @@ window.lsSet = function (k, v) {
     if (!tbl || !tbl.tBodies[0]) return;
     var rows = tbl.tBodies[0].rows;
     var totV = 0, acc = 0, any = false;
-    var rets = [];
+    // Subtotal de retorno por grupo (encabezados .pos-grp): mismo ponderado
+    // por valor, pero dentro de la rama — se pinta en la celda .pos-grp-ret.
+    var curGrp = null, gTot = 0, gAcc = 0;
+    function flushGrp() {
+      if (!curGrp) return;
+      var gc = curGrp.querySelector('.pos-grp-ret');
+      if (!gc) return;
+      gc.classList.remove('var-up', 'var-down');
+      if (gTot > 0) {
+        var gr = gAcc / gTot;
+        gc.textContent = fmtPct(gr);
+        gc.classList.add(gr >= 0 ? 'var-up' : 'var-down');
+      } else gc.textContent = '—';
+    }
     for (var i = 0; i < rows.length; i++) {
       var tr = rows[i];
+      if (tr.classList.contains('pos-grp')) { flushGrp(); curGrp = tr; gTot = 0; gAcc = 0; continue; }
       var pxv = parseFloat(tr.dataset.pxval);
       var valor = parseFloat(tr.dataset.valor);
       var inp = tr.querySelector('.pos-last');
@@ -520,8 +563,7 @@ window.lsSet = function (k, v) {
         var ratio = last * f / pxv;
         if (ratio > 0.2 && ratio < 5) ret = ratio - 1;
       }
-      rets.push(ret);
-      if (ret !== null && valor > 0) { totV += valor; acc += valor * ret; any = true; }
+      if (ret !== null && valor > 0) { totV += valor; acc += valor * ret; any = true; gTot += valor; gAcc += valor * ret; }
       var cell = tr.querySelector('.pos-ret');
       if (cell) {
         cell.textContent = ret === null ? '—' : fmtPct(ret);
@@ -529,6 +571,7 @@ window.lsSet = function (k, v) {
         if (ret !== null) cell.classList.add(ret >= 0 ? 'var-up' : 'var-down');
       }
     }
+    flushGrp();
     var chip = document.getElementById('pos-day-ret');
     if (chip) {
       if (any && totV > 0) {
@@ -566,6 +609,44 @@ window.lsSet = function (k, v) {
   });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', reapply);
   else reapply();
+})();
+
+// ── Posiciones: ramas por Categoría plegables (estilo Excel de carteras) ───
+// Click en el encabezado de grupo pliega/despliega sus filas. El estado se
+// guarda por nombre de grupo y se re-aplica tras cada swap de htmx (igual que
+// el sort). Independiente de los filtros: plegar usa la clase .grp-hide, los
+// filtros usan style.display — no se pisan.
+(function () {
+  var collapsed = {}; // data-grp -> true
+  function applyCollapse() {
+    var tbl = document.getElementById('pos-tbl');
+    if (!tbl || !tbl.tBodies[0]) return;
+    var rows = tbl.tBodies[0].rows, cur = null;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r.classList.contains('pos-grp')) {
+        cur = r.getAttribute('data-grp');
+        var caret = r.querySelector('.grp-caret');
+        if (caret) caret.textContent = collapsed[cur] ? '▸' : '▾';
+      } else if (cur !== null) {
+        r.classList.toggle('grp-hide', !!collapsed[cur]);
+      }
+    }
+  }
+  document.body.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('input, a, button')) return;
+    var tr = e.target.closest && e.target.closest('tr.pos-grp');
+    if (!tr) return;
+    var g = tr.getAttribute('data-grp');
+    collapsed[g] = !collapsed[g];
+    applyCollapse();
+  });
+  document.body.addEventListener('htmx:afterSwap', function (evt) {
+    var t = evt.detail.target;
+    if (t && (t.id === 'pos-fondo' || (t.querySelector && t.querySelector('#pos-tbl')))) applyCollapse();
+  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', applyCollapse);
+  else applyCollapse();
 })();
 
 // ── Ctrl+K: búsqueda global (bonos → YAS · pestañas por nombre) ────────────

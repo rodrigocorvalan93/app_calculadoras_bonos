@@ -49,6 +49,18 @@
     </div>
   </div>
 
+  {# Filtros client-side sobre las tenencias (texto + reglas ≥/≤ por columna),
+     mismo componente que Curvas/Mercado. Vive FUERA del swap → persiste. #}
+  <div class="tbl-filters" data-table-filters="#pos-tbl">
+    <input type="text" data-f-text placeholder="filtrar especie / emisor / categoría…" autocomplete="off">
+    <span class="muted" style="font-size:11px">·</span>
+    <select data-f-col title="columna"></select>
+    <select data-f-op title="operador"><option value=">=">≥</option><option value="<=">≤</option></select>
+    <input type="text" data-f-val placeholder="valor (ej 1M, 60)" autocomplete="off" style="width:96px">
+    <button type="button" class="btn-primary" data-f-add style="font-size:11px">+ filtro</button>
+    <span data-f-chips></span>
+  </div>
+
   {# Tabla ESTÁTICA: NO lleva md-update — el Last es editable y un re-render en vivo
      pisaba lo que el usuario tipeaba. Se refresca a demanda con "↻ Precios BYMA" o
      al cambiar fondo/plazo. data-flash-scope sigue marcando qué celdas cambiaron. #}
