@@ -92,13 +92,17 @@ def _categoria(obj) -> str:
 
 
 def _calif(obj) -> str:
+    """Calificación local de la ficha (AA(arg), CCC-, …). Antes los soberanos
+    devolvían el literal "Soberano" y la columna Rating nunca mostraba su
+    calificación real; el split soberano/corporativo ya vive en Categoría.
+    "Soberano" queda sólo como fallback de una ficha soberana sin dato."""
     if obj is None:
         return "(sin clasif.)"
-    clas = getattr(obj, "clasificacion", "") or ""
-    if "Soberano" in clas:
-        return "Soberano"
     cal = (getattr(obj, "calificacion", "") or "").strip()
-    return cal or "(sin clasif.)"
+    if cal:
+        return cal
+    clas = getattr(obj, "clasificacion", "") or ""
+    return "Soberano" if "Soberano" in clas else "(sin clasif.)"
 
 
 def _cat_for(h: Dict[str, Any], obj) -> str:
