@@ -27,10 +27,14 @@ def _any_code() -> str:
 
 
 def test_settle_str_24hs_es_t1_no_ci() -> None:
+    from backend.locale_ar import hoy_ba
+
     ci = pricing.settlement_date_str("CI")            # hoy hábil (t+0)
     s24 = tr.settle_str("24hs")                        # debe ser t+1 hábil
     assert s24 != ci                                   # 24hs NO liquida a CI
-    assert s24 != date.today().strftime("%d/%m/%Y")    # ni a hoy
+    # "hoy" en fecha BA: con date.today() naive (UTC) el test fallaba en la
+    # ventana 00:00–03:00 UTC, cuando el server ya cruzó la medianoche y BA no.
+    assert s24 != hoy_ba().strftime("%d/%m/%Y")        # ni a hoy
 
 
 def test_compute_metrics_settle_invalido_avisa() -> None:

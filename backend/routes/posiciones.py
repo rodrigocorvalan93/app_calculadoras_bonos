@@ -92,13 +92,17 @@ def _categoria(obj) -> str:
 
 
 def _calif(obj) -> str:
+    """Calificación local de la ficha (AA(arg), CCC-, …). Antes los soberanos
+    devolvían el literal "Soberano" y la columna Rating nunca mostraba su
+    calificación real; el split soberano/corporativo ya vive en Categoría.
+    "Soberano" queda sólo como fallback de una ficha soberana sin dato."""
     if obj is None:
         return "(sin clasif.)"
-    clas = getattr(obj, "clasificacion", "") or ""
-    if "Soberano" in clas:
-        return "Soberano"
     cal = (getattr(obj, "calificacion", "") or "").strip()
-    return cal or "(sin clasif.)"
+    if cal:
+        return cal
+    clas = getattr(obj, "clasificacion", "") or ""
+    return "Soberano" if "Soberano" in clas else "(sin clasif.)"
 
 
 def _cat_for(h: Dict[str, Any], obj) -> str:
@@ -250,14 +254,39 @@ async def posiciones_page(
     )
 
 
+def _agrupar_tenencias(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Tenencias agrupadas por Categoría — el cuadro con 'ramas' del Excel de
+    carteras, pero con NUESTRO agrupamiento (el mismo de composición). Grupos
+    ordenados por Σ valor desc; las filas adentro conservan su orden (valor
+    desc). El subtotal de % PN sólo se muestra si alguna fila lo tiene."""
+    by: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        cat = r.get("categoria") or "(sin clasif.)"
+        g = by.setdefault(cat, {"cat": cat, "valor": 0.0, "pct_pn": 0.0,
+                                "pct_any": False, "n": 0, "rows": []})
+        g["rows"].append(r)
+        g["n"] += 1
+        g["valor"] += r.get("valor") or 0.0
+        if r.get("pct_pn") is not None:
+            g["pct_pn"] += r["pct_pn"]
+            g["pct_any"] = True
+    out = sorted(by.values(), key=lambda g: -g["valor"])
+    for g in out:
+        if not g.pop("pct_any"):
+            g["pct_pn"] = None
+    return out
+
+
 def _fondo_ctx(selected: Optional[int], plazo: str) -> Dict[str, Any]:
     if selected is None:
-        return {"rows": [], "summary": {}, "pn": None, "total_valor": 0.0, "nombre": ""}
+        return {"rows": [], "grupos": [], "summary": {}, "pn": None,
+                "total_valor": 0.0, "nombre": ""}
     pn = positions.pn_of(selected)
     hs = positions.holdings(selected)
     rows = _enrich(hs, pn, plazo)
     return {
         "rows": rows,
+        "grupos": _agrupar_tenencias(rows),
         "summary": _composicion_summary(hs, pn),
         "pn": pn,
         "total_valor": sum((r.get("valor") or 0.0) for r in rows),

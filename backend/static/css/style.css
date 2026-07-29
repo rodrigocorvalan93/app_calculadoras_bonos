@@ -1025,6 +1025,18 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
 }
 .cell-edit:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
 .pos-day-ret { font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* Posiciones — ramas por Categoría (encabezados de grupo estilo Excel) */
+#pos-tbl tr.pos-grp { cursor: pointer; background: var(--accent-soft); }
+#pos-tbl tr.pos-grp td {
+  font-weight: 700; color: var(--accent-strong); font-size: 12px;
+  border-top: 1px solid var(--border); padding-top: 6px; padding-bottom: 6px;
+}
+#pos-tbl tr.pos-grp:hover { filter: brightness(1.12); }
+#pos-tbl tr.pos-grp .grp-caret { display: inline-block; width: 15px; color: var(--text-muted); }
+#pos-tbl tr.pos-grp .grp-n { color: var(--text-muted); font-weight: 400; font-size: 11px; }
+#pos-tbl tr.pos-grp .pos-grp-ret { font-variant-numeric: tabular-nums; }
+#pos-tbl tr.grp-hide { display: none; }
 .var-up { color: var(--green); }
 .var-down { color: var(--red); }
 

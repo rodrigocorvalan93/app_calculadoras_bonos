@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from backend.config import settings
+from backend.locale_ar import hoy_ba
 from backend.services import dolares, marketdata_store as mds, pricing
 
 
@@ -51,8 +52,11 @@ def test_intradia_spot_de_ayer_no_vale(monkeypatch) -> None:
 def test_official_fx_fecha_del_siopel_no_de_la_serie(monkeypatch) -> None:
     """Regresión del riel: con SIOPEL operando HOY, la fecha mostrada era la
     de la serie A3500 (AYER). Cada fuente pone SU fecha."""
-    from datetime import date, timedelta
-    ayer = (date.today() - timedelta(days=1)).isoformat()
+    # Fechas en BA: el container puede estar en UTC ya en el día siguiente
+    # (00:00–03:00 UTC) mientras dolares estampa la fecha de Buenos Aires —
+    # con date.today() naive estos tests fallaban justo en esa ventana.
+    from datetime import timedelta
+    ayer = (hoy_ba() - timedelta(days=1)).isoformat()
     monkeypatch.setattr(dolares, "a3500_official",
                         lambda: {"source": "A3500", "last": 1477.7, "close": 1474.7,
                                  "var_pct": 0.002, "date": ayer,
@@ -61,13 +65,13 @@ def test_official_fx_fecha_del_siopel_no_de_la_serie(monkeypatch) -> None:
     monkeypatch.setitem(dolares._mae_snap, "ust", {"last": 1478.5, "hora": "12:30"})
     monkeypatch.setitem(dolares._mae_snap, "ts", time.time())
     of = dolares.official_fx()
-    assert of["source"] == "SIOPEL" and of["date"] == date.today().isoformat()
+    assert of["source"] == "SIOPEL" and of["date"] == hoy_ba().isoformat()
     # sin SIOPEL → DLR/SPOT con last_ts de hoy → date = HOY
     monkeypatch.setitem(dolares._mae_snap, "ust", None)
     mds.get_store().update_from_md(dolares.SPOT_SYMBOL,
                                    {"LA": {"price": 1479.0, "date": str(int(time.time() * 1000))}})
     of = dolares.official_fx()
-    assert of["source"] == "DLR/SPOT" and of["date"] == date.today().isoformat()
+    assert of["source"] == "DLR/SPOT" and of["date"] == hoy_ba().isoformat()
     # sólo serie → conserva la fecha de la serie (AYER), como corresponde
     monkeypatch.setattr(dolares, "_spot_official", lambda: None)
     of = dolares.official_fx()
@@ -82,7 +86,7 @@ def _con_serie(monkeypatch, fecha, valor=1474.7):
 
 def test_a3500_de_hoy_publicado_manda(monkeypatch) -> None:
     """Con el cierre del día ya en la serie, el intradía NO pisa nada."""
-    _con_serie(monkeypatch, datetime.now())                       # serie fecha HOY
+    _con_serie(monkeypatch, datetime.combine(hoy_ba(), datetime.min.time()))   # serie fecha HOY (BA)
     monkeypatch.setattr(dolares, "oficial_intradia_hoy",
                         lambda: {"last": 1480.0, "source": "SIOPEL", "hora": None})
     a = pricing.a3500_aplicable()
@@ -91,7 +95,8 @@ def test_a3500_de_hoy_publicado_manda(monkeypatch) -> None:
 
 
 def test_serie_de_ayer_usa_intradia(monkeypatch) -> None:
-    _con_serie(monkeypatch, datetime.now() - timedelta(days=1))   # serie de AYER
+    _con_serie(monkeypatch, datetime.combine(hoy_ba() - timedelta(days=1),
+                                             datetime.min.time()))   # serie de AYER (BA)
     monkeypatch.setattr(dolares, "oficial_intradia_hoy",
                         lambda: {"last": 1480.0, "source": "SIOPEL", "hora": "12:30"})
     a = pricing.a3500_aplicable()
@@ -180,3 +185,19 @@ def test_card_yas_muestra_fuente(monkeypatch) -> None:
                                  "fecha": date.today(), "intradia": False})
     out = pricing.index_applied(_Obj())
     assert out["value"] == 1474.7 and "cierre" in out["label"]
+
+
+def test_fx_custom_se_muestra_en_el_card() -> None:
+    """Regresión: con TC (A3500) custom en YAS, las cuentas usaban el override
+    pero el card 'FX A3500 aplicable' seguía mostrando el cierre de la serie.
+    Ahora el card muestra el TC que realmente priceó los flujos."""
+    from backend.services import bond_universe, pricing
+
+    bond_universe.ensure_loaded()
+    m = pricing.compute_metrics("D30S6", "precio", 148000.0, fx_override=1498.5,
+                                include_cashflows=False)
+    ia = m["index_applied"]
+    assert ia["value"] == 1498.5 and "custom" in ia["label"].lower()
+    # sin override → el card sigue leyendo la serie/intradía (label sin 'custom')
+    m2 = pricing.compute_metrics("D30S6", "precio", 148000.0, include_cashflows=False)
+    assert "custom" not in m2["index_applied"]["label"].lower()

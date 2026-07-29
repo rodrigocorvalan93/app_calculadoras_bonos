@@ -115,3 +115,44 @@ def test_acciones_levantan_last_del_store() -> None:
     assert r["last"] == 5400.0 and r["price_source"] == "LA"
     assert r["categoria"] == "Acciones" and r["px_val"] == 5350.0
     assert r["tirea"] is None                      # sin calculadora para equities
+
+
+def test_rating_muestra_la_calificacion_de_la_ficha() -> None:
+    """Regresión: la columna Rating mostraba el literal 'Soberano' para los
+    soberanos (early-return) en vez de su calificación (CCC-), y los AA(arg)
+    de las ONs sólo aparecían si no eran soberanos. El split sob/corp ya vive
+    en Categoría — Rating muestra la calificación real de la ficha."""
+    from backend.routes.posiciones import _calif
+    from backend.services import bond_universe
+
+    bond_universe.ensure_loaded()
+    gd30 = bond_universe.get("GD30")
+    assert gd30 is not None
+    assert _calif(gd30) == (gd30.calificacion or "").strip()   # CCC-, no "Soberano"
+    assert _calif(None) == "(sin clasif.)"
+
+    class _FakeSinCalif:
+        calificacion = None
+        clasificacion = "Soberano"
+
+    assert _calif(_FakeSinCalif()) == "Soberano"               # fallback sin dato
+
+
+def test_agrupar_tenencias_ramas_por_categoria() -> None:
+    """El cuadro de tenencias se agrupa por Categoría (ramas estilo Excel):
+    grupos ordenados por Σ valor desc, subtotales de valor y % PN (None si
+    ninguna fila lo tiene), filas en su orden original."""
+    from backend.routes.posiciones import _agrupar_tenencias
+
+    rows = [
+        {"categoria": "CER", "valor": 100.0, "pct_pn": 0.10},
+        {"categoria": "USD", "valor": 500.0, "pct_pn": 0.50},
+        {"categoria": "CER", "valor": 300.0, "pct_pn": None},
+        {"categoria": None, "valor": None, "pct_pn": None},
+    ]
+    gs = _agrupar_tenencias(rows)
+    assert [g["cat"] for g in gs] == ["USD", "CER", "(sin clasif.)"]
+    cer = gs[1]
+    assert cer["n"] == 2 and cer["valor"] == 400.0 and cer["pct_pn"] == 0.10
+    assert [r["valor"] for r in cer["rows"]] == [100.0, 300.0]
+    assert gs[2]["pct_pn"] is None

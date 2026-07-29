@@ -256,6 +256,14 @@ def index_applied(obj) -> Dict[str, Any]:
         return out
 
     if "A3500" in ajuste or moneda == "DLK":
+        # TC custom del usuario (YAS): el card debe mostrar el FX que REALMENTE
+        # priceó los flujos, no el último de la serie — antes las cuentas
+        # usaban el override pero el card seguía mostrando el cierre oficial.
+        ov = getattr(obj, "_a3500_override", None)
+        if ov is not None and getattr(obj, "_a3500_custom", False):
+            out.update({"kind": "FX", "label": "FX A3500 aplicable (TC custom)",
+                        "value": float(ov), "value_fmt_hint": "decimal", "fecha": None})
+            return out
         a = a3500_aplicable()
         label = ("FX aplicable — mayorista intradía (" + a["fuente"] + ")"
                  if a.get("intradia") else "FX A3500 aplicable (cierre)")
@@ -518,6 +526,11 @@ def compute_metrics(
     if fx_override is not None:
         try:
             obj._a3500_override = float(fx_override)
+            # Marca "TC custom del usuario": index_applied muestra ESTE valor
+            # en el card de FX (antes las cuentas usaban el override pero el
+            # card seguía mostrando el cierre de la serie). El auto-override
+            # DLK intradía no la lleva: su card ya muestra el intradía.
+            obj._a3500_custom = True
         except (TypeError, ValueError):
             pass
     elif obj_override is None and _bond_index_kind(code) == "a3500":
@@ -886,6 +899,7 @@ def tr_puntual(
     # entrada del TR tiene que pricear EXACTAMENTE como el ticket de arriba.
     if fx_override is not None:
         try:
+            obj._a3500_custom = True
             obj._a3500_override = float(fx_override)
         except (TypeError, ValueError):
             pass
