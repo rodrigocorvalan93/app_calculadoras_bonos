@@ -147,6 +147,14 @@ function quoteGet(s, especie, campo, plazo, mercado) {
   if (mkt === "mae") {
     var m = (s.mae || {})[code] || (s.mae || {})[code.replace(/[CD]$/, "")];
     if (!m) { return naError("Sin dato MAE para " + code); }
+    // Plazo EXPLÍCITO → fila de ese segmento (CI / 24hs). Antes se ignoraba y
+    // pedir CI devolvía la fila default (mayor volumen = t+1) en silencio.
+    if (plazo != null && String(plazo).trim() !== "") {
+      var pn = normPlazo(plazo);
+      var pp = (m.plazos || {})[pn];
+      if (!pp) { return naError("Sin dato MAE " + pn + " para " + code); }
+      m = pp;
+    }
     var mv = m[MAE_FIELDS[f] || f];
     return mv == null ? "" : mv;
   }
