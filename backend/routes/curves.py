@@ -218,7 +218,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     # gigante, muchas veces profundo (por eso el WS suscribe depth 5). El snap
     # ya está en mano — son ≤10 comparaciones por fila, no toca el hot path.
     anom = marketdata_store.orden_anormal(
-        snap, settings.anom_book_min_vn, settings.anom_book_ratio, settings.anom_book_abs_vn)
+        snap, settings.anom_book_bid_vn, settings.anom_book_offer_vn, settings.anom_book_ratio)
     row.update(
         {
             "anom": anom,
@@ -439,6 +439,7 @@ async def mercado_page(
     only_quoting: bool = True,
     leg: str = "native",
     fuente: str = "byma",
+    book: str | None = None,   # deep-link: abre el libro de esta especie al cargar (⚠ de Curvas)
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     all_curves = curves.list_curves()
@@ -462,6 +463,7 @@ async def mercado_page(
         only_quoting=only_quoting,
         leg=leg,
         fuente=fuente,
+        book_open=book,
     )
 
 

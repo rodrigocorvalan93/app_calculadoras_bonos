@@ -115,9 +115,14 @@ def refresh() -> bool:
 
 def status() -> Dict[str, Any]:
     with _lock:
-        return {"enabled": enabled(), "ts": _snap["ts"],
-                "n_rentafija": len(_snap["rentafija"]), "n_cauciones": len(_snap["cauciones"]),
+        rf = list(_snap["rentafija"])
+        base = {"enabled": enabled(), "ts": _snap["ts"],
+                "n_rentafija": len(rf), "n_cauciones": len(_snap["cauciones"]),
                 "n_repo": len(_snap["repo"]), "fresh": (time.time() - _snap["ts"]) < _TTL}
+    # Qué segmentos manda la API (diagnóstico: si acá no aparece 'CI', el T+0
+    # no viene del feed — no es un problema de la app).
+    base["plazos_rf"] = sorted({_plazo_norm(r.get("plazo")) for r in rf} - {""})
+    return base
 
 
 def cauciones_rows() -> List[Dict[str, Any]]:
@@ -167,26 +172,32 @@ def _plazo_key(p: str) -> tuple:
         return (1, 0)
 
 
-def match(code: str, leg: str = "native") -> Optional[Dict[str, Any]]:
-    """Mejor fila MAE de renta fija para un bono nuestro (best-effort).
+def _plazo_norm(raw: object) -> str:
+    """Plazo MAE crudo → etiqueta de la casa: '000'/'0' → 'CI', '001'/'1' →
+    '24hs', '002' → '48hs'. Best-effort con variantes de texto ('CI',
+    'CONTADO INMEDIATO', '24HS'); cualquier otra cosa vuelve en mayúsculas."""
+    s = ("" if raw is None else str(raw)).strip().upper()   # ojo: 0 es falsy y es CI
+    if not s:
+        return ""
+    try:
+        n = int(s)
+        return {0: "CI", 1: "24hs", 2: "48hs"}.get(n, f"{n}d")
+    except ValueError:
+        pass
+    if "CI" in s or "INMEDIATO" in s:
+        return "CI"
+    if "24" in s:
+        return "24hs"
+    if "48" in s:
+        return "48hs"
+    return s
 
-    Matchea por ticker == código base (sin sufijo C/D); si el `leg` sugiere una
-    moneda (cable→X, MEP→D), prioriza esa; si no, la de mayor volumen. Devuelve
-    último/var/mín/máx/volumen/monto/segmento/moneda — NO trae bid/offer.
-    """
-    if not code:
-        return None
-    base = code[:-1].upper() if code[-1:] in ("C", "D") else code.upper()
-    with _lock:
-        rows = list(_snap["by_ticker"].get(base, []))
-    if not rows:
-        return None
-    pref = _LEG_MONEDAS.get(leg, ())
-    pool = [r for r in rows if str(r.get("moneda")) in pref] or rows
-    best = max(pool, key=lambda r: _num(r.get("volumenAcumulado")) or 0.0)
+
+def _row_out(best: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ticker": best.get("ticker"), "segmento": best.get("segmento"),
         "moneda": best.get("moneda"), "plazo": best.get("plazo"),
+        "plazo_norm": _plazo_norm(best.get("plazo")),
         "last": _num(best.get("precioUltimo")),
         "close": _num(best.get("precioCierreAnterior")),
         "var_pct": _num(best.get("variacion")),
@@ -194,6 +205,55 @@ def match(code: str, leg: str = "native") -> Optional[Dict[str, Any]]:
         "volumen": _num(best.get("volumenAcumulado")),   # VN nominal
         "monto": _num(best.get("montoAcumulado")),       # $ operado
     }
+
+
+def _rows_for(code: str) -> List[Dict[str, Any]]:
+    if not code:
+        return []
+    base = code[:-1].upper() if code[-1:] in ("C", "D") else code.upper()
+    with _lock:
+        return list(_snap["by_ticker"].get(base, []))
+
+
+def match(code: str, leg: str = "native", plazo: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Mejor fila MAE de renta fija para un bono nuestro (best-effort).
+
+    Matchea por ticker == código base (sin sufijo C/D); si el `leg` sugiere una
+    moneda (cable→X, MEP→D), prioriza esa; si no, la de mayor volumen. Con
+    `plazo` ('CI'/'24hs') filtra ESE segmento y devuelve None si no hay fila —
+    honesto: antes se aplastaba todo a la fila de mayor volumen (t+1) y pedir
+    CI devolvía t+1 en silencio. Devuelve último/var/mín/máx/volumen/monto/
+    segmento/moneda — NO trae bid/offer.
+    """
+    rows = _rows_for(code)
+    if plazo:
+        target = _plazo_norm(plazo)
+        rows = [r for r in rows if _plazo_norm(r.get("plazo")) == target]
+    if not rows:
+        return None
+    pref = _LEG_MONEDAS.get(leg, ())
+    pool = [r for r in rows if str(r.get("moneda")) in pref] or rows
+    best = max(pool, key=lambda r: _num(r.get("volumenAcumulado")) or 0.0)
+    return _row_out(best)
+
+
+def match_por_plazo(code: str, leg: str = "native") -> Dict[str, Dict[str, Any]]:
+    """Todas las filas MAE del ticker agrupadas por plazo normalizado
+    ('CI', '24hs', …), cada una resuelta con la misma preferencia de leg /
+    max-volumen que `match`. Alimenta el snapshot de Excel para que
+    OMS.QUOTE(...; "CI"; "mae") pueda elegir segmento."""
+    rows = _rows_for(code)
+    grupos: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        grupos.setdefault(_plazo_norm(r.get("plazo")), []).append(r)
+    out: Dict[str, Dict[str, Any]] = {}
+    pref = _LEG_MONEDAS.get(leg, ())
+    for pl, rs in grupos.items():
+        if not pl:
+            continue
+        pool = [r for r in rs if str(r.get("moneda")) in pref] or rs
+        out[pl] = _row_out(max(pool, key=lambda r: _num(r.get("volumenAcumulado")) or 0.0))
+    return out
 
 
 def tickers() -> List[str]:

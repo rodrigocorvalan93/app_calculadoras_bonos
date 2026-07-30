@@ -138,3 +138,41 @@ async def test_tasas_endpoints() -> None:
                 assert r.text
     finally:
         _clear()
+
+
+def test_match_por_plazo_ci_vs_24hs() -> None:
+    """Regresión Excel: pedir CI devolvía t+1 en silencio — match() aplastaba
+    todo a la fila de mayor volumen. Ahora `plazo` filtra el segmento (000=CI,
+    001=24hs) y devuelve None si no operó; match_por_plazo agrupa para que
+    OMS.QUOTE(...; "CI"; "mae") elija segmento en el add-in."""
+    _inject(rentafija=[
+        {"ticker": "AL30", "segmento": "Garantizado", "moneda": "$", "plazo": "001",
+         "precioUltimo": 74900.0, "volumenAcumulado": 9e6},
+        {"ticker": "AL30", "segmento": "Garantizado", "moneda": "$", "plazo": "000",
+         "precioUltimo": 74500.0, "volumenAcumulado": 2e6},
+    ])
+    try:
+        # sin plazo → compat: la de mayor volumen (t+1)
+        assert mae.match("AL30")["plazo_norm"] == "24hs"
+        # plazo explícito → el segmento pedido
+        ci = mae.match("AL30", plazo="CI")
+        assert ci is not None and ci["last"] == pytest.approx(74500.0)
+        assert mae.match("AL30", plazo="24hs")["last"] == pytest.approx(74900.0)
+        # segmento que no operó → None (no t+1 disfrazado)
+        assert mae.match("AL30", plazo="48hs") is None
+        # agrupado por plazo para el snapshot de Excel
+        pl = mae.match_por_plazo("AL30")
+        assert set(pl) == {"CI", "24hs"} and pl["CI"]["last"] == pytest.approx(74500.0)
+        # diagnóstico: qué segmentos manda la API
+        assert mae.status()["plazos_rf"] == ["24hs", "CI"]
+    finally:
+        _clear()
+
+
+def test_plazo_norm_variantes() -> None:
+    assert mae._plazo_norm("000") == "CI" and mae._plazo_norm(0) == "CI"
+    assert mae._plazo_norm("001") == "24hs" and mae._plazo_norm("1") == "24hs"
+    assert mae._plazo_norm("002") == "48hs"
+    assert mae._plazo_norm("CONTADO INMEDIATO") == "CI"
+    assert mae._plazo_norm("24HS") == "24hs"
+    assert mae._plazo_norm("") == "" and mae._plazo_norm(None) == ""

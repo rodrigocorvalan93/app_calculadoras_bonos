@@ -270,31 +270,35 @@ class MarketDataStore:
         return n
 
 
-def orden_anormal(snap: Optional[MarketSnapshot], min_vn: float, ratio: float,
-                  abs_vn: float) -> Optional[Dict[str, Any]]:
+def orden_anormal(snap: Optional[MarketSnapshot], bid_vn: float, offer_vn: float,
+                  ratio: float) -> Optional[Dict[str, Any]]:
     """Nivel del book con un tamaño ANORMAL (mano oficial estilo BCRA: p. ej.
     25.000M VN descansando profundo con 35.000M operados en el día).
 
-    Regla: size ≥ `ratio` × nominales operados del día (NV) Y size ≥ `min_vn`
-    (el piso evita falsos positivos en ilíquidos); o size ≥ `abs_vn` a secas
-    (cubre la pre-apertura, sin NV). Recorre TODOS los niveles capturados —
-    estas órdenes suelen estar profundas, no en la punta. Devuelve el nivel
+    La señal es el TAMAÑO ABSOLUTO del nivel, con piso POR PUNTA — los bids
+    son más sensibles que los offers (la mano oficial sostiene comprando).
+    Una regla puramente relativa metía ruido: 1.000M sobre 125M operados es
+    ratio 8× pero una orden chica. El `ratio` quedó sólo como des-ruidador
+    de nombres mega-líquidos: el nivel además debe ser ≥ ratio × NV del día
+    (sin NV — pre-apertura — alcanza el piso). Recorre TODOS los niveles
+    capturados (suelen estar profundos, no en la punta). Devuelve el nivel
     más grande {lado, price, size, pct_vol} o None. Costo: ≤10 comparaciones
-    por bono sobre el book ya en memoria — apto para correr por fila de tabla."""
+    por bono sobre el book ya en memoria — apto para correr por fila."""
     if snap is None:
         return None
     nv = snap.nominal
     best: Optional[Dict[str, Any]] = None
-    for lado, levels in (("compra", snap.bids), ("venta", snap.offers)):
+    for lado, piso, levels in (("compra", bid_vn, snap.bids),
+                               ("venta", offer_vn, snap.offers)):
         for lvl in levels or ():
             sz = lvl.get("size")
-            if not sz:
+            if not sz or sz < piso:
                 continue
-            rel = bool(nv) and nv > 0 and sz >= ratio * nv and sz >= min_vn
-            if rel or sz >= abs_vn:
-                if best is None or sz > best["size"]:
-                    best = {"lado": lado, "price": lvl.get("price"), "size": float(sz),
-                            "pct_vol": (float(sz) / float(nv)) if nv else None}
+            if nv and nv > 0 and sz < ratio * nv:
+                continue
+            if best is None or sz > best["size"]:
+                best = {"lado": lado, "price": lvl.get("price"), "size": float(sz),
+                        "pct_vol": (float(sz) / float(nv)) if nv else None}
     return best
 
 

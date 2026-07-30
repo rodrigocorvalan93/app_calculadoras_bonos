@@ -56,7 +56,11 @@ Dato de mercado de una especie: bonos, letras, ONs, acciones, CEDEARs e
 nada: hoy mapean al plazo estándar.)
 
 **mercado** (default `byma`): `byma` | `mae`. La cinta MAE **no tiene
-bid/ask** (es cinta + volumen, no libro); sus campos son:
+bid/ask** (es cinta + volumen, no libro). Con `mae`, el **plazo también
+aplica**: `=OMS.QUOTE("AL30";"last";"CI";"mae")` trae el segmento t+0 y
+`"24hs"` el t+1; sin plazo, la fila de mayor volumen del ticker (la de
+siempre). Si el segmento pedido no operó, devuelve `#N/A` con el motivo —
+antes pedir CI devolvía t+1 en silencio. Sus campos son:
 
 | Campo (en `mae`) | Qué devuelve |
 |---|---|

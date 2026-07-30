@@ -133,7 +133,17 @@ def _build(codes: Optional[FrozenSet[str]]) -> Dict[str, Any]:
         out["cauciones"] = {}
     try:
         if mae_svc.enabled():
-            out["mae"] = {t: mae_svc.match(t) for t in mae_svc.tickers()}
+            # Fila default (max volumen, compat con hojas viejas) + "plazos":
+            # {CI: {...}, 24hs: {...}} para que OMS.QUOTE(...; "CI"; "mae")
+            # pueda elegir segmento (antes pedir CI devolvía t+1 en silencio).
+            def _mae_row(t: str):
+                row = mae_svc.match(t)
+                if row is not None:
+                    pl = mae_svc.match_por_plazo(t)
+                    if pl:
+                        row = {**row, "plazos": pl}
+                return row
+            out["mae"] = {t: _mae_row(t) for t in mae_svc.tickers()}
             out["mae_cauciones"] = mae_svc.cauciones_rows()
     except Exception:  # noqa: BLE001
         logger.exception("[excel] mae section failed")
