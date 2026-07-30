@@ -58,11 +58,18 @@ async def _ctx(plazo: str, incl: Optional[List[str]] = None,
                                  incluir=incluir)
     # JSON para el gráfico de barras (sólo bonos INCLUIDOS, como el resumen).
     chart = [r for r in data["rows"] if r.get("be_anual") is not None and r.get("incluido")]
+    res = data.get("resumen") or {}
     be_json = json.dumps({
         "labels": [r["code"] for r in chart],
         "mes": [r.get("mes_ref") or "" for r in chart],
         "tem": [round(r["be_tem"] * 100.0, 4) for r in chart],
         "anual": [round(r["be_anual"] * 100.0, 4) for r in chart],
+        # Promedios del resumen (mismos números que la strip): la línea "prom"
+        # del gráfico de barras, en la métrica que esté seleccionada.
+        "prom_tem": (round(res["be_tem_prom"] * 100.0, 4)
+                     if res.get("be_tem_prom") is not None else None),
+        "prom_anual": (round(res["be_anual_prom"] * 100.0, 4)
+                       if res.get("be_anual_prom") is not None else None),
     })
     return {**data, "plazo": plazo, "be_json": be_json}
 

@@ -483,3 +483,56 @@ async def test_curve_table_latency_with_live_prices() -> None:
     p95 = sorted(times)[int(len(times) * 0.95)]
     # CLAUDE.md target: < 50 ms p95 on the warm-cache path.
     assert p95 < 0.050, f"{curve_key} ({len(codes)} bonds) p50={p50*1000:.1f}ms p95={p95*1000:.1f}ms"
+
+
+def test_orden_anormal_en_book() -> None:
+    """Detector de mano oficial: un nivel con VN gigante (profundo, no sólo la
+    punta) dispara si es ≥ratio del nominal operado del día con un piso, o si
+    supera el absoluto a secas (pre-apertura sin NV)."""
+    store = mds.MarketDataStore()
+    MIN, RATIO, ABS = 1e9, 0.25, 20e9
+
+    # caso real: 25.000M VN en el 3er nivel con 35.000M operados → dispara
+    s = store.update_from_md("LETRA", {
+        "BI": [{"price": 124.62, "size": 16e6}, {"price": 124.58, "size": 360e3},
+               {"price": 124.573, "size": 25e9}],
+        "NV": {"size": 35e9},
+    })
+    a = mds.orden_anormal(s, MIN, RATIO, ABS)
+    assert a is not None and a["lado"] == "compra" and a["size"] == 25e9
+    assert a["price"] == 124.573 and abs(a["pct_vol"] - 25 / 35) < 1e-9
+
+    # ilíquido: 40% del NV pero abajo del piso → NO dispara
+    s2 = store.update_from_md("ON_CHICA", {"BI": [{"price": 100.0, "size": 20e6}],
+                                           "NV": {"size": 50e6}})
+    assert mds.orden_anormal(s2, MIN, RATIO, ABS) is None
+
+    # pre-apertura (sin NV): sólo dispara el absoluto
+    s3 = store.update_from_md("PREAPERTURA", {"OF": [{"price": 99.0, "size": 21e9}]})
+    a3 = mds.orden_anormal(s3, MIN, RATIO, ABS)
+    assert a3 is not None and a3["lado"] == "venta" and a3["pct_vol"] is None
+    assert mds.orden_anormal(None, MIN, RATIO, ABS) is None
+
+
+@pytest.mark.asyncio
+async def test_anom_badge_en_curvas() -> None:
+    """El ⚠ aparece al lado del ticker cuando hay una orden anormal en el book."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, curves
+
+    bond_universe.ensure_loaded()
+    table = curves.build_curve_codes()
+    curve_key, codes = next((k, v) for k, v in table.items() if v)
+    code = codes[0]
+    store = mds.get_store()
+    store.update_from_md(syms.md_symbol(code, "24hs"), {
+        "LA": {"price": 90.0, "size": 100},
+        "BI": [{"price": 89.9, "size": 1e6}, {"price": 89.5, "size": 30e9}],
+        "NV": {"size": 40e9},
+    })
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get(f"/curves/table?curve={curve_key}&plazo=24hs")
+    assert r.status_code == 200
+    assert "anom-badge" in r.text and "Orden ANORMAL" in r.text

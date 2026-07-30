@@ -423,12 +423,37 @@
     var m = metric();
     var ys = (m === "anual") ? d.anual : d.tem;
     var xs = d.labels.map(function (_, i) { return i; });
+    var prom = (m === "anual") ? d.prom_anual : d.prom_tem;
     var ACC = cssVar("--accent", "#ff9f00"), MUT = cssVar("--text-muted", "#999"), BORD = cssVar("--border-soft", "#222");
     if (u) { u.destroy(); u = null; }
     box.innerHTML = "";
+    // Línea "prom" (mismo diseño que el sendero de deva de Futuros): punteada
+    // en accent a la altura del promedio del resumen + leyenda arriba a la
+    // derecha, fuera del alcance de las barras.
+    function drawProm(uu) {
+      if (prom == null) return;
+      var ctx = uu.ctx, dpr = (window.devicePixelRatio || 1);
+      var y = Math.round(uu.valToPos(prom, "y", true));
+      var x0 = uu.bbox.left, x1 = uu.bbox.left + uu.bbox.width;
+      ctx.save();
+      ctx.strokeStyle = ACC; ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 1.4 * dpr; ctx.setLineDash([5 * dpr, 4 * dpr]);
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+      var label = "prom " + fmtPct(prom);
+      ctx.globalAlpha = 1; ctx.fillStyle = ACC;
+      ctx.font = "600 " + (10.5 * dpr) + "px system-ui, sans-serif";
+      ctx.textAlign = "right"; ctx.textBaseline = "top";
+      var tx = x1 - 4 * dpr, ty = uu.bbox.top + 6 * dpr;
+      ctx.fillText(label, tx, ty);
+      var tw = ctx.measureText(label).width;
+      ctx.beginPath(); ctx.moveTo(tx - tw - 22 * dpr, ty + 5 * dpr);
+      ctx.lineTo(tx - tw - 6 * dpr, ty + 5 * dpr); ctx.stroke();
+      ctx.restore();
+    }
     u = new uPlot({
       width: Math.max(box.clientWidth || 700, 320), height: 260,
       scales: { x: { time: false, range: [-0.6, xs.length - 0.4] } },
+      hooks: { draw: [drawProm] },
       axes: [
         { stroke: MUT, grid: { show: false }, ticks: { show: false },
           values: function (uu, vals) {

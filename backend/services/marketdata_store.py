@@ -270,6 +270,34 @@ class MarketDataStore:
         return n
 
 
+def orden_anormal(snap: Optional[MarketSnapshot], min_vn: float, ratio: float,
+                  abs_vn: float) -> Optional[Dict[str, Any]]:
+    """Nivel del book con un tamaño ANORMAL (mano oficial estilo BCRA: p. ej.
+    25.000M VN descansando profundo con 35.000M operados en el día).
+
+    Regla: size ≥ `ratio` × nominales operados del día (NV) Y size ≥ `min_vn`
+    (el piso evita falsos positivos en ilíquidos); o size ≥ `abs_vn` a secas
+    (cubre la pre-apertura, sin NV). Recorre TODOS los niveles capturados —
+    estas órdenes suelen estar profundas, no en la punta. Devuelve el nivel
+    más grande {lado, price, size, pct_vol} o None. Costo: ≤10 comparaciones
+    por bono sobre el book ya en memoria — apto para correr por fila de tabla."""
+    if snap is None:
+        return None
+    nv = snap.nominal
+    best: Optional[Dict[str, Any]] = None
+    for lado, levels in (("compra", snap.bids), ("venta", snap.offers)):
+        for lvl in levels or ():
+            sz = lvl.get("size")
+            if not sz:
+                continue
+            rel = bool(nv) and nv > 0 and sz >= ratio * nv and sz >= min_vn
+            if rel or sz >= abs_vn:
+                if best is None or sz > best["size"]:
+                    best = {"lado": lado, "price": lvl.get("price"), "size": float(sz),
+                            "pct_vol": (float(sz) / float(nv)) if nv else None}
+    return best
+
+
 _store: Optional[MarketDataStore] = None
 
 

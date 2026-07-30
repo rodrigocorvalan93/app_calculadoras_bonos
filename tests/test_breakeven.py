@@ -88,6 +88,8 @@ async def test_breakeven_chart_y_columna() -> None:
     assert p.status_code == 200 and 'name="be-metric"' in p.text and 'id="be-chart"' in p.text
     assert t.status_code == 200 and 'id="be-data"' in t.text
     assert ("Infla. hasta" in t.text) == ("be-tbl" in t.text)   # columna sólo con filas
+    # la línea "prom" del gráfico viaja en el JSON (mismo número que la strip)
+    assert "prom_tem" in t.text and "prom_anual" in t.text
 
 
 def test_fisher_marca_definidos_y_los_excluye_del_resumen() -> None:
