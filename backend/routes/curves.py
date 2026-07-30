@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from backend.config import settings
 from backend.locale_ar import fmt_pct, hoy_ba, parse_ar_num
 from backend.cache_seq import seq_cached
 from backend.services import bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
@@ -213,8 +214,14 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             range_pos = max(0.0, min(1.0, (last - low) / (high - low)))
     except TypeError:
         pass
+    # ⚠ Orden anormal en el book (mano oficial estilo BCRA): un nivel con VN
+    # gigante, muchas veces profundo (por eso el WS suscribe depth 5). El snap
+    # ya está en mano — son ≤10 comparaciones por fila, no toca el hot path.
+    anom = marketdata_store.orden_anormal(
+        snap, settings.anom_book_min_vn, settings.anom_book_ratio, settings.anom_book_abs_vn)
     row.update(
         {
+            "anom": anom,
             "estreno": estreno,
             "range_pos": range_pos,
             "code": code,                # ticker BYMA = nombre de variable

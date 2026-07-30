@@ -1085,6 +1085,10 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
 
 /* ── Cosas lindas v3 (CSS puro, costo 0) ────────────────────────────── */
 
+/* ⚠ orden anormal en el book (mano oficial): discreto al lado del ticker,
+   el detalle vive en el title (punta, VN, precio, % del operado hoy) */
+.anom-badge { font-size: 10px; cursor: help; opacity: 0.9; filter: saturate(1.2); }
+
 /* Badge NUEVO para estrenos (emisión ≤5 días): pulso ámbar sutil. */
 .badge-new {
   display: inline-block; font-size: 8.5px; font-weight: 700;

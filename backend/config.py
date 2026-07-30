@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     # Phase 2 warmup daemon. Interval must stay under the curve metrics
     # cache TTL (20 s) so a sweep refreshes every bucket before it expires
     # and the curves table never hits a cold cache mid-session.
+    # Órdenes anormales en el book (mano oficial / BCRA): un nivel con VN
+    # gigante descansando en la profundidad. Regla: size ≥ ratio × nominales
+    # operados del día Y ≥ min_vn; o size ≥ abs_vn a secas (sin volumen aún).
+    anom_book_ratio: float = 0.25                 # ≥25% del NV del día
+    anom_book_min_vn: float = 1_000_000_000.0     # piso p/ la regla relativa (1.000M VN)
+    anom_book_abs_vn: float = 20_000_000_000.0    # dispara solo (20.000M VN)
+
     warmup_enabled: bool = True
     warmup_interval_seconds: int = 8
 

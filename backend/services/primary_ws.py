@@ -127,7 +127,7 @@ def _cookie_header(cookies: httpx.Cookies) -> str:
     return "; ".join(parts)
 
 
-def _subscribe_payload(symbols: Iterable[str], depth: int = 3,
+def _subscribe_payload(symbols: Iterable[str], depth: int = 5,
                        entries: Optional[List[str]] = None) -> str:
     return json.dumps({
         "type": "smd",
