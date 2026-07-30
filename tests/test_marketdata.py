@@ -486,11 +486,11 @@ async def test_curve_table_latency_with_live_prices() -> None:
 
 
 def test_orden_anormal_en_book() -> None:
-    """Detector de mano oficial: un nivel con VN gigante (profundo, no sólo la
-    punta) dispara si es ≥ratio del nominal operado del día con un piso, o si
-    supera el absoluto a secas (pre-apertura sin NV)."""
+    """Detector de mano oficial: la señal es el TAMAÑO ABSOLUTO por punta
+    (bids más sensibles que offers) + de-ruidador de liquidez (≥ratio del NV
+    del día; sin NV alcanza el piso). El ratio solo NO dispara."""
     store = mds.MarketDataStore()
-    MIN, RATIO, ABS = 1e9, 0.25, 20e9
+    BID, OFF, RATIO = 5e9, 15e9, 0.10
 
     # caso real: 25.000M VN en el 3er nivel con 35.000M operados → dispara
     s = store.update_from_md("LETRA", {
@@ -498,20 +498,35 @@ def test_orden_anormal_en_book() -> None:
                {"price": 124.573, "size": 25e9}],
         "NV": {"size": 35e9},
     })
-    a = mds.orden_anormal(s, MIN, RATIO, ABS)
+    a = mds.orden_anormal(s, BID, OFF, RATIO)
     assert a is not None and a["lado"] == "compra" and a["size"] == 25e9
     assert a["price"] == 124.573 and abs(a["pct_vol"] - 25 / 35) < 1e-9
 
-    # ilíquido: 40% del NV pero abajo del piso → NO dispara
-    s2 = store.update_from_md("ON_CHICA", {"BI": [{"price": 100.0, "size": 20e6}],
-                                           "NV": {"size": 50e6}})
-    assert mds.orden_anormal(s2, MIN, RATIO, ABS) is None
+    # el caso RUIDOSO reportado: 1.000M sobre 125M operados (ratio 8×) pero la
+    # orden es chica en absoluto → NO dispara
+    s2 = store.update_from_md("ILIQUIDA", {"BI": [{"price": 100.0, "size": 1e9}],
+                                           "NV": {"size": 125e6}})
+    assert mds.orden_anormal(s2, BID, OFF, RATIO) is None
 
-    # pre-apertura (sin NV): sólo dispara el absoluto
-    s3 = store.update_from_md("PREAPERTURA", {"OF": [{"price": 99.0, "size": 21e9}]})
-    a3 = mds.orden_anormal(s3, MIN, RATIO, ABS)
-    assert a3 is not None and a3["lado"] == "venta" and a3["pct_vol"] is None
-    assert mds.orden_anormal(None, MIN, RATIO, ABS) is None
+    # asimetría: 10.000M en la VENTA no alcanza (piso 15.000M) — el mismo
+    # tamaño en la COMPRA sí (piso 5.000M)
+    s3 = store.update_from_md("ASIM", {"OF": [{"price": 101.0, "size": 10e9}],
+                                       "NV": {"size": 30e9}})
+    assert mds.orden_anormal(s3, BID, OFF, RATIO) is None
+    s3 = store.update_from_md("ASIM", {"BI": [{"price": 99.0, "size": 10e9}]})
+    a3 = mds.orden_anormal(s3, BID, OFF, RATIO)
+    assert a3 is not None and a3["lado"] == "compra"
+
+    # mega-líquido: 6.000M de bid con 200.000M operados (3%) → NO (ratio)
+    s4 = store.update_from_md("MEGA", {"BI": [{"price": 98.0, "size": 6e9}],
+                                       "NV": {"size": 200e9}})
+    assert mds.orden_anormal(s4, BID, OFF, RATIO) is None
+
+    # pre-apertura (sin NV): alcanza el piso de la punta
+    s5 = store.update_from_md("PREAPERTURA", {"OF": [{"price": 99.0, "size": 16e9}]})
+    a5 = mds.orden_anormal(s5, BID, OFF, RATIO)
+    assert a5 is not None and a5["lado"] == "venta" and a5["pct_vol"] is None
+    assert mds.orden_anormal(None, BID, OFF, RATIO) is None
 
 
 @pytest.mark.asyncio
@@ -534,5 +549,10 @@ async def test_anom_badge_en_curvas() -> None:
     })
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.get(f"/curves/table?curve={curve_key}&plazo=24hs")
+        m = await ac.get(f"/mercado?book={code}&plazo=24hs")
     assert r.status_code == 200
     assert "anom-badge" in r.text and "Orden ANORMAL" in r.text
+    # el ⚠ es un link al libro de la especie en Mercado…
+    assert f"/mercado?book={code}" in r.text
+    # …y /mercado?book=X auto-carga el libro al abrir (hx-trigger load)
+    assert m.status_code == 200 and f"/mercado/book/{code}" in m.text and 'hx-trigger="load"' in m.text

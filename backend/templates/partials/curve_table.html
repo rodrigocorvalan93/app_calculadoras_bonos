@@ -50,7 +50,7 @@
           {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
           <tr>
             <td style="text-align:left;color:var(--accent);font-weight:600">
-              <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a>{% if r.estreno %} <span class="badge-new">NUEVO</span>{% endif %}{% if r.anom %} <span class="anom-badge" title="Orden ANORMAL en el book · {{ r.anom.lado }} {{ r.anom.size | ar_hum }} VN @ {{ r.anom.price | ar_num(2) }}{% if r.anom.pct_vol is not none %} · {{ r.anom.pct_vol | ar_pct(0) }} del nominal operado hoy{% endif %}">⚠</span>{% endif %}
+              <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a>{% if r.estreno %} <span class="badge-new">NUEVO</span>{% endif %}{% if r.anom %} <a class="anom-badge" href="/mercado?book={{ r.code }}&plazo={{ plazo }}" title="Orden ANORMAL en el book · {{ r.anom.lado }} {{ r.anom.size | ar_hum }} VN @ {{ r.anom.price | ar_num(2) }}{% if r.anom.pct_vol is not none %} · {{ r.anom.pct_vol | ar_pct(0) }} del nominal operado hoy{% endif %} · click: ver el libro en Mercado">⚠</a>{% endif %}
             </td>
             <td>{{ r.vencimiento | ar_date }}</td>
             <td>{{ r.moneda or "—" }}</td>

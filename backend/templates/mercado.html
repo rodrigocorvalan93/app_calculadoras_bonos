@@ -145,6 +145,11 @@
   </div>
 
   <p class="muted" style="margin-top:14px">Clickeá una fila para ver el libro (profundidad).</p>
-  <div id="mercado-book" class="mercado-book"></div>
+  {# deep-link ?book=CODE (⚠ de Curvas): carga el libro al abrir la página y
+     scrollea hasta él — después sigue funcionando el click por fila normal. #}
+  <div id="mercado-book" class="mercado-book"
+       {% if book_open %}hx-get="/mercado/book/{{ book_open | urlencode }}?plazo={{ plazo }}&leg={{ leg }}&fuente={{ fuente }}"
+       hx-trigger="load" hx-swap="innerHTML"
+       hx-on::after-swap="this.scrollIntoView({behavior:'smooth', block:'start'})"{% endif %}></div>
 </section>
 {% endblock %}
