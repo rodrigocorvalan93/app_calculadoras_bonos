@@ -10577,6 +10577,48 @@ MGC3C = {
     "Aviso Resultados": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F6756%2FPAMPA%20ENERGIA%2DHR%2DON%20CLASE%203%2D%20Aviso%20de%20Resultado%2002%2D07%2D19%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F6756&p=true&ga=1""",
     "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F6756%2FPAMPA%20ENERGIA%2DHR%2DON%20CLASE%203%2D%20Suplemento%20de%20Prospecto%2001%2D07%2D19%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F6756&p=true&ga=1"""
 }
+NPCED = {
+    "Nombre Security": "ON Central Puerto S.A. Clase E Vto 27 07 2029",
+    "Código": "NPCED",
+    "ISIN": "AR0738225512",
+    "Calificación": "AAA.ar",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Utilities",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "27/07/2026",
+    "Vencimiento": "27/07/2029",
+    "Fecha Primer Cupón": "27/01/2027",
+    "Cupón / Spread": 5.5,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "27/01/2027", "27/07/2027", "27/01/2028",
+        "27/07/2028", "27/01/2029", "27/07/2029",
+    ],
+    "Amortización": None,
+    "Callable": True,
+    "Tipo de Call": "Call total o parcial a opción de la sociedad en cualquier momento desde la Fecha de Emisión y Liquidación, al valor nominal",
+    "Fecha Call": "27/07/2026",
+    "Precio Call": 1.,
+    "Comentarios": "Ley argentina. Denominada y pagadera en USD en el pais (dolar MEP), integracion en efectivo en USD en el pais. VN emitido US$94.283.031 sobre US$98.897.303 ofertado. Precio de emision 100% (a la par). Duration informada en el aviso: 2,81 anios. Rescate opcional: en cualquier momento desde la emision, total o parcial, al valor nominal mas intereses devengados, con aviso de 10 a 60 dias; pago del Valor de Rescate dentro de los 30 dias de publicado el aviso. Tax call a la par (no se carga). Calificacion AAA.ar de Moody's Local AR al 20/07/2026.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/a0c223dc-abcb-4e1f-857e-92315e33df2f",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/995911d6-c899-4e93-9538-0d3d7aa65082"
+}
 NPCCO = {
     "Nombre Security": "ON Central Puerto S.A. Clase C Vto. 25 08 2029",
     "Código": "CEPU 29",
@@ -15780,6 +15822,50 @@ HJCGD = {
     "Comentarios": "",
     "Aviso Resultados": "https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9338%2FMPMAE%2DRES%2DON%20JOHN%20DEERE%20CREDIT%20CF%20Clase%20XIV%20y%20XV%20%20%2D%20Aviso%20de%20Resultados%2016%2D10%2D2024%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9338&p=true&ga=1",
     "Suplemento de Prospecto": "https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/EaeiZsAjmUlHpWJ1Ih3qkPMBxyS28bErwRIbK90rAjQ3OA"
+}
+PQC1C = {
+    "Nombre Security": "ON Petroquimica Comodoro Rivadavia S.A. Clase 1 Vto 28 07 2034",
+    "Código": "PQC1C",
+    "ISIN": "USP7865PAA41",
+    "Calificación": "B (S&P)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Energy",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "28/07/2026",
+    "Vencimiento": "28/07/2034",
+    "Fecha Primer Cupón": "28/01/2027",
+    "Cupón / Spread": 8.5,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "ISMA-30",
+    "Convención Base": 360.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "28/01/2027", "28/07/2027", "28/01/2028", "28/07/2028",
+        "28/01/2029", "28/07/2029", "28/01/2030", "28/07/2030",
+        "28/01/2031", "28/07/2031", "28/01/2032", "28/07/2032",
+        "28/01/2033", "28/07/2033", "28/01/2034", "28/07/2034",
+    ],
+    "Amortización": ([0] * 11 + [33.] + [0] + [33.] + [0] + [34.]),
+    "Callable": True,
+    "Tipo de Call": "Call total o parcial a opción de las Co-Emisoras a partir del 28/07/2029 (Primera Fecha de Llamado a Rescate)",
+    "Fecha Call": "28/07/2029",
+    "Precio Call": 1.0425, # precio a la 1ra fecha de call (cronograma completo en Comentarios: 104,25% / 102,125% / 100%)
+    "Comentarios": "Co-emitida con Luz de Tres Picos S.A. Ley de Nueva York; 144A/RegS; DTC. ISIN 144A US71677UAA43 / CUSIP 144A 71677U AA4, RegS P7865P AA4. Precio de emision 99,354%; rendimiento 8,625% n.a. Antes del 28/07/2029: make-whole al mayor entre 100% y el valor presente descontado a Tasa del Tesoro + 50 pb. Equity clawback: hasta 35% del capital al 108,500% antes del 28/07/2029 con producido de Ofertas de Acciones. Rescate escalonado: 104,25% (28/07/2029-27/07/2030), 102,125% (28/07/2030-27/07/2031), 100% (desde 28/07/2031). Tax call a la par (no se carga).",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/e84fc62b-306f-4eec-9f3c-ca0bcabc49f8",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/a600bf11-722d-4952-972e-6ac65bfd4a21"
 }
 PQCRD = {
     "Nombre Security": "ON Petroquimica Comodoro Rivadavia S.A. Clase R Vto 22 10 2028",
@@ -28198,6 +28284,7 @@ VSCTO = rentafija.Bono(VSCTO)
 VSCTC = rentafija.Bono(VSCTC)
 BYCHO = rentafija.Bono(BYCHO)
 BYCHC = rentafija.Bono(BYCHC)
+NPCED = rentafija.Bono(NPCED)
 NPCCO = rentafija.Bono(NPCCO)
 NPCCC = rentafija.Bono(NPCCC)
 PN38O = rentafija.Bono(PN38O)
@@ -28347,6 +28434,7 @@ CIC9D = rentafija.Bono(CIC9D)
 CICAD = rentafija.Bono(CICAD)
 CICBD = rentafija.Bono(CICBD)
 PECGD = rentafija.Bono(PECGD)
+PQC1C = rentafija.Bono(PQC1C)
 PQCRD = rentafija.Bono(PQCRD)
 PQCTD = rentafija.Bono(PQCTD)
 HJCGD = rentafija.Bono(HJCGD)
@@ -28704,7 +28792,7 @@ todos_los_bonos = [
 
     TSC3O, TSC3C, TSC4O, TSC4C, PLC5O, PLC5C, MGC3O, MGC3C, YMCJO, YMCIO, YMCIC, YM34O, YM34C, ARC1O, ARC1C,
     MGC9O, MGC9C, GNCXO, GNCXC, GN49O, GN49C, YFCJO, YFCJC, PNDCO, PNDCC, AEC2O, AEC2C, BACGO, BACGC,
-    TTCDO, TTCDC, VSCTO, VSCTC, BYCHO, BYCHC, NPCCO, NPCCC, PN38O, PN38C, YCAMO, YCAMC, CAC5O, CAC5C,
+    TTCDO, TTCDC, VSCTO, VSCTC, BYCHO, BYCHC, NPCCO, NPCCC, NPCED, PN38O, PN38C, YCAMO, YCAMC, CAC5O, CAC5C,
     BACAO, BACAC, RC1CO, RC1CC, RCCJO, RCCJC, PNXCO, PNXCC, PN43O, PN43C, TLCPO, TLCPC, PLC4O,
     YMCXO, YMCXC, IRCFO, IRCFC, YMCUO, YMCUC, YMC1O, YMC1C, YM39O, YM39C, MGCOO, MGCOC, MGCRO, MGCRC, RUCDO, RUCDC,
     DNC7O, DNC7C, TLCMO, TLCMC, LMS8D, IRCPO, IRCPC, VSCOD, VSCUO, VSCUC, VSCVO, VSCVC,
@@ -28721,7 +28809,7 @@ todos_los_bonos = [
     YM41D, YM42D, YM43D, BYCVD, BYCWD, PUC2D, T641D, BYCXD, FO4AD, CS52D,
     MCC1D, MCC2D, MSSGD, ZZC1O, GYC5O, CS47D, CS48D, CICBD, BF44D, BF45D,
     CS49D, CS50D, PN37D, CIC8D, CIC9D, CICAD, HJCKD, CP40D, TLCUD, CS53D,
-    PECGD, PQCRD, PQCTD, HJCGD, HBCAD, HBCDD, YMCYD, LUC5D, MIC6D, JNC7D,
+    PECGD, PQCRD, PQC1C, PQCTD, HJCGD, HBCAD, HBCDD, YMCYD, LUC5D, MIC6D, JNC7D,
     YMCZD, MGCND, MGCQD, OLC5D, OLC6D, DNC5D, PZCGD, HJCHD, MRCUD, MRCYD,
     CRCJD, RZABD, LECED, XMC1D, MSSFD, RCCRD, AFCMD, PFC3D, TLCWD, NZC5D, BVCVD,
     RC2CD, TTC8D, IRCND, ZPC2D, PN34D, LDCGD, CP36D, MIC4D, NPCDD, RC5CD, DEC4D,
