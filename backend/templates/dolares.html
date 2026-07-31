@@ -88,5 +88,37 @@
       <div id="calc-res" style="margin-top:10px"></div>
     </div>
   </div>
+
+  {# ── 4. Calculadora de canje (USB ⇄ USD) ─────────────────────────── #}
+  <div class="card">
+    <div class="card-title"><span>🔁 Calculadora de canje</span>
+      <span class="card-title-aux">USB ⇄ USD por profundidad: mejor bono, nominales y precios promedio</span>
+    </div>
+    <div class="card-body">
+      <form hx-get="/dolares/canje" hx-target="#canje-res" hx-swap="innerHTML"
+            hx-trigger="change, keyup changed delay:400ms from:find input[name='monto'], submit">
+        <div class="row-fields">
+          <fieldset class="field field-mode">
+            <legend>Dirección</legend>
+            <label><input type="radio" name="direccion" value="compra" checked> Compra de canje (USB → USD)</label>
+            <label><input type="radio" name="direccion" value="venta"> Venta de canje (USD → USB)</label>
+          </fieldset>
+          <fieldset class="field field-mode">
+            <legend>Plazo</legend>
+            <label><input type="radio" name="plazo" value="24hs" checked> 24 hs</label>
+            <label><input type="radio" name="plazo" value="CI"> CI</label>
+          </fieldset>
+          <label class="field">
+            <span>Monto origen</span>
+            <input type="text" name="monto" value="" inputmode="decimal"
+                   placeholder="100.000" autocomplete="off">
+          </label>
+        </div>
+      </form>
+      <div id="canje-res" style="margin-top:10px">
+        <p class="muted" style="font-size:12px;margin:4px 0 0">Ingresá un monto en la moneda de origen (USB · MEP) y te digo bono, nominales y precios por profundidad.</p>
+      </div>
+    </div>
+  </div>
 </section>
 {% endblock %}

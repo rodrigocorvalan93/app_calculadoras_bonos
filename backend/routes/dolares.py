@@ -108,6 +108,30 @@ async def dolares_rail(request: Request, plazo: str = "24hs") -> HTMLResponse:
                    macro=_safe("macro_snapshot", historico.macro_snapshot, []))
 
 
+@router.get("/dolares/canje", response_class=HTMLResponse)
+async def dolares_canje(
+    request: Request,
+    direccion: str = Query("compra"),   # compra = USB→USD (MEP a cable) | venta = USD→USB
+    monto: str = Query(""),
+    plazo: str = Query("24hs"),
+) -> HTMLResponse:
+    """Calculadora de canje por profundidad: qué bono, cuántos VN y a qué
+    precios promedio caminando el book de las dos patas. Todo del store en
+    memoria (µs) — cero requests externos, cero estado."""
+    from backend.locale_ar import parse_ar_num
+
+    pz = "CI" if (plazo or "").lower().startswith("ci") else "24hs"
+    m = parse_ar_num(monto)
+    if m is None or m <= 0:
+        return _render(request, "partials/dolares_canje.html",
+                       r={"vacio": True, "direccion": direccion, "plazo": pz})
+    r = _safe("canje_walk", lambda: fx_svc.canje_walk(direccion, m, pz),
+              {"candidatos": [], "mejor": None, "direccion": direccion,
+               "monto": m, "plazo": pz, "canje_pantalla": None})
+    r["vacio"] = False
+    return _render(request, "partials/dolares_canje.html", r=r)
+
+
 @router.get("/dolares/calc", response_class=HTMLResponse)
 async def dolares_calc(
     request: Request,
