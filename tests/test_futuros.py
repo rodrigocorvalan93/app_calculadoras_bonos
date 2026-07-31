@@ -90,7 +90,9 @@ def test_implied_rate_math() -> None:
 
 def test_rows_from_store() -> None:
     from backend.services import marketdata_store as mds
-    sym = fut.symbols("may")[0]
+    # [1], no [0]: el último día del mes el contrato front vence HOY (días=0,
+    # sin tasa implícita) y el test fallaba sólo ese día del calendario.
+    sym = fut.symbols("may")[1]
     sp = fut.spot() or 1000.0
     mds.get_store().update_from_md(sym, {"LA": {"price": sp * 1.03}, "CL": {"price": sp * 1.02}})
     r = next((x for x in fut.rows("may") if x["code"] == sym), None)
@@ -144,7 +146,8 @@ async def test_futuros_tabla_puntas_oi_y_graficos() -> None:
     from backend.services import marketdata_store as mds
 
     sp = 1400.0
-    s1, s2 = fut.symbols("may")[0], fut.symbols("may")[1]
+    # [1] y [2]: el front puede tener días=0 a fin de mes (sin TNA → sin curva)
+    s1, s2 = fut.symbols("may")[1], fut.symbols("may")[2]
     st = mds.get_store()
     st.update_from_md(s1, {"LA": {"price": sp * 1.02},
                            "BI": [{"price": sp * 1.015, "size": 120}],

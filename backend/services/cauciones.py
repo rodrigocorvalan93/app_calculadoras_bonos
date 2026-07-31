@@ -8,10 +8,41 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from backend.locale_ar import hoy_ba
 from backend.services import marketdata_store
 
 # Mismos plazos que el monitor legacy (OMScauciones.PLAZOS_DEFAULT).
 PLAZOS: List[int] = [1, 2, 3, 4, 5, 6, 7, 14, 21, 28, 35, 60, 90, 120]
+
+
+def _dia_ba(epoch: float):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.fromtimestamp(epoch, ZoneInfo("America/Argentina/Buenos_Aires")).date()
+
+
+def _last_es_de_hoy(snap: Any) -> bool:
+    """¿El last del snapshot es DE HOY (fecha BA)? El store es sticky y se
+    persiste entre reinicios: un viernes la caución 1D no opera (liquidaría
+    sábado) pero el last del jueves seguía contando como tasa viva y el riel
+    la mostraba operando. Manda el last_ts del trade; sin last_ts (feeds que
+    no mandan date), el updated_at del snapshot."""
+    ts = getattr(snap, "last_ts", None)
+    if ts:
+        from backend.services.historico_writer import _fecha_dato  # lazy
+        d = _fecha_dato(ts)
+        if d is not None:
+            return d >= hoy_ba()
+    ua = getattr(snap, "updated_at", 0.0) or 0.0
+    return bool(ua) and _dia_ba(ua) >= hoy_ba()
+
+
+def _snap_tocado_hoy(snap: Any) -> bool:
+    """¿Hubo ALGÚN tick de este snapshot hoy (fecha BA)? Para el book: unas
+    puntas restauradas de la rueda anterior no son puntas de hoy."""
+    ua = getattr(snap, "updated_at", 0.0) or 0.0
+    return bool(ua) and _dia_ba(ua) >= hoy_ba()
 
 
 def _moneda_tk(moneda: str) -> str:
@@ -40,6 +71,16 @@ def byma_rows(moneda: str = "PESOS", *, include_close_only: bool = False) -> Lis
         if snap is None:
             continue
         last, bid, offer, close = snap.last, snap.bid, snap.offer, snap.close
+        # Un last que NO es de hoy no es tasa viva — es el cierre de la última
+        # rueda (viernes: la 1D no opera y el last sticky del jueves la mostraba
+        # operando en el riel). Se degrada a cierre; un book sin ticks de hoy
+        # (restaurado de la persistencia) tampoco cuenta como puntas vivas.
+        if last is not None and not _last_es_de_hoy(snap):
+            if close is None:
+                close = last
+            last = None
+        if (bid is not None or offer is not None) and not _snap_tocado_hoy(snap):
+            bid = offer = None
         if last is None and bid is None and offer is None:
             if not (include_close_only and close is not None):
                 continue
