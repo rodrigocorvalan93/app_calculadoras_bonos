@@ -148,3 +148,60 @@ async def test_rail_renders_close_fallback() -> None:
     for tok in ("📊 Tasa", "Caución ARS 1D", "23,00%", "cierre previo"):
         assert tok in r.text, tok
     assert "vs cierre</span>" not in r.text.split("💵 Dólar")[0]  # sin flecha/var en el bloque caución
+
+
+def test_viernes_1d_vieja_no_cuenta_como_viva() -> None:
+    """Regresión: viernes la caución 1D no opera (liquidaría sábado), pero el
+    last sticky del jueves — con el volumen más grande — hacía que el riel la
+    mostrara operando. Un last que no es DE HOY se degrada a cierre y el pick
+    overnight rueda al plazo que SÍ operó hoy."""
+    from datetime import timedelta
+
+    from backend.locale_ar import hoy_ba
+
+    _clear_cauciones()
+    store = mds_.get_store()
+    ayer = (hoy_ba() - timedelta(days=1)).isoformat()
+    hoy = hoy_ba().isoformat()
+    # 1D: last del JUEVES con volumen gigante (sticky/persistido)
+    store.update_from_md("MERV - XMEV - PESOS - 1D", {
+        "LA": {"price": 29.5, "date": f"{ayer}T16:59:00"},
+        "CL": {"price": 29.0}, "EV": {"size": 9e11},
+    })
+    # 3D: operó HOY (el overnight real del viernes)
+    store.update_from_md("MERV - XMEV - PESOS - 3D", {
+        "LA": {"price": 31.2, "date": f"{hoy}T11:00:00"},
+        "CL": {"price": 30.8}, "EV": {"size": 2e11},
+    })
+    try:
+        vivos = cauc_svc.byma_rows("PESOS")
+        assert [r["plazo"] for r in vivos] == ["3D"]          # la 1D vieja no es viva
+        pick = cauc_svc.rail_pick("PESOS")
+        assert pick is not None and pick["plazo"] == "3D" and not pick.get("es_cierre")
+        assert pick["tasa"] == 31.2
+        # con include_close_only la 1D entra pero como CIERRE (tasa None)
+        todas = cauc_svc.byma_rows("PESOS", include_close_only=True)
+        r1d = next(r for r in todas if r["plazo"] == "1D")
+        assert r1d["tasa"] is None and r1d["close"] == 29.0
+    finally:
+        _clear_cauciones()
+
+
+def test_todo_viejo_cae_a_cierre_marcado() -> None:
+    """Pre-apertura del viernes: nada operó hoy → el riel muestra cierre previo
+    MARCADO (es_cierre), nunca una tasa vieja disfrazada de viva."""
+    from datetime import timedelta
+
+    from backend.locale_ar import hoy_ba
+
+    _clear_cauciones()
+    ayer = (hoy_ba() - timedelta(days=1)).isoformat()
+    mds_.get_store().update_from_md("MERV - XMEV - PESOS - 1D", {
+        "LA": {"price": 29.5, "date": f"{ayer}T16:59:00"}, "EV": {"size": 5e11},
+    })
+    try:
+        pick = cauc_svc.rail_pick("PESOS")
+        assert pick is not None and pick.get("es_cierre") is True
+        assert pick["tasa"] == 29.5 and pick["var"] is None   # el last viejo ES el cierre
+    finally:
+        _clear_cauciones()
