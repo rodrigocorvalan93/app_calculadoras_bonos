@@ -276,3 +276,106 @@ async def test_rail_renders_macro(monkeypatch) -> None:
             assert tok in r.text, tok
     finally:
         historico._cache = saved
+
+
+# ── Calculadora de canje (USB ⇄ USD por profundidad) ────────────────────────
+
+def test_walk_book_por_monto_y_por_vn() -> None:
+    levels = [{"price": 100.0, "size": 500.0}, {"price": 101.0, "size": 1000.0}]
+    # por monto: 1.000 de moneda → 500 VN del 1er nivel + ~495 del 2do
+    vn, m, px = fx_svc._walk_book(levels, monto=1000.0)
+    assert m == pytest.approx(1000.0)
+    assert vn == pytest.approx(500.0 + 500.0 * 100.0 / 101.0)
+    assert px == pytest.approx(m * 100.0 / vn)          # promedio ponderado
+    assert 100.0 < px < 101.0
+    # por VN: 600 VN → 500 al 100 + 100 al 101
+    vn2, m2, px2 = fx_svc._walk_book(levels, vn=600.0)
+    assert vn2 == pytest.approx(600.0)
+    assert m2 == pytest.approx(500.0 * 100.0 / 100.0 + 100.0 * 101.0 / 100.0)
+    # book corto: toma lo que hay, sin inventar
+    vn3, m3, _ = fx_svc._walk_book([{"price": 100.0, "size": 10.0}], monto=1e9)
+    assert vn3 == pytest.approx(10.0) and m3 == pytest.approx(10.0)
+    assert fx_svc._walk_book([], monto=100.0) == (0.0, 0.0, None)
+
+
+def _seed_canje(base: str, *, d_offer=100.0, d_offer2=101.0, c_bid=96.0,
+                c_bid_size=2000.0, c_offer=97.0, d_bid=99.0) -> None:
+    """Books C y D con profundidad para la calculadora de canje."""
+    store = mds_.get_store()
+    store.update_from_md(syms_.md_symbol(base + "D", "24hs"), {
+        "OF": [{"price": d_offer, "size": 500.0}, {"price": d_offer2, "size": 1000.0}],
+        "BI": [{"price": d_bid, "size": 5000.0}]})
+    store.update_from_md(syms_.md_symbol(base + "C", "24hs"), {
+        "BI": [{"price": c_bid, "size": c_bid_size}],
+        "OF": [{"price": c_offer, "size": 5000.0}]})
+
+
+def test_canje_walk_compra_camina_profundidad() -> None:
+    base = _base()
+    _seed_canje(base)
+    r = fx_svc.canje_walk("compra", 1000.0, "24hs")
+    c = next((x for x in r["candidatos"] if x["base"] == base), None)
+    assert c is not None and c["completo"]
+    # entrada: 1.000 USB en offers de la D (500 VN @100 + ~495 @101)
+    vn_esp = 500.0 + 500.0 * 100.0 / 101.0
+    assert c["vn"] == pytest.approx(vn_esp)
+    assert c["usb"] == pytest.approx(1000.0)
+    assert 100.0 < c["px_entrada"] < 101.0
+    # salida: ese VN al bid de la C → USD recibidos
+    assert c["px_salida"] == pytest.approx(96.0)
+    assert c["usd"] == pytest.approx(vn_esp * 96.0 / 100.0)
+    # canje efectivo = USB pagados / USD recibidos − 1 (positivo: pagás canje)
+    assert c["canje_eff"] == pytest.approx(1000.0 / c["usd"] - 1.0)
+    assert c["canje_eff"] > 0
+    assert r["mejor"] is not None and r["direccion"] == "compra"
+
+
+def test_canje_walk_venta_es_espejo() -> None:
+    base = _base()
+    _seed_canje(base)
+    r = fx_svc.canje_walk("venta", 1000.0, "24hs")
+    c = next((x for x in r["candidatos"] if x["base"] == base), None)
+    assert c is not None and c["completo"]
+    # entrada: 1.000 USD en offers de la C @97 → VN; salida al bid de la D @99
+    vn_esp = 1000.0 * 100.0 / 97.0
+    assert c["vn"] == pytest.approx(vn_esp)
+    assert c["usd"] == pytest.approx(1000.0)
+    assert c["px_entrada"] == pytest.approx(97.0)
+    assert c["usb"] == pytest.approx(vn_esp * 99.0 / 100.0)
+    assert c["canje_eff"] == pytest.approx(c["usb"] / 1000.0 - 1.0)
+
+
+def test_canje_walk_salida_limita_y_recotiza_entrada() -> None:
+    """Si el bid de salida no aguanta el VN de entrada, se opera el VN que sí
+    sale y la entrada se re-cotiza para ese VN (queda con `completo=False`)."""
+    base = _base()
+    _seed_canje(base, c_bid_size=400.0)          # la C sólo aguanta 400 VN
+    r = fx_svc.canje_walk("compra", 1000.0, "24hs")
+    c = next((x for x in r["candidatos"] if x["base"] == base), None)
+    assert c is not None and not c["completo"]
+    assert c["vn"] == pytest.approx(400.0)
+    # los 400 VN entran todos en el 1er nivel de la D → px de entrada 100 justo
+    assert c["px_entrada"] == pytest.approx(100.0)
+    assert c["usb"] == pytest.approx(400.0)      # convertido < monto pedido
+    assert c["convertido"] == pytest.approx(400.0)
+    assert c["usd"] == pytest.approx(400.0 * 96.0 / 100.0)
+
+
+@pytest.mark.asyncio
+async def test_canje_endpoint() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    base = _base()
+    _seed_canje(base)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        page = await ac.get("/dolares")
+        vacio = await ac.get("/dolares/canje", params={"monto": ""})
+        r = await ac.get("/dolares/canje",
+                         params={"direccion": "compra", "monto": "1.000", "plazo": "24hs"})
+    assert page.status_code == 200 and "Calculadora de canje" in page.text
+    assert vacio.status_code == 200 and "Ingresá un monto" in vacio.text
+    # monto es-AR "1.000" = mil → resultado con el mejor bono y el canje efectivo
+    assert r.status_code == 200 and "Canje efectivo" in r.text
+    assert "VN a operar" in r.text and "Entregás USB" in r.text

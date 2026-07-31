@@ -247,3 +247,104 @@ def to_cable_usd(price: object, leg: str, fx: Optional[FxSnapshot] = None) -> Op
     """Normalize a quote to the cable-USD (CCL) basis — `normalize_price`
     with native=USD. Kept for the globales/cable curves."""
     return normalize_price(price, leg, native="USD", fx=fx)
+
+
+# ── Calculadora de canje (USB ⇄ USD vía bono, caminando la profundidad) ─────
+
+def _walk_book(levels, *, monto: Optional[float] = None,
+               vn: Optional[float] = None):
+    """Camina niveles [{price, size}] (el feed ya los manda ordenados) hasta
+    cubrir un `monto` en moneda (precio × VN / 100) o un `vn` objetivo.
+    Devuelve (vn_tomado, monto_tomado, px_promedio) — px ponderado por lo que
+    efectivamente se llevó de cada nivel. Costo: ≤5 iteraciones."""
+    tot_vn = tot_m = 0.0
+    for lvl in levels or ():
+        p, s = _pos(lvl.get("price")), _pos(lvl.get("size"))
+        if p is None or s is None:
+            continue
+        if monto is not None:
+            take_m = min(p * s / 100.0, monto - tot_m)
+            if take_m <= 0:
+                break
+            take_vn = take_m * 100.0 / p
+        else:
+            take_vn = min(s, (vn or 0.0) - tot_vn)
+            if take_vn <= 0:
+                break
+            take_m = take_vn * p / 100.0
+        tot_vn += take_vn
+        tot_m += take_m
+        if (monto is not None and tot_m >= monto - 1e-9) or \
+           (vn is not None and tot_vn >= vn - 1e-9):
+            break
+    px = (tot_m * 100.0 / tot_vn) if tot_vn > 0 else None
+    return tot_vn, tot_m, px
+
+
+def _levels(snap, side: str):
+    """Book del lado pedido, con fallback al top-of-book si el feed no mandó
+    la profundidad (snapshot inicial / restaurado)."""
+    if side == "offers":
+        return snap.offers or ([{"price": snap.offer, "size": snap.offer_size}]
+                               if snap.offer is not None else [])
+    return snap.bids or ([{"price": snap.bid, "size": snap.bid_size}]
+                         if snap.bid is not None else [])
+
+
+def canje_walk(direccion: str, monto: float, plazo: str = "24hs") -> Dict[str, object]:
+    """Canje MEP ⇄ cable vía bono, con precios promedio POR PROFUNDIDAD.
+
+    direccion 'compra' = USB → USD (compro pata D contra sus offers, vendo la
+    pata C contra sus bids); 'venta' = USD → USB (espejo). `monto` viene en la
+    moneda de ORIGEN. El canje efectivo se expresa siempre como USB/USD − 1
+    (comparable con el canje de pantalla): comprando lo PAGÁS (menor = mejor),
+    vendiendo lo COBRÁS (mayor = mejor). Todo del store en memoria — ~10 bases
+    × ≤5 niveles × 2 patas: microsegundos, sin requests ni estado."""
+    store = marketdata_store.get_store()
+    compra = str(direccion or "").lower().startswith("c")
+    out: List[Dict[str, object]] = []
+    for base in fx_bases():
+        d = store.get(syms.md_symbol(base + "D", plazo))
+        c = store.get(syms.md_symbol(base + "C", plazo))
+        if d is None or c is None:
+            continue
+        if compra:
+            # gasto USB en offers de la D → VN; vendo ese VN en bids de la C → USD
+            vn_in, m_in, px_in = _walk_book(_levels(d, "offers"), monto=monto)
+            if vn_in <= 0:
+                continue
+            vn_out, m_out, px_out = _walk_book(_levels(c, "bids"), vn=vn_in)
+            if vn_out <= 0:
+                continue
+            if vn_out < vn_in - 1e-9:      # la salida limita: re-cotizo la entrada
+                vn_in, m_in, px_in = _walk_book(_levels(d, "offers"), vn=vn_out)
+            usb, usd = m_in, m_out
+        else:
+            # gasto USD en offers de la C → VN; vendo ese VN en bids de la D → USB
+            vn_in, m_in, px_in = _walk_book(_levels(c, "offers"), monto=monto)
+            if vn_in <= 0:
+                continue
+            vn_out, m_out, px_out = _walk_book(_levels(d, "bids"), vn=vn_in)
+            if vn_out <= 0:
+                continue
+            if vn_out < vn_in - 1e-9:
+                vn_in, m_in, px_in = _walk_book(_levels(c, "offers"), vn=vn_out)
+            usd, usb = m_in, m_out
+        vn = min(vn_in, vn_out)
+        if vn <= 0 or not usd or not usb:
+            continue
+        out.append({
+            "base": base, "vn": vn, "usb": usb, "usd": usd,
+            "px_entrada": px_in, "px_salida": px_out,
+            "canje_eff": (usb / usd - 1.0),
+            "completo": m_in >= monto * 0.999,
+            "convertido": m_in,            # cuánto del monto entra con este book
+        })
+    # comprando el canje se paga (menor mejor); vendiéndolo se cobra (mayor mejor).
+    # Un candidato que no cubre el monto va después de los completos.
+    out.sort(key=lambda r: (not r["completo"],
+                            r["canje_eff"] if compra else -r["canje_eff"]))
+    return {"direccion": "compra" if compra else "venta", "monto": monto,
+            "plazo": plazo, "candidatos": out,
+            "mejor": out[0] if out else None,
+            "canje_pantalla": get_fx(plazo).canje}

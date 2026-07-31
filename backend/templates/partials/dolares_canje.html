@@ -1,0 +1,60 @@
+{# Calculadora de canje (USB ⇄ USD) por profundidad: mejor bono + VN + precios
+   promedio caminando el book de las dos patas. Server-side puro del store. #}
+{% if r.vacio %}
+  <p class="muted" style="font-size:12px;margin:4px 0 0">Ingresá un monto en la moneda de origen ({{ "USB · MEP" if r.direccion == "compra" else "USD · cable" }}) y te digo bono, nominales y precios por profundidad.</p>
+{% elif not r.mejor %}
+  <div class="alert">Sin books completos para armar el canje ({{ r.plazo }}) — ¿broker offline o pre-apertura?</div>
+{% else %}
+{% set m = r.mejor %}
+<div class="fx-calc-res">
+  <div class="fx-calc-tc">
+    Canje efectivo <strong class="{{ 'var-down' if r.direccion == 'compra' else 'var-up' }}">{{ m.canje_eff | ar_pct(2) }}</strong>
+    <span class="muted">· {{ "pagás" if r.direccion == "compra" else "cobrás" }} vía <b>{{ m.base }}</b> ({{ r.plazo }}){% if r.canje_pantalla is not none %} · pantalla {{ r.canje_pantalla | ar_pct(2) }}{% endif %}</span>
+  </div>
+  <div class="metrics-grid metrics-margen" style="margin-top:8px">
+    <div class="metric">
+      <div class="metric-label">VN a operar</div>
+      <div class="metric-value">{{ m.vn | ar_int }}</div>
+    </div>
+    <div class="metric metric-highlight">
+      <div class="metric-label">{{ "Entregás USB" if r.direccion == "compra" else "Entregás USD" }}</div>
+      <div class="metric-value">{{ (m.usb if r.direccion == "compra" else m.usd) | ar_money(2) }}</div>
+    </div>
+    <div class="metric metric-highlight">
+      <div class="metric-label">{{ "Recibís USD" if r.direccion == "compra" else "Recibís USB" }}</div>
+      <div class="metric-value">{{ (m.usd if r.direccion == "compra" else m.usb) | ar_money(2) }}</div>
+    </div>
+  </div>
+  <p class="muted" style="margin:8px 0 0;font-size:12px">
+    {% if r.direccion == "compra" %}
+      compra {{ m.base }}D @ {{ m.px_entrada | ar_num(4) }} · venta {{ m.base }}C @ {{ m.px_salida | ar_num(4) }} (prom. por profundidad, VN 100)
+    {% else %}
+      compra {{ m.base }}C @ {{ m.px_entrada | ar_num(4) }} · venta {{ m.base }}D @ {{ m.px_salida | ar_num(4) }} (prom. por profundidad, VN 100)
+    {% endif %}
+    {% if not m.completo %} · <span class="var-down">⚠ la profundidad alcanza para {{ m.convertido | ar_money(0) }} de los {{ r.monto | ar_money(0) }}</span>{% endif %}
+  </p>
+
+  {% if r.candidatos | length > 1 %}
+  <div class="table-scroll" style="margin-top:10px">
+    <table class="cashflows curve-table">
+      <thead>
+        <tr><th style="text-align:left">Bono</th><th>VN</th><th>Px entrada</th><th>Px salida</th><th>{{ "USD out" if r.direccion == "compra" else "USB out" }}</th><th>Canje ef.</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for c in r.candidatos %}
+        <tr{% if c.base == m.base %} style="background:var(--accent-soft)"{% endif %}>
+          <td style="text-align:left;color:var(--accent);font-weight:600">{{ c.base }}</td>
+          <td>{{ c.vn | ar_int }}</td>
+          <td>{{ c.px_entrada | ar_num(2) }}</td>
+          <td>{{ c.px_salida | ar_num(2) }}</td>
+          <td>{{ (c.usd if r.direccion == "compra" else c.usb) | ar_money(0) }}</td>
+          <td style="font-weight:600">{{ c.canje_eff | ar_pct(2) }}</td>
+          <td class="muted" style="font-size:10.5px">{% if not c.completo %}prof. {{ c.convertido | ar_hum }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
