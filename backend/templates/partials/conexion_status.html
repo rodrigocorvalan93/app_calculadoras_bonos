@@ -12,6 +12,16 @@
   </div>
   <div class="card-body" style="font-size:12.5px">
     <p style="margin:0 0 6px"><span class="muted">Endpoint:</span> <code>{{ base_url }}</code></p>
+    {# Veredicto de FRESCURA — distinto de "autenticado": un broker puede tener
+       la sesión y el socket vivos sin mandar un solo precio (y lo que se ve son
+       los persistidos de la última rueda). #}
+    {% if health.feed_down %}
+      <p style="margin:0 0 6px;color:var(--red);font-weight:600">⚠ Feed caído: hay sesión pero el WS está desconectado — precios congelados.</p>
+    {% elif health.warn %}
+      <p style="margin:0 0 6px;color:var(--yellow);font-weight:600">⚠ {{ health.warn }} — probá otro broker (el selector de arriba).</p>
+    {% elif health.feed_alive %}
+      <p style="margin:0 0 6px;color:var(--green)">✓ Market data en vivo{% if health.data_age_s is not none %} — último tick hace {{ health.data_age_s | ar_num(0) }} s{% endif %}.</p>
+    {% endif %}
     {% if stats %}
       <table class="cashflows" style="font-size:12px">
         <tbody>

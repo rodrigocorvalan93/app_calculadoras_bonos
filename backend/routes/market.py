@@ -112,22 +112,17 @@ async def diag() -> Dict[str, Any]:
 @router.get("/health")
 async def market_health() -> Dict[str, Any]:
     """Estado del feed para el dot de la topbar (liviano; el front lo sondea cada
-    ~15 s). `feed_down` distingue "feed caído" de "mercado quieto": con el WS
-    muerto el seq deja de avanzar y el dot quedaba en 'idle', igual que un mercado
-    sin operaciones — el trader no sabía que estaba viendo precios viejos.
+    ~15 s). Dos alarmas distintas:
 
-    feed_down = tenemos sesión del broker PERO el WS no está conectado. De noche
-    con el WS conectado y el mercado quieto NO es "caído" (connected sigue True),
-    así que no da falso positivo. Sin login (paper/dev) tampoco alarma."""
-    ws = primary_ws.get_ws_client()
-    st = ws.stats()
-    return {
-        "feed_alive": ws.feed_alive,
-        "authenticated": ws.authenticated,
-        "connected": bool(st.get("connected")),
-        "stale_seconds": st.get("stale_seconds"),
-        "feed_down": bool(ws.authenticated and not st.get("connected")),
-    }
+    - `feed_down`: sesión del broker abierta PERO el WS desconectado.
+    - `warn` (md_stale/data_stale): el caso silencioso — WS CONECTADO pero sin
+      market data (broker que autentica y no streamea): el seq sigue avanzando
+      por MAE/pollers y los precios que se ven son los persistidos de la última
+      rueda buena. Sólo alarma en rueda y con sesión — sin falsos positivos de
+      noche ni en paper/dev. Ver services.feed_health."""
+    from backend.services import feed_health
+
+    return feed_health.snapshot()
 
 
 @router.get("/fx")

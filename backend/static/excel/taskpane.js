@@ -8,6 +8,7 @@
   var $ = function (id) { return document.getElementById(id); };
 
   var STATUS_LABEL = { off: "sin conexión", live: "en vivo", idle: "sin ticks",
+                       stale: "⚠ conectado pero SIN market data — precios posiblemente viejos",
                        auth: "token inválido / falta token", error: "error de red" };
 
   function paintStatus(_snap, status) {

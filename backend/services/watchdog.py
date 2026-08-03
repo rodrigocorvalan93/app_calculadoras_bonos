@@ -5,10 +5,13 @@ un mail cuando el feed lleva caído más de `feed_watchdog_min` minutos dentro
 de la rueda (11:00–17:00 BA, hábiles), y otro al recuperarse (sólo si avisó
 la caída). Un solo aviso por caída — nada de spam por flapping.
 
-"Caído" = misma señal que /market/health: hay sesión del broker
-(authenticated) pero el WS no está conectado. De noche o sin login no alarma.
-El chequeo corre cada ~60 s en el event loop (lecturas de flags, ~µs); el
-mail sale en el threadpool.
+"Caído" = hay sesión del broker (authenticated) pero NO llega market data
+(`feed_alive` en False). Cubre las dos variantes: WS desconectado, y el caso
+silencioso del broker que autentica con el socket vivo pero no streamea Md —
+ahí los precios que se ven son los persistidos de la última rueda buena y
+nadie se entera sin este aviso. De noche o sin login no alarma. El chequeo
+corre cada ~60 s en el event loop (lecturas de flags, ~µs); el mail sale en
+el threadpool.
 """
 from __future__ import annotations
 
@@ -39,7 +42,9 @@ def _feed_down() -> bool:
     from backend.services.primary_ws import get_ws_client
     ws = get_ws_client()
     try:
-        return bool(ws.authenticated and not ws.stats().get("connected"))
+        # feed_alive = conectado Y con Md reciente: no alcanza con el socket
+        # abierto (broker que autentica pero no streamea → precios viejos).
+        return bool(ws.authenticated and not ws.feed_alive)
     except Exception:  # noqa: BLE001
         return False
 

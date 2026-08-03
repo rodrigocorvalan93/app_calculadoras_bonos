@@ -64,7 +64,10 @@ var OMSFeed = (function () {
         .then(function (txt) {
           if (txt === null) { return null; }
           var s = parseInt(txt, 10);
-          if (snap !== null && s === lastSeq) { status = "idle"; notify(); return null; }
+          if (snap !== null && s === lastSeq) {
+            status = (snap.health && snap.health.warn) ? "stale" : "idle";
+            notify(); return null;
+          }
           return fetch("/excel/v1/snapshot", { headers: headers(), cache: "no-store" })
             .then(function (r) {
               if (r.status === 401) { status = "auth"; notify(); return null; }
@@ -73,7 +76,11 @@ var OMSFeed = (function () {
             })
             .then(function (data) {
               if (!data) { return null; }
-              snap = data; lastSeq = data.seq; status = "live"; notify();
+              snap = data; lastSeq = data.seq;
+              // "stale" pisa a "live": el seq avanza también por MAE/pollers,
+              // así que puede haber snapshot nuevo con precios BYMA viejos.
+              status = (data.health && data.health.warn) ? "stale" : "live";
+              notify();
               return null;
             });
         })
