@@ -471,7 +471,7 @@ def create_app() -> FastAPI:
     # con la pestaña Órdenes: se restringen a superuser además del gating por tab.
     # /conexion es para TODOS los usuarios logueados (si el feed se cae, cualquiera
     # puede reconectar): la ruta misma limita a los no-superuser a los brokers
-    # conocidos con las credenciales de la casa (sin URL libre ni user/clave).
+    # conocidos (sin URL libre; usuario/clave propios permitidos).
     _SUPERUSER_ONLY = ("/admin", "/ordenes/live", "/ordenes/kill",
                        "/historicos/guardar-base", "/alertas")
     # Paths gateados por FEATURE (administrable desde /admin, a diferencia de

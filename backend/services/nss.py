@@ -50,6 +50,20 @@ def _mad_mask(resid: np.ndarray, k: float = 3.0) -> np.ndarray:
     return np.abs(r - med) <= (float(k) * sigma)
 
 
+def _ns_fit(X, y, maxfev: int):
+    """Nelson-Siegel simple (4 params) expandido a la forma NSS (β3=0). Mucho más
+    estable que el NSS completo: es el fit de 4-5 pts y el FALLBACK cuando el de
+    6 params no converge (nube borderline → maxfev agotado)."""
+    from scipy.optimize import curve_fit
+
+    def _ns(x, b0, b1, b2, t1):
+        return model(x, b0, b1, b2, 0.0, t1, 2.0 * max(t1, 1e-8))
+
+    p0 = np.array([float(np.mean(y)), 0.0, 0.0, 1.0])
+    b0, b1, b2, t1 = (float(v) for v in curve_fit(_ns, X, y, p0=p0, maxfev=maxfev)[0])
+    return np.array([b0, b1, b2, 0.0, t1, 2.0 * t1])
+
+
 def _fit_raw(xs, ys, threshold: float, maxfev: int = 10000):
     import warnings
 
@@ -65,21 +79,21 @@ def _fit_raw(xs, ys, threshold: float, maxfev: int = 10000):
     try:
         warnings.simplefilter("ignore")          # OptimizeWarning (covarianza) — inocuo
         if n >= 6:
-            p0 = np.array([float(np.mean(y)), 0.0, 0.0, 0.0, 1.0, 1.0])
-            popt, _ = curve_fit(model, X, y, p0=p0, maxfev=maxfev)
-            mask = np.ones(n, dtype=bool)
-            for _ in range(3):                       # refit robusto (máx 3 pasadas)
-                nm = _mad_mask(y - model(X, *popt), threshold)
-                if int(nm.sum()) < 6 or np.array_equal(nm, mask):
-                    break
-                mask = nm
-                popt, _ = curve_fit(model, X[mask], y[mask], p0=popt, maxfev=maxfev)
+            try:
+                p0 = np.array([float(np.mean(y)), 0.0, 0.0, 0.0, 1.0, 1.0])
+                popt, _ = curve_fit(model, X, y, p0=p0, maxfev=maxfev)
+                mask = np.ones(n, dtype=bool)
+                for _ in range(3):                   # refit robusto (máx 3 pasadas)
+                    nm = _mad_mask(y - model(X, *popt), threshold)
+                    if int(nm.sum()) < 6 or np.array_equal(nm, mask):
+                        break
+                    mask = nm
+                    popt, _ = curve_fit(model, X[mask], y[mask], p0=popt, maxfev=maxfev)
+            except Exception as exc:  # noqa: BLE001 — NSS no converge → NS estable
+                logger.debug("[nss] NSS no convergió (%d pts: %s) — fallback NS", n, exc)
+                popt = _ns_fit(X, y, maxfev)
         else:                                        # 4-5 pts: NS (4 params) → NSS equiv.
-            def _ns(x, b0, b1, b2, t1):
-                return model(x, b0, b1, b2, 0.0, t1, 2.0 * max(t1, 1e-8))
-            p0 = np.array([float(np.mean(y)), 0.0, 0.0, 1.0])
-            b0, b1, b2, t1 = (float(v) for v in curve_fit(_ns, X, y, p0=p0, maxfev=maxfev)[0])
-            popt = np.array([b0, b1, b2, 0.0, t1, 2.0 * t1])
+            popt = _ns_fit(X, y, maxfev)
     except Exception as exc:  # noqa: BLE001
         logger.debug("[nss] fit falló (%d pts): %s", n, exc)
         return None

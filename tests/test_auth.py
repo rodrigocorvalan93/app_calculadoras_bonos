@@ -299,28 +299,31 @@ def fake_ws(monkeypatch):
 @pytest.mark.asyncio
 async def test_conexion_abierta_a_todos(auth_on):
     """Cualquier logueado ve /conexion y el 🔌 de la topbar; la versión no-SU
-    NO tiene campos de usuario/clave ni URL libre (sólo el selector de brokers)."""
+    tiene usuario/clave (opcionales) pero NO la URL libre (sólo el selector de
+    brokers) ni el prefill del usuario de la casa."""
     async with _client() as su:
         await _login(su, "rodricor93", "Rc_874562")
         await su.post("/admin/users", data={"username": "leo", "password": "clave123", "role": "basico"})
         page_su = await su.get("/conexion")
-        assert page_su.status_code == 200 and 'name="password"' in page_su.text
+        assert page_su.status_code == 200 and "URL del endpoint" in page_su.text
     async with _client() as ac:
         await _login(ac, "leo", "clave123")
         y = await ac.get("/yas")
         assert 'href="/conexion"' in y.text          # 🔌 visible para básico
         page = await ac.get("/conexion")
         assert page.status_code == 200 and "Reconectar" in page.text
-        assert 'name="password"' not in page.text and 'name="username"' not in page.text
-        assert "credenciales de la casa" in page.text
+        # usuario/clave propios sí; URL libre no
+        assert 'name="password"' in page.text and 'name="username"' in page.text
+        assert "URL del endpoint" not in page.text
+        assert "sólo brokers conocidos" in page.text
 
 
 @pytest.mark.asyncio
 async def test_conexion_no_su_solo_brokers_conocidos(auth_on, fake_ws):
-    """El login del feed MANDA la clave de secrets al host elegido: un no-SU con
-    URL arbitraria podría cosecharla. La URL fuera de la lista se rechaza SIN
-    intentar login; con host conocido se conecta con las credenciales de la casa
-    (ignorando user/clave del form)."""
+    """El login del feed MANDA la clave (la tipeada o la de secrets) al host
+    elegido: un no-SU con URL arbitraria podría cosechar la de la casa. La URL
+    fuera de la lista se rechaza SIN intentar login; con host conocido puede
+    usar credenciales PROPIAS, y vacías caen a las de la casa."""
     from backend.routes import conexion as conx
 
     async with _client() as su:
@@ -333,13 +336,18 @@ async def test_conexion_no_su_solo_brokers_conocidos(auth_on, fake_ws):
                                                    "username": "x", "password": "y"})
         assert r.status_code == 200 and "brokers" in r.text
         assert fake_ws.urls == [] and fake_ws.logins == []
-        # host conocido → intenta login con las credenciales de la CASA
+        # host conocido + credenciales propias → se usan las del form
         known = conx.KNOWN_HOSTS[1][1]
         r = await ac.post("/conexion/login", data={"url": known,
-                                                   "username": "otro", "password": "otra"})
+                                                   "username": "mio", "password": "mi-clave"})
         assert r.status_code == 200
         assert fake_ws.urls == [known]
-        assert fake_ws.logins == [("casa", "clave-casa")]
+        assert fake_ws.logins == [("mio", "mi-clave")]
+        # host conocido + campos vacíos → caen a las credenciales de la casa
+        r = await ac.post("/conexion/login", data={"url": known,
+                                                   "username": "", "password": ""})
+        assert r.status_code == 200
+        assert fake_ws.logins[-1] == ("casa", "clave-casa")
 
 
 @pytest.mark.asyncio

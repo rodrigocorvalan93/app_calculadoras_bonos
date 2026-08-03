@@ -9,10 +9,11 @@ Abierta a TODOS los usuarios logueados (el feed es global: si el broker default
 se cae y el superuser no está, cualquiera tiene que poder levantarlo), pero con
 dos niveles:
 - superuser: URL libre + usuario/clave propios (como siempre);
-- resto: SOLO elige entre los brokers conocidos y se reconecta con las
-  credenciales de la casa. La URL libre queda vedada porque el login MANDA la
-  clave de secrets.txt al host que se ponga — con URL arbitraria cualquier
-  usuario podría cosecharla apuntándola a un server propio.
+- resto: usuario/clave propios (vacíos = los de la casa) pero SOLO contra los
+  brokers conocidos. La URL libre queda vedada porque el login MANDA la clave
+  (la tipeada o la de secrets.txt) al host que se ponga — con URL arbitraria
+  cualquier usuario podría cosechar la de la casa apuntándola a un server
+  propio.
 
 Seguridad: la clave NUNCA se imprime en el HTML — si el campo viene vacío se
 usa la de secrets.txt.
@@ -104,18 +105,17 @@ async def conexion_login(
     url = (url or "").strip() or settings.primary_base_url
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    if _es_su(request):
-        user = (username or "").strip() or settings.primary_user
-        pwd = password or settings.primary_pass      # vacío → la de secrets.txt
-    else:
-        # No-superuser: SOLO brokers conocidos y SIEMPRE las credenciales de la
-        # casa. Validar la URL acá es lo que impide que un usuario cualquiera
-        # mande la clave de secrets.txt a un host arbitrario.
+    if not _es_su(request):
+        # No-superuser: usuario/clave propios OK, pero SOLO contra brokers
+        # conocidos. Validar la URL acá es lo que impide que un usuario
+        # cualquiera mande la clave (la suya o la de secrets.txt) a un host
+        # arbitrario para cosecharla.
         if _norm_url(url) not in _hosts_permitidos():
             return _render(request, "partials/conexion_status.html",
                            **_status_ctx("Ese endpoint no está en la lista de brokers "
                                          "conocidos — elegí uno del selector.", False))
-        user, pwd = settings.primary_user, settings.primary_pass
+    user = (username or "").strip() or settings.primary_user
+    pwd = password or settings.primary_pass          # vacío → la de secrets.txt
     if not user or not pwd:
         return _render(request, "partials/conexion_status.html",
                        **_status_ctx("Faltan usuario o clave (y secrets.txt no los tiene).", False))
