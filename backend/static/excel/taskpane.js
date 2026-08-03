@@ -19,6 +19,14 @@
     OMSFeed.loadToken().then(function (t) { if (t) { $("token").value = t; } });
     OMSFeed.subscribe(paintStatus);
 
+    // Diagnóstico multi-máquina: el add-in pega SIEMPRE contra el host del
+    // manifest con el que se instaló. Mostrarlo evita adivinar por qué en una
+    // compu anda y en otra no (nombre que no resuelve, cert no confiado, etc.).
+    try {
+      $("server-line").textContent = "Servidor del complemento: " + window.location.origin +
+        " (definido por el manifest instalado en ESTA máquina)";
+    } catch (e) { /* noop */ }
+
     $("save").onclick = function () {
       OMSFeed.setToken($("token").value);
       $("test-result").textContent = "Token guardado.";
@@ -35,7 +43,16 @@
       }).then(function (d) {
         $("test-result").innerHTML = '<span class="ok">Conectado como ' + (d.user || "?") + '.</span>';
       }).catch(function (e) {
-        $("test-result").innerHTML = '<span class="err">Sin conexión: ' + e.message + '</span>';
+        // "Failed to fetch" = no se llegó al server (nombre que no resuelve
+        // desde esta máquina, firewall, notebook suspendida o certificado no
+        // confiado — WebView2 no tiene el "continuar de todos modos" del
+        // navegador). Distinto de token inválido (401).
+        var red = /fetch|network|load/i.test(e.message || "");
+        $("test-result").innerHTML = '<span class="err">Sin conexión: ' + e.message +
+          (red ? ' — no se llegó a ' + window.location.origin +
+                 ' desde esta máquina (probá abrir ' + window.location.origin +
+                 '/healthz en el navegador acá mismo; si no responde es red/DNS/cert, no el add-in)'
+               : '') + '</span>';
       });
     };
 

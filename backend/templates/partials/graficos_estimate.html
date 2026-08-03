@@ -45,5 +45,9 @@
   </div>
 </div>
 {% elif duration %}
+  {% if n >= 4 %}
+  <div class="alert">No se pudo estimar: la regresión NSS no convergió para esta nube de {{ n }} puntos (curva muy irregular). Probá excluir outliers o acotar la duration mínima.</div>
+  {% else %}
   <div class="alert">No se pudo estimar (hacen falta ≥4 bonos con Duration y {% if metric == 'margen' %}margen sobre TAMAR/BADLAR — sólo aplica a tasa variable{% else %}TIREA{% endif %} en la curva).</div>
+  {% endif %}
 {% endif %}

@@ -76,8 +76,10 @@
       {% if request.state.user %}
       {% if request.state.user.role == 'superuser' %}
       <a class="rail-toggle" href="/admin" title="Panel de administración (usuarios y permisos)" style="text-decoration:none">👤</a>
-      <a class="rail-toggle" href="/conexion" title="Conexión broker (endpoint / credenciales)" style="text-decoration:none">🔌</a>
       {% endif %}
+      {# 🔌 para TODOS los logueados: si el broker default se cae, cualquiera
+         reconecta (los no-superuser sólo entre brokers conocidos). #}
+      <a class="rail-toggle" href="/conexion" title="Conexión del feed BYMA (reconectar / cambiar broker)" style="text-decoration:none">🔌</a>
       <span class="user-chip" title="Sesión ({{ request.state.user.role }})">{{ request.state.user.username }}<i class="muted"> · {{ request.state.user.role }}</i></span>
       <a class="rail-toggle" href="/logout" title="Cerrar sesión" style="text-decoration:none">⎋</a>
       {% endif %}

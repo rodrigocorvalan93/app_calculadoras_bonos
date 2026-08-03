@@ -68,9 +68,14 @@ async def test_graficos_estimate_endpoint() -> None:
     from httpx import ASGITransport, AsyncClient
 
     from backend.main import app
-    from backend.services import bond_universe, curves, marketdata_store as mds, symbols as syms
+    from backend.services import bond_universe, curves, marketdata_store as mds, pricing, symbols as syms
 
     bond_universe.ensure_loaded()
+    # Flaky-guard: la cache de ERRORES de metrics (TTL 120 s) puede tener
+    # cacheado un fallo de otro test para estos mismos códigos/precios — si este
+    # test corre dentro de esa ventana, la TIREA da None y n<4 sin razón propia.
+    pricing._curve_metrics_err_cache.clear()
+    pricing._curve_metrics_cache.clear()
     codes = curves.build_curve_codes().get("cer", [])
     if len(codes) < 4:
         pytest.skip("curva CER insuficiente")

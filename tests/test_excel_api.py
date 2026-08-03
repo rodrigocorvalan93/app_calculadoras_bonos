@@ -140,3 +140,34 @@ def test_snapshot_json_compacto(store_con_datos):
     # sin None: los campos ausentes no viajan
     q = data["quotes"]["GD30"]["CI"]
     assert "bid" not in q and q["last"] == 999.5
+
+
+async def test_manifest_base_override(auth_on):
+    """`?base=` fija el host del manifest (la tarjeta de /admin lo usa para el
+    manifest universal con localhost — cada notebook corre su propia app). Una
+    base que no es http(s) se ignora y cae al host del request."""
+    async with _client() as ac:
+        r = await ac.get("/excel/manifest.xml",
+                         params={"base": "http://localhost:8000/"})
+        assert r.status_code == 200
+        assert "http://localhost:8000/static/excel/functions.js" in r.text
+        assert "http://t/" not in r.text
+        # base inválida (no-http) → fallback al host del request, sin colarse
+        r2 = await ac.get("/excel/manifest.xml", params={"base": "javascript:alert(1)"})
+        assert r2.status_code == 200
+        assert "javascript:" not in r2.text
+        assert "http://t/static/excel/taskpane.html" in r2.text
+
+
+async def test_admin_tarjeta_instalacion_excel(auth_on):
+    """/admin muestra la guía de instalación multi-máquina con el link al
+    manifest universal (localhost)."""
+    async with _client() as ac:
+        await ac.post("/login", data={"username": "rodricor93", "password": "Rc_874562",
+                                      "next": "/yas"})
+        r = await ac.get("/admin")
+    assert r.status_code == 200
+    assert "instalar en otra máquina" in r.text
+    assert "manifest universal" in r.text
+    # urlencode de Jinja deja las barras sin escapar: http%3A//localhost…
+    assert "/excel/manifest.xml?base=http%3A//localhost" in r.text

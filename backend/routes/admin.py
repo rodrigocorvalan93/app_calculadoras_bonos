@@ -23,6 +23,22 @@ def _guard(request: Request) -> bool:
     return bool(u and u.get("role") == "superuser")
 
 
+def _excel_bases(request: Request) -> dict:
+    """Bases para instalar el add-in. Topología de la mesa: CADA UNO corre la
+    app en su notebook → el manifest tiene que apuntar a `localhost`, así el
+    add-in de cada compu pega contra SU instancia y el mismo archivo sirve en
+    todas (además Office exime a localhost de la exigencia de HTTPS). La IP LAN
+    queda como alternativa sólo para un server centralizado."""
+    from backend.routes import excel as excel_routes
+
+    port = request.url.port
+    suf = f":{port}" if port else ""
+    scheme = request.url.scheme
+    ip = excel_routes.lan_ip()
+    return {"local": f"{scheme}://localhost{suf}",
+            "ip": f"{scheme}://{ip}{suf}" if ip else None}
+
+
 def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = None) -> HTMLResponse:
     rt = auth.role_tabs()
     # Las tabs superuser-only (Alertas) no se ofrecen como checkbox: aunque se
@@ -36,6 +52,7 @@ def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = Non
          "tabs": tabs, "role_tabs": {r: set(rt.get(r, [])) for r in ("premium", "basico")},
          "features": [{"key": k, "label": lbl} for k, lbl in auth.FEATURES],
          "role_features": {r: set(rf.get(r, [])) for r in ("premium", "basico")},
+         "excel_bases": _excel_bases(request),
          "msg": msg, "error": error},
     )
 
