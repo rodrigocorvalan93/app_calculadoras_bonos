@@ -317,11 +317,41 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+def lan_ip() -> Optional[str]:
+    """IP LAN primaria del server (la de la ruta de salida). El connect() UDP no
+    manda ningún paquete — sólo hace que el SO elija la interfaz. Para la
+    tarjeta de instalación multi-máquina de /admin: el manifest tiene que
+    apuntar a una dirección que TODAS las compus resuelvan, y el nombre NetBIOS
+    de una notebook (DAM-NB-…) no lo es."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except OSError:
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+            return None if ip.startswith("127.") else ip
+        except OSError:
+            return None
+
+
 @router.get("/manifest.xml")
-async def manifest(request: Request) -> Response:
-    """Manifest del add-in con la URL base resuelta (app_base_url o el host del
-    request): se descarga y se sideloadea en Excel — sin editar XML a mano."""
-    base = (settings.app_base_url or "").rstrip("/")
+async def manifest(request: Request, base: str = Query("")) -> Response:
+    """Manifest del add-in con la URL base resuelta: `?base=` explícito (lo usa
+    la tarjeta de instalación de /admin para fijar la IP), o app_base_url, o el
+    host con el que se está bajando. Se descarga y se sideloadea en Excel — sin
+    editar XML a mano. TODO el add-in queda clavado a esa base en esa máquina:
+    para otra compu conviene bajarlo apuntado a la IP del server, no al nombre
+    de la notebook."""
+    base = (base or "").strip().rstrip("/")
+    if base and not base.startswith(("http://", "https://")):
+        base = ""                                    # sólo http(s); si no, fallback
+    if not base:
+        base = (settings.app_base_url or "").rstrip("/")
     if not base:
         base = f"{request.url.scheme}://{request.url.netloc}"
     xml = _MANIFEST_XML.format(app_id=_MANIFEST_ID, base=base)

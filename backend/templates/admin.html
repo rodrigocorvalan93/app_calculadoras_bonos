@@ -139,6 +139,32 @@
         </form>
       </div>
     </div>
+
+    {# ── Add-in de Excel: instalación multi-máquina ── #}
+    <div class="card">
+      <div class="card-title"><span>Add-in de Excel · instalar en otra máquina</span>
+        <span class="card-title-aux">cada compu corre su app → el add-in debe apuntar a localhost</span></div>
+      <div class="card-body" style="font-size:12.5px">
+        <p style="margin:0 0 8px">Como cada uno corre la app en su notebook, el manifest correcto apunta a
+          <code>{{ excel_bases.local }}</code>: el add-in de cada máquina lee los precios de <strong>su propia
+          instancia</strong>, y el MISMO archivo sirve tal cual en todas las compus ·
+          <a href="/excel/manifest.xml?base={{ excel_bases.local | urlencode }}">⬇ bajar manifest universal (localhost)</a></p>
+        <ol style="margin:0 0 8px 18px">
+          <li>En la compu nueva: quitar el add-in viejo (Insertar → Mis complementos → ⋯ → Quitar).
+            Importante si quedó instalado con el manifest de OTRA notebook (p.ej. <code>dam-nb-rc</code>):
+            ese add-in intenta leer los precios de esa otra máquina — anda sólo cuando está prendida y
+            alcanzable, por eso los precios cargan mal y aparece "ya no está disponible en el servidor".</li>
+          <li>Instalar el manifest universal de arriba (o abrir
+            <code>{{ excel_bases.local }}/excel/manifest.xml</code> en esa compu, con su app corriendo).</li>
+          <li>En el taskpane, pegar el token del usuario de <strong>esa</strong> instancia
+            (su /admin) → Guardar y conectar → Probar.</li>
+        </ol>
+        <p class="muted" style="margin:0">Alternativa sólo para un server centralizado (una máquina que
+          sirve a todos): bajar el manifest apuntado a la IP fija de ese server{% if excel_bases.ip %}
+          (<a href="/excel/manifest.xml?base={{ excel_bases.ip | urlencode }}">⬇ manifest con {{ excel_bases.ip }}</a>){% endif %}
+          — nunca al nombre NetBIOS de una notebook, que no siempre resuelve entre compus.</p>
+      </div>
+    </div>
   </div>
 </section>
 {% endblock %}
