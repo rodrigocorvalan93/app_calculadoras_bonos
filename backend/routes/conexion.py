@@ -5,6 +5,15 @@ Cocos…): esta página deja elegir el host, poner usuario/clave (default: los d
 secrets.txt) y reconectar el WS SIN reiniciar uvicorn. MAE no se toca acá: es
 un token directo con MAE (sin brokers en el medio), vive en secrets.txt.
 
+Abierta a TODOS los usuarios logueados (el feed es global: si el broker default
+se cae y el superuser no está, cualquiera tiene que poder levantarlo), pero con
+dos niveles:
+- superuser: URL libre + usuario/clave propios (como siempre);
+- resto: SOLO elige entre los brokers conocidos y se reconecta con las
+  credenciales de la casa. La URL libre queda vedada porque el login MANDA la
+  clave de secrets.txt al host que se ponga — con URL arbitraria cualquier
+  usuario podría cosecharla apuntándola a un server propio.
+
 Seguridad: la clave NUNCA se imprime en el HTML — si el campo viene vacío se
 usa la de secrets.txt.
 """
@@ -32,6 +41,23 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
 
 
+def _es_su(request: Request) -> bool:
+    return bool(getattr(request.state, "is_superuser", False))
+
+
+def _norm_url(u: str) -> str:
+    return (u or "").strip().rstrip("/").lower()
+
+
+def _hosts_permitidos() -> set[str]:
+    """URLs a las que un no-superuser puede reconectar: los brokers conocidos
+    más el endpoint actual (por si la casa está en un host fuera de la lista)."""
+    urls = {u for _, u in KNOWN_HOSTS}
+    if settings.primary_base_url:
+        urls.add(settings.primary_base_url)
+    return {_norm_url(u) for u in urls}
+
+
 def _status_ctx(result: str | None = None, ok: bool | None = None) -> Dict[str, Any]:
     ws = primary_ws.get_ws_client()
     mae_on = False
@@ -55,11 +81,14 @@ def _status_ctx(result: str | None = None, ok: bool | None = None) -> Dict[str, 
 
 @router.get("/conexion", response_class=HTMLResponse)
 async def conexion_page(request: Request) -> HTMLResponse:
+    es_su = _es_su(request)
     return _render(
         request, "conexion.html",
         hosts=KNOWN_HOSTS,
+        es_su=es_su,
         current_url=settings.primary_base_url,
-        current_user=settings.primary_user,
+        # el usuario del feed sólo se muestra (prefill) al superuser
+        current_user=settings.primary_user if es_su else "",
         has_secret_pass=bool(settings.primary_pass),
         **_status_ctx(),
     )
@@ -75,8 +104,18 @@ async def conexion_login(
     url = (url or "").strip() or settings.primary_base_url
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    user = (username or "").strip() or settings.primary_user
-    pwd = password or settings.primary_pass          # vacío → la de secrets.txt
+    if _es_su(request):
+        user = (username or "").strip() or settings.primary_user
+        pwd = password or settings.primary_pass      # vacío → la de secrets.txt
+    else:
+        # No-superuser: SOLO brokers conocidos y SIEMPRE las credenciales de la
+        # casa. Validar la URL acá es lo que impide que un usuario cualquiera
+        # mande la clave de secrets.txt a un host arbitrario.
+        if _norm_url(url) not in _hosts_permitidos():
+            return _render(request, "partials/conexion_status.html",
+                           **_status_ctx("Ese endpoint no está en la lista de brokers "
+                                         "conocidos — elegí uno del selector.", False))
+        user, pwd = settings.primary_user, settings.primary_pass
     if not user or not pwd:
         return _render(request, "partials/conexion_status.html",
                        **_status_ctx("Faltan usuario o clave (y secrets.txt no los tiene).", False))

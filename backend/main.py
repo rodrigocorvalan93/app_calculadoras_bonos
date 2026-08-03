@@ -469,7 +469,10 @@ def create_app() -> FastAPI:
     # gateables). /ordenes/live (armar el envío REAL al broker) y /ordenes/kill
     # (kill-switch del desk) son operaciones de mesa, no de un usuario cualquiera
     # con la pestaña Órdenes: se restringen a superuser además del gating por tab.
-    _SUPERUSER_ONLY = ("/admin", "/conexion", "/ordenes/live", "/ordenes/kill",
+    # /conexion es para TODOS los usuarios logueados (si el feed se cae, cualquiera
+    # puede reconectar): la ruta misma limita a los no-superuser a los brokers
+    # conocidos con las credenciales de la casa (sin URL libre ni user/clave).
+    _SUPERUSER_ONLY = ("/admin", "/ordenes/live", "/ordenes/kill",
                        "/historicos/guardar-base", "/alertas")
     # Paths gateados por FEATURE (administrable desde /admin, a diferencia de
     # _SUPERUSER_ONLY que es fijo): superuser siempre pasa; premium/básico

@@ -5,11 +5,15 @@
 <section class="curves" style="max-width:760px">
   <header class="yas-header">
     <h1>Conexión · broker BYMA</h1>
-    <p class="muted">El mismo feed de BYMA lo intermedian varios brokers (XOMS). Elegí el endpoint,
-    poné usuario/clave (si los dejás vacíos se usan los de <code>secrets.txt</code>) y reconectá
-    <strong>sin reiniciar la app</strong>.</p>
+    <p class="muted">El mismo feed de BYMA lo intermedian varios brokers (XOMS).
+    {% if es_su %}Elegí el endpoint, poné usuario/clave (si los dejás vacíos se usan los de
+    <code>secrets.txt</code>) y reconectá <strong>sin reiniciar la app</strong>.
+    {% else %}Si el feed se cayó, elegí otro broker y reconectá <strong>sin reiniciar la app</strong>
+    (se usan las credenciales de la casa). Ojo: la conexión es compartida — el cambio
+    aplica para todos los usuarios.{% endif %}</p>
   </header>
 
+  {% if es_su %}
   {# x-data en comillas simples + tojson: si la URL tuviera comilla rompía el atributo. #}
   <div class="card" x-data='{ url: {{ current_url | tojson }} }'>
     <div class="card-title"><span>Endpoint XOMS</span></div>
@@ -47,6 +51,32 @@
       </form>
     </div>
   </div>
+  {% else %}
+  {# No-superuser: sólo brokers conocidos, credenciales de la casa (el server
+     re-valida la URL — este form es la UI, no el control). #}
+  <div class="card">
+    <div class="card-title"><span>Endpoint XOMS</span>
+      <span class="card-title-aux">credenciales de la casa · sólo brokers conocidos</span>
+    </div>
+    <div class="card-body">
+      <form hx-post="/conexion/login" hx-target="#conn-status" hx-swap="innerHTML"
+            hx-indicator="#conn-spin">
+        <div class="form-row">
+          <label class="field" style="min-width:240px">
+            <span>Broker</span>
+            <select name="url">
+              {% for label, u in hosts %}
+                <option value="{{ u }}" {% if u == current_url %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button type="submit" class="btn-primary" style="align-self:flex-end">🔌 Reconectar</button>
+          <span id="conn-spin" class="htmx-indicator muted" style="align-self:flex-end">conectando…</span>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   <div id="conn-status">
     {% include "partials/conexion_status.html" %}

@@ -254,3 +254,102 @@ async def test_ordenes_gateado_por_prefijo_y_live_kill_superuser(auth_on):
     async with _client() as ac:
         await _login(ac, "rodricor93", "Rc_874562")
         assert (await ac.post("/ordenes/kill", data={"on": "0"})).status_code == 200
+
+
+# ── /conexion para todos (feed caído sin superuser a mano) ──────────────────
+class _FakeWS:
+    """WS falso: registra a qué URL y con qué credenciales se intentó loguear.
+    login devuelve False → la ruta corta antes de start()/símbolos (sin red)."""
+    def __init__(self):
+        self.urls: list = []
+        self.logins: list = []
+        self.authenticated = False
+        self.base_url = "https://fake/"
+
+    def stats(self):
+        return {}
+
+    async def stop(self):
+        pass
+
+    async def login(self, user, pwd):
+        self.logins.append((user, pwd))
+        return False
+
+
+@pytest.fixture()
+def fake_ws(monkeypatch):
+    from backend.routes import conexion as conx
+    from backend.services import primary_ws
+
+    fake = _FakeWS()
+    monkeypatch.setattr(primary_ws, "get_ws_client", lambda: fake)
+
+    def _reset(url):
+        fake.urls.append(url)
+        return fake
+
+    monkeypatch.setattr(primary_ws, "reset_ws_client", _reset)
+    monkeypatch.setattr(settings, "primary_user", "casa")
+    monkeypatch.setattr(settings, "primary_pass", "clave-casa")
+    monkeypatch.setattr(settings, "primary_base_url", conx.KNOWN_HOSTS[0][1])
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_conexion_abierta_a_todos(auth_on):
+    """Cualquier logueado ve /conexion y el 🔌 de la topbar; la versión no-SU
+    NO tiene campos de usuario/clave ni URL libre (sólo el selector de brokers)."""
+    async with _client() as su:
+        await _login(su, "rodricor93", "Rc_874562")
+        await su.post("/admin/users", data={"username": "leo", "password": "clave123", "role": "basico"})
+        page_su = await su.get("/conexion")
+        assert page_su.status_code == 200 and 'name="password"' in page_su.text
+    async with _client() as ac:
+        await _login(ac, "leo", "clave123")
+        y = await ac.get("/yas")
+        assert 'href="/conexion"' in y.text          # 🔌 visible para básico
+        page = await ac.get("/conexion")
+        assert page.status_code == 200 and "Reconectar" in page.text
+        assert 'name="password"' not in page.text and 'name="username"' not in page.text
+        assert "credenciales de la casa" in page.text
+
+
+@pytest.mark.asyncio
+async def test_conexion_no_su_solo_brokers_conocidos(auth_on, fake_ws):
+    """El login del feed MANDA la clave de secrets al host elegido: un no-SU con
+    URL arbitraria podría cosecharla. La URL fuera de la lista se rechaza SIN
+    intentar login; con host conocido se conecta con las credenciales de la casa
+    (ignorando user/clave del form)."""
+    from backend.routes import conexion as conx
+
+    async with _client() as su:
+        await _login(su, "rodricor93", "Rc_874562")
+        await su.post("/admin/users", data={"username": "mia", "password": "clave123", "role": "premium"})
+    async with _client() as ac:
+        await _login(ac, "mia", "clave123")
+        # URL arbitraria → rechazada, CERO intentos contra ese host
+        r = await ac.post("/conexion/login", data={"url": "https://evil.example.com/",
+                                                   "username": "x", "password": "y"})
+        assert r.status_code == 200 and "brokers" in r.text
+        assert fake_ws.urls == [] and fake_ws.logins == []
+        # host conocido → intenta login con las credenciales de la CASA
+        known = conx.KNOWN_HOSTS[1][1]
+        r = await ac.post("/conexion/login", data={"url": known,
+                                                   "username": "otro", "password": "otra"})
+        assert r.status_code == 200
+        assert fake_ws.urls == [known]
+        assert fake_ws.logins == [("casa", "clave-casa")]
+
+
+@pytest.mark.asyncio
+async def test_conexion_su_mantiene_url_libre(auth_on, fake_ws):
+    """El superuser sigue pudiendo apuntar a un endpoint fuera de la lista y
+    con credenciales propias (deploys nuevos / broker de prueba)."""
+    async with _client() as su:
+        await _login(su, "rodricor93", "Rc_874562")
+        r = await su.post("/conexion/login", data={"url": "https://api.nuevo.xoms.com.ar/",
+                                                   "username": "propio", "password": "secreta"})
+        assert r.status_code == 200
+        assert fake_ws.urls == ["https://api.nuevo.xoms.com.ar/"]
+        assert fake_ws.logins == [("propio", "secreta")]
