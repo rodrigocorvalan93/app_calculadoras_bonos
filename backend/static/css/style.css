@@ -957,6 +957,13 @@ select {
   background: var(--red);
   animation: live-pulse-down 1.2s ease-out infinite;
 }
+/* stale = WS conectado pero SIN market data (precios posiblemente viejos):
+   mismo pulso de alarma que down, en ámbar — el peligro es que TODO parece
+   normal (el seq avanza por MAE/pollers y hay precios persistidos). */
+.live-dot[data-state="stale"] {
+  background: var(--yellow);
+  animation: live-pulse-down 1.2s ease-out infinite;
+}
 /* Aviso textual de feed caído en la topbar (junto al dot). */
 .live-meta.feed-down-txt { color: var(--red); font-weight: 600; }
 @keyframes live-pulse {

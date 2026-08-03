@@ -72,11 +72,17 @@ def _status_ctx(result: str | None = None, ok: bool | None = None) -> Dict[str, 
         stats = ws.stats() or {}
     except Exception:  # noqa: BLE001
         pass
+    health = {}
+    try:
+        from backend.services import feed_health
+        health = feed_health.snapshot()
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "result": result, "ok": ok,
         "authenticated": getattr(ws, "authenticated", False),
         "base_url": getattr(ws, "base_url", settings.primary_base_url),
-        "stats": stats, "mae_on": mae_on,
+        "stats": stats, "mae_on": mae_on, "health": health,
     }
 
 

@@ -68,6 +68,7 @@ window.lsSet = function (k, v) {
   var timer = null;
   var healthTimer = null;
   var feedDown = false;       // el broker tiene sesión pero el WS está caído
+  var staleWarn = null;       // WS conectado pero SIN market data (precios viejos)
   var sse = null;             // EventSource activo (null = modo polling)
   var sseEverOk = false;      // llegó a conectar al menos una vez
 
@@ -89,6 +90,14 @@ window.lsSet = function (k, v) {
       el.classList.add('feed-down-txt');
       return;
     }
+    // Conectado pero sin market data (broker que autentica y no streamea):
+    // los precios pueden ser los persistidos de la última rueda — avisar
+    // igual de fuerte que la caída, porque a la vista parecen normales.
+    if (staleWarn) {
+      el.textContent = '⚠ Precios viejos';
+      el.classList.add('feed-down-txt');
+      return;
+    }
     el.classList.remove('feed-down-txt');
     var now = Date.now();
     while (advances.length && now - advances[0] > 60000) advances.shift();
@@ -103,7 +112,10 @@ window.lsSet = function (k, v) {
   function checkHealth() {
     fetch('/market/health', { cache: 'no-store' })
       .then(function (r) { return r.json(); })
-      .then(function (h) { feedDown = !!(h && h.feed_down); })
+      .then(function (h) {
+        feedDown = !!(h && h.feed_down);
+        staleWarn = (h && !h.feed_down && h.warn) ? h.warn : null;
+      })
       .catch(function () { /* dejamos el estado previo del feed */ });
   }
 
@@ -141,9 +153,13 @@ window.lsSet = function (k, v) {
       advances.push(lastAdvance);
       dispatchUpdate();
     }
-    // Prioridad del dot: feed caído (rojo) > tick en vivo (verde) > quieto (gris).
+    // Prioridad del dot: caído (rojo) > datos viejos (naranja) > vivo > quieto.
+    // 'stale' va ANTES que 'live': el seq puede avanzar por MAE/pollers aunque
+    // el broker no mande un solo precio de BYMA — ese verde era mentiroso.
     if (feedDown) {
       dot('down', 'Feed caído — el WS del broker está desconectado; los precios pueden estar congelados');
+    } else if (staleWarn) {
+      dot('stale', '⚠ ' + staleWarn);
     } else if (advanced) {
       dot('live', 'En vivo — tick hace instantes');
     } else if (Date.now() - lastAdvance > QUIET_AFTER_MS) {

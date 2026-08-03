@@ -147,6 +147,17 @@ def _build(codes: Optional[FrozenSet[str]]) -> Dict[str, Any]:
             out["mae_cauciones"] = mae_svc.cauciones_rows()
     except Exception:  # noqa: BLE001
         logger.exception("[excel] mae section failed")
+    try:
+        # Sólo viaja cuando hay algo que avisar (broker conectado sin market
+        # data → precios posiblemente viejos): el taskpane lo muestra en ámbar.
+        # Sin esto Excel repetía el engaño de la web: seq avanzando por MAE y
+        # celdas con los precios persistidos de la última rueda buena.
+        from backend.services import feed_health
+        h = feed_health.snapshot()
+        if h.get("warn"):
+            out["health"] = {"warn": h["warn"]}
+    except Exception:  # noqa: BLE001
+        logger.exception("[excel] health section failed")
     return out
 
 
