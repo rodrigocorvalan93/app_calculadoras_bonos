@@ -2,9 +2,12 @@
    fallback 30s), reemplazándose a sí mismo. Antes se cargaba al clickear la fila
    y quedaba congelado con la profundidad de ese instante — el trader podía
    pricear una orden sobre un book de minutos atrás. data-flash-scope hace el
-   flash de celdas post-swap. #}
+   flash de celdas post-swap.
+   OJO: el code va en el PATH (/mercado/book/GD30) — la única ruta es
+   /mercado/book/{code}; la forma ?code= devolvía 404 silencioso y el libro
+   quedaba freezado en Mercado y en Órdenes. #}
 <div class="card" data-flash-scope
-     hx-get="/mercado/book?code={{ code | urlencode }}&plazo={{ plazo }}&leg={{ leg }}&fuente={{ fuente }}"
+     hx-get="/mercado/book/{{ code | urlencode }}?plazo={{ plazo }}&leg={{ leg }}&fuente={{ fuente }}"
      hx-trigger="md-update from:body, every 30s"
      hx-target="this" hx-swap="outerHTML">
   <div class="card-title">
