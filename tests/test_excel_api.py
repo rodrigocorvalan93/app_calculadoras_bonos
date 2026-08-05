@@ -171,3 +171,58 @@ async def test_admin_tarjeta_instalacion_excel(auth_on):
     assert "manifest universal" in r.text
     # urlencode de Jinja deja las barras sin escapar: http%3A//localhost…
     assert "/excel/manifest.xml?base=http%3A//localhost" in r.text
+
+
+# ── Calculadora YAS en celdas (/excel/v1/calc) ───────────────────────────────
+async def test_calc_batch_requiere_token_y_calcula(auth_on):
+    from backend.services import bond_universe, pricing
+
+    bond_universe.ensure_loaded()
+    auth.create_user("mesa3", "clave123", "basico")
+    tok = auth.set_excel_access("mesa3", True)
+    body = {"items": [
+        {"code": "GD30", "modo": "precio", "valor": 78.5},
+        {"code": "GD30", "modo": "tir", "valor": 0.14},
+        {"code": "GD30", "modo": "precio", "valor": 78.5, "nominales": 1_000_000},
+        {"code": "NOEXISTE", "modo": "precio", "valor": 100.0},
+    ]}
+    async with _client() as ac:
+        assert (await ac.post("/excel/v1/calc", json=body)).status_code == 401
+        r = await ac.post("/excel/v1/calc", json=body, headers={"X-OMS-Token": tok})
+    assert r.status_code == 200
+    res = r.json()["results"]
+    # item 0: precio → tirea, igual que el YAS web (mismo compute_metrics)
+    esperado = pricing.compute_metrics("GD30", "precio", 78.5,
+                                       settle=pricing.settlement_date_str("24hs"),
+                                       include_cashflows=False)
+    assert res[0]["tirea"] == pytest.approx(esperado["tirea"])
+    assert res[0]["tna"] == pytest.approx(esperado["tna"])
+    assert res[0]["tna_convention_label"] == esperado["tna_convention_label"]
+    # item 1: tir → precio (ida y vuelta consistente con el item 0)
+    assert res[1]["precio_clean_pct"] == pytest.approx(78.5, rel=0.02)
+    # item 2: con nominales viaja el ticket
+    assert res[2]["vn_ticket"] == 1_000_000
+    assert res[2]["monto_total"] == pytest.approx(1_000_000 * esperado["precio"])
+    assert res[2]["interes"] == pytest.approx(1_000_000 * esperado["intereses_corridos"])
+    # item 3: error POR ITEM, sin voltear el batch
+    assert "error" in res[3] and "NOEXISTE" in res[3]["error"]
+
+
+async def test_calc_batch_valida_entrada(auth_on):
+    auth.create_user("mesa4", "clave123", "basico")
+    tok = auth.set_excel_access("mesa4", True)
+    h = {"X-OMS-Token": tok}
+    async with _client() as ac:
+        assert (await ac.post("/excel/v1/calc", json={}, headers=h)).status_code == 400
+        assert (await ac.post("/excel/v1/calc", json={"items": []}, headers=h)).status_code == 400
+        demasiados = {"items": [{"code": "GD30", "modo": "precio", "valor": 70.0 + i}
+                                for i in range(41)]}
+        assert (await ac.post("/excel/v1/calc", json=demasiados, headers=h)).status_code == 400
+        # modo inválido y valor no numérico: error por item, 200 igual
+        r = await ac.post("/excel/v1/calc", headers=h, json={"items": [
+            {"code": "GD30", "modo": "banana", "valor": 1},
+            {"code": "GD30", "modo": "precio", "valor": "hola"},
+        ]})
+        assert r.status_code == 200
+        res = r.json()["results"]
+        assert "Modo inválido" in res[0]["error"] and "error" in res[1]

@@ -185,6 +185,46 @@ No es streaming: se recalcula al abrir el libro o con F9. Reemplaza los
 
 ---
 
+## Calculadora YAS en celdas — OMS.TIREA / PRECIO / TNA / TICKET / CALC
+
+El mismo motor de cálculo del YAS web (`genera_ticket` / `calcula_tirea` /
+`calcula_precio` de rentafija), en la celda. **No streamean**: se recalculan
+sólo cuando cambian sus argumentos o con F9. Todas las celdas que recalculan
+juntas viajan en UN solo request batch y el resultado queda memoizado — armar
+una columna de TIRs de toda la curva no carga el server.
+
+    =OMS.TIREA("GD30";78,5)              → 0,1388   (TIR efectiva anual, decimal)
+    =OMS.TIREA("S31L6";OMS.QUOTE("S31L6"))           (TIR viva al last del día)
+    =OMS.PRECIO("GD30";0,14)             → precio clean % del par a TIR 14%
+    =OMS.TNA("TTM26";99,8)               → TNA bajo la convención del bono
+    =OMS.TICKET("GD30";78,5;1000000)     → spill: VN, monto, principal, interés…
+    =OMS.CALC("TX26";"duration";105)     → cualquier métrica del YAS
+
+### OMS.TIREA(especie; precio; [plazo])
+TIR efectiva anual (decimal → formatear como %). `precio` en la misma
+convención que tipeás en el YAS. `plazo` 24hs (default) | CI define la fecha
+de liquidación.
+
+### OMS.PRECIO(especie; tir; [plazo])
+Inverso: precio **clean % del par** a la TIREA dada (decimal: `0,14` = 14%).
+
+### OMS.TNA(especie; precio; [plazo])
+TNA bajo la convención del bono (dual TAMAR 32/365 · variable 90/365 ·
+CER/UVA 180/365 · DLK 90/365 · hard-dollar 180/360 · LECAP días/365).
+
+### OMS.TICKET(especie; precio; nominales; [plazo])
+Ticket de operación (spill, 2 columnas): VN, monto total, principal, interés,
+TIREA, TNA (con su convención), TEM, duration y fecha de liquidación.
+
+### OMS.CALC(especie; campo; valor; [modo]; [plazo])
+Escape general: cualquier métrica del YAS. `campo`: `tirea`, `tna`, `tna_raw`,
+`tem`, `duration`, `paridad`, `precio_pct`, `precio_clean_pct`,
+`intereses_corridos`, `dias_corridos`, `dias_remanentes`, `valor_residual`,
+`valor_tecnico`, `settle`, `tna_convention_label`. `modo` dice qué es `valor`:
+`precio` (default) | `tir` | `tna` | `margen`.
+
+---
+
 ## Unidades y formato — resumen
 
 - **Precios**: como cotizan en pantalla BYMA (bonos por 100 VN; LECAPs por

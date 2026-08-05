@@ -350,6 +350,116 @@ def lan_ip() -> Optional[str]:
             return None
 
 
+# ── Calculadora YAS en celdas (=OMS.TIREA / PRECIO / TNA / TICKET / CALC) ────
+# Diseño anti-carga: las funciones de cálculo NO streamean (corren sólo cuando
+# Excel recalcula), el cliente las junta en UN POST batch (ventana de 80 ms) y
+# memoiza por argumentos; acá cada (bono, modo, valor, plazo) se computa UNA
+# vez por día-índice y se sirve de cache a todos los libros/usuarios. El calc
+# es el mismo compute_metrics del YAS web (~1-3 ms), corrido en threadpool
+# para no frenar el event loop en un batch frío.
+from backend.cache import LockedTTLCache
+
+_CALC_MAX_ITEMS = 40
+_calc_cache = LockedTTLCache(maxsize=8192, ttl=600)
+_CALC_MODOS = ("precio", "tir", "tna", "margen")
+_CALC_NUM = ("tirea", "tna", "tna_raw", "tem", "duration", "paridad", "margen_tna",
+             "precio_pct", "precio_clean_pct", "precio", "precio_clean",
+             "intereses_corridos", "dias_corridos", "dias_remanentes",
+             "valor_residual", "valor_tecnico")
+
+
+def _calc_one(code: str, modo: str, valor: float, plazo: str,
+              nominales: Optional[float]) -> Dict[str, Any]:
+    import math
+
+    from backend.services import pricing
+
+    settle = pricing.settlement_date_str(plazo)
+    key = (code, modo, round(valor, 8), plazo,
+           pricing._index_fingerprint(pricing._bond_index_kind(code)),
+           pricing.hoy_ba().toordinal())
+
+    def _factory() -> Dict[str, Any]:
+        m = pricing.compute_metrics(code, modo, valor, settle=settle,
+                                    include_cashflows=False)
+        if m.get("error"):
+            return {"error": str(m["error"]), "_nocache": True}
+        out: Dict[str, Any] = {"codigo": code}
+        for k in _CALC_NUM:
+            v = m.get(k)
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                out[k] = v
+        if m.get("tna_convention_label"):
+            out["tna_convention_label"] = m["tna_convention_label"]
+        fs = m.get("fecha_settlement")
+        if fs is not None:
+            out["settle"] = fs.strftime("%d/%m/%Y")
+        out["_metrics"] = {k: m.get(k) for k in ("precio", "precio_clean",
+                                                 "intereses_corridos", "valor_residual")}
+        return out
+
+    res = _calc_cache.get_or_compute(key, _factory)
+    if res.get("_nocache"):
+        _calc_cache.invalidate(key)          # errores: no retenerlos 10 min
+        return {"error": res["error"]}
+    out = {k: v for k, v in res.items() if k != "_metrics"}
+    if nominales and nominales > 0:
+        from backend.services.pricing import ticket_rows
+        t = ticket_rows(res["_metrics"], float(nominales))
+        out.update({k: v for k, v in t.items()
+                    if isinstance(v, (int, float)) and math.isfinite(v)})
+    return out
+
+
+def _calc_batch(items: list) -> list:
+    out = []
+    for it in items:
+        try:
+            code = str(it.get("code") or "").strip().upper()
+            modo = str(it.get("modo") or "precio").strip().lower()
+            plazo = "CI" if str(it.get("plazo") or "").upper().startswith("CI") else "24hs"
+            valor = float(it.get("valor"))
+            nom = it.get("nominales")
+            nom = float(nom) if nom not in (None, "") else None
+            if not code:
+                out.append({"error": "Especie vacía"})
+            elif modo not in _CALC_MODOS:
+                out.append({"error": f"Modo inválido: {modo!r} (precio | tir | tna | margen)"})
+            elif not (valor == valor and abs(valor) < 1e12):     # NaN/inf
+                out.append({"error": "Valor inválido"})
+            else:
+                out.append(_calc_one(code, modo, valor, plazo, nom))
+        except Exception as exc:  # noqa: BLE001 — un item roto no voltea el batch
+            out.append({"error": f"{type(exc).__name__}: {exc}"})
+    return out
+
+
+@router.post("/v1/calc")
+async def excel_calc(request: Request) -> Response:
+    """Batch de cálculos YAS para el add-in. Body: {"items":[{"code","modo",
+    "valor","plazo","nominales"}...]} → {"results":[{...métricas}|{"error"}]}.
+    Siempre 200 con error POR ITEM (una celda rota no rompe a las demás)."""
+    import asyncio
+
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return Response(content='{"error":"body inválido"}',
+                        media_type="application/json", status_code=400)
+    items = (body or {}).get("items")
+    if not isinstance(items, list) or not items:
+        return Response(content='{"error":"items vacío"}',
+                        media_type="application/json", status_code=400)
+    if len(items) > _CALC_MAX_ITEMS:
+        return Response(
+            content=json.dumps({"error": f"máximo {_CALC_MAX_ITEMS} items por batch"}),
+            media_type="application/json", status_code=400)
+    results = await asyncio.get_running_loop().run_in_executor(None, _calc_batch, items)
+    return Response(content=json.dumps({"results": results}, ensure_ascii=False,
+                                       separators=(",", ":"), default=str),
+                    media_type="application/json")
+
+
 @router.get("/manifest.xml")
 async def manifest(request: Request, base: str = Query("")) -> Response:
     """Manifest del add-in con la URL base resuelta: `?base=` explícito (lo usa

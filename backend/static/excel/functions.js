@@ -338,6 +338,141 @@ function histFn(serie, dias) {
   });
 }
 
+// ── Calculadora YAS en celdas (TIREA / PRECIO / TNA / TICKET / CALC) ────────
+// Anti-carga: estas funciones NO streamean — corren sólo cuando Excel
+// recalcula. Todas las celdas que recalculan juntas se juntan en UN POST
+// batch (ventana de 80 ms, dedup en vuelo) y el resultado se memoiza por
+// argumentos, así arrastrar una fórmula por 200 filas es 5 requests chicos
+// una única vez, y F9 sin cambios no pega al server.
+var OMSCalc = (function () {
+  var BATCH_MS = 80;
+  var CHUNK = 40;          // límite del server por batch
+  var MEMO_MAX = 800;
+  var memo = {}, memoN = 0;
+  var pending = {};        // key → [{resolve, reject}]
+  var queue = [];          // items únicos a mandar
+  var flushTimer = null;
+
+  function keyOf(it) {
+    return [it.code, it.modo, it.valor, it.plazo, it.nominales || ""].join("|");
+  }
+
+  function request(it) {
+    var k = keyOf(it);
+    if (Object.prototype.hasOwnProperty.call(memo, k)) { return Promise.resolve(memo[k]); }
+    return new Promise(function (resolve, reject) {
+      if (pending[k]) { pending[k].push({ resolve: resolve, reject: reject }); return; }
+      pending[k] = [{ resolve: resolve, reject: reject }];
+      queue.push(it);
+      if (!flushTimer) { flushTimer = setTimeout(flush, BATCH_MS); }
+    });
+  }
+
+  function settle(k, val, err) {
+    var subs = pending[k] || [];
+    delete pending[k];
+    if (val && !err) {
+      if (memoN >= MEMO_MAX) { memo = {}; memoN = 0; }
+      memo[k] = val; memoN++;
+    }
+    for (var i = 0; i < subs.length; i++) {
+      if (err) { subs[i].reject(err); } else { subs[i].resolve(val); }
+    }
+  }
+
+  function sendChunk(items) {
+    OMSFeed.loadToken().then(function (t) {
+      return fetch("/excel/v1/calc", {
+        method: "POST",
+        headers: { "X-OMS-Token": t, "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items }),
+        cache: "no-store"
+      });
+    }).then(function (r) {
+      if (r.status === 401) { throw naError("Token de Excel inválido"); }
+      if (!r.ok) { throw naError("HTTP " + r.status); }
+      return r.json();
+    }).then(function (data) {
+      var res = (data && data.results) || [];
+      for (var i = 0; i < items.length; i++) {
+        settle(keyOf(items[i]), res[i] || { error: "sin resultado" }, null);
+      }
+    }).catch(function (e) {
+      for (var j = 0; j < items.length; j++) { settle(keyOf(items[j]), null, e); }
+    });
+  }
+
+  function flush() {
+    flushTimer = null;
+    var items = queue.splice(0, queue.length);
+    while (items.length) { sendChunk(items.splice(0, CHUNK)); }
+  }
+
+  return { request: request };
+})();
+
+function calcItem(especie, modo, valor, plazo, nominales) {
+  var code = String(especie == null ? "" : especie).trim().toUpperCase();
+  if (!code) { throw naError("Especie vacía"); }
+  var v = Number(valor);
+  if (!isFinite(v)) { throw naError("Valor inválido: " + valor); }
+  var it = { code: code, modo: modo, valor: v, plazo: normPlazo(plazo) };
+  if (nominales != null && nominales !== "") { it.nominales = Number(nominales); }
+  return it;
+}
+
+function calcField(it, campo) {
+  return OMSCalc.request(it).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    var v = m[campo];
+    if (v === undefined || v === null) { throw naError("Sin " + campo + " para " + it.code); }
+    return v;
+  });
+}
+
+function tireaFn(especie, precio, plazo) {
+  return calcField(calcItem(especie, "precio", precio, plazo), "tirea");
+}
+
+function precioFn(especie, tir, plazo) {
+  // TIR decimal (0,1388 = 13,88 %) → precio clean % del par, como el YAS.
+  return calcField(calcItem(especie, "tir", tir, plazo), "precio_clean_pct");
+}
+
+function tnaFn(especie, precio, plazo) {
+  return calcField(calcItem(especie, "precio", precio, plazo), "tna");
+}
+
+var CALC_MODOS = { "": "precio", "precio": "precio", "px": "precio",
+                   "tir": "tir", "tirea": "tir", "tna": "tna", "margen": "margen" };
+
+function calcFn(especie, campo, valor, modo, plazo) {
+  var md = CALC_MODOS[String(modo == null ? "" : modo).trim().toLowerCase()];
+  if (!md) { throw naError("Modo inválido: " + modo + " (precio | tir | tna | margen)"); }
+  var c = String(campo == null ? "" : campo).trim().toLowerCase() || "tirea";
+  return calcField(calcItem(especie, md, valor, plazo), c);
+}
+
+function ticketFn(especie, precio, nominales, plazo) {
+  var nom = Number(nominales);
+  if (!isFinite(nom) || nom <= 0) { throw naError("Nominales inválidos: " + nominales); }
+  var it = calcItem(especie, "precio", precio, plazo, nom);
+  return OMSCalc.request(it).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    return [["Concepto", "Valor"],
+            ["Especie", m.codigo || it.code],
+            ["VN", m.vn_ticket != null ? m.vn_ticket : nom],
+            ["Monto total", m.monto_total != null ? m.monto_total : ""],
+            ["Principal", m.principal != null ? m.principal : ""],
+            ["Interés", m.interes != null ? m.interes : ""],
+            ["TIREA", m.tirea != null ? m.tirea : ""],
+            ["TNA (" + (m.tna_convention_label || "conv.") + ")", m.tna != null ? m.tna : ""],
+            ["TEM", m.tem != null ? m.tem : ""],
+            ["Duration", m.duration != null ? m.duration : ""],
+            ["Liquidación", m.settle || ""]];
+  });
+}
+
 function registerFunctions() {
   if (typeof CustomFunctions === "undefined") { return; }
   CustomFunctions.associate("QUOTE", makeStreaming(quoteGet));
@@ -346,6 +481,11 @@ function registerFunctions() {
   CustomFunctions.associate("CAUCION", makeStreaming(caucionGet));
   CustomFunctions.associate("TABLA", makeStreaming(tablaGet));
   CustomFunctions.associate("HIST", histFn);
+  CustomFunctions.associate("TIREA", tireaFn);
+  CustomFunctions.associate("PRECIO", precioFn);
+  CustomFunctions.associate("TNA", tnaFn);
+  CustomFunctions.associate("TICKET", ticketFn);
+  CustomFunctions.associate("CALC", calcFn);
 }
 
 if (typeof Office !== "undefined" && Office.onReady) {
