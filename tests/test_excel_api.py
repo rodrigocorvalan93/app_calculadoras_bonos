@@ -226,3 +226,47 @@ async def test_calc_batch_valida_entrada(auth_on):
         assert r.status_code == 200
         res = r.json()["results"]
         assert "Modo inválido" in res[0]["error"] and "error" in res[1]
+
+
+async def test_calc_settle_custom_fx_y_tr(auth_on):
+    """El 3er arg acepta fecha de liquidación custom (settle del YAS), `fx`
+    viaja como fx_override, y tipo=tr devuelve el total return puntual."""
+    from backend.services import bond_universe, pricing
+
+    bond_universe.ensure_loaded()
+    auth.create_user("mesa5", "clave123", "basico")
+    tok = auth.set_excel_access("mesa5", True)
+    h = {"X-OMS-Token": tok}
+    fecha = "15/09/2026"
+    async with _client() as ac:
+        r = await ac.post("/excel/v1/calc", headers=h, json={"items": [
+            {"code": "GD30", "modo": "precio", "valor": 78.5, "settle": fecha},
+            {"code": "GD30", "modo": "precio", "valor": 78.5, "fx": 1500.0},
+            {"code": "GD30", "modo": "precio", "valor": 78.5, "tipo": "tr",
+             "tir_salida": 0.12, "fecha_salida": "30/12/2026", "nominales": 1_000_000},
+            {"code": "GD30", "modo": "precio", "valor": 78.5, "tipo": "tr",
+             "fecha_salida": "01/01/2020"},          # salida anterior al settle
+        ]})
+    assert r.status_code == 200
+    res = r.json()["results"]
+    # settle custom = mismo resultado que compute_metrics con esa fecha
+    esp = pricing.compute_metrics("GD30", "precio", 78.5, settle=fecha,
+                                  include_cashflows=False)
+    assert res[0]["settle"] == fecha
+    assert res[0]["tirea"] == pytest.approx(esp["tirea"])
+    # fx pasa como override (passthrough exacto contra el motor)
+    esp_fx = pricing.compute_metrics("GD30", "precio", 78.5,
+                                     settle=pricing.settlement_date_str("24hs"),
+                                     fx_override=1500.0, include_cashflows=False)
+    assert res[1]["tirea"] == pytest.approx(esp_fx["tirea"])
+    # TR: mismo desglose que tr_puntual
+    esp_tr = pricing.tr_puntual("GD30", "precio", 78.5,
+                                settle=pricing.settlement_date_str("24hs"),
+                                tir_salida=0.12, fecha_salida="30/12/2026",
+                                nominales=1_000_000)
+    assert res[2]["tr"] == pytest.approx(esp_tr["tr"])
+    assert res[2]["tea"] == pytest.approx(esp_tr["tea"])
+    assert res[2]["pnl_total_m"] == pytest.approx(esp_tr["pnl_total_m"])
+    assert res[2]["fecha_salida"] == "30/12/2026" and res[2]["dias"] == esp_tr["dias"]
+    # TR con fecha imposible → error por item, batch vivo
+    assert "error" in res[3] and "posterior" in res[3]["error"]

@@ -411,13 +411,25 @@ var OMSCalc = (function () {
   return { request: request };
 })();
 
-function calcItem(especie, modo, valor, plazo, nominales) {
+var FECHA_RE = /^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/;
+
+function calcItem(especie, modo, valor, plazo, nominales, fx) {
   var code = String(especie == null ? "" : especie).trim().toUpperCase();
   if (!code) { throw naError("Especie vacía"); }
   var v = Number(valor);
   if (!isFinite(v)) { throw naError("Valor inválido: " + valor); }
-  var it = { code: code, modo: modo, valor: v, plazo: normPlazo(plazo) };
+  var it = { code: code, modo: modo, valor: v };
+  // El 3er argumento admite plazo (CI/24hs) O una fecha de liquidación
+  // custom DD/MM/AAAA — mismo settle_custom que la ficha YAS.
+  var p = String(plazo == null ? "" : plazo).trim();
+  if (FECHA_RE.test(p)) { it.settle = p; it.plazo = "24hs"; }
+  else { it.plazo = normPlazo(plazo); }
   if (nominales != null && nominales !== "") { it.nominales = Number(nominales); }
+  if (fx != null && fx !== "") {
+    var f = Number(fx);
+    if (!isFinite(f) || f <= 0) { throw naError("FX inválido: " + fx); }
+    it.fx = f;                           // FX custom, como en la ficha YAS
+  }
   return it;
 }
 
@@ -430,33 +442,63 @@ function calcField(it, campo) {
   });
 }
 
-function tireaFn(especie, precio, plazo) {
-  return calcField(calcItem(especie, "precio", precio, plazo), "tirea");
+function tireaFn(especie, precio, plazo, fx) {
+  return calcField(calcItem(especie, "precio", precio, plazo, null, fx), "tirea");
 }
 
-function precioFn(especie, tir, plazo) {
+function precioFn(especie, tir, plazo, fx) {
   // TIR decimal (0,1388 = 13,88 %) → precio clean % del par, como el YAS.
-  return calcField(calcItem(especie, "tir", tir, plazo), "precio_clean_pct");
+  return calcField(calcItem(especie, "tir", tir, plazo, null, fx), "precio_clean_pct");
 }
 
-function tnaFn(especie, precio, plazo) {
-  return calcField(calcItem(especie, "precio", precio, plazo), "tna");
+function tnaFn(especie, precio, plazo, fx) {
+  return calcField(calcItem(especie, "precio", precio, plazo, null, fx), "tna");
 }
 
 var CALC_MODOS = { "": "precio", "precio": "precio", "px": "precio",
                    "tir": "tir", "tirea": "tir", "tna": "tna", "margen": "margen" };
 
-function calcFn(especie, campo, valor, modo, plazo) {
+function calcFn(especie, campo, valor, modo, plazo, fx) {
   var md = CALC_MODOS[String(modo == null ? "" : modo).trim().toLowerCase()];
   if (!md) { throw naError("Modo inválido: " + modo + " (precio | tir | tna | margen)"); }
   var c = String(campo == null ? "" : campo).trim().toLowerCase() || "tirea";
-  return calcField(calcItem(especie, md, valor, plazo), c);
+  return calcField(calcItem(especie, md, valor, plazo, null, fx), c);
 }
 
-function ticketFn(especie, precio, nominales, plazo) {
+function trFn(especie, precio, tirSalida, fechaSalida, nominales, plazo, fx) {
+  var it = calcItem(especie, "precio", precio, plazo, nominales, fx);
+  it.tipo = "tr";
+  if (tirSalida != null && tirSalida !== "") { it.tir_salida = Number(tirSalida); }
+  var fs = String(fechaSalida == null ? "" : fechaSalida).trim();
+  if (fs) {
+    if (!FECHA_RE.test(fs)) { throw naError("Fecha de salida inválida: " + fechaSalida + " (DD/MM/AAAA)"); }
+    it.fecha_salida = fs;
+  }
+  return OMSCalc.request(it).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    var nn = function (v) { return v != null ? v : ""; };
+    return [["Concepto", "Valor"],
+            ["Especie", m.codigo || it.code],
+            ["Entrada (settle)", nn(m.fecha_entrada)],
+            ["Salida", nn(m.fecha_salida) + (m.a_vencimiento ? " (a vencimiento)" : "")],
+            ["Días", nn(m.dias)],
+            ["TIR entrada", nn(m.tir_entrada)],
+            ["TIR salida", nn(m.tir_salida) + (m.salida_flat ? "" : "")],
+            ["Px inicial %", nn(m.px_ini_pct)],
+            ["Px final %", nn(m.px_fin_pct)],
+            ["P&L capital %", nn(m.pnl_capital_pct)],
+            ["Cobrado %", nn(m.cobrado_pct)],
+            ["TR directo", nn(m.tr)],
+            ["TEA", nn(m.tea)],
+            ["TNA", nn(m.tna)],
+            ["P&L total $", nn(m.pnl_total_m)]];
+  });
+}
+
+function ticketFn(especie, precio, nominales, plazo, fx) {
   var nom = Number(nominales);
   if (!isFinite(nom) || nom <= 0) { throw naError("Nominales inválidos: " + nominales); }
-  var it = calcItem(especie, "precio", precio, plazo, nom);
+  var it = calcItem(especie, "precio", precio, plazo, nom, fx);
   return OMSCalc.request(it).then(function (m) {
     if (m.error) { throw naError(m.error); }
     return [["Concepto", "Valor"],
@@ -486,6 +528,7 @@ function registerFunctions() {
   CustomFunctions.associate("TNA", tnaFn);
   CustomFunctions.associate("TICKET", ticketFn);
   CustomFunctions.associate("CALC", calcFn);
+  CustomFunctions.associate("TR", trFn);
 }
 
 if (typeof Office !== "undefined" && Office.onReady) {

@@ -368,27 +368,39 @@ _CALC_NUM = ("tirea", "tna", "tna_raw", "tem", "duration", "paridad", "margen_tn
              "valor_residual", "valor_tecnico")
 
 
-def _calc_one(code: str, modo: str, valor: float, plazo: str,
-              nominales: Optional[float]) -> Dict[str, Any]:
-    import math
+_TR_NUM = ("dias", "tir_entrada", "tir_salida", "px_ini_pct", "px_fin_pct",
+           "pnl_capital_pct", "interes_pct", "capital_pct", "cobrado_pct",
+           "tr", "tea", "tna", "nominales", "monto_ini", "monto_fin",
+           "interes_m", "capital_m", "cobrado_m", "pnl_capital_m", "pnl_total_m")
 
+
+def _num_ok(v) -> bool:
+    import math
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _calc_one(code: str, modo: str, valor: float, plazo: str,
+              nominales: Optional[float], settle_custom: Optional[str] = None,
+              fx: Optional[float] = None) -> Dict[str, Any]:
     from backend.services import pricing
 
-    settle = pricing.settlement_date_str(plazo)
-    key = (code, modo, round(valor, 8), plazo,
+    # settle explícito (DD/MM/AAAA) gana sobre el plazo; fx = FX custom, como
+    # en la ficha YAS. Ambos van a la cache key: cambian el resultado.
+    settle = settle_custom or pricing.settlement_date_str(plazo)
+    key = (code, modo, round(valor, 8), settle or "",
+           round(fx, 6) if fx is not None else None,
            pricing._index_fingerprint(pricing._bond_index_kind(code)),
            pricing.hoy_ba().toordinal())
 
     def _factory() -> Dict[str, Any]:
         m = pricing.compute_metrics(code, modo, valor, settle=settle,
-                                    include_cashflows=False)
+                                    fx_override=fx, include_cashflows=False)
         if m.get("error"):
             return {"error": str(m["error"]), "_nocache": True}
         out: Dict[str, Any] = {"codigo": code}
         for k in _CALC_NUM:
-            v = m.get(k)
-            if isinstance(v, (int, float)) and math.isfinite(v):
-                out[k] = v
+            if _num_ok(m.get(k)):
+                out[k] = m[k]
         if m.get("tna_convention_label"):
             out["tna_convention_label"] = m["tna_convention_label"]
         fs = m.get("fecha_settlement")
@@ -406,9 +418,49 @@ def _calc_one(code: str, modo: str, valor: float, plazo: str,
     if nominales and nominales > 0:
         from backend.services.pricing import ticket_rows
         t = ticket_rows(res["_metrics"], float(nominales))
-        out.update({k: v for k, v in t.items()
-                    if isinstance(v, (int, float)) and math.isfinite(v)})
+        out.update({k: v for k, v in t.items() if _num_ok(v)})
     return out
+
+
+def _calc_tr(code: str, modo: str, valor: float, plazo: str,
+             nominales: Optional[float], settle_custom: Optional[str],
+             fx: Optional[float], tir_salida: Optional[float],
+             fecha_salida: Optional[str]) -> Dict[str, Any]:
+    """Total return puntual (misma ficha que el YAS): entrada a precio/TIR,
+    salida a `tir_salida` en `fecha_salida` (default: flat, settle+90d)."""
+    from backend.services import pricing
+
+    settle = settle_custom or pricing.settlement_date_str(plazo)
+    nom = float(nominales) if nominales and nominales > 0 else 1_000_000.0
+    key = ("tr", code, modo, round(valor, 8), settle or "",
+           round(fx, 6) if fx is not None else None,
+           round(tir_salida, 8) if tir_salida is not None else None,
+           fecha_salida or "", round(nom, 2),
+           pricing._index_fingerprint(pricing._bond_index_kind(code)),
+           pricing.hoy_ba().toordinal())
+
+    def _factory() -> Dict[str, Any]:
+        m = pricing.tr_puntual(code, modo, valor, settle=settle,
+                               tir_salida=tir_salida, fecha_salida=fecha_salida,
+                               nominales=nom, fx_override=fx)
+        if m.get("error"):
+            return {"error": str(m["error"]), "_nocache": True}
+        out: Dict[str, Any] = {"codigo": code}
+        for k in _TR_NUM:
+            if _num_ok(m.get(k)):
+                out[k] = m[k]
+        for k in ("fecha_entrada", "fecha_salida"):
+            if m.get(k):
+                out[k] = m[k]
+        for k in ("salida_flat", "a_vencimiento"):
+            out[k] = bool(m.get(k))
+        return out
+
+    res = _calc_cache.get_or_compute(key, _factory)
+    if res.get("_nocache"):
+        _calc_cache.invalidate(key)
+        return {"error": res["error"]}
+    return res
 
 
 def _calc_batch(items: list) -> list:
@@ -421,14 +473,22 @@ def _calc_batch(items: list) -> list:
             valor = float(it.get("valor"))
             nom = it.get("nominales")
             nom = float(nom) if nom not in (None, "") else None
+            settle = str(it.get("settle") or "").strip() or None
+            fx = it.get("fx")
+            fx = float(fx) if fx not in (None, "") else None
             if not code:
                 out.append({"error": "Especie vacía"})
             elif modo not in _CALC_MODOS:
                 out.append({"error": f"Modo inválido: {modo!r} (precio | tir | tna | margen)"})
             elif not (valor == valor and abs(valor) < 1e12):     # NaN/inf
                 out.append({"error": "Valor inválido"})
+            elif it.get("tipo") == "tr":
+                ts = it.get("tir_salida")
+                ts = float(ts) if ts not in (None, "") else None
+                fs = str(it.get("fecha_salida") or "").strip() or None
+                out.append(_calc_tr(code, modo, valor, plazo, nom, settle, fx, ts, fs))
             else:
-                out.append(_calc_one(code, modo, valor, plazo, nom))
+                out.append(_calc_one(code, modo, valor, plazo, nom, settle, fx))
         except Exception as exc:  # noqa: BLE001 — un item roto no voltea el batch
             out.append({"error": f"{type(exc).__name__}: {exc}"})
     return out
