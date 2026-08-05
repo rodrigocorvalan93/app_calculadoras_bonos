@@ -67,6 +67,84 @@
         { "name": "serie", "type": "string", "description": "a3500 | badlar | tamar | cer | uva" },
         { "name": "dias", "type": "number", "description": "Últimos N días (opcional; default toda la serie)", "optional": true }
       ]
+    },
+    {
+      "id": "TIREA",
+      "name": "TIREA",
+      "description": "TIR efectiva anual (decimal) de un bono a un precio dado — mismo motor que el YAS. Ej: =OMS.TIREA(\"GD30\";78,5).",
+      "result": { "type": "number" },
+      "parameters": [
+        { "name": "especie", "type": "string", "description": "Ticker (GD30, TX26, S31L6...)" },
+        { "name": "precio", "type": "number", "description": "Precio (misma convención que el YAS)" },
+        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha de liquidación DD/MM/AAAA", "optional": true },
+        { "name": "fx", "type": "number", "description": "FX custom (como en la ficha YAS)", "optional": true }
+      ]
+    },
+    {
+      "id": "PRECIO",
+      "name": "PRECIO",
+      "description": "Precio (clean, % del par) de un bono a una TIR dada (decimal) — inverso del YAS. Ej: =OMS.PRECIO(\"GD30\";0,14).",
+      "result": { "type": "number" },
+      "parameters": [
+        { "name": "especie", "type": "string", "description": "Ticker" },
+        { "name": "tir", "type": "number", "description": "TIREA decimal (0,14 = 14%)" },
+        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
+        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+      ]
+    },
+    {
+      "id": "TNA",
+      "name": "TNA",
+      "description": "TNA bajo la convención del bono (dual TAMAR 32/365, CER 180/365, hard-dollar 180/360...) a un precio dado.",
+      "result": { "type": "number" },
+      "parameters": [
+        { "name": "especie", "type": "string", "description": "Ticker" },
+        { "name": "precio", "type": "number", "description": "Precio (misma convención que el YAS)" },
+        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
+        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+      ]
+    },
+    {
+      "id": "TICKET",
+      "name": "TICKET",
+      "description": "Ticket de operación (spill): VN, monto total, principal, interés, TIREA, TNA, TEM, duration y liquidación.",
+      "result": { "type": "any", "dimensionality": "matrix" },
+      "parameters": [
+        { "name": "especie", "type": "string", "description": "Ticker" },
+        { "name": "precio", "type": "number", "description": "Precio (misma convención que el YAS)" },
+        { "name": "nominales", "type": "number", "description": "VN a operar (ej: 1000000)" },
+        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
+        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+      ]
+    },
+    {
+      "id": "CALC",
+      "name": "CALC",
+      "description": "Cualquier métrica del YAS: tirea, tna, tem, duration, paridad, precio_pct, precio_clean_pct, intereses_corridos, valor_residual, valor_tecnico, dias_remanentes...",
+      "result": { "type": "any" },
+      "parameters": [
+        { "name": "especie", "type": "string", "description": "Ticker" },
+        { "name": "campo", "type": "string", "description": "tirea (default), tna, tem, duration, paridad..." },
+        { "name": "valor", "type": "number", "description": "Precio o TIR según modo" },
+        { "name": "modo", "type": "string", "description": "precio (default) | tir | tna | margen — qué es `valor`", "optional": true },
+        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
+        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+      ]
+    },
+    {
+      "id": "TR",
+      "name": "TR",
+      "description": "Total return puntual (spill): entrada a un precio, salida a una TIR en una fecha (default flat, settle+90d). TR directo, TEA, TNA, P&L capital/cobrado y montos.",
+      "result": { "type": "any", "dimensionality": "matrix" },
+      "parameters": [
+        { "name": "especie", "type": "string", "description": "Ticker" },
+        { "name": "precio", "type": "number", "description": "Precio de entrada (misma convención que el YAS)" },
+        { "name": "tir_salida", "type": "number", "description": "TIREA de salida decimal (vacío = flat)", "optional": true },
+        { "name": "fecha_salida", "type": "string", "description": "DD/MM/AAAA (vacío = settle+90d; ≥ vencimiento = hold to maturity)", "optional": true },
+        { "name": "nominales", "type": "number", "description": "VN (default 1.000.000)", "optional": true },
+        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
+        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+      ]
     }
   ]
 }

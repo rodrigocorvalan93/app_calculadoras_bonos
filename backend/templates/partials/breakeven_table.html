@@ -1,6 +1,3 @@
-{# Datos del gráfico de barras: SIEMPRE presente (vacío ⇒ el chart muestra
-   su propio mensaje) — así el JS y los tests no dependen de que haya filas. #}
-<div id="be-data" data-be='{{ be_json }}' style="display:none"></div>
 {% if not rows %}
   <div class="alert">Sin bonos CER con cotización para despejar el break-even (¿broker offline?).</div>
 {% else %}

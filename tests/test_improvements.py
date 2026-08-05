@@ -310,3 +310,31 @@ async def test_mercado_book_shows_row_stats() -> None:
     assert r.status_code == 200
     assert "book-stats" in r.text       # panel con toda la fila
     assert "TIR @ last" in r.text and "Mín op." in r.text
+
+
+@pytest.mark.asyncio
+async def test_mercado_book_refresh_url_apunta_a_ruta_real() -> None:
+    """Regresión: el self-refresh del libro emitía /mercado/book?code=… (query)
+    pero la única ruta es /mercado/book/{code} (path) → 404 silencioso y el
+    libro quedaba FREEZADO en Mercado y en Órdenes (htmx no swapea en error).
+    El partial debe emitir la forma path y esa URL debe responder 200."""
+    import re
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    code = _first_codes(1)[0]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.get(f"/mercado/book/{code}", params={"plazo": "24hs"})
+        assert r.status_code == 200
+        m = re.search(r'hx-get="([^"]+)"\s+hx-trigger="md-update', r.text)
+        assert m, "el libro perdió su hx-get de auto-refresh"
+        url = m.group(1).replace("&amp;", "&")
+        assert f"/mercado/book/{code}?" in url          # code en el PATH
+        assert "book?code=" not in url                  # la forma rota, nunca más
+        r2 = await ac.get(url)                          # la URL emitida DEBE existir
+        assert r2.status_code == 200 and "md-update" in r2.text
+        # y el mismo partial servido vía Órdenes emite el mismo refresh sano
+        q = await ac.get("/ordenes/quote", params={"code": code, "plazo": "24hs"})
+        assert q.status_code == 200 and f"/mercado/book/{code}?" in q.text

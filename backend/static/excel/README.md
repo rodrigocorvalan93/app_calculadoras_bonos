@@ -17,6 +17,8 @@ tick y todos los libros conectados comparten ese único build.
 | `=OMS.CAUCION(7;"tasa")` | `RtGet("IDN";"ARS…RP=BA";…)` |
 | `=OMS.TABLA("futuros")` (spill) | hoja Rofex completa |
 | `=OMS.HIST("a3500";365)` (spill) | `RHistory("ARS=BCRA";…)` |
+| `=OMS.TIREA("GD30";78,5)` / `=OMS.PRECIO("GD30";0,14)` / `=OMS.TNA(…)` | calculadora YAS en la celda |
+| `=OMS.TICKET("GD30";78,5;1000000)` (spill) / `=OMS.CALC(…;"duration";…)` | ticket + cualquier métrica YAS |
 
 Campos de `QUOTE`: `last · bid · ask · bid_size · ask_size · close · close_date ·
 var · vol · nominal · trades · vwap · open · high · low · last_ts` (con alias

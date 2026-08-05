@@ -41,8 +41,6 @@ def _cer_conocido_hasta():
 
 async def _ctx(plazo: str, incl: Optional[List[str]] = None,
                incl_set: bool = False) -> Dict[str, Any]:
-    import json
-
     cer_rows, _ = await _rows_for("cer", plazo, only_quoting=True)
     lecap_rows, _ = await _rows_for(_NOMINAL_CURVE, plazo, only_quoting=True)
     # Lag de ajuste de la especie (típ. −10 hábiles) → mes de referencia.
@@ -56,28 +54,32 @@ async def _ctx(plazo: str, incl: Optional[List[str]] = None,
     data = be_svc.compute_fisher(cer_rows, lecap_rows,
                                  cer_conocido_hasta=_cer_conocido_hasta(),
                                  incluir=incluir)
-    # JSON para el gráfico de barras (sólo bonos INCLUIDOS, como el resumen).
-    chart = [r for r in data["rows"] if r.get("be_anual") is not None and r.get("incluido")]
+    return {**data, "plazo": plazo}
+
+
+def _chart_ctx(data: Dict[str, Any], metric: str) -> Dict[str, Any]:
+    """Geometría SVG del gráfico de barras — el MISMO layout (svg_charts) y las
+    mismas clases fc-* que el sendero de deva de Futuros, para que las capturas
+    de pantalla de los dos queden con idéntico estilo. Sólo bonos INCLUIDOS."""
+    from backend.services.svg_charts import barras_pct
+
+    m = "anual" if (metric or "").lower().startswith("an") else "tem"
+    key = "be_anual" if m == "anual" else "be_tem"
+    segs = [{"label": r["code"], "mes": r.get("mes_ref") or "", "val": r[key]}
+            for r in data["rows"] if r.get(key) is not None and r.get("incluido")]
     res = data.get("resumen") or {}
-    be_json = json.dumps({
-        "labels": [r["code"] for r in chart],
-        "mes": [r.get("mes_ref") or "" for r in chart],
-        "tem": [round(r["be_tem"] * 100.0, 4) for r in chart],
-        "anual": [round(r["be_anual"] * 100.0, 4) for r in chart],
-        # Promedios del resumen (mismos números que la strip): la línea "prom"
-        # del gráfico de barras, en la métrica que esté seleccionada.
-        "prom_tem": (round(res["be_tem_prom"] * 100.0, 4)
-                     if res.get("be_tem_prom") is not None else None),
-        "prom_anual": (round(res["be_anual_prom"] * 100.0, 4)
-                       if res.get("be_anual_prom") is not None else None),
-    })
-    return {**data, "plazo": plazo, "be_json": be_json}
+    prom = res.get("be_anual_prom" if m == "anual" else "be_tem_prom")
+    # height 300 / pad_b 96 → MISMA altura de plot que el sendero de deva
+    # (194 uds), con aire extra para los labels largos "CÓDIGO · mes".
+    return {"be_chart": barras_pct(segs, prom, ticks=4, pad_l=88,
+                                   height=300, pad_b=96), "be_metric": m}
 
 
 @router.get("/breakeven", response_class=HTMLResponse)
 async def breakeven_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
     bond_universe.ensure_loaded()
-    return _render(request, "breakeven.html", **(await _ctx(plazo)))
+    data = await _ctx(plazo)
+    return _render(request, "breakeven.html", **data, **_chart_ctx(data, "tem"))
 
 
 @router.get("/breakeven/table", response_class=HTMLResponse)
@@ -87,3 +89,16 @@ async def breakeven_table(request: Request, plazo: str = "24hs",
     bond_universe.ensure_loaded()
     return _render(request, "partials/breakeven_table.html",
                    **(await _ctx(plazo, incl=incl, incl_set=bool(incl_set))))
+
+
+@router.get("/breakeven/chart", response_class=HTMLResponse)
+async def breakeven_chart(request: Request, plazo: str = "24hs",
+                          metric: str = Query("tem", alias="be-metric"),
+                          incl: Optional[List[str]] = Query(None),
+                          incl_set: Optional[str] = None) -> HTMLResponse:
+    """Partial htmx del gráfico de barras BE (SVG server-side). Respeta los
+    tildes de la tabla (incl/incl_set, mismos params que /breakeven/table)."""
+    bond_universe.ensure_loaded()
+    data = await _ctx(plazo, incl=incl, incl_set=bool(incl_set))
+    return _render(request, "partials/breakeven_chart.html",
+                   **_chart_ctx(data, metric))

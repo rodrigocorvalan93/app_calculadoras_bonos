@@ -338,6 +338,183 @@ function histFn(serie, dias) {
   });
 }
 
+// ── Calculadora YAS en celdas (TIREA / PRECIO / TNA / TICKET / CALC) ────────
+// Anti-carga: estas funciones NO streamean — corren sólo cuando Excel
+// recalcula. Todas las celdas que recalculan juntas se juntan en UN POST
+// batch (ventana de 80 ms, dedup en vuelo) y el resultado se memoiza por
+// argumentos, así arrastrar una fórmula por 200 filas es 5 requests chicos
+// una única vez, y F9 sin cambios no pega al server.
+var OMSCalc = (function () {
+  var BATCH_MS = 80;
+  var CHUNK = 40;          // límite del server por batch
+  var MEMO_MAX = 800;
+  var memo = {}, memoN = 0;
+  var pending = {};        // key → [{resolve, reject}]
+  var queue = [];          // items únicos a mandar
+  var flushTimer = null;
+
+  function keyOf(it) {
+    return [it.code, it.modo, it.valor, it.plazo, it.nominales || ""].join("|");
+  }
+
+  function request(it) {
+    var k = keyOf(it);
+    if (Object.prototype.hasOwnProperty.call(memo, k)) { return Promise.resolve(memo[k]); }
+    return new Promise(function (resolve, reject) {
+      if (pending[k]) { pending[k].push({ resolve: resolve, reject: reject }); return; }
+      pending[k] = [{ resolve: resolve, reject: reject }];
+      queue.push(it);
+      if (!flushTimer) { flushTimer = setTimeout(flush, BATCH_MS); }
+    });
+  }
+
+  function settle(k, val, err) {
+    var subs = pending[k] || [];
+    delete pending[k];
+    if (val && !err) {
+      if (memoN >= MEMO_MAX) { memo = {}; memoN = 0; }
+      memo[k] = val; memoN++;
+    }
+    for (var i = 0; i < subs.length; i++) {
+      if (err) { subs[i].reject(err); } else { subs[i].resolve(val); }
+    }
+  }
+
+  function sendChunk(items) {
+    OMSFeed.loadToken().then(function (t) {
+      return fetch("/excel/v1/calc", {
+        method: "POST",
+        headers: { "X-OMS-Token": t, "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items }),
+        cache: "no-store"
+      });
+    }).then(function (r) {
+      if (r.status === 401) { throw naError("Token de Excel inválido"); }
+      if (!r.ok) { throw naError("HTTP " + r.status); }
+      return r.json();
+    }).then(function (data) {
+      var res = (data && data.results) || [];
+      for (var i = 0; i < items.length; i++) {
+        settle(keyOf(items[i]), res[i] || { error: "sin resultado" }, null);
+      }
+    }).catch(function (e) {
+      for (var j = 0; j < items.length; j++) { settle(keyOf(items[j]), null, e); }
+    });
+  }
+
+  function flush() {
+    flushTimer = null;
+    var items = queue.splice(0, queue.length);
+    while (items.length) { sendChunk(items.splice(0, CHUNK)); }
+  }
+
+  return { request: request };
+})();
+
+var FECHA_RE = /^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/;
+
+function calcItem(especie, modo, valor, plazo, nominales, fx) {
+  var code = String(especie == null ? "" : especie).trim().toUpperCase();
+  if (!code) { throw naError("Especie vacía"); }
+  var v = Number(valor);
+  if (!isFinite(v)) { throw naError("Valor inválido: " + valor); }
+  var it = { code: code, modo: modo, valor: v };
+  // El 3er argumento admite plazo (CI/24hs) O una fecha de liquidación
+  // custom DD/MM/AAAA — mismo settle_custom que la ficha YAS.
+  var p = String(plazo == null ? "" : plazo).trim();
+  if (FECHA_RE.test(p)) { it.settle = p; it.plazo = "24hs"; }
+  else { it.plazo = normPlazo(plazo); }
+  if (nominales != null && nominales !== "") { it.nominales = Number(nominales); }
+  if (fx != null && fx !== "") {
+    var f = Number(fx);
+    if (!isFinite(f) || f <= 0) { throw naError("FX inválido: " + fx); }
+    it.fx = f;                           // FX custom, como en la ficha YAS
+  }
+  return it;
+}
+
+function calcField(it, campo) {
+  return OMSCalc.request(it).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    var v = m[campo];
+    if (v === undefined || v === null) { throw naError("Sin " + campo + " para " + it.code); }
+    return v;
+  });
+}
+
+function tireaFn(especie, precio, plazo, fx) {
+  return calcField(calcItem(especie, "precio", precio, plazo, null, fx), "tirea");
+}
+
+function precioFn(especie, tir, plazo, fx) {
+  // TIR decimal (0,1388 = 13,88 %) → precio clean % del par, como el YAS.
+  return calcField(calcItem(especie, "tir", tir, plazo, null, fx), "precio_clean_pct");
+}
+
+function tnaFn(especie, precio, plazo, fx) {
+  return calcField(calcItem(especie, "precio", precio, plazo, null, fx), "tna");
+}
+
+var CALC_MODOS = { "": "precio", "precio": "precio", "px": "precio",
+                   "tir": "tir", "tirea": "tir", "tna": "tna", "margen": "margen" };
+
+function calcFn(especie, campo, valor, modo, plazo, fx) {
+  var md = CALC_MODOS[String(modo == null ? "" : modo).trim().toLowerCase()];
+  if (!md) { throw naError("Modo inválido: " + modo + " (precio | tir | tna | margen)"); }
+  var c = String(campo == null ? "" : campo).trim().toLowerCase() || "tirea";
+  return calcField(calcItem(especie, md, valor, plazo, null, fx), c);
+}
+
+function trFn(especie, precio, tirSalida, fechaSalida, nominales, plazo, fx) {
+  var it = calcItem(especie, "precio", precio, plazo, nominales, fx);
+  it.tipo = "tr";
+  if (tirSalida != null && tirSalida !== "") { it.tir_salida = Number(tirSalida); }
+  var fs = String(fechaSalida == null ? "" : fechaSalida).trim();
+  if (fs) {
+    if (!FECHA_RE.test(fs)) { throw naError("Fecha de salida inválida: " + fechaSalida + " (DD/MM/AAAA)"); }
+    it.fecha_salida = fs;
+  }
+  return OMSCalc.request(it).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    var nn = function (v) { return v != null ? v : ""; };
+    return [["Concepto", "Valor"],
+            ["Especie", m.codigo || it.code],
+            ["Entrada (settle)", nn(m.fecha_entrada)],
+            ["Salida", nn(m.fecha_salida) + (m.a_vencimiento ? " (a vencimiento)" : "")],
+            ["Días", nn(m.dias)],
+            ["TIR entrada", nn(m.tir_entrada)],
+            ["TIR salida", nn(m.tir_salida) + (m.salida_flat ? "" : "")],
+            ["Px inicial %", nn(m.px_ini_pct)],
+            ["Px final %", nn(m.px_fin_pct)],
+            ["P&L capital %", nn(m.pnl_capital_pct)],
+            ["Cobrado %", nn(m.cobrado_pct)],
+            ["TR directo", nn(m.tr)],
+            ["TEA", nn(m.tea)],
+            ["TNA", nn(m.tna)],
+            ["P&L total $", nn(m.pnl_total_m)]];
+  });
+}
+
+function ticketFn(especie, precio, nominales, plazo, fx) {
+  var nom = Number(nominales);
+  if (!isFinite(nom) || nom <= 0) { throw naError("Nominales inválidos: " + nominales); }
+  var it = calcItem(especie, "precio", precio, plazo, nom, fx);
+  return OMSCalc.request(it).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    return [["Concepto", "Valor"],
+            ["Especie", m.codigo || it.code],
+            ["VN", m.vn_ticket != null ? m.vn_ticket : nom],
+            ["Monto total", m.monto_total != null ? m.monto_total : ""],
+            ["Principal", m.principal != null ? m.principal : ""],
+            ["Interés", m.interes != null ? m.interes : ""],
+            ["TIREA", m.tirea != null ? m.tirea : ""],
+            ["TNA (" + (m.tna_convention_label || "conv.") + ")", m.tna != null ? m.tna : ""],
+            ["TEM", m.tem != null ? m.tem : ""],
+            ["Duration", m.duration != null ? m.duration : ""],
+            ["Liquidación", m.settle || ""]];
+  });
+}
+
 function registerFunctions() {
   if (typeof CustomFunctions === "undefined") { return; }
   CustomFunctions.associate("QUOTE", makeStreaming(quoteGet));
@@ -346,6 +523,12 @@ function registerFunctions() {
   CustomFunctions.associate("CAUCION", makeStreaming(caucionGet));
   CustomFunctions.associate("TABLA", makeStreaming(tablaGet));
   CustomFunctions.associate("HIST", histFn);
+  CustomFunctions.associate("TIREA", tireaFn);
+  CustomFunctions.associate("PRECIO", precioFn);
+  CustomFunctions.associate("TNA", tnaFn);
+  CustomFunctions.associate("TICKET", ticketFn);
+  CustomFunctions.associate("CALC", calcFn);
+  CustomFunctions.associate("TR", trFn);
 }
 
 if (typeof Office !== "undefined" && Office.onReady) {

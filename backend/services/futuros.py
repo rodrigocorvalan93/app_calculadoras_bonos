@@ -185,24 +185,9 @@ def all_symbols() -> List[str]:
 
 
 # ── Gráficos (geometría SVG server-side; el template sólo dibuja) ────────────
-
-def _nice_ticks(lo: float, hi: float, n: int = 5) -> List[float]:
-    """Ticks 'lindos' (1/2/2.5/5 × 10^k) dentro de [lo, hi]."""
-    span = hi - lo
-    if span <= 0 or not math.isfinite(span):
-        return [lo]
-    raw = span / max(1, n)
-    step = 10.0 ** math.floor(math.log10(raw))
-    for mult in (1.0, 2.0, 2.5, 5.0, 10.0):
-        if step * mult >= raw:
-            step *= mult
-            break
-    out: List[float] = []
-    v = math.ceil(lo / step) * step
-    while v <= hi + step * 1e-6:
-        out.append(round(v, 10))
-        v += step
-    return out
+# El layout de barras y los ticks viven en services.svg_charts (compartidos
+# con el break-even CER para que las capturas queden con el mismo estilo).
+from backend.services.svg_charts import _nice_ticks, barras_pct  # noqa: E402
 
 
 # El front a días de vencer anualiza ruido (±1 peso vs spot ÷ 2 días →
@@ -286,29 +271,4 @@ def deva_path_chart(rws: List[Dict[str, Any]], spot_v: Optional[float], *,
         avg_val = (prev_px / float(spot_v)) ** (_DIAS_MES / prev_d) - 1.0
     except (ValueError, ZeroDivisionError, OverflowError):
         avg_val = None
-    vals = [s["val"] for s in segs]
-    ymin, ymax = min(0.0, min(vals)), max(0.0, max(vals))
-    span = (ymax - ymin) or 0.01
-    ymax += span * 0.16                      # aire para el label sobre la barra
-    if ymin < 0:
-        ymin -= span * 0.10
-    pad_l, pad_r, pad_t, pad_b = 54, 14, 10, 46
-    plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
-
-    def Y(v: float) -> float:
-        return round(pad_t + (ymax - v) / (ymax - ymin) * plot_h, 2)
-
-    slot = plot_w / len(segs)
-    bw = min(44.0, slot * 0.62)
-    bars: List[Dict[str, Any]] = []
-    for i, s in enumerate(segs):
-        cx = round(pad_l + slot * (i + 0.5), 2)
-        y_top, y_bot = Y(max(s["val"], 0.0)), Y(min(s["val"], 0.0))
-        bars.append({**s, "cx": cx, "x": round(cx - bw / 2.0, 2),
-                     "w": round(bw, 2), "y": y_top,
-                     "h": round(max(y_bot - y_top, 0.75), 2),
-                     "label_y": (y_top - 5) if s["val"] >= 0 else (y_bot + 12)})
-    return {"w": width, "h": height, "x0": pad_l, "x1": width - pad_r, "y0": pad_t,
-            "zero_y": Y(0.0), "xlabel_y": height - pad_b + 15, "bars": bars,
-            "avg": ({"val": avg_val, "y": Y(avg_val)} if avg_val is not None else None),
-            "yticks": [{"v": v, "y": Y(v)} for v in _nice_ticks(ymin, ymax, 4)]}
+    return barras_pct(segs, avg_val, width=width, height=height, ticks=4)
