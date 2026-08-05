@@ -1,0 +1,30 @@
+{# Barras de break-even por bono — SVG server-side con el MISMO layout
+   (services.svg_charts) y clases fc-* que el sendero de deva de Futuros:
+   las capturas de los dos gráficos quedan con idéntico estilo. #}
+{% if be_chart %}
+<svg class="fut-chart" viewBox="0 0 {{ be_chart.w }} {{ be_chart.h }}" width="100%"
+     preserveAspectRatio="xMidYMid meet" role="img" aria-label="Break-even de inflación por bono CER">
+  {% for t in be_chart.yticks %}
+    <line class="fc-grid" x1="{{ be_chart.x0 }}" y1="{{ t.y }}" x2="{{ be_chart.x1 }}" y2="{{ t.y }}"/>
+    <text class="fc-vlabel" x="{{ be_chart.x0 - 6 }}" y="{{ t.y + 3.5 }}" text-anchor="end">{{ t.v | ar_pct(1) }}</text>
+  {% endfor %}
+  <line class="fc-zero" x1="{{ be_chart.x0 }}" y1="{{ be_chart.zero_y }}" x2="{{ be_chart.x1 }}" y2="{{ be_chart.zero_y }}"/>
+  {% for b in be_chart.bars %}
+    <rect class="fc-bar" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1">
+      <title>{{ b.label }}{% if b.mes %} · hasta {{ b.mes }}{% endif %} · BE {{ 'anual' if be_metric == 'anual' else 'TEM' }} {{ b.val | ar_pct(2) }}</title></rect>
+    <text class="fc-blabel" x="{{ b.cx }}" y="{{ b.label_y }}" text-anchor="middle">{{ b.val | ar_pct(1) }}</text>
+    <text class="fc-xlabel" x="{{ b.cx }}" y="{{ be_chart.xlabel_y }}" text-anchor="end"
+          transform="rotate(-32 {{ b.cx }} {{ be_chart.xlabel_y }})">{{ b.label }}{% if b.mes %} · {{ b.mes }}{% endif %}</text>
+  {% endfor %}
+  {# Línea de promedio del resumen — mismo diseño que la TEM promedio del
+     sendero de deva (punteada accent + leyenda arriba a la derecha). #}
+  {% if be_chart.avg %}
+    <line class="fc-avg" x1="{{ be_chart.x0 }}" y1="{{ be_chart.avg.y }}" x2="{{ be_chart.x1 }}" y2="{{ be_chart.avg.y }}">
+      <title>BE {{ 'anual' if be_metric == 'anual' else 'TEM' }} promedio: {{ be_chart.avg.val | ar_pct(2) }}</title></line>
+    <line class="fc-avg" x1="{{ be_chart.x1 - 96 }}" y1="{{ be_chart.y0 + 8 }}" x2="{{ be_chart.x1 - 80 }}" y2="{{ be_chart.y0 + 8 }}"/>
+    <text class="fc-avg-label" x="{{ be_chart.x1 - 74 }}" y="{{ be_chart.y0 + 11.5 }}">prom {{ be_chart.avg.val | ar_pct(2) }}</text>
+  {% endif %}
+</svg>
+{% else %}
+<p class="muted" style="font-size:12px">Sin break-evens para graficar (¿hay cotización en CER y tasa fija?).</p>
+{% endif %}

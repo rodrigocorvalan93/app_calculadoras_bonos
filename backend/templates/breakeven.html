@@ -31,12 +31,24 @@
   <div class="card" style="margin-bottom:12px">
     <div class="card-title"><span>Break-even por bono (barras)</span>
       <span class="card-title-aux">
-        <label style="margin-right:10px"><input type="radio" name="be-metric" value="tem" checked> TEM</label>
-        <label><input type="radio" name="be-metric" value="anual"> TIR anual</label>
+        <label style="margin-right:10px"><input type="radio" name="be-metric" value="tem" checked
+               hx-get="/breakeven/chart" hx-target="#be-chart" hx-swap="innerHTML" hx-trigger="change"
+               hx-include="[name=plazo], [name=be-metric], #be-table input"> TEM</label>
+        <label><input type="radio" name="be-metric" value="anual"
+               hx-get="/breakeven/chart" hx-target="#be-chart" hx-swap="innerHTML" hx-trigger="change"
+               hx-include="[name=plazo], [name=be-metric], #be-table input"> TIR anual</label>
       </span>
     </div>
     <div class="card-body">
-      <div id="be-chart" style="min-height:260px"></div>
+      {# SVG server-side (mismo estilo que el sendero de deva de Futuros).
+         `change from:#be-table` re-dibuja al tildar/destildar bonos; el
+         md-update + every 30s lo mantiene vivo como a la tabla. #}
+      <div id="be-chart" style="min-height:200px"
+           hx-get="/breakeven/chart" hx-swap="innerHTML"
+           hx-trigger="md-update from:body, every 30s, change from:#be-table, change from:#be-plazo"
+           hx-include="[name=plazo], [name=be-metric], #be-table input">
+        {% include "partials/breakeven_chart.html" %}
+      </div>
       <p class="muted" style="font-size:11.5px;margin:8px 0 0">
         Eje X: bono · <b>mes de referencia</b> = última inflación que el BE captura
         (CER fix = vto + lag hábiles de la especie; el CER del día D devenga la

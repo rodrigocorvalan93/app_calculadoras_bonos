@@ -85,11 +85,19 @@ async def test_breakeven_chart_y_columna() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         p = await ac.get("/breakeven")
         t = await ac.get("/breakeven/table")
+        ch = await ac.get("/breakeven/chart")
+        ch_an = await ac.get("/breakeven/chart", params={"be-metric": "anual"})
     assert p.status_code == 200 and 'name="be-metric"' in p.text and 'id="be-chart"' in p.text
-    assert t.status_code == 200 and 'id="be-data"' in t.text
+    assert t.status_code == 200
     assert ("Infla. hasta" in t.text) == ("be-tbl" in t.text)   # columna sólo con filas
-    # la línea "prom" del gráfico viaja en el JSON (mismo número que la strip)
-    assert "prom_tem" in t.text and "prom_anual" in t.text
+    # Gráfico SVG server-side, MISMO estilo que el sendero de deva de Futuros:
+    # misma clase de svg (fut-chart) y mismas clases fc-* (barras/grid/prom).
+    assert ch.status_code == 200 and ch_an.status_code == 200
+    for frag in ('class="fut-chart"', "fc-grid"):
+        assert (frag in ch.text) or "Sin break-evens" in ch.text
+    if "fc-bar" in ch.text:                     # con datos: barras + línea prom
+        assert "fc-blabel" in ch.text and "fc-xlabel" in ch.text
+        assert ("fc-avg" in ch.text) == ("prom " in ch.text)
 
 
 def test_fisher_marca_definidos_y_los_excluye_del_resumen() -> None:
