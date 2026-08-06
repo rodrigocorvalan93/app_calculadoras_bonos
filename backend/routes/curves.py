@@ -810,6 +810,38 @@ async def forwards_table_partial(
     )
 
 
+@forwards_router.get("/forwards/hist", response_class=HTMLResponse)
+async def forwards_hist_partial(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+    corto: str = Query("", alias="fw-corto"),
+    largo: str = Query("", alias="fw-largo"),
+    ventana: int = Query(60, alias="fw-ventana"),
+) -> HTMLResponse:
+    """Histórico del forward de un par: media/desvío/percentil/z de la serie
+    reconstruida de la base diaria + el fwd de HOY desde las filas cacheadas
+    de la curva (cero pricing extra: reusa _rows_for)."""
+    from backend.services import forwards_hist as fh, historico_byma
+
+    st = ch = None
+    if corto and largo and corto != largo:
+        rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
+        by = {r["code"]: r for r in rows}
+        a, b = by.get(corto), by.get(largo)
+        fwd_hoy = None
+        if a and b:
+            fwd_hoy = fh.fwd_rate(a.get("tirea"), a.get("duration"),
+                                  b.get("tirea"), b.get("duration"))
+        st = fh.stats(corto, largo, ventana=ventana, fwd_hoy=fwd_hoy)
+        ch = fh.chart(st)
+    return _render(request, "partials/forwards_hist.html",
+                   st=st, ch=ch, corto=corto, largo=largo, ventana=ventana,
+                   hb_ok=historico_byma.available())
+
+
 @forwards_router.get("/forwards/whatif", response_class=HTMLResponse)
 async def forwards_whatif(
     request: Request,

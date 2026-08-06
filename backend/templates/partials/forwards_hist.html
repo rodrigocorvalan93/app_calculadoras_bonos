@@ -1,0 +1,63 @@
+{# Histórico del forward corto→largo: métricas + serie SVG (estilo fc-*). #}
+{% if st is none or not hb_ok %}
+  <p class="muted" style="font-size:12px">Sin base histórica cargada (se arma con el autoguardado diario de Históricos).</p>
+{% elif st.n == 0 %}
+  <p class="muted" style="font-size:12px">Sin ruedas con dato simultáneo de {{ corto }} y {{ largo }} en la base (¿bonos nuevos o par invertido?).</p>
+{% else %}
+<div class="metrics-grid metrics-margen">
+  <div class="metric metric-highlight">
+    <div class="metric-label">Fwd hoy {{ corto }}→{{ largo }}</div>
+    <div class="metric-value">{{ st.fwd_hoy | ar_pct(2) if st.fwd_hoy is not none else "—" }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Media ({{ st.n }} ruedas)</div>
+    <div class="metric-value">{{ st.media | ar_pct(2) }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Desvío</div>
+    <div class="metric-value">{{ st.desvio | ar_pct(2) }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Mín · Máx</div>
+    <div class="metric-value" style="font-size:15px">{{ st.vmin | ar_pct(2) }} · {{ st.vmax | ar_pct(2) }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Percentil hoy</div>
+    <div class="metric-value">{% if st.percentil is not none %}{{ (st.percentil * 100) | ar_num(0) }}º{% else %}—{% endif %}</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Z-score</div>
+    <div class="metric-value">{{ st.z | ar_num(2) if st.z is not none else "—" }}σ</div>
+  </div>
+</div>
+
+{% if ch %}
+<svg class="fut-chart" viewBox="0 0 {{ ch.w }} {{ ch.h }}" width="100%" style="margin-top:10px"
+     preserveAspectRatio="xMidYMid meet" role="img" aria-label="Serie histórica del forward {{ corto }}→{{ largo }}">
+  {% for t in ch.yticks %}
+    <line class="fc-grid" x1="{{ ch.x0 }}" y1="{{ t.y }}" x2="{{ ch.x1 }}" y2="{{ t.y }}"/>
+    <text class="fc-vlabel" x="{{ ch.x0 - 6 }}" y="{{ t.y + 3.5 }}" text-anchor="end">{{ t.v | ar_pct(1) }}</text>
+  {% endfor %}
+  {% if ch.banda %}<rect class="fc-band" x="{{ ch.x0 }}" y="{{ ch.banda.y }}" width="{{ ch.x1 - ch.x0 }}" height="{{ ch.banda.h }}"/>{% endif %}
+  {% if ch.media_y is not none %}
+    <line class="fc-avg" x1="{{ ch.x0 }}" y1="{{ ch.media_y }}" x2="{{ ch.x1 }}" y2="{{ ch.media_y }}">
+      <title>media {{ st.media | ar_pct(2) }} ±1σ</title></line>
+  {% endif %}
+  <polyline class="fc-line" points="{{ ch.poly }}"/>
+  {% if ch.hoy %}
+    <circle class="fc-dot" cx="{{ ch.hoy.cx }}" cy="{{ ch.hoy.cy }}" r="4">
+      <title>hoy: {{ st.fwd_hoy | ar_pct(2) }} · percentil {{ (st.percentil * 100) | ar_num(0) }} · z {{ st.z | ar_num(2) }}σ</title></circle>
+  {% endif %}
+  {% for xl in ch.xlabels %}
+    <text class="fc-xlabel" x="{{ xl.x }}" y="{{ ch.xlabel_y }}" text-anchor="middle">{{ xl.txt }}</text>
+  {% endfor %}
+</svg>
+{% endif %}
+
+<p class="muted" style="margin:8px 0 0;font-size:11.5px">
+  {{ st.desde | ar_date }} → {{ st.hasta | ar_date }} · fórmula idéntica a la matriz (TIREA+Duration del cierre diario).
+  {% if st.aviso_n %}<b style="color:var(--yellow)">⚠ Muestra chica ({{ st.n }} ruedas): percentil poco confiable.</b>{% endif %}
+  Ojo con el percentil: el par tiene durations que se acortan rueda a rueda — contra ventanas largas compara
+  momentos distintos de la curva; el z-score acompaña para leerlo con ese grano de sal.
+</p>
+{% endif %}

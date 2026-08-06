@@ -42,4 +42,38 @@
        hx-swap="innerHTML">
     {% include "partials/forwards_whatif.html" %}
   </div>
+
+  {# ── Histórico del forward de un par (base diaria TIREA/Duration) ────── #}
+  {% if candidates | length >= 2 %}
+  <div class="card" style="margin-top:14px">
+    <div class="card-title"><span>Histórico del forward</span>
+      <span class="card-title-aux" id="fwd-hist-controls">
+        <label>corto
+          <select name="fw-corto">
+            {% for c in candidates %}<option value="{{ c }}" {% if loop.index0 == 0 %}selected{% endif %}>{{ c }}</option>{% endfor %}
+          </select></label>
+        <label style="margin-left:8px">largo
+          <select name="fw-largo">
+            {% for c in candidates %}<option value="{{ c }}" {% if loop.index0 == 1 %}selected{% endif %}>{{ c }}</option>{% endfor %}
+          </select></label>
+        <span style="margin-left:10px">
+          <label><input type="radio" name="fw-ventana" value="30"> 30r</label>
+          <label><input type="radio" name="fw-ventana" value="60" checked> 60r</label>
+          <label><input type="radio" name="fw-ventana" value="90"> 90r</label>
+          <label><input type="radio" name="fw-ventana" value="0"> todas</label>
+        </span>
+      </span>
+    </div>
+    <div class="card-body">
+      {# El histórico es estático (la base cambia 1 vez por día) — se pide al
+         cargar y al tocar los controles; el fwd de HOY se refresca junto con
+         el resto vía md-update/30s, costo µs sobre filas ya cacheadas. #}
+      <div id="fwd-hist"
+           hx-get="/forwards/hist"
+           hx-trigger="load, change from:#fwd-hist-controls, md-update from:body, every 30s"
+           hx-include="[name=curve],[name=plazo],[name=leg],[name=only_quoting],[name=fw-corto],[name=fw-largo],[name=fw-ventana]"
+           hx-swap="innerHTML"></div>
+    </div>
+  </div>
+  {% endif %}
 {% endif %}
