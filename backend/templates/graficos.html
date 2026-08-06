@@ -52,9 +52,17 @@
               <option value="ARS"    {% if leg == "ARS"    %}selected{% endif %}>ARS (pesos)</option>
             </select>
           </label>
-          <label class="field" style="max-width:118px">
+          <label class="field" style="max-width:110px">
             <span>Dur mín <small class="muted">(outliers)</small></span>
             <input type="text" inputmode="decimal" name="dmin" value="{{ dmin or '' }}" placeholder="ej. 0,3" autocomplete="off"
+                   hx-get="/graficos/estimate" hx-trigger="change, keyup[key=='Enter']" hx-target="#grafico-estimate" hx-swap="innerHTML"
+                   hx-include="#graf-controls, [name=duration]">
+          </label>
+          <label class="field" style="max-width:110px">
+            <span>Dur máx <small class="muted">(tramo)</small></span>
+            {# corta el tramo del fit: NSS entre 1y y 3y cuando hay cambio de
+               tendencia — dmin+dmax definen el rango de la regresión. #}
+            <input type="text" inputmode="decimal" name="dmax" value="{{ dmax or '' }}" placeholder="ej. 3" autocomplete="off"
                    hx-get="/graficos/estimate" hx-trigger="change, keyup[key=='Enter']" hx-target="#grafico-estimate" hx-swap="innerHTML"
                    hx-include="#graf-controls, [name=duration]">
           </label>
@@ -63,6 +71,28 @@
             <input type="text" name="exclude" value="{{ exclude or '' }}" placeholder="ej. T30J6 TX26" autocomplete="off"
                    hx-get="/graficos/estimate" hx-trigger="change, keyup[key=='Enter']" hx-target="#grafico-estimate" hx-swap="innerHTML"
                    hx-include="#graf-controls, [name=duration]">
+          </label>
+          <label class="field">
+            <span>Fuente <small class="muted">(corp.)</small></span>
+            {# CAFCI: TIR + Mod.Duration del vector diario — para corporativos
+               con pocos precios operados en BYMA la curva de precios da
+               cualquier cosa; el vector es la referencia de valuación. #}
+            <select name="fuente" hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
+                    hx-include="#graf-controls, [name=duration]">
+              <option value="byma" {% if fuente != "cafci" %}selected{% endif %}>Precios BYMA</option>
+              <option value="cafci" {% if fuente == "cafci" %}selected{% endif %}>Vector CAFCI</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Comparar con</span>
+            <select name="curve2" hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
+                    hx-include="#graf-controls, [name=duration]">
+              <option value="">— sola —</option>
+              {% for c in all_curves %}
+                {% set count = (table.get(c.key) or []) | length %}
+                <option value="{{ c.key }}" {% if c.key == curve2 %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>{{ c.label }}</option>
+              {% endfor %}
+            </select>
           </label>
           <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
             {# hidden 'false' para poder DESactivar el filtro (checkbox desmarcado
