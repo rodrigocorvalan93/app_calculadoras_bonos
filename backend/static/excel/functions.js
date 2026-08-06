@@ -384,6 +384,13 @@ var OMSCalc = (function () {
       memo[k] = val; memoN++;
     }
     delete noMemo[k];
+    // Rechazar SIEMPRE con CustomFunctions.Error: un reject con Error pelado
+    // (p.ej. TypeError "failed to fetch" con el server caído) Office lo pinta
+    // #¡VALOR! sin mensaje; envuelto sale #N/A con el motivo visible.
+    if (err && typeof CustomFunctions !== "undefined" &&
+        !(err instanceof CustomFunctions.Error)) {
+      err = naError(String((err && err.message) || err));
+    }
     for (var i = 0; i < subs.length; i++) {
       if (err) { subs[i].reject(err); } else { subs[i].resolve(val); }
     }

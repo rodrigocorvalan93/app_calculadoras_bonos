@@ -1274,6 +1274,8 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .fut-chart .fc-blabel { fill: var(--text-soft); font-size: 10.5px; font-weight: 600; }
 .fut-chart .fc-avg { stroke: var(--accent); stroke-width: 1.4; stroke-dasharray: 5 4; opacity: 0.85; }
 .fut-chart .fc-avg-label { fill: var(--accent); font-size: 10.5px; font-weight: 600; }
+/* Banda ±1σ del histórico de forwards (media punteada fc-avg encima). */
+.fut-chart .fc-band { fill: var(--accent); opacity: 0.10; }
 
 /* ── Escenario — inputs por categoría + tabla agrupada ─────────────────── */
 .esc-cats { display: grid; gap: 4px; margin: 10px 0 2px; max-width: 560px; }

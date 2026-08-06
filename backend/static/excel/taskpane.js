@@ -42,7 +42,34 @@
         if (!r.ok) { throw new Error("HTTP " + r.status); }
         return r.json();
       }).then(function (d) {
-        $("test-result").innerHTML = '<span class="ok">Conectado como ' + (d.user || "?") + '.</span>';
+        var quien = d.user || "?";
+        // 2º paso: probar la CALCULADORA (POST /excel/v1/calc). Aísla "server
+        // viejo sin el endpoint" vs "runtime de Excel roto": si acá da OK y la
+        // celda sigue en #¡VALOR!, el problema es la caché Wef del add-in.
+        return OMSFeed.loadToken().then(function (t) {
+          return fetch("/excel/v1/calc", {
+            method: "POST", cache: "no-store",
+            headers: { "X-OMS-Token": t, "Content-Type": "application/json" },
+            body: JSON.stringify({ items: [{ code: "GD30", modo: "precio", valor: 78.5 }] })
+          });
+        }).then(function (r) {
+          if (r.status === 404) {
+            throw new Error("conectado como " + quien + ", pero este server NO tiene " +
+                            "/excel/v1/calc — falta git pull + reiniciar el .bat");
+          }
+          if (!r.ok) { throw new Error("conectado como " + quien + ", calc HTTP " + r.status); }
+          return r.json();
+        }).then(function (dd) {
+          var x = (dd.results && dd.results[0]) || {};
+          if (x.tirea != null) {
+            $("test-result").innerHTML = '<span class="ok">Conectado como ' + quien +
+              ' · calculadora OK (TIREA GD30@78,5 = ' +
+              (x.tirea * 100).toFixed(2).replace(".", ",") + '%)</span>';
+          } else {
+            $("test-result").innerHTML = '<span class="err">Conectado como ' + quien +
+              ' pero el calc devolvió: ' + (x.error || "sin dato") + '</span>';
+          }
+        });
       }).catch(function (e) {
         // "Failed to fetch" = no se llegó al server (nombre que no resuelve
         // desde esta máquina, firewall, notebook suspendida o certificado no
