@@ -755,15 +755,17 @@ async def forwards_page(
         rows, _meta = await _rows_for(selected_key, plazo, only_quoting, leg)   # 1 sola pasada
         candidates = _candidates_from_rows(rows)
         fwd = _matrix_from_rows(rows)
-        wi_rows, wi_fwd = _whatif_from_rows(rows, None, {})
     else:
-        candidates, fwd, wi_rows, wi_fwd = [], {"header": [], "rows": [], "n": 0}, [], {"header": [], "rows": [], "n": 0}
+        candidates, fwd = [], {"header": [], "rows": [], "n": 0}
+    # El what-if NO se computa acá: se difiere al partial /forwards/whatif
+    # (hx-trigger="revealed") — media página de HTML + cómputo que sólo se
+    # paga si el usuario scrollea hasta él.
     return _render(
         request, "forwards.html",
         all_curves=all_curves, table=table, selected_key=selected_key,
         selected_def=curves.curve_def(selected_key) if selected_key else None,
         candidates=candidates, selected_codes=set(candidates),
-        fwd=fwd, wi_rows=wi_rows, wi_fwd=wi_fwd,
+        fwd=fwd,
         curve=selected_key, plazo=plazo, only_quoting=only_quoting, leg=leg,
     )
 
@@ -776,17 +778,17 @@ async def forwards_body(
     only_quoting: bool = True,
     leg: str = "native",
 ) -> HTMLResponse:
-    """Curva/plazo/leg cambió → reconstruye filtro + matriz + what-if (estado
-    fresco: todos los bonos tildados, precios a mercado)."""
+    """Curva/plazo/leg cambió → reconstruye filtro + matriz (estado fresco:
+    todos los bonos tildados, precios a mercado). El what-if se difiere al
+    partial /forwards/whatif (revealed), igual que en la carga de página."""
     rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)   # 1 sola pasada
     candidates = _candidates_from_rows(rows)
     fwd = _matrix_from_rows(rows)
-    wi_rows, wi_fwd = _whatif_from_rows(rows, None, {})
     return _render(
         request, "partials/forwards_body.html",
         selected_def=curves.curve_def(curve),
         candidates=candidates, selected_codes=set(candidates),
-        fwd=fwd, wi_rows=wi_rows, wi_fwd=wi_fwd,
+        fwd=fwd,
         curve=curve, plazo=plazo, only_quoting=only_quoting, leg=leg,
     )
 
