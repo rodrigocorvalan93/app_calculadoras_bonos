@@ -776,6 +776,20 @@ select {
 .px-down  { color: var(--red); }
 .px-flat  { color: var(--text-muted); }
 .table-scroll { overflow-x: auto; max-width: 100%; }
+/* Botón "copiar tabla" (app.js lo inyecta como hermano ANTES de cada
+   .table-scroll): alineado a la derecha con margen negativo para no ocupar
+   alto — cero corrimiento de layout, re sutil (opacidad baja). */
+.tbl-copy {
+  display: block; margin: 0 2px -18px auto; position: relative; z-index: 3;
+  background: none; border: none; cursor: pointer; padding: 1px 4px;
+  font-size: 12px; line-height: 1; color: var(--text-muted); opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+.tbl-copy:hover { opacity: 0.9; }
+.tbl-copy.ok { color: var(--green); opacity: 0.9; }
+/* Celdas clickeables de la matriz de forwards (cargan el histórico del par). */
+td[data-fwc] { cursor: pointer; }
+td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .mercado-table th, .mercado-table td { white-space: nowrap; }
 .mercado-table tbody tr:hover { background: var(--accent-soft); }
 /* Libro (profundidad) en Mercado */
