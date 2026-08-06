@@ -112,7 +112,7 @@
       "parameters": [
         { "name": "especie", "type": "string", "description": "Ticker" },
         { "name": "precio", "type": "number", "description": "Precio (misma convención que el YAS)" },
-        { "name": "nominales", "type": "number", "description": "VN a operar (ej: 1000000)" },
+        { "name": "nominales", "type": "number", "description": "VN a operar (opcional; default 1.000.000)", "optional": true },
         { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
         { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
       ]

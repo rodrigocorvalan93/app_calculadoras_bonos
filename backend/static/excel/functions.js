@@ -496,7 +496,8 @@ function trFn(especie, precio, tirSalida, fechaSalida, nominales, plazo, fx) {
 }
 
 function ticketFn(especie, precio, nominales, plazo, fx) {
-  var nom = Number(nominales);
+  // nominales opcional: default 1.000.000 VN, el mismo del ticket del YAS.
+  var nom = (nominales == null || nominales === "") ? 1000000 : Number(nominales);
   if (!isFinite(nom) || nom <= 0) { throw naError("Nominales inválidos: " + nominales); }
   var it = calcItem(especie, "precio", precio, plazo, nom, fx);
   return OMSCalc.request(it).then(function (m) {

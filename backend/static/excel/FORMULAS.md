@@ -217,9 +217,10 @@ Inverso: precio **clean % del par** a la TIREA dada (decimal: `0,14` = 14%).
 TNA bajo la convención del bono (dual TAMAR 32/365 · variable 90/365 ·
 CER/UVA 180/365 · DLK 90/365 · hard-dollar 180/360 · LECAP días/365).
 
-### OMS.TICKET(especie; precio; nominales; [plazo_o_fecha]; [fx])
+### OMS.TICKET(especie; precio; [nominales]; [plazo_o_fecha]; [fx])
 Ticket de operación (spill, 2 columnas): VN, monto total, principal, interés,
 TIREA, TNA (con su convención), TEM, duration y fecha de liquidación.
+`nominales` opcional — default 1.000.000 VN (el mismo del ticket del YAS).
 
 ### OMS.CALC(especie; campo; valor; [modo]; [plazo_o_fecha]; [fx])
 Escape general: cualquier métrica del YAS. `campo`: `tirea`, `tna`, `tna_raw`,
