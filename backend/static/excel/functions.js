@@ -349,20 +349,28 @@ var OMSCalc = (function () {
   var CHUNK = 40;          // límite del server por batch
   var MEMO_MAX = 800;
   var memo = {}, memoN = 0;
+  var noMemo = {};         // keys "a precio de mercado": re-resolver en cada recálculo
   var pending = {};        // key → [{resolve, reject}]
   var queue = [];          // items únicos a mandar
   var flushTimer = null;
 
   function keyOf(it) {
-    return [it.code, it.modo, it.valor, it.plazo, it.nominales || ""].join("|");
+    return [it.code, it.modo, (it.valor == null ? "@mercado" : it.valor),
+            it.plazo, it.settle || "", it.fx || "", it.nominales || "",
+            it.tipo || "", it.tir_salida == null ? "" : it.tir_salida,
+            it.fecha_salida || ""].join("|");
   }
 
   function request(it) {
     var k = keyOf(it);
-    if (Object.prototype.hasOwnProperty.call(memo, k)) { return Promise.resolve(memo[k]); }
+    // Sin precio explícito el server resuelve el last del MOMENTO: no se
+    // memoiza (cada F9 re-pide); el dedup en vuelo del mismo tick sí corre.
+    var live = (it.valor == null);
+    if (!live && Object.prototype.hasOwnProperty.call(memo, k)) { return Promise.resolve(memo[k]); }
     return new Promise(function (resolve, reject) {
       if (pending[k]) { pending[k].push({ resolve: resolve, reject: reject }); return; }
       pending[k] = [{ resolve: resolve, reject: reject }];
+      if (live) { noMemo[k] = 1; }
       queue.push(it);
       if (!flushTimer) { flushTimer = setTimeout(flush, BATCH_MS); }
     });
@@ -371,10 +379,11 @@ var OMSCalc = (function () {
   function settle(k, val, err) {
     var subs = pending[k] || [];
     delete pending[k];
-    if (val && !err) {
+    if (val && !err && !noMemo[k]) {
       if (memoN >= MEMO_MAX) { memo = {}; memoN = 0; }
       memo[k] = val; memoN++;
     }
+    delete noMemo[k];
     for (var i = 0; i < subs.length; i++) {
       if (err) { subs[i].reject(err); } else { subs[i].resolve(val); }
     }
@@ -416,9 +425,16 @@ var FECHA_RE = /^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/;
 function calcItem(especie, modo, valor, plazo, nominales, fx) {
   var code = String(especie == null ? "" : especie).trim().toUpperCase();
   if (!code) { throw naError("Especie vacía"); }
-  var v = Number(valor);
-  if (!isFinite(v)) { throw naError("Valor inválido: " + valor); }
-  var it = { code: code, modo: modo, valor: v };
+  var it = { code: code, modo: modo };
+  // Precio omitido (sólo modo precio): el server usa el last del mercado —
+  // puntual, sin anidar QUOTE (streaming anidada da #¡VALOR! en Office).
+  if (valor == null || valor === "") {
+    if (modo !== "precio") { throw naError("Falta el valor (TIR/TNA no tienen default)"); }
+  } else {
+    var v = Number(valor);
+    if (!isFinite(v)) { throw naError("Valor inválido: " + valor); }
+    it.valor = v;
+  }
   // El 3er argumento admite plazo (CI/24hs) O una fecha de liquidación
   // custom DD/MM/AAAA — mismo settle_custom que la ficha YAS.
   var p = String(plazo == null ? "" : plazo).trim();
@@ -496,7 +512,8 @@ function trFn(especie, precio, tirSalida, fechaSalida, nominales, plazo, fx) {
 }
 
 function ticketFn(especie, precio, nominales, plazo, fx) {
-  var nom = Number(nominales);
+  // nominales opcional: default 1.000.000 VN, el mismo del ticket del YAS.
+  var nom = (nominales == null || nominales === "") ? 1000000 : Number(nominales);
   if (!isFinite(nom) || nom <= 0) { throw naError("Nominales inválidos: " + nominales); }
   var it = calcItem(especie, "precio", precio, plazo, nom, fx);
   return OMSCalc.request(it).then(function (m) {
