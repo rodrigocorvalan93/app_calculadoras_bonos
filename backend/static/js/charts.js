@@ -352,11 +352,13 @@
   var HL_COLORS = ["#ef4444", "#22c55e", "#a78bfa"];
   var cache = {};   // curva|plazo -> {t, data}
 
-  function getData(curve, plazo) {
-    var key = curve + "|" + plazo;
+  function getData(curve, plazo, fuente) {
+    var key = curve + "|" + plazo + "|" + (fuente || "byma");
     var hit = cache[key];
     if (hit && Date.now() - hit.t < 4000) return Promise.resolve(hit.data);
-    return fetch("/graficos/data?curve=" + encodeURIComponent(curve) + "&plazo=" + encodeURIComponent(plazo))
+    var url = "/graficos/data?curve=" + encodeURIComponent(curve) + "&plazo=" + encodeURIComponent(plazo);
+    if (fuente && fuente !== "byma") url += "&fuente=" + encodeURIComponent(fuente);
+    return fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (d) { cache[key] = { t: Date.now(), data: d }; return d; });
   }
@@ -367,7 +369,8 @@
     var pts;
     try { pts = JSON.parse(el.dataset.pts || "[]"); } catch (e) { pts = []; }
     if (!curve || !pts.length) return;
-    getData(curve, plazo).then(function (d) {
+    var fuente = el.dataset.fuente || "byma";
+    getData(curve, plazo, fuente).then(function (d) {
       if (!d || !d.n) { el.innerHTML = '<p class="muted" style="font-size:12px">Sin puntos con cotización en la curva.</p>'; return; }
       // Merge: eje x = xs de la curva + las durations de los bonos resaltados.
       var xs = d.xs.slice();
@@ -401,7 +404,7 @@
       // muestra bono vs curva + el spread en pp. Cero requests extra.
       var metaTxt = "";
       if (d.nss && d.nss.length === d.xs.length && d.xs.length > 1) {
-        var mlabel = d.ylabel || "TIREA";
+        var mlabel = (d.ylabel || "TIREA") + (d.fuente === "cafci" ? " · CAFCI" : "");
         pts.forEach(function (p) {
           var xq = Math.min(Math.max(p.d, d.xs[0]), d.xs[d.xs.length - 1]);
           var k = 0;
@@ -448,6 +451,15 @@
     if (root.hasAttribute && root.hasAttribute("data-locate")) draw(root);
   }
   document.body.addEventListener("htmx:afterSwap", function (evt) { scan(evt.detail.target); });
+  // Switch BYMA/CAFCI del card (YAS y Comparador comparten este widget): al
+  // cambiar el select, la caja re-dibuja con la otra fuente. Default: BYMA.
+  document.body.addEventListener("change", function (evt) {
+    var t = evt.target;
+    if (!t || !t.classList || !t.classList.contains("locate-fuente")) return;
+    var card = t.closest(".locate-card");
+    var el = card && card.querySelector("[data-locate]");
+    if (el) { el.dataset.fuente = t.value; draw(el); }
+  });
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { scan(document); });
   } else { scan(document); }

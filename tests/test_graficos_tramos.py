@@ -129,3 +129,25 @@ async def test_graficos_page_trae_controles_nuevos() -> None:
     assert p.status_code == 200
     for frag in ('name="dmax"', 'name="fuente"', 'name="curve2"', "Vector CAFCI"):
         assert frag in p.text
+
+
+@pytest.mark.asyncio
+async def test_locate_fuente_switch_en_yas_y_comparador() -> None:
+    """El widget compartido de 'ubicación en la curva' (YAS y Comparador)
+    trae el selector BYMA/CAFCI, con BYMA como default (primera opción)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    bond_universe.ensure_loaded()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        y = await ac.post("/yas/recompute", data={"code": "GD30", "mode": "precio",
+                                                  "value": "78,5"})
+        c = await ac.get("/comparador/result", params={
+            "a": "TX26", "b": "TX28", "mode": "precio",
+            "val_a": "1.100", "val_b": "1.500"})
+    assert y.status_code == 200 and c.status_code == 200
+    for r in (y, c):
+        if "locate-box" in r.text:                       # con curva y métricas sanas
+            assert 'class="locate-fuente"' in r.text
+            assert r.text.index('value="byma"') < r.text.index('value="cafci"')

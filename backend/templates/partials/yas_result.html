@@ -86,7 +86,7 @@
        NSS con ESTE bono en rojo a su precio actual. #}
     <div class="card locate-card">
       <div class="card-title"><span>📍 Ubicación en la curva · {{ curve_label or curve_key }}</span>
-        <span class="card-title-aux">{{ metrics.codigo }} a tu precio — punto rojo</span></div>
+        <span class="card-title-aux">{{ metrics.codigo }} a tu precio — punto rojo<select class="locate-fuente" title="Fuente de la curva: precios BYMA o vector CAFCI (corporativos poco operados)" style="font-size:11px;margin-left:8px"><option value="byma">BYMA</option><option value="cafci">CAFCI</option></select></span></div>
       <div class="card-body">
         <div class="locate-box" data-locate data-curve="{{ curve_key }}" data-plazo="{{ plazo }}"
              data-pts='[{"c":"{{ metrics.codigo }}","d":{{ metrics.duration }},"t":{{ metrics.tirea * 100 }}}]'></div>
