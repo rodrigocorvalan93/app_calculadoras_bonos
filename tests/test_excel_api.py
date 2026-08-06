@@ -270,3 +270,32 @@ async def test_calc_settle_custom_fx_y_tr(auth_on):
     assert res[2]["fecha_salida"] == "30/12/2026" and res[2]["dias"] == esp_tr["dias"]
     # TR con fecha imposible → error por item, batch vivo
     assert "error" in res[3] and "posterior" in res[3]["error"]
+
+
+async def test_calc_sin_precio_usa_last_del_mercado(auth_on):
+    """Precio omitido en modo precio → el server resuelve el last del store
+    (reemplaza anidar OMS.QUOTE, que como streaming da #¡VALOR! en Office)."""
+    from backend.services import bond_universe, marketdata_store as mds, pricing
+
+    bond_universe.ensure_loaded()
+    mds.get_store().update_from_md("MERV - XMEV - GD30 - 24hs", {"LA": {"price": 78.5}})
+    auth.create_user("mesa6", "clave123", "basico")
+    tok = auth.set_excel_access("mesa6", True)
+    h = {"X-OMS-Token": tok}
+    async with _client() as ac:
+        r = await ac.post("/excel/v1/calc", headers=h, json={"items": [
+            {"code": "GD30", "modo": "precio"},                       # sin valor → last
+            {"code": "GD30", "modo": "precio", "nominales": 500_000},  # ticket al last
+            {"code": "GD30", "modo": "tir"},                          # tir sin valor → error
+            {"code": "ZZZZZ", "modo": "precio"},                      # sin especie con precio
+        ]})
+    assert r.status_code == 200
+    res = r.json()["results"]
+    esp = pricing.compute_metrics("GD30", "precio", 78.5,
+                                  settle=pricing.settlement_date_str("24hs"),
+                                  include_cashflows=False)
+    assert res[0]["tirea"] == pytest.approx(esp["tirea"])
+    assert res[1]["vn_ticket"] == 500_000
+    assert res[1]["monto_total"] == pytest.approx(500_000 * esp["precio"])
+    assert "error" in res[2]                       # tir necesita valor explícito
+    assert "error" in res[3] and "Sin precio de mercado" in res[3]["error"]

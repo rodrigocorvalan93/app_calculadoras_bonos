@@ -463,6 +463,19 @@ def _calc_tr(code: str, modo: str, valor: float, plazo: str,
     return res
 
 
+def _px_mercado(code: str, plazo: str) -> Optional[float]:
+    """Último precio del store para un calc sin precio explícito (last → close).
+    Lectura puntual de memoria — NO streamea: el add-in no puede anidar QUOTE
+    (streaming) dentro de otra función custom (#¡VALOR! del runtime de Office),
+    así que el precio de mercado se resuelve acá, una vez por recálculo."""
+    from backend.services import marketdata_store, symbols as syms
+
+    snap = marketdata_store.get_store().get(syms.md_symbol(code, plazo))
+    if snap is None:
+        return None
+    return snap.last if snap.last is not None else snap.close
+
+
 def _calc_batch(items: list) -> list:
     out = []
     for it in items:
@@ -470,7 +483,15 @@ def _calc_batch(items: list) -> list:
             code = str(it.get("code") or "").strip().upper()
             modo = str(it.get("modo") or "precio").strip().lower()
             plazo = "CI" if str(it.get("plazo") or "").upper().startswith("CI") else "24hs"
-            valor = float(it.get("valor"))
+            valor_raw = it.get("valor")
+            if valor_raw in (None, "") and modo == "precio":
+                px = _px_mercado(code, plazo) if code else None
+                if px is None:
+                    out.append({"error": f"Sin precio de mercado para {code} ({plazo}) — "
+                                         "pasá el precio como 2º argumento."})
+                    continue
+                valor_raw = px
+            valor = float(valor_raw)
             nom = it.get("nominales")
             nom = float(nom) if nom not in (None, "") else None
             settle = str(it.get("settle") or "").strip() or None

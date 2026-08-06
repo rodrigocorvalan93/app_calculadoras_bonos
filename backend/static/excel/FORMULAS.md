@@ -195,6 +195,8 @@ las celdas que recalculan juntas viajan en UN solo request batch y el
 resultado queda memoizado.
 
     =OMS.TIREA("GD30";78,5)              → 0,1388   (TIR efectiva anual, decimal)
+    =OMS.TIREA("GD30")                   → TIR al LAST del mercado (puntual)
+    =OMS.TICKET("TXMJ8")                 → ticket al last, 1.000.000 VN default
     =OMS.TIREA("GD30";78,5;"15/08/2026") (con fecha de liquidación custom)
     =OMS.PRECIO("GD30";0,14)             → precio clean % del par a TIR 14%
     =OMS.TNA("TTM26";99,8)               → TNA bajo la convención del bono
@@ -205,6 +207,13 @@ resultado queda memoizado.
 En todas, el argumento `plazo` acepta `"24hs"` (default), `"CI"` **o una
 fecha de liquidación custom** `"DD/MM/AAAA"` (el settle custom del YAS), y el
 último argumento opcional es un **FX custom** (el de la ficha YAS).
+
+**Precio omitido = last del mercado.** Dejando el precio vacío, el server
+resuelve el último precio del store en ese momento (last → cierre) y calcula
+UNA vez — se actualiza sólo al recalcular (F9), no streamea. Importante:
+**no anides `OMS.QUOTE` adentro de estas funciones** — las funciones
+streaming no pueden ser argumento de otra función custom (Office devuelve
+`#¡VALOR!`); el precio-de-mercado omitido reemplaza ese patrón.
 
 ### OMS.TIREA(especie; precio; [plazo_o_fecha]; [fx])
 TIR efectiva anual (decimal → formatear como %). `precio` en la misma

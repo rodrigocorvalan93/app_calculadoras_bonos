@@ -4,146 +4,400 @@
       "id": "QUOTE",
       "name": "QUOTE",
       "description": "Dato de mercado en vivo de una especie (BYMA o MAE). Campos: last, bid, ask, bid_size, ask_size, close, close_date, var, vol, nominal, trades, vwap, open, high, low, last_ts.",
-      "result": { "type": "any" },
+      "result": {
+        "type": "any"
+      },
       "parameters": [
-        { "name": "especie", "type": "string", "description": "Ticker (GD30, AL30D, S31L6...)" },
-        { "name": "campo", "type": "string", "description": "last (default), bid, ask, close, var, vol...", "optional": true },
-        { "name": "plazo", "type": "string", "description": "24hs (default) | CI. 48hs se mapea a 24hs.", "optional": true },
-        { "name": "mercado", "type": "string", "description": "byma (default) | mae", "optional": true }
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker (GD30, AL30D, S31L6...)"
+        },
+        {
+          "name": "campo",
+          "type": "string",
+          "description": "last (default), bid, ask, close, var, vol...",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI. 48hs se mapea a 24hs.",
+          "optional": true
+        },
+        {
+          "name": "mercado",
+          "type": "string",
+          "description": "byma (default) | mae",
+          "optional": true
+        }
       ],
-      "options": { "stream": true, "cancelable": true }
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "FX",
       "name": "FX",
       "description": "Dólares de referencia en vivo: mep, ccl, canje, mep_ci, ccl_ci, mayorista, a3500.",
-      "result": { "type": "any" },
+      "result": {
+        "type": "any"
+      },
       "parameters": [
-        { "name": "tipo", "type": "string", "description": "mep | ccl | canje | mayorista | a3500 | mep_ci | ccl_ci" }
+        {
+          "name": "tipo",
+          "type": "string",
+          "description": "mep | ccl | canje | mayorista | a3500 | mep_ci | ccl_ci"
+        }
       ],
-      "options": { "stream": true, "cancelable": true }
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "ROFEX",
       "name": "ROFEX",
       "description": "Futuro de dólar DLR en vivo. Campos: last, bid, ask, close, var, tna, tem, td, dias, vto, vol.",
-      "result": { "type": "any" },
+      "result": {
+        "type": "any"
+      },
       "parameters": [
-        { "name": "contrato", "type": "any", "description": "DLR/AGO26M, 'Ago-26' o posición 1..14" },
-        { "name": "campo", "type": "string", "description": "last (default), tna, tem, bid, ask...", "optional": true },
-        { "name": "canal", "type": "string", "description": "may (default, mayorista) | min (minorista)", "optional": true }
+        {
+          "name": "contrato",
+          "type": "any",
+          "description": "DLR/AGO26M, 'Ago-26' o posición 1..14"
+        },
+        {
+          "name": "campo",
+          "type": "string",
+          "description": "last (default), tna, tem, bid, ask...",
+          "optional": true
+        },
+        {
+          "name": "canal",
+          "type": "string",
+          "description": "may (default, mayorista) | min (minorista)",
+          "optional": true
+        }
       ],
-      "options": { "stream": true, "cancelable": true }
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "CAUCION",
       "name": "CAUCION",
       "description": "Caución BYMA por plazo, en vivo. Campos: tasa, bid, ask, close, var, vol.",
-      "result": { "type": "any" },
+      "result": {
+        "type": "any"
+      },
       "parameters": [
-        { "name": "dias", "type": "number", "description": "Plazo en días (1, 7, 14, 28...)" },
-        { "name": "campo", "type": "string", "description": "tasa (default), bid, ask, close, var, vol", "optional": true },
-        { "name": "moneda", "type": "string", "description": "ARS (default) | USD", "optional": true }
+        {
+          "name": "dias",
+          "type": "number",
+          "description": "Plazo en días (1, 7, 14, 28...)"
+        },
+        {
+          "name": "campo",
+          "type": "string",
+          "description": "tasa (default), bid, ask, close, var, vol",
+          "optional": true
+        },
+        {
+          "name": "moneda",
+          "type": "string",
+          "description": "ARS (default) | USD",
+          "optional": true
+        }
       ],
-      "options": { "stream": true, "cancelable": true }
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "TABLA",
       "name": "TABLA",
       "description": "Tabla completa en vivo (spill): quotes, futuros, cauciones, fx o mae.",
-      "result": { "type": "any", "dimensionality": "matrix" },
+      "result": {
+        "type": "any",
+        "dimensionality": "matrix"
+      },
       "parameters": [
-        { "name": "panel", "type": "string", "description": "quotes | futuros | cauciones | fx | mae" },
-        { "name": "opcion", "type": "string", "description": "quotes: plazo (24hs/CI) · futuros: canal (may/min) · cauciones: moneda (ARS/USD)", "optional": true }
+        {
+          "name": "panel",
+          "type": "string",
+          "description": "quotes | futuros | cauciones | fx | mae"
+        },
+        {
+          "name": "opcion",
+          "type": "string",
+          "description": "quotes: plazo (24hs/CI) · futuros: canal (may/min) · cauciones: moneda (ARS/USD)",
+          "optional": true
+        }
       ],
-      "options": { "stream": true, "cancelable": true }
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "HIST",
       "name": "HIST",
       "description": "Serie histórica macro (spill): a3500, badlar, tamar, cer, uva. Reemplaza RHistory.",
-      "result": { "type": "any", "dimensionality": "matrix" },
+      "result": {
+        "type": "any",
+        "dimensionality": "matrix"
+      },
       "parameters": [
-        { "name": "serie", "type": "string", "description": "a3500 | badlar | tamar | cer | uva" },
-        { "name": "dias", "type": "number", "description": "Últimos N días (opcional; default toda la serie)", "optional": true }
+        {
+          "name": "serie",
+          "type": "string",
+          "description": "a3500 | badlar | tamar | cer | uva"
+        },
+        {
+          "name": "dias",
+          "type": "number",
+          "description": "Últimos N días (opcional; default toda la serie)",
+          "optional": true
+        }
       ]
     },
     {
       "id": "TIREA",
       "name": "TIREA",
       "description": "TIR efectiva anual (decimal) de un bono a un precio dado — mismo motor que el YAS. Ej: =OMS.TIREA(\"GD30\";78,5).",
-      "result": { "type": "number" },
+      "result": {
+        "type": "number"
+      },
       "parameters": [
-        { "name": "especie", "type": "string", "description": "Ticker (GD30, TX26, S31L6...)" },
-        { "name": "precio", "type": "number", "description": "Precio (misma convención que el YAS)" },
-        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha de liquidación DD/MM/AAAA", "optional": true },
-        { "name": "fx", "type": "number", "description": "FX custom (como en la ficha YAS)", "optional": true }
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker (GD30, TX26, S31L6...)"
+        },
+        {
+          "name": "precio",
+          "type": "number",
+          "description": "Precio (opcional: vacío = last del mercado, puntual)",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha de liquidación DD/MM/AAAA",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom (como en la ficha YAS)",
+          "optional": true
+        }
       ]
     },
     {
       "id": "PRECIO",
       "name": "PRECIO",
       "description": "Precio (clean, % del par) de un bono a una TIR dada (decimal) — inverso del YAS. Ej: =OMS.PRECIO(\"GD30\";0,14).",
-      "result": { "type": "number" },
+      "result": {
+        "type": "number"
+      },
       "parameters": [
-        { "name": "especie", "type": "string", "description": "Ticker" },
-        { "name": "tir", "type": "number", "description": "TIREA decimal (0,14 = 14%)" },
-        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
-        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "tir",
+          "type": "number",
+          "description": "TIREA decimal (0,14 = 14%)"
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom",
+          "optional": true
+        }
       ]
     },
     {
       "id": "TNA",
       "name": "TNA",
       "description": "TNA bajo la convención del bono (dual TAMAR 32/365, CER 180/365, hard-dollar 180/360...) a un precio dado.",
-      "result": { "type": "number" },
+      "result": {
+        "type": "number"
+      },
       "parameters": [
-        { "name": "especie", "type": "string", "description": "Ticker" },
-        { "name": "precio", "type": "number", "description": "Precio (misma convención que el YAS)" },
-        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
-        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "precio",
+          "type": "number",
+          "description": "Precio (opcional: vacío = last del mercado, puntual)",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom",
+          "optional": true
+        }
       ]
     },
     {
       "id": "TICKET",
       "name": "TICKET",
       "description": "Ticket de operación (spill): VN, monto total, principal, interés, TIREA, TNA, TEM, duration y liquidación.",
-      "result": { "type": "any", "dimensionality": "matrix" },
+      "result": {
+        "type": "any",
+        "dimensionality": "matrix"
+      },
       "parameters": [
-        { "name": "especie", "type": "string", "description": "Ticker" },
-        { "name": "precio", "type": "number", "description": "Precio (misma convención que el YAS)" },
-        { "name": "nominales", "type": "number", "description": "VN a operar (opcional; default 1.000.000)", "optional": true },
-        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
-        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "precio",
+          "type": "number",
+          "description": "Precio (opcional: vacío = last del mercado, puntual)",
+          "optional": true
+        },
+        {
+          "name": "nominales",
+          "type": "number",
+          "description": "VN a operar (opcional; default 1.000.000)",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom",
+          "optional": true
+        }
       ]
     },
     {
       "id": "CALC",
       "name": "CALC",
       "description": "Cualquier métrica del YAS: tirea, tna, tem, duration, paridad, precio_pct, precio_clean_pct, intereses_corridos, valor_residual, valor_tecnico, dias_remanentes...",
-      "result": { "type": "any" },
+      "result": {
+        "type": "any"
+      },
       "parameters": [
-        { "name": "especie", "type": "string", "description": "Ticker" },
-        { "name": "campo", "type": "string", "description": "tirea (default), tna, tem, duration, paridad..." },
-        { "name": "valor", "type": "number", "description": "Precio o TIR según modo" },
-        { "name": "modo", "type": "string", "description": "precio (default) | tir | tna | margen — qué es `valor`", "optional": true },
-        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
-        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "campo",
+          "type": "string",
+          "description": "tirea (default), tna, tem, duration, paridad..."
+        },
+        {
+          "name": "valor",
+          "type": "number",
+          "description": "Precio o TIR según modo (vacío en modo precio = last del mercado)",
+          "optional": true
+        },
+        {
+          "name": "modo",
+          "type": "string",
+          "description": "precio (default) | tir | tna | margen — qué es `valor`",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom",
+          "optional": true
+        }
       ]
     },
     {
       "id": "TR",
       "name": "TR",
       "description": "Total return puntual (spill): entrada a un precio, salida a una TIR en una fecha (default flat, settle+90d). TR directo, TEA, TNA, P&L capital/cobrado y montos.",
-      "result": { "type": "any", "dimensionality": "matrix" },
+      "result": {
+        "type": "any",
+        "dimensionality": "matrix"
+      },
       "parameters": [
-        { "name": "especie", "type": "string", "description": "Ticker" },
-        { "name": "precio", "type": "number", "description": "Precio de entrada (misma convención que el YAS)" },
-        { "name": "tir_salida", "type": "number", "description": "TIREA de salida decimal (vacío = flat)", "optional": true },
-        { "name": "fecha_salida", "type": "string", "description": "DD/MM/AAAA (vacío = settle+90d; ≥ vencimiento = hold to maturity)", "optional": true },
-        { "name": "nominales", "type": "number", "description": "VN (default 1.000.000)", "optional": true },
-        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
-        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "precio",
+          "type": "number",
+          "description": "Precio (opcional: vacío = last del mercado, puntual)",
+          "optional": true
+        },
+        {
+          "name": "tir_salida",
+          "type": "number",
+          "description": "TIREA de salida decimal (vacío = flat)",
+          "optional": true
+        },
+        {
+          "name": "fecha_salida",
+          "type": "string",
+          "description": "DD/MM/AAAA (vacío = settle+90d; ≥ vencimiento = hold to maturity)",
+          "optional": true
+        },
+        {
+          "name": "nominales",
+          "type": "number",
+          "description": "VN (default 1.000.000)",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom",
+          "optional": true
+        }
       ]
     }
   ]
