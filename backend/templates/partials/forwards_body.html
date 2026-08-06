@@ -35,12 +35,15 @@
     {% include "partials/forwards_table.html" %}
   </div>
 
+  {# What-if DIFERIDO: es media página de HTML + cómputo y la mayoría de las
+     visitas son para la matriz — se carga recién cuando entra en pantalla
+     (`revealed`); de ahí en más se comporta igual que siempre. #}
   <div id="forwards-whatif" style="margin-top:14px"
        hx-get="/forwards/whatif"
-       hx-trigger="change, change from:#forwards-filter delay:200ms"
+       hx-trigger="revealed, change, change from:#forwards-filter delay:200ms"
        hx-include="[name=curve],[name=plazo],[name=leg],[name=only_quoting],#forwards-filter,#wi-prices"
        hx-swap="innerHTML">
-    {% include "partials/forwards_whatif.html" %}
+    <p class="muted" style="font-size:12px">Cargando what-if…</p>
   </div>
 
   {# ── Histórico del forward de un par (base diaria TIREA/Duration) ────── #}
