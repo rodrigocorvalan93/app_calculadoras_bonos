@@ -31,6 +31,7 @@ DEFAULT_DEPTH = 3
 # Constantes
 # =============================================================================
 BASE_URL = "https://api.latinsecurities.matrizoms.com.ar/"
+#BASE_URL = "https://api.lbo.xoms.com.ar/"
 
 # =============================================================================
 # Conexión / Instrumentos
