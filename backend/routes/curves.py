@@ -578,19 +578,35 @@ async def mercado_book(
 forwards_router = APIRouter(tags=["forwards"])
 
 
-def _forwards_matrix(rows: list[dict]) -> dict:
-    pts = [
-        (r["code"], r["tirea"], r["duration"])
-        for r in rows
-        if r.get("tirea") is not None and r["tirea"] == r["tirea"] and (1.0 + r["tirea"]) > 0.0
-        and r.get("duration") is not None and r["duration"] == r["duration"] and r["duration"] > 0
-    ]
+def _forwards_matrix(rows: list[dict], metric: str = "tirea") -> dict:
+    """Matriz triangular de forwards. `metric`:
+    - "tirea": forward de descuento clásico ((d1/d2)^(1/Δt) − 1).
+    - "margen": forward del MARGEN TNA de los floaters (TAMAR/BADLAR), con la
+      aproximación lineal (m₂·t₂ − m₁·t₁)/(t₂ − t₁) — el margen es un spread
+      aditivo sobre el benchmark, así que el fwd implícito sale del promedio
+      ponderado por tiempo (asume el benchmark flat entre t₁ y t₂). Sólo
+      entran bonos con margen (los no-benchmarkeados quedan afuera)."""
+    margen = (metric == "margen")
+    if margen:
+        pts = [
+            (r["code"], r["margen_tna"], r["duration"])
+            for r in rows
+            if r.get("margen_tna") is not None and r["margen_tna"] == r["margen_tna"]
+            and r.get("duration") is not None and r["duration"] == r["duration"] and r["duration"] > 0
+        ]
+    else:
+        pts = [
+            (r["code"], r["tirea"], r["duration"])
+            for r in rows
+            if r.get("tirea") is not None and r["tirea"] == r["tirea"] and (1.0 + r["tirea"]) > 0.0
+            and r.get("duration") is not None and r["duration"] == r["duration"] and r["duration"] > 0
+        ]
     pts.sort(key=lambda p: p[2])  # por Duration ascendente (TIR ≤ −100% excluida → sin (1+y)^t complejo)
     n = len(pts)
     codes = [p[0] for p in pts]
     ys = [p[1] for p in pts]
     ts = [p[2] for p in pts]
-    dfact = [(1.0 + ys[i]) ** (-ts[i]) for i in range(n)]
+    dfact = [] if margen else [(1.0 + ys[i]) ** (-ts[i]) for i in range(n)]
 
     raw: list[list[float | None]] = [[None] * n for _ in range(n)]
     finite: list[float] = []
@@ -599,7 +615,10 @@ def _forwards_matrix(rows: list[dict]) -> dict:
             if ts[j] <= ts[i]:
                 continue
             try:
-                f = (dfact[i] / dfact[j]) ** (1.0 / (ts[j] - ts[i])) - 1.0
+                if margen:
+                    f = (ys[j] * ts[j] - ys[i] * ts[i]) / (ts[j] - ts[i])
+                else:
+                    f = (dfact[i] / dfact[j]) ** (1.0 / (ts[j] - ts[i])) - 1.0
             except (ValueError, ZeroDivisionError, OverflowError):
                 f = None
             if f is not None and f == f:
@@ -658,11 +677,12 @@ def _candidates_from_rows(rows: list[dict]) -> list[str]:
     return [c for c, _ in pts]
 
 
-def _matrix_from_rows(rows: list[dict], include: set[str] | None = None) -> dict:
+def _matrix_from_rows(rows: list[dict], include: set[str] | None = None,
+                      metric: str = "tirea") -> dict:
     if include is not None:
         rows = [r for r in rows if r["code"] in include]
     capped, trunc, total = _fwd_points(rows)
-    m = _forwards_matrix(capped)
+    m = _forwards_matrix(capped, metric=metric)
     m["truncated"], m["total"] = trunc, total
     return m
 
@@ -694,9 +714,9 @@ def _whatif_from_rows(rows: list[dict], include: set[str] | None,
 
 
 async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str,
-                        include: set[str] | None = None) -> dict:
+                        include: set[str] | None = None, metric: str = "tirea") -> dict:
     rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
-    return _matrix_from_rows(rows, include)
+    return _matrix_from_rows(rows, include, metric=metric)
 
 
 def _price_overrides(request: Request) -> dict[str, float]:
@@ -802,13 +822,16 @@ async def forwards_table_partial(
     leg: str = "native",
     code: list[str] = Query(default=None),
     filtered: int = 0,
+    metric: str = Query("tirea", alias="fw-metric"),
 ) -> HTMLResponse:
     include = set(code or []) if filtered else None
-    fwd = await _forwards_for(curve, plazo, only_quoting, leg, include=include)
+    metric = "margen" if str(metric).lower().startswith("m") else "tirea"
+    fwd = await _forwards_for(curve, plazo, only_quoting, leg, include=include,
+                              metric=metric)
     return _render(
         request, "partials/forwards_table.html",
         fwd=fwd, selected_def=curves.curve_def(curve),
-        plazo=plazo, only_quoting=only_quoting, leg=leg,
+        plazo=plazo, only_quoting=only_quoting, leg=leg, fw_metric=metric,
     )
 
 
@@ -936,7 +959,10 @@ async def graficos_page(
     leg: str = "native",
     metric: str = "tirea",
     dmin: str = "",
+    dmax: str = "",
     exclude: str = "",
+    fuente: str = "byma",
+    curve2: str = "",
 ) -> HTMLResponse:
     bond_universe.ensure_loaded()
     all_curves = curves.list_curves()
@@ -949,7 +975,8 @@ async def graficos_page(
         all_curves=all_curves, table=table, selected_key=selected_key,
         selected_def=curves.curve_def(selected_key) if selected_key else None,
         chart=chart, plazo=plazo, only_quoting=only_quoting, leg=leg,
-        metric=_graf_metric(metric), dmin=dmin, exclude=exclude,
+        metric=_graf_metric(metric), dmin=dmin, dmax=dmax, exclude=exclude,
+        fuente=(fuente or "byma").lower(), curve2=curve2,
     )
 
 
@@ -1011,7 +1038,7 @@ def _parse_dmin(s: str):
     return v if (v == v and v > 0.0) else None
 
 
-def _graf_pts(rows, metric: str, dmin, exclude: set):
+def _graf_pts(rows, metric: str, dmin, exclude: set, dmax=None):
     """[(code, duration, y%, MONEDA, bid%|None, offer%|None)] en la métrica
     elegida, con los filtros (duration mínima + códigos excluidos) aplicados.
 
@@ -1026,6 +1053,8 @@ def _graf_pts(rows, metric: str, dmin, exclude: set):
         if d is None or d != d:
             continue
         if dmin is not None and float(d) < dmin:
+            continue
+        if dmax is not None and float(d) > dmax:
             continue
         code = r.get("code") or ""
         if exclude and code.upper() in exclude:
@@ -1045,6 +1074,82 @@ def _graf_pts(rows, metric: str, dmin, exclude: set):
     return out
 
 
+
+# ── Fuente CAFCI para los gráficos de corporativos ───────────────────────────
+# Con pocos precios operados en BYMA la "curva" corporativa da cualquier cosa;
+# el vector diario de CAFCI trae TIR + Mod. Duration por especie y sirve de
+# fuente alternativa de puntos (sin margen ni puntas — el vector no los trae).
+_CAFCI_IDX: tuple | None = None      # ((path, fecha), {BYMA_ticker: row})
+
+
+def _cafci_idx():
+    from backend.services import cafci
+
+    global _CAFCI_IDX
+    c = cafci.ensure_loaded()
+    if not c.get("loaded"):
+        return {}
+    ver = (c.get("path"), c.get("fecha"))
+    if _CAFCI_IDX and _CAFCI_IDX[0] == ver:
+        return _CAFCI_IDX[1]
+    idx: dict = {}
+    for r in c.get("rows") or []:
+        t = (r.get("byma") or "").strip().upper()
+        if t and r.get("tir") is not None and r.get("mod_dur") is not None:
+            idx.setdefault(t, r)
+    _CAFCI_IDX = (ver, idx)
+    return idx
+
+
+def _graf_pts_cafci(curve_key: str, metric: str, dmin, dmax, exclude: set):
+    """Puntos (code, dur, y%, MON, None, None) desde el vector CAFCI. La TIR
+    viene en % y la duration es Mod. Duration. Margen no aplica (vector sin
+    benchmark) → lista vacía."""
+    if metric == "margen":
+        return []
+    idx = _cafci_idx()
+    if not idx:
+        return []
+    if curve_key.startswith("mix:"):
+        codes = curves.mix_codes([k for k in curve_key[4:].split(",") if k])
+    else:
+        codes = curves.build_curve_codes().get(curve_key) or []
+    out = []
+    for code in codes:
+        r = idx.get(code.upper())
+        if not r:
+            continue
+        d, tir = r.get("mod_dur"), r.get("tir")
+        if d is None or d <= 0 or tir is None:
+            continue
+        if dmin is not None and d < dmin:
+            continue
+        if dmax is not None and d > dmax:
+            continue
+        if exclude and code.upper() in exclude:
+            continue
+        y = _graf_y(tir / 100.0, metric)
+        if y is None:
+            continue
+        mon = (r.get("moneda") or "").strip().upper()
+        out.append((code, float(d), y, "USD" if mon.startswith("U") else "ARS", None, None))
+    return out
+
+
+async def _graf_pts_for(curve_key: str, plazo: str, only_quoting: bool, leg: str,
+                        metric: str, dmin, dmax, exclude: set,
+                        fuente: str = "byma", book: bool = False):
+    """Puntos del gráfico según la fuente: filas vivas (BYMA) o vector CAFCI.
+    El path CAFCI ni siquiera toca _rows_for; la carga fría del Excel (~1 s,
+    1 vez/día) va al threadpool."""
+    if (fuente or "").lower() == "cafci":
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, _graf_pts_cafci, curve_key, metric, dmin, dmax, exclude)
+    rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg, book=book)
+    return _graf_pts(rows, metric, dmin, exclude, dmax)
+
+
 @graficos_router.get("/graficos/estimate", response_class=HTMLResponse)
 async def graficos_estimate(
     request: Request,
@@ -1055,7 +1160,9 @@ async def graficos_estimate(
     duration: str = "",
     metric: str = "tirea",
     dmin: str = "",
+    dmax: str = "",
     exclude: str = "",
+    fuente: str = "byma",
 ) -> HTMLResponse:
     """Estima a una `duration` dada con la regresión NSS de la curva (Duration →
     métrica). En TIREA/TEM devuelve TIR/TEM/TNAs; en Margen, sólo el margen
@@ -1070,8 +1177,9 @@ async def graficos_estimate(
     est = None
     n = 0
     if d is not None:
-        rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
-        pts = _graf_pts(rows, metric, _parse_dmin(dmin), _parse_exclude(exclude))
+        pts = await _graf_pts_for(curve, plazo, only_quoting, leg, metric,
+                                  _parse_dmin(dmin), _parse_dmin(dmax),
+                                  _parse_exclude(exclude), fuente)
         n = len(pts)
         if n >= 4:
             xs = [p[1] for p in pts]
@@ -1088,14 +1196,16 @@ async def graficos_estimate(
 @graficos_router.get("/graficos/nss", response_class=HTMLResponse)
 async def graficos_nss(request: Request, curve: str = "", plazo: str = "24hs",
                        only_quoting: bool = True, leg: str = "native",
-                       metric: str = "tirea", dmin: str = "", exclude: str = "") -> HTMLResponse:
+                       metric: str = "tirea", dmin: str = "", dmax: str = "",
+                       exclude: str = "", fuente: str = "byma") -> HTMLResponse:
     """Parámetros de la curva NSS ajustada (β0..β3, τ1, τ2 + nivel/pendiente/
     convexidad). El fit ya está cacheado en nss.py; corre en threadpool."""
     from backend.services import nss as nss_svc
 
     metric = _graf_metric(metric)
-    rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
-    pts = _graf_pts(rows, metric, _parse_dmin(dmin), _parse_exclude(exclude))
+    pts = await _graf_pts_for(curve, plazo, only_quoting, leg, metric,
+                              _parse_dmin(dmin), _parse_dmin(dmax),
+                              _parse_exclude(exclude), fuente)
     p = None
     if len(pts) >= 4:
         xs = [a[1] for a in pts]
@@ -1115,31 +1225,48 @@ async def graficos_data(
     leg: str = "native",
     metric: str = "tirea",
     dmin: str = "",
+    dmax: str = "",
     exclude: str = "",
+    fuente: str = "byma",
+    curve2: str = "",
 ) -> JSONResponse:
     """Datos JSON para el chart de Gráficos (uPlot): scatter ARS/USD por leg +
     la curva NSS evaluada en un grid fino. Eje x = Duration (años); eje y según
-    `metric` (TIREA % o TEM %). `dmin`/`exclude` filtran outliers/near-maturity."""
+    `metric` (TIREA % o TEM %). `dmin`/`dmax` cortan el tramo (outliers /
+    cambios de tendencia), `exclude` saca códigos, `fuente` elige precios BYMA
+    o el vector CAFCI (corporativos poco operados), y `curve2` superpone una
+    segunda curva (scatter + su propia NSS) en el mismo gráfico."""
     import numpy as np
 
     from backend.services import nss as nss_svc
 
     metric = _graf_metric(metric)
-    rows, _meta = await _rows_for(curve, plazo, only_quoting, leg, book=True)
-    pts = _graf_pts(rows, metric, _parse_dmin(dmin), _parse_exclude(exclude))
-    if not pts:
+    dminv, dmaxv = _parse_dmin(dmin), _parse_dmin(dmax)
+    excl = _parse_exclude(exclude)
+    pts = await _graf_pts_for(curve, plazo, only_quoting, leg, metric,
+                              dminv, dmaxv, excl, fuente, book=True)
+    pts2 = []
+    if curve2 and curve2 != curve:
+        pts2 = await _graf_pts_for(curve2, plazo, only_quoting, leg, metric,
+                                   dminv, dmaxv, excl, fuente)
+    if not pts and not pts2:
         return JSONResponse({"n": 0, "xs": [], "ars": [], "usd": [], "nss": [], "codes": [],
                              "bid": [], "off": [], "metric": metric, "ylabel": _metric_label(metric)})
 
-    bond_x = sorted({p[1] for p in pts})
+    def _grid(ps):
+        bx = sorted({p[1] for p in ps})
+        out = set(bx)
+        if len(ps) >= 4 and bx and bx[-1] > bx[0]:
+            out |= set(float(v) for v in np.linspace(bx[0], bx[-1], 80))
+        return out
+
+    xs = sorted(_grid(pts) | _grid(pts2))
     bid_at: Dict[float, float] = {}
     off_at: Dict[float, float] = {}
-    xs_set = set(bond_x)
-    if len(pts) >= 4 and bond_x[-1] > bond_x[0]:
-        xs_set |= set(float(v) for v in np.linspace(bond_x[0], bond_x[-1], 80))
-    xs = sorted(xs_set)
     ars_at: Dict[float, float] = {}
     usd_at: Dict[float, float] = {}
+    ars2_at: Dict[float, float] = {}
+    usd2_at: Dict[float, float] = {}
     code_at: Dict[float, str] = {}
     for code, d, t, mon, tb, to in pts:
         (usd_at if mon in ("USD", "USB") else ars_at)[d] = t
@@ -1148,15 +1275,21 @@ async def graficos_data(
             bid_at[d] = tb
         if to is not None:
             off_at[d] = to
+    for code, d, t, mon, _tb, _to in pts2:
+        (usd2_at if mon in ("USD", "USB") else ars2_at)[d] = t
+        code_at.setdefault(d, code)
     # La regresión NSS se ajusta SIEMPRE sobre el last (los bid/offer son
     # series visuales extra, como en OMSweb_app). El fit (scipy curve_fit) es
     # CPU-bound: fuera del event loop, igual que /graficos/nss y /graficos/estimate.
-    nss_y = None
+    loop = asyncio.get_running_loop()
+    nss_y = nss2_y = None
     if len(pts) >= 4:
-        loop = asyncio.get_running_loop()
         nss_y = await loop.run_in_executor(
             None, nss_svc.eval_at, [p[1] for p in pts], [p[2] for p in pts], xs)
-    return JSONResponse({
+    if len(pts2) >= 4:
+        nss2_y = await loop.run_in_executor(
+            None, nss_svc.eval_at, [p[1] for p in pts2], [p[2] for p in pts2], xs)
+    out: Dict[str, Any] = {
         "n": len(pts), "xs": xs,
         "ars": [ars_at.get(x) for x in xs],
         "usd": [usd_at.get(x) for x in xs],
@@ -1165,4 +1298,15 @@ async def graficos_data(
         "codes": [code_at.get(x) for x in xs],
         "nss": nss_y or [],
         "metric": metric, "ylabel": _metric_label(metric),
-    })
+        "fuente": (fuente or "byma").lower(),
+    }
+    if pts2:
+        cd2 = _def_or_mix(curve2)
+        out.update({
+            "n2": len(pts2),
+            "ars2": [ars2_at.get(x) for x in xs],
+            "usd2": [usd2_at.get(x) for x in xs],
+            "nss2": nss2_y or [],
+            "label2": getattr(cd2, "label", curve2),
+        })
+    return JSONResponse(out)

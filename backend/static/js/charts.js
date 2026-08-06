@@ -52,6 +52,8 @@
     }
     var GREEN = cssVar("--green", "#22c55e"), RED = cssVar("--red", "#ef4444");
 
+    var hasCmp = false, cmpLabel = "Curva 2";
+
     function opts() {
       return {
         width: box.clientWidth || 900, height: 460,
@@ -63,15 +65,26 @@
             label: yLabel, size: 56,
             values: function (uu, vals) { return vals.map(function (v) { return v + "%"; }); } },
         ],
-        series: [
-          { label: "Dur", value: function (uu, v) { return fmtNum(v); } },
-          scatter("ARS", ORANGE),
-          scatter("USD/USB", CYAN),
-          scatter("Bid", GREEN, 5),
-          scatter("Offer", RED, 5),
-          { label: "NSS", stroke: NSSCOL, width: 2, points: { show: false },
-            value: function (uu, v) { return fmtPct(v); } },
-        ],
+        series: (function () {
+          var base = [
+            { label: "Dur", value: function (uu, v) { return fmtNum(v); } },
+            scatter("ARS", ORANGE),
+            scatter("USD/USB", CYAN),
+            scatter("Bid", GREEN, 5),
+            scatter("Offer", RED, 5),
+            { label: "NSS", stroke: NSSCOL, width: 2, points: { show: false },
+              value: function (uu, v) { return fmtPct(v); } },
+          ];
+          if (hasCmp) {
+            var C2A = "#f472b6", C2B = "#facc15";      // curva 2: rosa / amarillo
+            base.push(scatter(cmpLabel + " ARS", C2A, 6));
+            base.push(scatter(cmpLabel + " USD", C2B, 6));
+            base.push({ label: cmpLabel + " NSS", stroke: C2A, width: 1.6,
+                        dash: [5, 4], points: { show: false },
+                        value: function (uu, v) { return fmtPct(v); } });
+          }
+          return base;
+        })(),
         cursor: { points: { size: 9 }, focus: { prox: 24 } },
         legend: { isolate: true },
         padding: [12, 34, 0, 0],
@@ -114,7 +127,9 @@
     }
 
     function clear() {
-      Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert")).forEach(function (n) { n.remove(); });
+      // p = el placeholder "Cargando gráfico…" del template (quedaba pegado
+      // arriba del chart para siempre).
+      Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert,p")).forEach(function (n) { n.remove(); });
     }
 
     function load(recreate) {
@@ -131,6 +146,15 @@
           var nss = (j.nss && j.nss.length === j.xs.length) ? j.nss : j.xs.map(function () { return null; });
           var vac = j.xs.map(function () { return null; });
           var data = [j.xs, j.ars, j.usd, j.bid || vac, j.off || vac, nss];
+          var jCmp = !!(j.ars2 || j.usd2);
+          if (jCmp) {
+            var nss2 = (j.nss2 && j.nss2.length === j.xs.length) ? j.nss2 : vac;
+            data.push(j.ars2 || vac, j.usd2 || vac, nss2);
+          }
+          if (jCmp !== hasCmp || (jCmp && cmpLabel !== (j.label2 || "Curva 2"))) {
+            hasCmp = jCmp; cmpLabel = j.label2 || "Curva 2";
+            recreate = true;                 // cambió el set de series → chart nuevo
+          }
           codes = j.codes || [];
           if (j.ylabel) yLabel = j.ylabel + " (%)";   // TIREA/TEM según la métrica
           if (recreate || !u) {
@@ -372,8 +396,37 @@
       var data = [xs, ars, usd];
       if (nss.length) data.push(nss);
       hls.forEach(function (h) { data.push(h); });
+      // Distancia a la curva (pedido: "en algún lado chiquito"): interpola la
+      // NSS ORIGINAL (d.xs/d.nss, antes del splice) en la duration del bono y
+      // muestra bono vs curva + el spread en pp. Cero requests extra.
+      var metaTxt = "";
+      if (d.nss && d.nss.length === d.xs.length && d.xs.length > 1) {
+        var mlabel = d.ylabel || "TIREA";
+        pts.forEach(function (p) {
+          var xq = Math.min(Math.max(p.d, d.xs[0]), d.xs[d.xs.length - 1]);
+          var k = 0;
+          while (k < d.xs.length - 1 && d.xs[k + 1] < xq) k++;
+          var x0 = d.xs[k], x1 = d.xs[Math.min(k + 1, d.xs.length - 1)];
+          var y0 = d.nss[k], y1 = d.nss[Math.min(k + 1, d.xs.length - 1)];
+          if (y0 == null && y1 != null) y0 = y1;
+          if (y1 == null && y0 != null) y1 = y0;
+          if (y0 == null || y1 == null) return;
+          var cy = (x1 > x0) ? y0 + (y1 - y0) * (xq - x0) / (x1 - x0) : y0;
+          var dist = p.t - cy;
+          metaTxt += (metaTxt ? " · " : "") + p.c + " " + fmtPct(p.t) +
+            " vs curva NSS (" + mlabel + ") " + fmtPct(cy) + " → " +
+            (dist >= 0 ? "+" : "") + dist.toFixed(2).replace(".", ",") + " pp";
+        });
+      }
       if (el.__u) { el.__u.destroy(); el.__u = null; }
       el.innerHTML = "";
+      if (metaTxt) {
+        var meta = document.createElement("p");
+        meta.className = "muted";
+        meta.style.cssText = "font-size:11.5px;margin:0 0 4px";
+        meta.textContent = metaTxt;
+        el.appendChild(meta);
+      }
       el.__u = new uPlot({
         width: Math.max(el.clientWidth || 600, 320), height: 240,
         legend: { show: true },
