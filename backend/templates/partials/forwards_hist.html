@@ -55,7 +55,9 @@
 {% endif %}
 
 <p class="muted" style="margin:8px 0 0;font-size:11.5px">
-  {{ st.desde | ar_date }} → {{ st.hasta | ar_date }} · fórmula idéntica a la matriz (TIREA+Duration del cierre diario).
+  {# desde/hasta vienen ISO (YYYY-MM-DD) de la base → a mano a DD/MM/AAAA
+     (ar_date sólo formatea date/datetime, un string pasa crudo). #}
+  {{ st.desde[8:10] }}/{{ st.desde[5:7] }}/{{ st.desde[:4] }} → {{ st.hasta[8:10] }}/{{ st.hasta[5:7] }}/{{ st.hasta[:4] }} · fórmula idéntica a la matriz (TIREA+Duration del cierre diario).
   {% if st.aviso_n %}<b style="color:var(--yellow)">⚠ Muestra chica ({{ st.n }} ruedas): percentil poco confiable.</b>{% endif %}
   Ojo con el percentil: el par tiene durations que se acortan rueda a rueda — contra ventanas largas compara
   momentos distintos de la curva; el z-score acompaña para leerlo con ese grano de sal.
