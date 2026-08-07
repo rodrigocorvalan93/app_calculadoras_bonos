@@ -45,6 +45,17 @@ def test_ars_rate_bond_not_hard_dollar() -> None:
                  dias_remanentes=120) == ("120/365", 120, 365, "linear")
 
 
+def test_dlk_corporativo_90_360() -> None:
+    # El mercado cotiza los DLK corporativos en 90/360 (los soberanos no).
+    assert _conv(moneda="ARS", ajuste_sobre_capital="Dolar A3500",
+                 clasificacion="Corporativo Dolar Linked") == ("90/360", 90, 360, "linear")
+
+
+def test_dlk_soberano_90_365() -> None:
+    assert _conv(moneda="ARS", ajuste_sobre_capital="Dolar A3500",
+                 clasificacion="Soberano") == ("90/365", 90, 365, "linear")
+
+
 def test_more_specific_branches_win_over_hard_dollar() -> None:
     # Ordering: a VARIABLE bond tagged USB is still 90/365 (the rate
     # convention runs before the hard-dollar check).
