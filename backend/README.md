@@ -1,190 +1,215 @@
-# backend/ — FastAPI rewrite (Fase 1: YAS)
+# backend/ — Front web FastAPI
 
-Reescritura del frontend Streamlit en FastAPI + Jinja2 + HTMX + Alpine.js.
-Single-process local, sub-100ms en re-cómputo de YAS, sin cloud, sin build step.
-
-Solo el panel YAS está implementado. Curvas, Mercado, Comparador, Forwards,
-WebSocket en vivo, charts, tape de trades — todo eso llega en fases siguientes.
+Reescritura del frontend Streamlit en **FastAPI + Jinja2 + HTMX + Alpine.js**.
+Single-process local, sin cloud, sin build step, sin frameworks JS pesados
+(gráficos en SVG server-side + uPlot). Objetivo de performance: **< 50 ms p95
+server-side warm en todo endpoint de cara al usuario** (medido con sweeps de
+50–100 calls; hoy todas las pestañas rinden p95 ≤ ~8 ms warm).
 
 ## Cómo correr
 
 ```bash
 # Desde la raíz del repo
-python -m venv .venv-fastapi
-source .venv-fastapi/bin/activate     # Windows: .venv-fastapi\Scripts\activate
 pip install -r backend/requirements.txt
-
-# Variables de entorno opcionales (Fase 1 no las necesita para calcular;
-# son para que el lifespan de FastAPI haga login al broker — se puede omitir):
-export PRIMARY_USER="..."
-export PRIMARY_PASS="..."
-
 uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+# abrir http://127.0.0.1:8000  (redirige a /login)
 ```
 
-Abrir <http://127.0.0.1:8000/yas>.
+Env mínimas para el muro de login (o `AUTH_ENABLED=0` para dev sin muro) — ver
+la sección **Auth** abajo. Las credenciales del broker (`PRIMARY_USER` /
+`PRIMARY_PASS`, vía `secrets.txt`) habilitan el feed en vivo; sin ellas la app
+calcula igual con datos de cierre/backup.
 
-## Lo que ya funciona (Fase 1)
+Cada usuario del equipo corre **su propia instancia** en su notebook (el .bat
+lanza uvicorn en `http://127.0.0.1:8000`); no hay un server central.
 
-- Dropdown con los ~480 bonos de `especies.py` (todas las instancias
-  `rentafija.Bono` exportadas a módulo).
-- Cuatro modos de input: **Precio**, **TIREA**, **TNA**, **Margen TNA**.
-- Recompute por HTMX: form `hx-post=/yas/recompute` con
-  `hx-trigger="change, keyup changed delay:80ms from:input[name=value]"` →
-  partial swap de las cards de métricas + ticket.
-- Convención TNA por tipo de bono y Margen TNA para `VARIABLE` /
-  `VARIABLE_CAP` (la corrección del commit 0106d25 está portada).
-- Format es-AR (decimales con coma, separador de miles con punto, fechas
-  DD/MM/AAAA).
-- Overrides opcionales: settlement custom, TC (A3500) custom.
-- Thread-safety: lock por código + `copy.copy(bono)` antes de mutar,
-  igual al patrón `_bond_obj_copy` del legacy.
-- Health check en `/healthz` (devuelve cantidad de bonos cargados +
-  estado de auth al broker).
+## Pestañas
 
-## Lo que NO está aún
+| Pestaña | Ruta | Qué hace |
+|---|---|---|
+| YAS | `/yas` | Ficha de análisis por bono: precio ↔ TIREA ↔ TNA ↔ margen TNA, ticket, cashflows, settlement/TC custom, override de convención TNA, ubicación en la curva con distancia a la NSS y switch de fuente (BYMA / CAFCI). |
+| Nueva especie | `/nueva` | Calculadora ad-hoc: se arma/pega una ficha y calcula cashflow + métricas sin tocar el universo. |
+| Comparador | `/comparador` | Dos bonos lado a lado + ubicación en curva (mismo widget que YAS, con fuente switcheable). |
+| Curvas | `/curves` | Curvas por segmento (CER, DLK, HD, tasa fija, etc.) con precios en vivo. |
+| Mercado | `/mercado` | Paneles de mercado en vivo: quotes, book por especie, cauciones, FX, MAE. |
+| Break-even | `/breakeven` | BE de inflación (CER) y de deva (futuros), con gráficos SVG estilo unificado. |
+| Dólares | `/dolares` | MEP/CCL/canje implícitos por especie + calculadora de canje. |
+| Tasas | `/tasas` | Tasas cortas: cauciones, REPO, plazos. |
+| Posiciones | `/posiciones` | Tenencias por fondo con métricas en vivo, Vto por bono, PnL. |
+| Matriz | `/matriz` | Matriz de compensación entre bonos (ratio de precios). |
+| Forwards | `/forwards` | Matriz triangular de forwards (TIREA o margen TNA), what-if diferido, **histórico par-a-par** con media/desvío/percentil/z (celda de la matriz clickeable → carga ese par). |
+| Futuros | `/futuros` | Rofex DLR: tasas implícitas, sintéticos DLK↔ARS, gráfico de deva. |
+| Gráficos | `/graficos` | Scatter TIR/duration por curva + ajuste NSS, con recorte por tramo (dmin–dmax), overlay de segunda curva y fuente BYMA (default) o vector CAFCI para corporativos. |
+| Total Return | `/total-return` | TR proyectado por bono (salida a TIR/fecha) y TR realizado. |
+| Escenario | `/escenario` | Senderos de inflación/deva/tasas y revaluación del universo. |
+| Históricos | `/historicos` | Series guardadas (px/tasas por rueda) con el autosave diario. |
+| Qué pasó | `/que-paso` | Resumen de la rueda por segmento + cómo se movió cada curva (mail automático opcional tras el autosave). |
+| Créditos | `/creditos` | Scoring crediticio propietario por emisor. |
+| CAFCI | `/cafci` | FCIs: series, flujos y vector de TIRs corporativas. |
+| Órdenes | `/ordenes` | OMS: cursado de órdenes reales contra el broker, book en vivo. |
+| Alertas | `/alertas` | Alertas de precio/tasa (superuser-only). |
 
-- WebSocket al broker / hub WS hacia el navegador (Fase 4).
-- Auto-refresh de precios en vivo. El form se recalcula solo cuando el
-  user cambia un input — no hay polling todavía.
-- Tabs Curvas / Mercado / Comparador / Forwards (Fases 2-3).
-- Charts (Lightweight Charts + Plotly) — Fase 5.
-- Multi-pestaña sync (tab-id en sessionStorage) — Fase 4.
-- Tailwind build. Tailwind no se usa aún; el CSS está a mano en
-  `static/css/style.css`. Build se agrega en Fase 6.
+Además, fuera de la nav: `/admin` (gestión de usuarios/roles/features + panel
+de instalación del add-in de Excel), `/conexion` (reconexión del feed: elegir
+broker, usuario y clave — disponible para todos los usuarios; URL libre sólo
+superuser) y `/excel/*` (API del add-in).
+
+La lista canónica de pestañas vive en `backend/services/auth.py` (`TABS`); el
+superuser define desde `/admin` qué pestañas ve cada rol.
+
+## Motor en vivo
+
+- `primary_ws.py` mantiene el WS al broker (Primary/BYMA) + REST autenticado;
+  `mae.py` sondea MAE. Todo entra a `marketdata_store.py` (store en memoria
+  con secuencia global; `store_persist.py` lo restaura entre reinicios).
+- El navegador **no** abre WebSockets: `static/js/app.js` sondea `/market/seq`
+  (entero plano, ~0,5 ms) cada 1 s y dispara el evento `md-update` en `<body>`
+  sólo cuando la secuencia avanzó (pausa con la pestaña oculta). Un panel vivo
+  se declara `hx-trigger="md-update from:body, every 30s"` — el `every` largo
+  es fallback, **no** usar `every 3-5s` fijo.
+- `data-flash-scope` activa el diff de celdas post-swap → flash verde/rojo
+  estilo terminal (`.tick-up` / `.tick-down`).
+- El dot de la topbar (`#live-dot`) muestra live / idle / **stale** / off.
+  `feed_health.py` detecta el broker "conectado pero mudo" (Md sin ticks +
+  edad de los datos sobre la canasta de FX) y lo avisa en vez de mostrar
+  precios viejos como vivos. `watchdog.py` reintenta la conexión.
+- Cache de render por seq: `seq_cached(ttl=…)` — N clientes = 1 render.
+
+## Históricos y forwards
+
+- `historico_byma.py`: base parquet por rueda (TIREA/Duration/TEM/paridad por
+  bono). `historico_writer.py` la guarda solo a las 17:01 hábiles
+  (`HISTORICO_AUTOSAVE`, dejarlo prendido en **una** sola máquina del equipo).
+- `forwards_hist.py`: serie histórica del forward par-a-par reconstruida de esa
+  base (fórmula de descuento, gap mínimo 0,03 años para no anualizar ruido),
+  con media/desvío/percentil empírico/z por ventana (30/60/90/todas). El
+  percentil asume estacionariedad — la advertencia es parte del panel.
+
+## FX legs y ficha nativa (hard-dollar)
+
+`moneda` codifica la pata de cotización (USD = cable, USB = MEP). Un bono
+hard-dollar es **una ficha calculada en su dólar nativo** (`…C` cable o `…D`
+MEP, DIRTY) con hasta tres patas BYMA (`…O`/base = ARS, `…D` = MEP, `…C` =
+cable). `services/fx.py::normalize_price(price, leg, native, fx)` convierte
+pata → ARS → nativo con CCL/MEP implícitos; la pata nativa es no-op, así que
+la curva básica queda libre de FX. La especie `…O`/sin sufijo CLEAN es sólo
+referencia (Bloomberg/Euroclear) — nunca precia una pata BYMA.
+
+## Convención TNA (tabla de detección)
+
+Implementada en `services/pricing.py::tna_convention` — primera coincidencia
+gana; `freq_override` + `base_override` del YAS siempre pisan el default
+(label `… custom`):
+
+| Tipo de bono | Convención | Detección |
+|---|---|---|
+| Dual TAMAR | 32/365 cap | `VARIABLE_CAP` + `index == TAMAR` |
+| Tasa variable pura (BADLAR/TAMAR) | 90/365 | `tipo_tasa_interes == VARIABLE` |
+| CER / CER PROY | 180/365 | `"CER" in ajuste_sobre_capital` |
+| UVA / UVA PROY | 180/365 | `"UVA" in ajuste_sobre_capital` |
+| DLK corporativo (A3500) | **90/360** | `"A3500" in ajuste` + `"CORPORATIVO" in clasificacion` |
+| DLK soberano (A3500) | 90/365 | `"A3500" in ajuste_sobre_capital` |
+| Hard-dollar | 180/360 | `_is_hard_dollar(obj)` (pata USD/USB **o** clasificación) |
+| LECAP / bullets ARS | días_remanentes/365 | default |
+
+El margen TNA usa la fórmula cap32 para `VARIABLE_CAP` y `TNA − bench/100`
+para `VARIABLE` (benchmark = avg últimos 5 obs BCRA).
+
+## Add-in de Excel «OMS Bonos»
+
+Reemplazo del feed Reuters + calculadora YAS en la celda. Funciones en vivo
+(`OMS.QUOTE/FX/ROFEX/CAUCION/TABLA/HIST`) vía snapshot compartido (1 build/s
+para N libros) y funciones de cálculo puntuales (`OMS.TIREA/PRECIO/TNA/TICKET/
+CALC/TR`) vía batch cacheado — una llamada, sin streaming de precios.
+Manifest universal apuntando a `localhost:8000` (cada usuario corre su
+instancia); instalación multi-máquina desde `/admin`. **Doc completa:**
+`static/excel/README.md` (instalación/HTTPS) y `static/excel/FORMULAS.md`
+(referencia de todas las fórmulas).
 
 ## Arquitectura
 
 ```
 backend/
-  main.py                  FastAPI app + lifespan (carga universo, opcional login broker)
-  config.py                Settings vía pydantic-settings (.env)
-  cache.py                 LockedTTLCache (genérico para fases siguientes)
-  locale_ar.py             Filtros Jinja2 ar_pct / ar_num / ar_date
-  routes/
-    yas.py                 /yas, /yas/recompute, /yas/meta/{code}
+  main.py                  App + lifespan (warmup daemon, middleware auth/nav)
+  config.py                Settings pydantic (.env / secrets.txt)
+  cache.py                 LockedTTLCache + seq_cached (cache de render por seq)
+  locale_ar.py             Filtros Jinja es-AR: ar_pct/ar_num/ar_int/ar_money/
+                           ar_date/ar_pct_pp + parse_ar_num + hoy_ba
+  routes/                  Un módulo por pestaña (+ admin, auth, conexion,
+                           excel, market, tape)
   services/
-    bond_universe.py       Enumera bonos desde especies.py (lazy)
-    pricing.py             compute_metrics() — port de _ticket_numeric + _bond_obj_copy
-    primary_ws.py          WS market data + REST autenticado (login broker; lo usa el OMS)
-  templates/
-    base.html              Layout topbar + content + footer
-    yas.html               Página completa: form + result + conv-note
-    partials/
-      yas_header.html      Strip con código/nombre/tipo/vto/moneda
-      yas_metrics.html     5+5+3 cards (precio/TIREA/TNA/TEM/Duration/paridad/IC/...)
-      yas_ticket.html      Tabla ticket en formato es-AR
-      yas_result.html      Wrapper que mete metrics + ticket en el #yas-result
+    pricing.py             compute_metrics — motor YAS (TIR/TNA/ticket/TR),
+                           convención TNA, cache TTL con fingerprint de índices
+    bond_universe.py       Universo lazy desde especies.py
+    marketdata_store.py    Store en memoria + seq global
+    primary_ws.py          WS/REST broker · mae.py — pollers MAE
+    feed_health.py         Detección de feed mudo/datos viejos
+    curves.py              Armado de curvas (códigos por segmento); la lógica
+                           de forwards/NSS por tramos/fuente CAFCI está en
+                           routes/curves.py
+    nss.py                 Ajuste Nelson-Siegel(-Svensson) con fallback NS
+    forwards_hist.py       Histórico de forwards par-a-par
+    historico_byma.py      Base parquet por rueda + autosave 17:01
+    fx.py                  Patas O/D/C ↔ ficha nativa (CCL/MEP implícitos)
+    svg_charts.py          Barras/ticks SVG compartidos (deva, BE)
+    auth.py                Usuarios, roles, TABS, tokens de Excel
+    ...                    (un service por dominio: dolares, futuros, breakeven,
+                           escenario, total_return, credito, cafci, oms, ...)
+  templates/               Una página por pestaña + partials/ (swaps HTMX)
   static/
-    css/style.css          Tema 1816-like
-    js/app.js              Sólo helpers de debug (htmx 2.0 + Alpine.js 3 vía CDN)
+    css/style.css          Tema Bloomberg-dark (+ [data-theme="light"])
+    js/app.js              Live engine (seq/md-update/flash), sorters, copy-table
+    js/charts.js           uPlot (gráficos, locate, overlay 2ª curva)
+    excel/                 Add-in: manifest, functions.js/json, taskpane, docs
 ```
 
-## Convenciones implementadas
+Legacy reutilizado (no reescribir): `rentafija.py`, `especies.py`, `utils.py`,
+`indices.py`, `OMSapi.py`, `OMSmktdata.py`, `OMSprices.py`. Los singletons
+`rentafija.Bono` mutan estado al calcular → **siempre** pasar por
+`pricing._bond_obj_copy(code)` (lock por código + `copy.copy`).
 
-| Tipo de bono | Detección | Conversión TNA aplicada por rentafija |
-|---|---|---|
-| Dual TAMAR (VARIABLE_CAP + TAMAR) | `tipo_tasa_interes == "VARIABLE_CAP"` y `index == "TAMAR"` | Margen TNA: `((1+TIREA)^(32/365)−1)×(365/32) − TAMAR/100` |
-| CER / CER proyectado | `"CER" in ajuste_sobre_capital` | `tir_a_tna(TIREA, 180, 365)` (vía rentafija) |
-| Hard-dollar / USD | `moneda == "USD"` | `tir_a_tna(TIREA, 180, 360)` |
-| DLK (A3500) | `"A3500" in ajuste_sobre_capital` | `tir_a_tna(TIREA, 90, 365)` |
-| LECAP / TAMAR puro / bullets ARS | default | `tir_a_tna(TIREA, días_remanentes, 365)` |
+## Auth (login wall + roles)
 
-Para la **TNA en sí**, la app delega en `rentafija.Bono.calcula_tirea`
-(igual que el legacy YAS) — ahí se aplica la convención por
-`cnv_tna`/`convencion_base` del bono. La detección por tipo (la tabla del
-prompt) se usa para mostrar la convención correcta en la UI y para
-elegir la fórmula de margen TNA. Si en algún caso la TNA reportada no
-encaja con la convención esperada, el fix correcto es en `rentafija.py`
-(como ya se hizo para el cálculo del margen en el commit 0106d25).
+Muro de login con 3 roles: **superuser / premium / básico**. El superuser
+gestiona usuarios, pestañas por rol, features y tokens de Excel desde `/admin`.
+Contraseñas PBKDF2-HMAC-SHA256 con salt; sesión por cookie firmada;
+recuperación por mail (SMTP). Config por env:
+
+```
+AUTH_ENABLED=1                       # 0 apaga el muro (dev/emergencia)
+APP_SECRET_KEY=<hex largo>           # firma de la cookie de sesión
+APP_USERS_PATH=auth_store.json       # store de usuarios (gitignored)
+APP_SUPERUSER_USER=...               # se siembra en el 1er arranque
+APP_SUPERUSER_PASSWORD=...
+APP_SUPERUSER_EMAIL=...
+APP_BASE_URL=https://...             # links de reset + manifest de Excel
+
+APP_SMTP_HOST=smtp.gmail.com         # SMTP para reset de clave y mail Qué pasó
+APP_SMTP_PORT=587
+APP_SMTP_USER=... / APP_SMTP_PASSWORD=... / APP_SMTP_FROM=...
+```
+
+`/conexion` permite a **cualquier** usuario reconectar el feed contra los
+brokers conocidos con su propio usuario/clave (vacío = credenciales de la
+casa); la URL libre queda superuser-only porque el login manda la clave al
+host que se elija.
+
+## Performance
+
+Regla de la casa (ver `CLAUDE.md`): **< 50 ms p95 warm** en todo endpoint de
+cara al usuario, medido con sweep de 50–100 calls reportando avg/p50/p95/p99.
+Números de referencia: YAS `/yas/recompute` p50 ≈ 9 ms · p95 ≈ 10 ms; sweep
+integral de las 21 pestañas p95 ≤ ~8 ms warm. Los cómputos pesados (fits NSS,
+cache-miss de métricas) corren en threadpool y quedan cacheados con
+fingerprint de índices (A3500/CER/UVA) + día.
 
 ## Tests
 
 ```bash
-pytest -q
+pytest -q        # ~470 tests, suite completa en la raíz del repo
 ```
 
-Se ejecutan:
-- Parse de números es-AR (`'87,30'` ↔ `'87.30'` ↔ `'1.234.567,89'`).
-- Cálculo end-to-end para TXMJ9v @ 87,30 (dual TAMAR): TIREA, TNA, Margen
-  TNA finitos y dentro de rango plausible (0,10 < TNA < 0,80;
-  −0,30 < Margen TNA < 0,30).
-- Cálculo para un LECAP y un hard-dollar (USD, FIJA).
-- HTTP: `GET /yas` y `POST /yas/recompute` devuelven 200 y el HTML
-  partial contiene los labels esperados.
-
-> **TXMJ9v @ 87,30 hoy** (TAMAR aplicable avg-5d = 22,875%): el pipeline
-> nuevo devuelve **TIREA = 35,81% · TNA = 31,03% · Margen TNA = 8,15%**.
-> El target del prompt (TNA ≈ 31%, Margen TNA ≈ 8%) se cumple.
-> Para diagnóstico también se expone `tna_raw = 51,34%`, que es lo que
-> `rentafija.calcula_tirea` deja en `obj.tna` con la convención "plazo
-> remanente / 360" — esa es la TNA cruda que reportaba el legacy y que
-> motivó este rewrite del pipeline YAS.
-
-### Cómo se llegó al fix
-
-El commit `0106d25` corrigió **solo el cálculo del Margen TNA** (la fórmula
-cap 32/365 para `VARIABLE_CAP`). La TNA reportada seguía siendo
-`obj.tna` cruda. Este rewrite agrega `pricing.tna_from_obj(obj, tirea)`,
-que aplica la convención correcta por tipo de bono detectado desde los
-atributos del objeto Bono — la tabla del prompt. También invierte la
-fórmula correcta cuando el user ingresa por `mode=tna` o `mode=margen`,
-para que los cuatro modos lleguen al mismo TIREA (`test_txmj9v_modes_are_symmetric`).
-
-## Performance
-
-Target: **< 50 ms p95 en recompute** (1816-style). Medido sobre 100
-calls a `POST /yas/recompute` con el server warm:
-
-```
-n=100  avg=0.0079s  p50=0.0078s  p95=0.0094s  p99=0.0111s  max=0.0111s
-```
-
-- Recompute warm: **~8 ms p50, ~9 ms p95**.
-- Cambio de bono (incluye OOB swap del header): **~9 ms**.
-- Render inicial `GET /yas` (dropdown con 481 bonos): **~9 ms**.
-
-El cold-start aún es lento porque `indices.main()` carga el backup BCRA
-en el primer acceso (segundos). Mitigación en Fase 2: agregar al lifespan
-una warmup task que dispare la carga sin bloquear el arranque.
-
-## Decisiones pendientes para mergear
-
-- [ ] Branch a la que pushear (este chat va a `claude/laughing-turing-yG3tA`,
-      el prompt mencionaba `feature/fastapi-rewrite` — abrir PR contra
-      `main` desde la branch correcta).
-- [ ] `_legacy/OMSweb_app.py`: el archivo sigue en la raíz para no romper
-      la app Streamlit existente. Mover en Fase 6.
-- [ ] Confirmar visualmente abriendo `http://127.0.0.1:8000/yas`,
-      seleccionando TXMJ9v y comparando con la app Streamlit corriendo
-      en paralelo.
-
-## Auth (login wall + roles)
-
-La app tiene un muro de login con 3 roles: **superuser**, **premium**,
-**básico**. El superuser gestiona usuarios y qué pestañas ve cada rol desde
-`/admin`. Config por env (nada de contraseñas en el código):
-
-```
-AUTH_ENABLED=1                       # 0 apaga el muro (dev/emergencia)
-APP_SECRET_KEY=<hex largo>           # firma de la cookie de sesión (si falta
-                                     # se autogenera y persiste en el store)
-APP_USERS_PATH=auth_store.json       # store de usuarios (gitignored). Default: raíz
-APP_SUPERUSER_USER=rodricor93        # se siembra en el 1er arranque si no hay superuser
-APP_SUPERUSER_PASSWORD=<tu clave>
-APP_SUPERUSER_EMAIL=vos@ejemplo.com
-APP_BASE_URL=https://tuapp.example   # para los links de reset por mail
-
-# SMTP para recuperación de contraseña (Gmail: App Password, no la clave normal)
-APP_SMTP_HOST=smtp.gmail.com
-APP_SMTP_PORT=587
-APP_SMTP_USER=vos@gmail.com
-APP_SMTP_PASSWORD=<app password>
-APP_SMTP_FROM=vos@gmail.com
-```
-
-- El hash de contraseñas es PBKDF2-HMAC-SHA256 con salt por usuario (stdlib).
-- El gating es a nivel de página: las sub-rutas (partials/data) sólo piden
-  sesión. Overhead del middleware: ~0,2 ms/request (cookie HMAC + lookups).
-- Recuperación: `/forgot` manda un link de reset por mail (si SMTP está
-  configurado); el superuser también puede resetear cualquier clave desde `/admin`.
+Toda feature nueva del backend lleva un smoke test que (a) ejercita el
+cálculo y (b) pega al endpoint HTTP vía `httpx.AsyncClient` con
+`ASGITransport`. Ojo con los exit codes: `pytest -q | tail` se come el código
+de salida — chequearlo aparte (`set -o pipefail`).

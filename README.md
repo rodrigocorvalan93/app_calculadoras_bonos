@@ -12,7 +12,8 @@ Puntos de entrada según el caso de uso:
 
 | Entry point | Tipo | Para qué se usa |
 |---|---|---|
-| `backend/` (`uvicorn backend.main:app`) | ⭐ **FastAPI web app** | **Front actual.** Muro de login + roles, YAS, Nueva especie ad-hoc, Curvas, Mercado, Qué pasó, Posiciones, OMS, etc. |
+| `backend/` (`uvicorn backend.main:app`) | ⭐ **FastAPI web app** | **Front actual.** Muro de login + roles, YAS, Nueva especie ad-hoc, Curvas, Mercado, Qué pasó, Posiciones, OMS, etc. Arquitectura y detalle: `backend/README.md` |
+| `backend/static/excel/` | Add-in de Excel | Feed en vivo + calculadora YAS en la celda (`=OMS.*`), servido por la app local |
 | `OMSweb_app.py` | Streamlit web app (legacy) | Dashboard original. Referencia para portar lógica; no se importa desde `backend/` |
 | `bymaapi.py` | Script REPL | **Calculadora en vivo** desde VS Code Interactive (`bymaapi.bat` lanza `python -i`) |
 | `rentafija.py` | Librería core | **Núcleo duro de cálculos** (TIR, MD, flujos, valuación). No se ejecuta solo, se importa |
@@ -24,7 +25,10 @@ Puntos de entrada según el caso de uso:
 Reescritura moderna del front, sin frameworks JS pesados (sólo HTMX + Alpine; gráficos en SVG/uPlot). Estado de larga vida cacheado en memoria y un *warmup daemon* que precalienta el motor de cálculo al arranque, así el path caliente queda bajo **50 ms p95**.
 
 ### Pestañas
-YAS (análisis de yields) · **Nueva especie** (calculadora ad-hoc: armás/pegás una ficha y calcula cashflow + métricas en vivo, sin tocar el universo) · Comparador · Curvas · Mercado · Break-even · Dólares · Tasas · Posiciones · Matriz · Forwards · Futuros · Gráficos · Total Return · Escenario · Históricos · **Qué pasó** (resumen de la ventana por segmento + gráfico de cómo se movió la curva) · Créditos · CAFCI · Órdenes.
+YAS (análisis de yields, con ubicación en curva y distancia a la NSS) · **Nueva especie** (calculadora ad-hoc: armás/pegás una ficha y calcula cashflow + métricas en vivo, sin tocar el universo) · Comparador · Curvas · Mercado · Break-even · Dólares (MEP/CCL/canje) · Tasas · Posiciones · Matriz · **Forwards** (matriz TIREA o margen TNA + histórico par-a-par con media/desvío/percentil) · Futuros · **Gráficos** (NSS por tramos, overlay de curvas, fuente BYMA o vector CAFCI) · Total Return · Escenario · Históricos · **Qué pasó** (resumen de la ventana por segmento + gráfico de cómo se movió la curva) · Créditos · CAFCI · Órdenes · Alertas (superuser). Además: `/conexion` (reconexión del feed por usuario) y `/admin`.
+
+### Add-in de Excel «OMS Bonos»
+Reemplazo del feed Reuters + calculadora YAS dentro de Excel: `=OMS.QUOTE/FX/ROFEX/CAUCION/TABLA/HIST` en vivo y `=OMS.TIREA/PRECIO/TNA/TICKET/CALC/TR` puntuales, contra la instancia local de cada usuario. Instalación y referencia completa: **`backend/static/excel/README.md`** y **`backend/static/excel/FORMULAS.md`**.
 
 ### Usuarios y permisos
 Muro de login con roles **superuser / premium / básico**. El superuser gestiona usuarios y qué pestañas ve cada rol desde `/admin`. Contraseñas hasheadas (PBKDF2 + salt), sesión por cookie firmada, recuperación por mail (SMTP). Config por env (nada de credenciales en el código) — ver `backend/README.md`.
