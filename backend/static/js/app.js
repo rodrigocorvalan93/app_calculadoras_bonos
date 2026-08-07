@@ -353,6 +353,7 @@ window.lsSet = function (k, v) {
   function cellVal(row, idx) {
     var c = row.cells[idx];
     if (!c) return '';
+    if (c.dataset && c.dataset.sort != null && c.dataset.sort !== '') return c.dataset.sort;
     var inp = c.querySelector('input');
     return (inp ? inp.value : c.textContent || '').trim();
   }
@@ -937,4 +938,97 @@ window.lsSet = function (k, v) {
   });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', arm);
   else arm();
+})();
+
+// ── Copiar tabla al portapapeles (TSV → pega como celdas en Excel) ──────────
+// Un botoncito ⧉ re sutil inyectado como hermano ANTES de cada .table-scroll
+// (margen negativo: cero corrimiento). Delegación global: sobrevive a todos
+// los swaps de htmx sin re-bindear nada.
+(function () {
+  function inject(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('.table-scroll').forEach(function (ts) {
+      var prev = ts.previousElementSibling;
+      if (prev && prev.classList && prev.classList.contains('tbl-copy')) return;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tbl-copy';
+      b.title = 'Copiar tabla (pegar en Excel)';
+      b.textContent = '⧉';
+      ts.parentNode.insertBefore(b, ts);
+    });
+  }
+
+  function tsvOf(table) {
+    var out = [];
+    table.querySelectorAll('tr').forEach(function (tr) {
+      var row = [];
+      tr.querySelectorAll('th,td').forEach(function (c) {
+        row.push((c.innerText || '').replace(/\s+/g, ' ').trim());
+      });
+      if (row.length) out.push(row.join('\t'));
+    });
+    return out.join('\n');
+  }
+
+  function feedback(b) {
+    b.textContent = '✓';
+    b.classList.add('ok');
+    setTimeout(function () { b.textContent = '⧉'; b.classList.remove('ok'); }, 1200);
+  }
+
+  document.body.addEventListener('click', function (evt) {
+    var b = evt.target.closest && evt.target.closest('.tbl-copy');
+    if (!b) return;
+    var ts = b.nextElementSibling;
+    var table = ts && ts.querySelector && ts.querySelector('table');
+    if (!table) return;
+    var txt = tsvOf(table);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { feedback(b); }, function () { fallback(txt, b); });
+    } else {
+      fallback(txt, b);
+    }
+  });
+
+  function fallback(txt, b) {
+    // http-sobre-LAN sin Clipboard API: textarea + execCommand.
+    var ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.cssText = 'position:fixed;left:-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { if (document.execCommand('copy')) feedback(b); } catch (e) { /* noop */ }
+    ta.remove();
+  }
+
+  document.body.addEventListener('htmx:afterSettle', function (evt) { inject(evt.detail.elt || evt.target); });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { inject(document); });
+  else inject(document);
+})();
+
+// ── Matriz de forwards → histórico del par con un click ─────────────────────
+// Click en una celda con forward (fila = corto, columna = largo): setea los
+// selects del histórico y dispara su change — el mismo request que elegirlo a
+// mano, cero costo extra. Delegado en body: sobrevive los swaps de la matriz.
+(function () {
+  document.body.addEventListener('click', function (evt) {
+    var td = evt.target.closest && evt.target.closest('td[data-fwc]');
+    if (!td) return;
+    var sc = document.querySelector("select[name='fw-corto']");
+    var sl = document.querySelector("select[name='fw-largo']");
+    if (!sc || !sl) return;
+    var corto = td.dataset.fwc, largo = td.dataset.fwl;
+    if (!corto || !largo) return;
+    var has = function (sel, v) {
+      return Array.prototype.some.call(sel.options, function (o) { return o.value === v; });
+    };
+    if (!has(sc, corto) || !has(sl, largo)) return;
+    sc.value = corto;
+    // un solo change (el del largo) para disparar UN request, no dos
+    sl.value = largo;
+    sl.dispatchEvent(new Event('change', { bubbles: true }));
+    var hist = document.getElementById('fwd-hist');
+    if (hist && hist.scrollIntoView) hist.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
 })();

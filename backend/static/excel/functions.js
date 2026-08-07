@@ -320,6 +320,27 @@ function makeStreaming(getter) {
   };
 }
 
+// Las funciones de CÁLCULO emiten UNA vez por el canal streaming (setResult),
+// el mismo mecanismo probado de QUOTE/TABLA: en varias builds de Office una
+// custom function no-streaming que devuelve una Promise se pinta #¡VALOR!
+// aunque el cálculo haya salido bien. Sigue siendo puntual: un solo emit por
+// invocación; al cambiar un argumento Office cancela y re-invoca.
+function makeOnce(fn) {
+  return function () {
+    var args = Array.prototype.slice.call(arguments);
+    var invocation = args.pop();
+    invocation.onCanceled = function () { /* nada que cortar: emit único */ };
+    function emit(v) { try { invocation.setResult(v); } catch (e) { /* noop */ } }
+    function emitErr(e) {
+      emit((typeof CustomFunctions !== "undefined" && e instanceof CustomFunctions.Error)
+           ? e : naError(String((e && e.message) || e)));
+    }
+    try {
+      Promise.resolve(fn.apply(null, args)).then(emit, emitErr);
+    } catch (e) { emitErr(e); }
+  };
+}
+
 function histFn(serie, dias) {
   var qs = dias ? ("?days=" + encodeURIComponent(dias)) : "";
   return OMSFeed.loadToken().then(function (t) {
@@ -547,12 +568,12 @@ function registerFunctions() {
   CustomFunctions.associate("CAUCION", makeStreaming(caucionGet));
   CustomFunctions.associate("TABLA", makeStreaming(tablaGet));
   CustomFunctions.associate("HIST", histFn);
-  CustomFunctions.associate("TIREA", tireaFn);
-  CustomFunctions.associate("PRECIO", precioFn);
-  CustomFunctions.associate("TNA", tnaFn);
-  CustomFunctions.associate("TICKET", ticketFn);
-  CustomFunctions.associate("CALC", calcFn);
-  CustomFunctions.associate("TR", trFn);
+  CustomFunctions.associate("TIREA", makeOnce(tireaFn));
+  CustomFunctions.associate("PRECIO", makeOnce(precioFn));
+  CustomFunctions.associate("TNA", makeOnce(tnaFn));
+  CustomFunctions.associate("TICKET", makeOnce(ticketFn));
+  CustomFunctions.associate("CALC", makeOnce(calcFn));
+  CustomFunctions.associate("TR", makeOnce(trFn));
 }
 
 if (typeof Office !== "undefined" && Office.onReady) {

@@ -15,7 +15,11 @@
         <td style="text-align:left;color:var(--accent);font-weight:600">
           {{ r.code }} <span class="muted" style="font-weight:400">{{ r.t | ar_num(1) }}a</span>
         </td>
-        {% for c in r.cells %}<td style="{{ c.bg }}">{{ c.txt }}</td>{% endfor %}
+        {# Celdas con forward: clickeables → cargan ese par (fila=corto,
+           col=largo) en el panel de histórico de abajo (app.js). Sin title
+           por celda: en una matriz 50×50 pesaba ~50 KB; el cursor+hover
+           alcanzan como affordance. #}
+        {% for c in r.cells %}{% if c.txt != "·" %}<td style="{{ c.bg }}" data-fwc="{{ r.code }}" data-fwl="{{ fwd.header[loop.index0].code }}">{{ c.txt }}</td>{% else %}<td>·</td>{% endif %}{% endfor %}
       </tr>
     {% endfor %}
   </tbody>

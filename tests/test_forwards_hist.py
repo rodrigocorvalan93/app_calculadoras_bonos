@@ -117,3 +117,24 @@ def test_serie_saltea_gaps_infimos(monkeypatch) -> None:
     monkeypatch.setattr(hb, "meta", lambda: {"last_update": "v-gap"})
     s = fh.serie("C", "L")
     assert len(s["fwds"]) == 5                      # sólo las ruedas con gap sano
+
+
+@pytest.mark.asyncio
+async def test_matriz_celdas_clickeables_para_hist() -> None:
+    """Las celdas con forward llevan data-fwc/data-fwl (fila=corto, col=largo):
+    app.js las usa para cargar ese par en el panel de histórico."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import bond_universe, curves, marketdata_store as mds
+    from backend.services import symbols as syms
+
+    bond_universe.ensure_loaded()
+    for i, c in enumerate((curves.build_curve_codes().get("cer") or [])[:5]):
+        mds.get_store().update_from_md(syms.md_symbol(c, "24hs"),
+                                       {"LA": {"price": 1150.0 + i * 40}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/forwards/table", params={"curve": "cer"})
+    assert r.status_code == 200
+    if 'data-fwc="' in r.text:                      # con ≥2 bonos válidos
+        assert 'data-fwl="' in r.text

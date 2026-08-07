@@ -197,7 +197,11 @@
           "description": "FX custom (como en la ficha YAS)",
           "optional": true
         }
-      ]
+      ],
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "PRECIO",
@@ -229,7 +233,11 @@
           "description": "FX custom",
           "optional": true
         }
-      ]
+      ],
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "TNA",
@@ -262,7 +270,11 @@
           "description": "FX custom",
           "optional": true
         }
-      ]
+      ],
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "TICKET",
@@ -302,7 +314,11 @@
           "description": "FX custom",
           "optional": true
         }
-      ]
+      ],
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "CALC",
@@ -346,7 +362,11 @@
           "description": "FX custom",
           "optional": true
         }
-      ]
+      ],
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "TR",
@@ -398,7 +418,11 @@
           "description": "FX custom",
           "optional": true
         }
-      ]
+      ],
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     }
   ]
 }

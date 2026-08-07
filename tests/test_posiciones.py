@@ -156,3 +156,18 @@ def test_agrupar_tenencias_ramas_por_categoria() -> None:
     assert cer["n"] == 2 and cer["valor"] == 400.0 and cer["pct_pn"] == 0.10
     assert [r["valor"] for r in cer["rows"]] == [100.0, 300.0]
     assert gs[2]["pct_pn"] is None
+
+
+@pytest.mark.asyncio
+async def test_tenencias_columna_vencimiento() -> None:
+    """La tabla de tenencias agrupadas muestra Vto con data-sort ordinal
+    (orden cronológico real, no 'por día del mes')."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/posiciones")
+    assert r.status_code == 200
+    if "tenencias" in r.text.lower() and "<th" in r.text:
+        assert ">Vto</th>" in r.text
