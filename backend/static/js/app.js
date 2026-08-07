@@ -353,6 +353,7 @@ window.lsSet = function (k, v) {
   function cellVal(row, idx) {
     var c = row.cells[idx];
     if (!c) return '';
+    if (c.dataset && c.dataset.sort != null && c.dataset.sort !== '') return c.dataset.sort;
     var inp = c.querySelector('input');
     return (inp ? inp.value : c.textContent || '').trim();
   }

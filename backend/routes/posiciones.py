@@ -91,6 +91,18 @@ def _categoria(obj) -> str:
             "Step Up": "ARS Step Up"}.get(tasa, "ARS (s/tasa)")
 
 
+def _venc_date(obj):
+    """Vencimiento de la ficha como date (o None): admite date/datetime/Timestamp
+    (los con hora se normalizan con .date(); un date pelado no tiene .hour)."""
+    v = getattr(obj, "vencimiento", None) if obj is not None else None
+    if v is None:
+        return None
+    try:
+        return v.date() if hasattr(v, "hour") else v
+    except Exception:  # noqa: BLE001
+        return v
+
+
 def _calif(obj) -> str:
     """Calificación local de la ficha (AA(arg), CCC-, …). Antes los soberanos
     devolvían el literal "Soberano" y la columna Rating nunca mostraba su
@@ -222,6 +234,7 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             "tna": (m or {}).get("tna"),
             "tna_convention_label": (m or {}).get("tna_convention_label"),
             "duration": (m or {}).get("duration"),
+            "vencimiento": _venc_date(obj),
             "last": last_val,
             "price_source": (m or {}).get("price_source") if m is not None else eq_src,
         })
