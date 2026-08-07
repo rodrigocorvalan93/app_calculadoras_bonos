@@ -53,7 +53,8 @@ wins:
 | Tasa variable pura (BADLAR / TAMAR) | 90/365 | `tipo_tasa_interes == VARIABLE` |
 | CER / CER PROY | 180/365 | `"CER" in ajuste_sobre_capital` |
 | UVA / UVA PROY | 180/365 | `"UVA" in ajuste_sobre_capital` |
-| DLK (A3500) | 90/365 | `"A3500" in ajuste_sobre_capital` |
+| DLK corporativo (A3500) | 90/360 | `"A3500" in ajuste` + `"CORPORATIVO" in clasificacion` |
+| DLK soberano (A3500) | 90/365 | `"A3500" in ajuste_sobre_capital` |
 | Hard-dollar | 180/360 | `_is_hard_dollar(obj)` |
 | LECAP / bullets ARS | días_remanentes / 365 | default |
 

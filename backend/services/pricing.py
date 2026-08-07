@@ -27,7 +27,7 @@ typical of dual TAMAR; the others use the standard `tir_a_tna`.
   VARIABLE_CAP + TAMAR             → 32/365  (cap32)
   VARIABLE  (BADLAR, TAMAR puro)   → 90/365  (linear)   ← user-requested
   ajuste contains "CER"            → 180/365 (linear)
-  ajuste contains "A3500" (DLK)    → 90/365  (linear)
+  ajuste contains "A3500" (DLK)    → 90/360 corporativo · 90/365 soberano (linear)
   moneda == USD (hard-dollar)      → 180/360 (linear)
   default (LECAP / bullets ARS)    → días_remanentes/365 (linear)
 
@@ -330,6 +330,11 @@ def tna_convention(
     if "UVA" in ajuste:
         return "180/365", 180, 365, "linear"
     if "A3500" in ajuste:
+        # El mercado cotiza los DLK corporativos en 90/360 (aunque el cupón
+        # devengue actual/360); los soberanos se mantienen en 90/365.
+        clas = (getattr(obj, "clasificacion", "") or "").upper()
+        if "CORPORATIVO" in clas:
+            return "90/360", 90, 360, "linear"
         return "90/365", 90, 365, "linear"
     if _is_hard_dollar(obj):
         return "180/360", 180, 360, "linear"
