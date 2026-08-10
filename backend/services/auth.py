@@ -344,12 +344,21 @@ def page_tab(path: str) -> Optional[str]:
 
 
 # Prefijos cuyo SUBÁRBOL COMPLETO se gatea por su tab (no sólo la página exacta).
-# Para superficies sensibles —plata real— donde los sub-endpoints NO son
-# compartidos entre pestañas: un rol sin la pestaña Órdenes no debe alcanzar
-# NINGÚN /ordenes/* (ticket, confirmar, multi, kill, live, quote…). El modelo
-# general sigue siendo página-exacta (así /dolares/rail, /historicos/semanal y
-# demás partials compartidos no se atan a la pestaña de su prefijo).
-_TAB_PREFIX_GATED: Tuple[Tuple[str, str], ...] = (("/ordenes", "ordenes"),)
+# Para superficies sensibles —plata real o data confidencial del desk— donde los
+# sub-endpoints NO son compartidos entre pestañas: un rol sin la pestaña no debe
+# alcanzar NINGÚN sub-endpoint de ese prefijo.
+#   /ordenes    → ticket, confirmar, multi, kill, live, quote…
+#   /posiciones → /posiciones/table, /posiciones/targets (tenencias reales de los
+#                 fondos: VN, valor, %PN por bono). Gatear sólo la página dejaba
+#                 los partials de datos abiertos a cualquier rol logueado.
+#   /matriz     → /matriz/table (matriz cruzada de tenencias por fondo).
+# El modelo general sigue siendo página-exacta (así /dolares/rail, /historicos/
+# semanal y demás partials COMPARTIDOS no se atan a la pestaña de su prefijo).
+_TAB_PREFIX_GATED: Tuple[Tuple[str, str], ...] = (
+    ("/ordenes", "ordenes"),
+    ("/posiciones", "posiciones"),
+    ("/matriz", "matriz"),
+)
 
 
 def can_access_path(role: Optional[str], path: str) -> bool:

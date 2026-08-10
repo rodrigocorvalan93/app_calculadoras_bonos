@@ -122,6 +122,45 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
 - El dot `#live-dot` de la topbar muestra el estado del feed
   (live/idle/off). Todo vanilla JS — sin librerías nuevas.
 
+## Seguridad — invariantes (no regresar sin querer)
+
+La app cursa órdenes reales y se comparte en el equipo, así que estos
+controles son load-bearing. Tests en `tests/test_seguridad.py` +
+`tests/test_auth.py`.
+
+- **Gating por subárbol de superficies sensibles**: `auth._TAB_PREFIX_GATED`
+  gatea TODO el subárbol (no sólo la página exacta) de `/ordenes`,
+  `/posiciones` y `/matriz` — los partials de datos (`…/table`, `…/targets`)
+  filtran tenencias reales del desk. El modelo general sigue siendo
+  página-exacta (partials compartidos como `/dolares/rail` no se atan a su
+  prefijo); si agregás una pestaña con data confidencial y sub-endpoints
+  propios, sumala acá.
+- **Middleware `_SecurityMiddleware`** (el más externo, ASGI puro en
+  `main.create_app`): agrega `X-Frame-Options: DENY`, CSP con
+  `frame-ancestors 'none'`/`object-src 'none'`/`base-uri 'self'`, `nosniff`,
+  `Referrer-Policy`, y **rechaza POST/PUT/PATCH/DELETE cross-site** por
+  Origin/Referer (defensa CSRF además de `SameSite=Lax`). `/excel/*` está
+  EXENTO (corre en el iframe/webview de Office; auth por token, no cookie).
+  La CSP deja `script-src`/`style-src` con `unsafe-inline`+`unsafe-eval`
+  porque Alpine evalúa con `Function()` y hay inline en los templates — no lo
+  quites o rompés Alpine.
+- **Guard de arranque**: `create_app` se niega a levantar si
+  `AUTH_ENABLED=0` (sin muro, todo request = superuser) con `APP_HOST` no
+  loopback (host expuesto). Dev local (auth off + 127.0.0.1) y Tailscale con
+  muro puesto arrancan normal.
+- **Parser ad-hoc** (`adhoc._eval_node`): whitelist AST (rechaza Name/Call/
+  Attribute/…). `Mult` está acotado (`_MAX_SEQ_LEN`) para que `[0]*9e8` no
+  reviente memoria, y `parse_ficha` corre en el threadpool (texto arbitrario
+  del usuario, no bloquear el event loop).
+- **Manifest de Excel** (`excel._safe_manifest_base`): `?base=` se valida
+  contra una allowlist de hosts (loopback / IP LAN / `app_base_url` / host de
+  descarga) y se RECONSTRUYE desde componentes parseados — no se interpola
+  texto crudo en el XML (evita apuntar el add-in de un colega a un host
+  atacante que capture el token).
+- **`/conexion`**: la allowlist de hosts para no-superuser es la barrera
+  anti-harvesting (el login MANDA la clave al host elegido). Mantené el
+  match exacto de URL normalizada; la URL libre es superuser-only.
+
 ## Tests
 
 `pytest -q` at the repo root. New backend features need a smoke test
