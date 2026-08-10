@@ -6,7 +6,7 @@
 <section class="curves">
   <header class="yas-header">
     <h1>Gráficos · Tasa vs Duration</h1>
-    <p class="muted">Cada punto es un bono (x = Duration, y = <strong>TIREA</strong>, <strong>TEM</strong> o, para tasa variable, <strong>Margen</strong> sobre TAMAR/BADLAR según la métrica), con la <span style="color:#a78bfa">regresión NSS</span> ajustada en ese mismo espacio. Interactivo (uPlot): <strong>arrastrá para zoom</strong>, doble click para reset, hover para ver el bono, click en la leyenda para aislar. USD/USB en cyan, ARS en naranja. Refresh 5 s. <strong>Dur mín</strong> descarta near-maturity (p. ej. T30J6 que vence ya) y <strong>Excluir bonos</strong> saca códigos puntuales de la regresión.</p>
+    <p class="muted">Cada punto es un bono (x = Duration, y = <strong>TIREA</strong>, <strong>TEM</strong> o, para tasa variable, <strong>Margen</strong> sobre TAMAR/BADLAR según la métrica), con la <span style="color:#a78bfa">regresión NSS</span> ajustada en ese mismo espacio. Interactivo (uPlot): <strong>arrastrá para zoom</strong>, doble click para reset, <strong>hover</strong> sobre un punto para ver código · precio · fecha · TIR/TNA/TEM · duration, click en la leyenda para aislar. Se pueden <strong>comparar hasta 3 curvas</strong> (cada una con sus tickers). USD/USB en cyan, ARS en naranja. Refresh 5 s. <strong>Dur mín</strong> descarta near-maturity (p. ej. T30J6 que vence ya) y <strong>Excluir bonos</strong> saca códigos puntuales de la regresión.</p>
   </header>
 
   <div class="curve-picker card">
@@ -83,14 +83,15 @@
               <option value="cafci" {% if fuente == "cafci" %}selected{% endif %}>Vector CAFCI</option>
             </select>
           </label>
-          <label class="field">
-            <span>Comparar con</span>
-            <select name="curve2" hx-get="/graficos/estimate" hx-trigger="change" hx-target="#grafico-estimate" hx-swap="innerHTML"
-                    hx-include="#graf-controls, [name=duration]">
-              <option value="">— sola —</option>
+          <label class="field" style="max-width:180px">
+            <span>Comparar con <small class="muted">(hasta 3 · Ctrl/Cmd)</small></span>
+            {# multi-select: superpone varias curvas (cada una un color, con sus
+               tickers y NSS punteada). Sin selección = curva sola. No dispara la
+               estimación/NSS (esas ignoran curve2); el chart lo recarga charts.js. #}
+            <select name="curve2" multiple size="4" style="height:auto">
               {% for c in all_curves %}
                 {% set count = (table.get(c.key) or []) | length %}
-                <option value="{{ c.key }}" {% if c.key == curve2 %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>{{ c.label }}</option>
+                <option value="{{ c.key }}" {% if c.key in (curve2 or '').split(',') %}selected{% endif %} {% if count == 0 %}disabled{% endif %}>{{ c.label }}</option>
               {% endfor %}
             </select>
           </label>
