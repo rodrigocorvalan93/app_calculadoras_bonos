@@ -1,6 +1,25 @@
 {
   "functions": [
     {
+      "id": "PING",
+      "name": "PING",
+      "description": "Diagnóstico: versión del add-in cargada + confirma que las funciones corren. Sin server.",
+      "result": { "type": "string" },
+      "parameters": []
+    },
+    {
+      "id": "DIAG",
+      "name": "DIAG",
+      "description": "Diagnóstico de OMS.TIREA: devuelve el resultado (o el error) como TEXTO — nunca #¡VALOR!. Ej: =OMS.DIAG(\"TZXM8\";0,977).",
+      "result": { "type": "string" },
+      "parameters": [
+        { "name": "especie", "type": "string", "description": "Ticker" },
+        { "name": "precio", "type": "number", "description": "Precio", "optional": true },
+        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
+        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+      ]
+    },
+    {
       "id": "QUOTE",
       "name": "QUOTE",
       "description": "Dato de mercado en vivo de una especie (BYMA o MAE). Campos: last, bid, ask, bid_size, ask_size, close, close_date, var, vol, nominal, trades, vwap, open, high, low, last_ts.",

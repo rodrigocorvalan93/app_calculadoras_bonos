@@ -8,6 +8,11 @@
 /* global CustomFunctions, Office, OfficeRuntime, Excel */
 "use strict";
 
+// Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
+// el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
+// que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
+var OMS_BUILD = "v6 · 2026-08-10";
+
 // ── Motor de datos compartido ────────────────────────────────────────────────
 var OMSFeed = (function () {
   var POLL_MS = 1000;
@@ -560,8 +565,35 @@ function ticketFn(especie, precio, nominales, plazo, fx) {
   });
 }
 
+// ── Diagnóstico (para cazar el #¡VALOR!) ─────────────────────────────────────
+// PING: función SÍNCRONA, sin server, sin async → si esto no devuelve el texto,
+// el problema es de carga/registro del add-in (metadata o JS cacheados), NO del
+// cálculo. Confirma además QUÉ build cargó Excel.
+function pingFn() { return "OMS Bonos " + OMS_BUILD; }
+
+// DIAG: mismo camino de cálculo que TIREA pero devuelve TEXTO (nunca #¡VALOR!):
+// el resultado, o el motivo del error, visible en la celda. Async "clásica"
+// (devuelve la Promise, sin el canal streaming) → también sirve para comparar:
+// si DIAG funciona y TIREA no, el problema es el mecanismo streaming en tu build.
+function diagFn(especie, precio, plazo, fx) {
+  try {
+    var it = calcItem(especie, "precio", precio, plazo, null, fx);
+    return OMSCalc.request(it).then(function (m) {
+      if (m && m.error) { return "ERROR: " + m.error; }
+      return "OK tirea=" + (m && m.tirea) + " tna=" + (m && m.tna) +
+             " tem=" + (m && m.tem) + " dur=" + (m && m.duration);
+    }, function (e) {
+      return "REJECT: " + ((e && (e.message || e.code)) || e);
+    });
+  } catch (e) {
+    return "THROW: " + ((e && e.message) || e);
+  }
+}
+
 function registerFunctions() {
   if (typeof CustomFunctions === "undefined") { return; }
+  CustomFunctions.associate("PING", pingFn);
+  CustomFunctions.associate("DIAG", diagFn);
   CustomFunctions.associate("QUOTE", makeStreaming(quoteGet));
   CustomFunctions.associate("FX", makeStreaming(fxGet));
   CustomFunctions.associate("ROFEX", makeStreaming(rofexGet));
