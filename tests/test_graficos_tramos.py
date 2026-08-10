@@ -87,14 +87,28 @@ async def test_graficos_data_overlay_y_fuente(monkeypatch) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         solo = await ac.get("/graficos/data", params={"curve": "cer"})
         comp = await ac.get("/graficos/data", params={"curve": "cer", "curve2": "lecap"})
+        # multi + cap: 'cer' se descarta (== principal), quedan a lo sumo 3
+        multi = await ac.get("/graficos/data", params={
+            "curve": "cer", "curve2": "lecap,cer,lecap"})
         dm = await ac.get("/graficos/data", params={"curve": "cer", "dmin": "1", "dmax": "3"})
         est = await ac.get("/graficos/estimate",
                            params={"curve": "cer", "duration": "1,5", "dmax": "3"})
-    assert solo.status_code == 200 and "ars2" not in solo.json()
+    js = solo.json()
+    assert solo.status_code == 200 and "ars2" not in js
+    assert js.get("cmps") == [] and isinstance(js.get("meta"), dict)   # sola: sin comparaciones
+    # meta por punto para el tooltip: cada código tiene tir/dur (u otras claves)
+    if js.get("codes"):
+        code = next((c for c in js["codes"] if c), None)
+        if code:
+            assert code in js["meta"] and "tir" in js["meta"][code] and "dur" in js["meta"][code]
     j = comp.json()
     assert comp.status_code == 200
-    if j.get("n2"):                                     # con lecap con data
-        assert len(j["ars2"]) == len(j["xs"]) and "label2" in j
+    if j.get("cmps"):                                   # con lecap con data
+        c0 = j["cmps"][0]
+        assert len(c0["vals"]) == len(j["xs"]) and len(c0["codes"]) == len(j["xs"])
+        assert "label" in c0 and len(c0["nss"]) in (0, len(j["xs"]))
+    jm = multi.json()
+    assert multi.status_code == 200 and len(jm.get("cmps", [])) <= 3   # dedup + cap
     jd = dm.json()
     assert all(1.0 <= x <= 3.0 for x in jd["xs"]) or jd["n"] == 0
     assert est.status_code == 200

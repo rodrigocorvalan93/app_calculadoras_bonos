@@ -1038,9 +1038,39 @@ def _parse_dmin(s: str):
     return v if (v == v and v > 0.0) else None
 
 
+# ── Meta por punto para el tooltip del gráfico ──────────────────────────────
+# Todo sale de la fila ya construida por `_row_for_code` (cero recomputo): el
+# tooltip muestra precio/fecha/tipo/TNA/TIR/TEM/Duration al hacer hover. Las
+# tasas van en % (× 100) para no convertir en el cliente.
+_SRC_LABEL = {"LA": "últ", "CL": "cierre", "MAE": "MAE"}
+
+
+def _pct(x):
+    return x * 100.0 if (x is not None and x == x) else None
+
+
+def _graf_meta(r) -> dict:
+    from backend.locale_ar import fmt_ts
+    dt = r.get("price_date")
+    return {
+        "p": r.get("px_calc"),
+        "src": _SRC_LABEL.get(r.get("price_source") or "", r.get("price_source") or ""),
+        "dt": (fmt_ts(dt) if dt else None),
+        "tir": _pct(r.get("tirea")),
+        "tna": _pct(r.get("tna")),
+        "tem": _pct(r.get("tem")),
+        "dur": r.get("duration"),
+        "mon": (r.get("moneda") or "").upper(),
+        "bp": r.get("bid"), "bt": _pct(r.get("tirea_bid")),
+        "op": r.get("offer"), "ot": _pct(r.get("tirea_offer")),
+    }
+
+
 def _graf_pts(rows, metric: str, dmin, exclude: set, dmax=None):
-    """[(code, duration, y%, MONEDA, bid%|None, offer%|None)] en la métrica
+    """[(code, duration, y%, MONEDA, bid%|None, offer%|None, meta)] en la métrica
     elegida, con los filtros (duration mínima + códigos excluidos) aplicados.
+    `meta` alimenta el tooltip (precio/fecha/tipo/TNA/TIR/TEM/Dur), independiente
+    de la métrica graficada.
 
     - tirea/tem: y desde la TIREA (con TEM = (1+TIREA)^(30/360)−1); incluye
       las puntas bid/offer.
@@ -1070,7 +1100,7 @@ def _graf_pts(rows, metric: str, dmin, exclude: set, dmax=None):
                 continue
             yb = _graf_y(r.get("tirea_bid"), metric)
             yo = _graf_y(r.get("tirea_offer"), metric)
-        out.append((code, float(d), y, (r.get("moneda") or "").upper(), yb, yo))
+        out.append((code, float(d), y, (r.get("moneda") or "").upper(), yb, yo, _graf_meta(r)))
     return out
 
 
@@ -1102,9 +1132,9 @@ def _cafci_idx():
 
 
 def _graf_pts_cafci(curve_key: str, metric: str, dmin, dmax, exclude: set):
-    """Puntos (code, dur, y%, MON, None, None) desde el vector CAFCI. La TIR
+    """Puntos (code, dur, y%, MON, None, None, meta) desde el vector CAFCI. La TIR
     viene en % y la duration es Mod. Duration. Margen no aplica (vector sin
-    benchmark) → lista vacía."""
+    benchmark) → lista vacía. El vector no trae precio/puntas → meta acotado."""
     if metric == "margen":
         return []
     idx = _cafci_idx()
@@ -1132,7 +1162,11 @@ def _graf_pts_cafci(curve_key: str, metric: str, dmin, dmax, exclude: set):
         if y is None:
             continue
         mon = (r.get("moneda") or "").strip().upper()
-        out.append((code, float(d), y, "USD" if mon.startswith("U") else "ARS", None, None))
+        leg_mon = "USD" if mon.startswith("U") else "ARS"
+        meta = {"p": None, "src": "CAFCI", "dt": None, "tir": tir, "tna": None,
+                "tem": None, "dur": float(d), "mon": leg_mon,
+                "bp": None, "bt": None, "op": None, "ot": None}
+        out.append((code, float(d), y, leg_mon, None, None, meta))
     return out
 
 
@@ -1243,15 +1277,30 @@ async def graficos_data(
     metric = _graf_metric(metric)
     dminv, dmaxv = _parse_dmin(dmin), _parse_dmin(dmax)
     excl = _parse_exclude(exclude)
-    pts = await _graf_pts_for(curve, plazo, only_quoting, leg, metric,
-                              dminv, dmaxv, excl, fuente, book=True)
-    pts2 = []
-    if curve2 and curve2 != curve:
-        pts2 = await _graf_pts_for(curve2, plazo, only_quoting, leg, metric,
-                                   dminv, dmaxv, excl, fuente)
-    if not pts and not pts2:
+
+    # `curve2` es multi-select (coma-separado): comparar contra varias curvas.
+    # Dedup, sin la principal, tope 3 (cada una es un _rows_for; acotamos el
+    # costo). Los puntos de TODAS las curvas se piden EN PARALELO.
+    comp_keys: List[str] = []
+    seen = {curve}
+    for k in (curve2 or "").split(","):
+        k = k.strip()
+        if k and k not in seen:
+            comp_keys.append(k)
+            seen.add(k)
+    comp_keys = comp_keys[:3]
+
+    tasks = [_graf_pts_for(curve, plazo, only_quoting, leg, metric,
+                           dminv, dmaxv, excl, fuente, book=True)]
+    tasks += [_graf_pts_for(k, plazo, only_quoting, leg, metric,
+                            dminv, dmaxv, excl, fuente) for k in comp_keys]
+    all_pts = await asyncio.gather(*tasks)
+    pts, comp_pts = all_pts[0], list(all_pts[1:])
+
+    if not pts and not any(comp_pts):
         return JSONResponse({"n": 0, "xs": [], "ars": [], "usd": [], "nss": [], "codes": [],
-                             "bid": [], "off": [], "metric": metric, "ylabel": _metric_label(metric)})
+                             "bid": [], "off": [], "cmps": [], "meta": {},
+                             "metric": metric, "ylabel": _metric_label(metric)})
 
     def _grid(ps):
         bx = sorted({p[1] for p in ps})
@@ -1260,35 +1309,57 @@ async def graficos_data(
             out |= set(float(v) for v in np.linspace(bx[0], bx[-1], 80))
         return out
 
-    xs = sorted(_grid(pts) | _grid(pts2))
+    xs = sorted(set().union(_grid(pts), *[_grid(cp) for cp in comp_pts]))
+
+    # La regresión NSS se ajusta SIEMPRE sobre el last (los bid/offer son series
+    # visuales extra). El fit (scipy curve_fit) es CPU-bound → threadpool, y las
+    # curvas se ajustan EN PARALELO (gather).
+    loop = asyncio.get_running_loop()
+
+    async def _nss(ps):
+        if len(ps) >= 4:
+            return await loop.run_in_executor(
+                None, nss_svc.eval_at, [p[1] for p in ps], [p[2] for p in ps], xs)
+        return None
+
+    nss_all = await asyncio.gather(_nss(pts), *[_nss(cp) for cp in comp_pts])
+
+    # Curva principal: ARS/USD/bid/offer separados (naranja/cyan/verde/rojo).
     bid_at: Dict[float, float] = {}
     off_at: Dict[float, float] = {}
     ars_at: Dict[float, float] = {}
     usd_at: Dict[float, float] = {}
-    ars2_at: Dict[float, float] = {}
-    usd2_at: Dict[float, float] = {}
     code_at: Dict[float, str] = {}
-    for code, d, t, mon, tb, to in pts:
+    meta: Dict[str, Any] = {}
+    for code, d, t, mon, tb, to, mt in pts:
         (usd_at if mon in ("USD", "USB") else ars_at)[d] = t
         code_at[d] = code
+        meta[code] = mt
         if tb is not None:
             bid_at[d] = tb
         if to is not None:
             off_at[d] = to
-    for code, d, t, mon, _tb, _to in pts2:
-        (usd2_at if mon in ("USD", "USB") else ars2_at)[d] = t
-        code_at.setdefault(d, code)
-    # La regresión NSS se ajusta SIEMPRE sobre el last (los bid/offer son
-    # series visuales extra, como en OMSweb_app). El fit (scipy curve_fit) es
-    # CPU-bound: fuera del event loop, igual que /graficos/nss y /graficos/estimate.
-    loop = asyncio.get_running_loop()
-    nss_y = nss2_y = None
-    if len(pts) >= 4:
-        nss_y = await loop.run_in_executor(
-            None, nss_svc.eval_at, [p[1] for p in pts], [p[2] for p in pts], xs)
-    if len(pts2) >= 4:
-        nss2_y = await loop.run_in_executor(
-            None, nss_svc.eval_at, [p[1] for p in pts2], [p[2] for p in pts2], xs)
+
+    # Comparaciones: cada una un color propio (puntos + NSS punteada) con sus
+    # tickers etiquetados. ARS/USD se funden en una serie por curva (el valor de
+    # una comparación es la forma, no la pata).
+    cmps: List[Dict[str, Any]] = []
+    for ci, cp in enumerate(comp_pts):
+        if not cp:
+            continue
+        vals_at: Dict[float, float] = {}
+        code2_at: Dict[float, str] = {}
+        for code, d, t, _mon, _tb, _to, mt in cp:
+            vals_at[d] = t
+            code2_at[d] = code
+            meta.setdefault(code, mt)          # main gana en colisión de código
+        cmps.append({
+            "label": getattr(_def_or_mix(comp_keys[ci]), "label", comp_keys[ci]),
+            "vals": [vals_at.get(x) for x in xs],
+            "codes": [code2_at.get(x) for x in xs],
+            "nss": nss_all[ci + 1] or [],
+        })
+
     out: Dict[str, Any] = {
         "n": len(pts), "xs": xs,
         "ars": [ars_at.get(x) for x in xs],
@@ -1296,17 +1367,10 @@ async def graficos_data(
         "bid": [bid_at.get(x) for x in xs],
         "off": [off_at.get(x) for x in xs],
         "codes": [code_at.get(x) for x in xs],
-        "nss": nss_y or [],
+        "nss": nss_all[0] or [],
         "metric": metric, "ylabel": _metric_label(metric),
         "fuente": (fuente or "byma").lower(),
+        "meta": meta,
+        "cmps": cmps,
     }
-    if pts2:
-        cd2 = _def_or_mix(curve2)
-        out.update({
-            "n2": len(pts2),
-            "ars2": [ars2_at.get(x) for x in xs],
-            "usd2": [usd2_at.get(x) for x in xs],
-            "nss2": nss2_y or [],
-            "label2": getattr(cd2, "label", curve2),
-        })
     return JSONResponse(out)

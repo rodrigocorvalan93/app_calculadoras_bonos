@@ -34,13 +34,20 @@
     box.style.position = "relative";
     var tip = document.createElement("div");
     tip.style.cssText = "position:absolute;pointer-events:none;background:var(--bg);border:1px solid var(--border);" +
-      "border-radius:6px;padding:3px 8px;font-size:11px;display:none;z-index:6;white-space:nowrap;color:var(--text)";
+      "border-radius:6px;padding:3px 8px;font-size:11px;line-height:1.35;display:none;z-index:6;white-space:nowrap;color:var(--text)";
     box.appendChild(tip);
 
     function params() {
       var p = {};
       form.querySelectorAll("[name]").forEach(function (el) {
-        p[el.name] = (el.type === "checkbox") ? (el.checked ? "true" : "false") : el.value;
+        if (el.multiple) {
+          // 'Comparar con' es multi-select → coma-separado (el server lo splitea).
+          p[el.name] = Array.prototype.map.call(el.selectedOptions, function (o) {
+            return o.value;
+          }).filter(Boolean).join(",");
+        } else {
+          p[el.name] = (el.type === "checkbox") ? (el.checked ? "true" : "false") : el.value;
+        }
       });
       return new URLSearchParams(p).toString();
     }
@@ -52,7 +59,41 @@
     }
     var GREEN = cssVar("--green", "#22c55e"), RED = cssVar("--red", "#ef4444");
 
-    var hasCmp = false, cmpLabel = "Curva 2";
+    // Comparaciones: hasta 3 curvas, cada una un color (puntos + NSS punteada).
+    var CMP_COLORS = ["#f472b6", "#facc15", "#a3e635", "#38bdf8", "#c084fc"];
+    var cmps = [];          // [{label, vals[], codes[], nss[]}] del último payload
+    var meta = {};          // { code: {p,src,dt,tir,tna,tem,dur,mon,bp,bt,op,ot} }
+    var sig = "";           // firma estructural (labels de cmps) → recrea al cambiar
+    var SCAT = [];          // [{si, kind, ci}] serie uPlot → rol (labels + tooltip)
+
+    // codes del rol (main = array `codes`; comparación = cmps[ci].codes). Se lee
+    // en cada draw/hover, así el auto-refresh (setData) no usa un array viejo.
+    function codesOf(e) { return e.ci < 0 ? codes : (cmps[e.ci] ? cmps[e.ci].codes : null); }
+
+    // Tooltip chico (≤4 líneas, 11px): código · moneda / precio · tipo · fecha /
+    // TIR · TNA / TEM · Dur. Para bid/offer muestra la punta y su TIR.
+    function tipHTML(code, m, kind) {
+      var head = "<b>" + code + "</b>";
+      if (!m) return head;
+      if (m.mon) head += " · " + m.mon;
+      if (kind === "bid" && m.bp != null)
+        return head + "<br>bid " + fmtNum(m.bp) + (m.bt != null ? " · TIR " + fmtPct(m.bt) : "");
+      if (kind === "off" && m.op != null)
+        return head + "<br>offer " + fmtNum(m.op) + (m.ot != null ? " · TIR " + fmtPct(m.ot) : "");
+      var out = head, l2 = "";
+      if (m.p != null) { l2 = fmtNum(m.p); if (m.src) l2 += " " + m.src; if (m.dt) l2 += " · " + m.dt; }
+      else if (m.src) { l2 = m.src; }
+      if (l2) out += "<br>" + l2;
+      var l3 = [];
+      if (m.tir != null) l3.push("TIR " + fmtPct(m.tir));
+      if (m.tna != null) l3.push("TNA " + fmtPct(m.tna));
+      if (l3.length) out += "<br>" + l3.join(" · ");
+      var l4 = [];
+      if (m.tem != null) l4.push("TEM " + fmtPct(m.tem));
+      if (m.dur != null) l4.push("Dur " + fmtNum(m.dur));
+      if (l4.length) out += "<br>" + l4.join(" · ");
+      return out;
+    }
 
     function opts() {
       return {
@@ -66,6 +107,7 @@
             values: function (uu, vals) { return vals.map(function (v) { return v + "%"; }); } },
         ],
         series: (function () {
+          SCAT = [];
           var base = [
             { label: "Dur", value: function (uu, v) { return fmtNum(v); } },
             scatter("ARS", ORANGE),
@@ -75,13 +117,16 @@
             { label: "NSS", stroke: NSSCOL, width: 2, points: { show: false },
               value: function (uu, v) { return fmtPct(v); } },
           ];
-          if (hasCmp) {
-            var C2A = "#f472b6", C2B = "#facc15";      // curva 2: rosa / amarillo
-            base.push(scatter(cmpLabel + " ARS", C2A, 6));
-            base.push(scatter(cmpLabel + " USD", C2B, 6));
-            base.push({ label: cmpLabel + " NSS", stroke: C2A, width: 1.6,
-                        dash: [5, 4], points: { show: false },
-                        value: function (uu, v) { return fmtPct(v); } });
+          SCAT.push({ si: 1, kind: "ars", ci: -1 }, { si: 2, kind: "usd", ci: -1 },
+                    { si: 3, kind: "bid", ci: -1 }, { si: 4, kind: "off", ci: -1 });
+          var si = 6;
+          for (var ci = 0; ci < cmps.length; ci++) {
+            var col = CMP_COLORS[ci % CMP_COLORS.length], lbl = cmps[ci].label || ("Curva " + (ci + 2));
+            base.push(scatter(lbl, col, 6));
+            SCAT.push({ si: si, kind: "cmp", ci: ci }); si++;
+            base.push({ label: lbl + " NSS", stroke: col, width: 1.6, dash: [5, 4],
+                        points: { show: false }, value: function (uu, v) { return fmtPct(v); } });
+            si++;
           }
           return base;
         })(),
@@ -94,32 +139,49 @@
             if (key === "x" && !selfSet) userZoomed = true;
           }],
           draw: [function (uu) {
-            // Etiqueta el código de cada bono sobre su punto (anti-superposición).
+            // Etiqueta el código de cada bono sobre su punto — de TODAS las curvas
+            // (principal + comparaciones), con el color de su curva y anti-super-
+            // posición global (no etiqueta las puntas bid/offer: mismo bono).
             var ctx = uu.ctx; ctx.save();
-            ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.fillStyle = MUT; ctx.textBaseline = "bottom";
-            var X0 = uu.data[0], A = uu.data[1], U = uu.data[2];
-            var aS = uu.series[1].show, uS = uu.series[2].show, drawn = [];
-            for (var i = 0; i < X0.length; i++) {
-              if (!codes[i]) continue;
-              var isA = A[i] != null, isU = U[i] != null, yv = isA ? A[i] : (isU ? U[i] : null);
-              if (yv == null || (isA && !aS) || (isU && !uS)) continue;
-              var X = uu.valToPos(X0[i], "x", true), Y = uu.valToPos(yv, "y", true), ok = true;
-              for (var k = 0; k < drawn.length; k++) {
-                if (Math.abs(drawn[k][0] - X) < 26 && Math.abs(drawn[k][1] - Y) < 11) { ok = false; break; }
+            ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.textBaseline = "bottom";
+            var X0 = uu.data[0], drawn = [];
+            for (var s = 0; s < SCAT.length; s++) {
+              var e = SCAT[s];
+              if (e.kind === "bid" || e.kind === "off") continue;
+              var arr = uu.data[e.si], ser = uu.series[e.si], cds = codesOf(e);
+              if (!arr || !cds || !ser || !ser.show) continue;
+              ctx.fillStyle = (e.ci < 0) ? MUT : (ser.stroke || MUT);
+              for (var i = 0; i < X0.length; i++) {
+                var yv = arr[i];
+                if (yv == null || !cds[i]) continue;
+                var X = uu.valToPos(X0[i], "x", true), Y = uu.valToPos(yv, "y", true), ok = true;
+                for (var k = 0; k < drawn.length; k++) {
+                  if (Math.abs(drawn[k][0] - X) < 26 && Math.abs(drawn[k][1] - Y) < 11) { ok = false; break; }
+                }
+                if (!ok) continue;
+                drawn.push([X, Y]);
+                ctx.fillText(cds[i], X + 5, Y - 3);
               }
-              if (!ok) continue;
-              drawn.push([X, Y]);
-              ctx.fillText(codes[i], X + 5, Y - 3);
             }
             ctx.restore();
           }],
           setCursor: [function (uu) {
             var i = uu.cursor.idx;
             if (i == null) { tip.style.display = "none"; return; }
-            var yv = (uu.data[1][i] != null) ? uu.data[1][i] : uu.data[2][i];
-            if (yv == null || !codes[i]) { tip.style.display = "none"; return; }
-            var L = uu.valToPos(uu.data[0][i], "x"), T = uu.valToPos(yv, "y");
-            tip.innerHTML = "<b>" + codes[i] + "</b> · Dur " + fmtNum(uu.data[0][i]) + " · " + fmtPct(yv);
+            // Punto más cercano (en Y) al cursor entre las series con valor en i.
+            var cy = uu.cursor.top, best = null, bestD = Infinity;
+            for (var s = 0; s < SCAT.length; s++) {
+              var e = SCAT[s], ser = uu.series[e.si];
+              if (!ser || !ser.show) continue;
+              var yv = uu.data[e.si][i];
+              if (yv == null) continue;
+              var dd = (cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy);
+              if (dd < bestD) { bestD = dd; best = { e: e, yv: yv }; }
+            }
+            var cds = best && codesOf(best.e), code = cds ? cds[i] : null;
+            if (!code) { tip.style.display = "none"; return; }
+            tip.innerHTML = tipHTML(code, meta[code], best.e.kind);
+            var L = uu.valToPos(uu.data[0][i], "x"), T = uu.valToPos(best.yv, "y");
             tip.style.left = (L + 10) + "px"; tip.style.top = (T - 6) + "px"; tip.style.display = "block";
           }],
         },
@@ -143,18 +205,22 @@
             e.textContent = "Sin bonos con TIREA y Duration (¿hay cotización?).";
             box.appendChild(e); return;
           }
-          var nss = (j.nss && j.nss.length === j.xs.length) ? j.nss : j.xs.map(function () { return null; });
           var vac = j.xs.map(function () { return null; });
+          var nss = (j.nss && j.nss.length === j.xs.length) ? j.nss : vac;
           var data = [j.xs, j.ars, j.usd, j.bid || vac, j.off || vac, nss];
-          var jCmp = !!(j.ars2 || j.usd2);
-          if (jCmp) {
-            var nss2 = (j.nss2 && j.nss2.length === j.xs.length) ? j.nss2 : vac;
-            data.push(j.ars2 || vac, j.usd2 || vac, nss2);
+          var newCmps = j.cmps || [];
+          for (var ci = 0; ci < newCmps.length; ci++) {
+            var c = newCmps[ci];
+            var cn = (c.nss && c.nss.length === j.xs.length) ? c.nss : vac;
+            data.push(c.vals || vac, cn);
           }
-          if (jCmp !== hasCmp || (jCmp && cmpLabel !== (j.label2 || "Curva 2"))) {
-            hasCmp = jCmp; cmpLabel = j.label2 || "Curva 2";
-            recreate = true;                 // cambió el set de series → chart nuevo
-          }
+          // Firma estructural = labels de las comparaciones. Si cambió el set de
+          // series (cantidad/orden/nombre), hay que recrear el chart; si sólo
+          // cambian los datos, setData preserva el zoom.
+          var newSig = newCmps.map(function (c) { return c.label; }).join("|");
+          if (newSig !== sig) { sig = newSig; recreate = true; }
+          cmps = newCmps;
+          meta = j.meta || {};
           codes = j.codes || [];
           if (j.ylabel) yLabel = j.ylabel + " (%)";   // TIREA/TEM según la métrica
           if (recreate || !u) {
