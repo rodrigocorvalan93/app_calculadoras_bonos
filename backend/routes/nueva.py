@@ -92,7 +92,11 @@ async def nueva_parse(
 ) -> HTMLResponse:
     try:
         if entrada == "pegar":
-            _name, ficha = adhoc.parse_ficha(ficha_text)
+            # Al threadpool: el parse de una ficha pegada es CPU/alloc-bound y
+            # arbitrario (texto del usuario); en el event loop, un paste pesado
+            # congelaba los paneles live de todos mientras se procesaba.
+            _name, ficha = await asyncio.get_running_loop().run_in_executor(
+                None, adhoc.parse_ficha, ficha_text)
         else:
             ficha = adhoc.build_ficha_from_form({
                 "codigo": codigo, "nombre": nombre, "moneda": moneda,

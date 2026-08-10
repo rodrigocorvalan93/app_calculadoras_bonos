@@ -541,6 +541,54 @@ async def excel_calc(request: Request) -> Response:
                     media_type="application/json")
 
 
+def _allowed_manifest_hosts(request: Request) -> FrozenSet[str]:
+    """Hosts (host[:port]) a los que se permite apuntar el manifest: loopback,
+    la IP LAN del propio server, el host de app_base_url si está configurado, y
+    el host con el que se está bajando el manifest (el server actual). Es la
+    barrera contra que un `?base=` apunte el add-in de un colega a un host
+    atacante (que capturaría el token OMS que se pega en el taskpane)."""
+    hosts = {"localhost", "127.0.0.1", "[::1]", "::1"}
+    ip = lan_ip()
+    if ip:
+        hosts.add(ip)
+    if request.url.netloc:
+        hosts.add(request.url.netloc.lower())
+        if request.url.hostname:
+            hosts.add(request.url.hostname.lower())
+    if settings.app_base_url:
+        from urllib.parse import urlsplit
+        u = urlsplit(settings.app_base_url)
+        if u.hostname:
+            hosts.add(u.hostname.lower())
+        if u.netloc:
+            hosts.add(u.netloc.lower())
+    return frozenset(hosts)
+
+
+def _safe_manifest_base(base: str, request: Request) -> str:
+    """Devuelve una URL base http(s) SEGURA para el manifest. Valida el host del
+    `?base=` contra la allowlist y RECONSTRUYE la URL desde componentes
+    parseados (scheme + host + puerto), descartando userinfo/path/query — así no
+    hay forma de inyectar XML ni de apuntar a un host no permitido. Si no valida,
+    cae a app_base_url o al host de descarga."""
+    from urllib.parse import urlsplit
+    allowed = _allowed_manifest_hosts(request)
+    cand = (base or "").strip().rstrip("/")
+    if cand:
+        u = urlsplit(cand)
+        host = (u.hostname or "").lower()
+        if u.scheme in ("http", "https") and host and host in allowed:
+            netloc = host if u.port is None else f"{host}:{u.port}"
+            return f"{u.scheme}://{netloc}"
+    fallback = (settings.app_base_url or "").rstrip("/")
+    if fallback:
+        u = urlsplit(fallback)
+        if u.scheme in ("http", "https") and u.hostname:
+            netloc = u.hostname.lower() if u.port is None else f"{u.hostname.lower()}:{u.port}"
+            return f"{u.scheme}://{netloc}"
+    return f"{request.url.scheme}://{request.url.netloc}"
+
+
 @router.get("/manifest.xml")
 async def manifest(request: Request, base: str = Query("")) -> Response:
     """Manifest del add-in con la URL base resuelta: `?base=` explícito (lo usa
@@ -548,14 +596,9 @@ async def manifest(request: Request, base: str = Query("")) -> Response:
     host con el que se está bajando. Se descarga y se sideloadea en Excel — sin
     editar XML a mano. TODO el add-in queda clavado a esa base en esa máquina:
     para otra compu conviene bajarlo apuntado a la IP del server, no al nombre
-    de la notebook."""
-    base = (base or "").strip().rstrip("/")
-    if base and not base.startswith(("http://", "https://")):
-        base = ""                                    # sólo http(s); si no, fallback
-    if not base:
-        base = (settings.app_base_url or "").rstrip("/")
-    if not base:
-        base = f"{request.url.scheme}://{request.url.netloc}"
+    de la notebook. El `base` se valida contra una allowlist de hosts y se
+    reconstruye desde componentes (no se interpola texto crudo en el XML)."""
+    base = _safe_manifest_base(base, request)
     xml = _MANIFEST_XML.format(app_id=_MANIFEST_ID, base=base)
     return Response(content=xml, media_type="application/xml",
                     headers={"Content-Disposition": 'attachment; filename="oms-bonos-manifest.xml"'})

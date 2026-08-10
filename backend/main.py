@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -401,6 +402,24 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # ── Guard de arranque: nunca servir SIN muro en un host expuesto ──────────
+    # AUTH_ENABLED=0 apaga el login (dev/emergencia) y marca toda request como
+    # superuser. Combinado con APP_HOST=0.0.0.0 (escuchar en la red/Tailscale),
+    # cualquier peer entraría sin credenciales como superuser y podría cursar
+    # órdenes reales. Los dos escape-hatch viven en secrets.txt y se combinan mal.
+    # Sólo falla el combo peligroso (muro apagado + host NO loopback); dev local
+    # (auth off + 127.0.0.1) y Tailscale con muro puesto (0.0.0.0 + auth on)
+    # arrancan normal. Costo: cero en runtime (chequeo único al boot).
+    if not settings.auth_enabled:
+        _bind_host = (os.environ.get("APP_HOST") or "").strip().lower()
+        _loopback = {"", "127.0.0.1", "localhost", "::1", "[::1]"}
+        if _bind_host and _bind_host not in _loopback:
+            raise RuntimeError(
+                f"Config insegura: AUTH_ENABLED=0 (sin muro de login) con "
+                f"APP_HOST={_bind_host!r} (host expuesto). Cualquiera en la red "
+                f"entraría como superuser y podría cursar órdenes. Poné "
+                f"AUTH_ENABLED=1, o bindeá a 127.0.0.1 para dev local.")
+
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     for name, fn in JINJA_FILTERS.items():
         templates.env.filters[name] = fn
@@ -598,6 +617,92 @@ def create_app() -> FastAPI:
             await self.app(scope, receive, send)
 
     app.add_middleware(_SSESinGzip)
+
+    # ── Security headers + defensa CSRF por Origin (ASGI puro) ────────────────
+    # Se agrega ÚLTIMO → queda como el middleware MÁS externo: los headers se
+    # aplican a TODA respuesta (incluidas las de SessionMiddleware/estáticos) y
+    # el chequeo de Origin corre antes que nada. ASGI puro (no BaseHTTPMiddleware)
+    # para no bufferear el SSE y no agregar overhead de coroutine por request.
+    #
+    # Headers: X-Frame-Options + CSP frame-ancestors 'none' (anti-clickjacking de
+    # la UI que cursa órdenes), nosniff, Referrer-Policy. La CSP deja script/style
+    # 'unsafe-inline'/'unsafe-eval' PORQUE Alpine.js evalúa expresiones con
+    # Function() y hay <script>/<style> inline en los templates — el valor real
+    # acá es frame-ancestors/object-src/base-uri, no bloquear inline (el XSS ya
+    # está cubierto por el autoescape de Jinja). Todo self-hosted (sin CDNs).
+    _CSP = ("default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; font-src 'self' data:; "
+            "connect-src 'self'; object-src 'none'; "
+            "base-uri 'self'; frame-ancestors 'none'")
+    _SEC_HEADERS = [
+        (b"x-frame-options", b"DENY"),
+        (b"x-content-type-options", b"nosniff"),
+        (b"referrer-policy", b"strict-origin-when-cross-origin"),
+        (b"content-security-policy", _CSP.encode("latin-1")),
+    ]
+    _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+    def _netloc_of(v: str) -> str:
+        """host[:port] en minúsculas de un Origin/Referer ('http://h:p/x' → 'h:p')."""
+        v = v.strip()
+        i = v.find("://")
+        if i != -1:
+            v = v[i + 3:]
+        for sep in ("/", "?", "#"):
+            j = v.find(sep)
+            if j != -1:
+                v = v[:j]
+        return v.lower()
+
+    class _SecurityMiddleware:
+        def __init__(self, app):  # noqa: ANN001
+            self.app = app
+
+        async def __call__(self, scope, receive, send):  # noqa: ANN001
+            if scope.get("type") != "http":
+                await self.app(scope, receive, send)
+                return
+            # El add-in de Excel corre en un iframe/webview de Office: mandarle
+            # X-Frame-Options/frame-ancestors rompería el taskpane. /excel/* se
+            # exime de TODO este middleware (headers + CSRF): se autentica por
+            # token X-OMS-Token (no cookie) → sin CSRF de credencial ambiente, y
+            # no es la superficie de clickjacking (esa es la UI que cursa órdenes).
+            is_excel = scope.get("path", "").startswith("/excel/")
+            # CSRF: en métodos que mutan y con sesión por cookie, rechazar el
+            # cross-site. Si no hay Origin ni Referer (clientes no-browser, tests)
+            # se deja pasar; SameSite=Lax ya es la primera línea, esto es
+            # defensa-en-profundidad.
+            if not is_excel and scope.get("method") in _UNSAFE_METHODS:
+                hdrs = {k.decode("latin-1").lower(): v.decode("latin-1")
+                        for k, v in scope.get("headers", ())}
+                host = (hdrs.get("host") or "").lower()
+                src = hdrs.get("origin")
+                if src is None:
+                    src = hdrs.get("referer")
+                if src and host and _netloc_of(src) != host:
+                    resp = JSONResponse(
+                        {"error": "Origen cruzado no permitido."}, status_code=403)
+                    await resp(scope, receive, send)
+                    return
+
+            if is_excel:
+                await self.app(scope, receive, send)
+                return
+
+            async def _send(message):  # noqa: ANN001
+                if message["type"] == "http.response.start":
+                    hh = message.setdefault("headers", [])
+                    have = {k.lower() for k, _ in hh}
+                    for k, v in _SEC_HEADERS:
+                        if k not in have:
+                            hh.append((k, v))
+                await send(message)
+
+            await self.app(scope, receive, _send)
+
+    app.add_middleware(_SecurityMiddleware)
 
     @app.get("/")
     async def index() -> RedirectResponse:

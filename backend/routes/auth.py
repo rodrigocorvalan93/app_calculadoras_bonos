@@ -110,22 +110,34 @@ async def forgot_page(request: Request) -> HTMLResponse:
 async def forgot_submit(request: Request, identifier: str = Form(...)) -> HTMLResponse:
     """Acepta usuario o email. No revela si existe (respuesta uniforme). Si hay
     match y SMTP configurado, manda el link de reset en un threadpool."""
-    ident = (identifier or "").strip()
-    username = ident.lower()
-    if not auth.get_user(username):
-        username = auth.find_user_by_email(ident) or ""
-    if username:
-        token = auth.make_reset_token(username, ttl_seconds=3600)
-        base = _base_url(request)
-        link = f"{base}/reset?token={token}"
-        user = auth.get_user(username)
-        to = (user or {}).get("email") or ""
-        body = ("Recibimos un pedido para restablecer tu contraseña de la Calculadora "
-                f"de Bonos.\n\nEntrá a este link (vence en 1 hora):\n{link}\n\n"
-                "Si no fuiste vos, ignorá este mail.")
-        if to and mailer.is_configured():
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, mailer.send, to, "Restablecer contraseña · Calculadora de Bonos", body)
+    # Throttle: /forgot es público y dispara SMTP + trabajo en el executor. Sin
+    # tope es un vector de DoS (mail-bombing de un usuario conocido, saturar el
+    # threadpool) y de enumeración por volumen. Misma respuesta uniforme al pasar
+    # el tope (no revela nada).
+    _fk = f"forgot:{_client_ip(request)}"
+    if not _login_throttled(_fk):
+        _login_fails[_fk].append(time.time())
+        ident = (identifier or "").strip()
+        username = ident.lower()
+        if not auth.get_user(username):
+            username = auth.find_user_by_email(ident) or ""
+        if username:
+            token = auth.make_reset_token(username, ttl_seconds=3600)
+            base = _base_url(request)
+            link = f"{base}/reset?token={token}"
+            user = auth.get_user(username)
+            to = (user or {}).get("email") or ""
+            body = ("Recibimos un pedido para restablecer tu contraseña de la Calculadora "
+                    f"de Bonos.\n\nEntrá a este link (vence en 1 hora):\n{link}\n\n"
+                    "Si no fuiste vos, ignorá este mail.")
+            if to and mailer.is_configured():
+                # Fire-and-forget en el threadpool: NO se hace `await`. Esperar
+                # el envío SMTP (0,5-3 s) haría que el tiempo de respuesta
+                # delate qué identificadores existen (los que no matchean
+                # responden al instante) → oracle de enumeración que anula la
+                # respuesta uniforme. Sin await, el tiempo es constante.
+                asyncio.get_running_loop().run_in_executor(
+                    None, mailer.send, to, "Restablecer contraseña · Calculadora de Bonos", body)
     # respuesta uniforme (no filtra existencia de usuarios)
     return _render(request, "forgot.html", sent=True, error=None, smtp_ok=mailer.is_configured())
 

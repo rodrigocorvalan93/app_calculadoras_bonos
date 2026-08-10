@@ -70,6 +70,23 @@ def get_ficha(token: str) -> Optional[Dict[str, Any]]:
 
 # ── Parseo seguro de ficha pegada ────────────────────────────────────────────
 _ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult)
+# Tope de elementos para la repetición de secuencias (`[0]*n`, `"a"*n`). Una
+# ficha real tiene a lo sumo unas decenas/centenas de cupones; 100k es holgado.
+# Sin este tope, `[0]*900000000` pegado en una ficha fuerza una asignación de
+# varios GB (DoS de memoria) — el `Mult` está habilitado a propósito para poder
+# escribir `[0]*6 + [8]*12`, así que acotamos el resultado en vez de prohibirlo.
+_MAX_SEQ_LEN = 100_000
+
+
+def _safe_mult(left: Any, right: Any) -> Any:
+    """`left * right` acotando la repetición de secuencias para que un literal
+    grande no reviente la memoria. `número * número` pasa sin tope."""
+    for a, b in ((left, right), (right, left)):
+        if isinstance(a, (list, tuple, str, bytes)) and isinstance(b, int):
+            if b > 0 and len(a) * b > _MAX_SEQ_LEN:
+                raise ValueError(
+                    f"secuencia demasiado grande en la ficha (máx {_MAX_SEQ_LEN} elementos).")
+    return left * right
 
 
 def _eval_node(node: ast.AST) -> Any:
@@ -95,7 +112,7 @@ def _eval_node(node: ast.AST) -> Any:
             return left + right
         if isinstance(node.op, ast.Sub):
             return left - right
-        return left * right   # Mult → habilita [0]*6, [8]*12
+        return _safe_mult(left, right)   # Mult → habilita [0]*6, [8]*12 (acotado)
     raise ValueError(f"expresión no permitida en la ficha: {type(node).__name__}")
 
 
