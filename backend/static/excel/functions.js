@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v8 · 2026-08-11 (runtime clásico)";
+var OMS_BUILD = "v9 · 2026-08-11 (runtime clásico + token en URL)";
 
 // ── Motor de datos compartido ────────────────────────────────────────────────
 var OMSFeed = (function () {
@@ -25,17 +25,39 @@ var OMSFeed = (function () {
 
   function getTokenSync() { return token; }
 
+  // Token embebido en la URL de la página (functions.html?token=… del manifest
+  // per-usuario). Es la fuente MÁS confiable en el modelo clásico: el runtime
+  // de funciones es SEPARADO del panel, y OfficeRuntime.storage no siempre le
+  // comparte el token → sin esto, todas las celdas dan 401/#N/D aunque el panel
+  // esté conectado. La URL lo tiene siempre, sin depender de storage compartido.
+  var _urlToken = null;
+  function urlToken() {
+    if (_urlToken !== null) { return _urlToken; }
+    _urlToken = "";
+    try {
+      var m = (window.location.search || "").match(/[?&]token=([^&]+)/);
+      if (m) { _urlToken = decodeURIComponent(m[1]); }
+    } catch (e) { /* noop */ }
+    return _urlToken;
+  }
+
   function loadToken() {
-    // OfficeRuntime.storage es el storage compartido del add-in; localStorage
-    // queda de fallback para pruebas en browser.
     return new Promise(function (resolve) {
+      // 1) URL de la página (manifest per-usuario) — determinístico.
+      var ut = urlToken();
+      if (ut) { token = ut; resolve(token); return; }
+      // 2) OfficeRuntime.storage (compartido cuando el build lo soporta).
+      // 3) localStorage de fallback (mismo origen).
+      function fromLS() {
+        try { token = window.localStorage.getItem("oms_token") || token; } catch (e) { /* noop */ }
+      }
       try {
         OfficeRuntime.storage.getItem("oms_token").then(function (t) {
-          if (t) token = t;
+          if (t) { token = t; } else { fromLS(); }
           resolve(token);
-        }, function () { resolve(token); });
+        }, function () { fromLS(); resolve(token); });
       } catch (e) {
-        try { token = window.localStorage.getItem("oms_token") || token; } catch (e2) { /* noop */ }
+        fromLS();
         resolve(token);
       }
     });

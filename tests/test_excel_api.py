@@ -299,3 +299,29 @@ async def test_calc_sin_precio_usa_last_del_mercado(auth_on):
     assert res[1]["monto_total"] == pytest.approx(500_000 * esp["precio"])
     assert "error" in res[2]                       # tir necesita valor explícito
     assert "error" in res[3] and "Sin precio de mercado" in res[3]["error"]
+
+
+@pytest.mark.asyncio
+async def test_manifest_token_en_url_y_saneado() -> None:
+    """Runtime CLÁSICO: el runtime de funciones es SEPARADO del panel y no
+    siempre comparte OfficeRuntime.storage → el token va embebido en la URL de
+    functions.html/taskpane.html. El valor se valida (alfabeto de token_urlsafe)
+    para que no se pueda inyectar XML."""
+    import xml.dom.minidom as MD
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        ok = await ac.get("/excel/manifest.xml", params={"token": "AbC-123_xyzAbC123xyz"})
+        bad = await ac.get("/excel/manifest.xml", params={"token": 'x"/><Evil>&'})
+        none = await ac.get("/excel/manifest.xml")
+    for r in (ok, bad, none):
+        assert r.status_code == 200
+        MD.parseString(r.text)                      # XML siempre bien formado
+    assert "functions.html?token=AbC-123_xyzAbC123xyz" in ok.text
+    assert "taskpane.html?token=AbC-123_xyzAbC123xyz" in ok.text
+    assert "<Evil>" not in bad.text and "token=" not in bad.text   # inválido → se descarta
+    assert "token=" not in none.text                               # sin token: compat
+    assert "SharedRuntime" not in none.text                        # modelo clásico

@@ -63,6 +63,8 @@
                 {% if u.excel_enabled %}
                 <input readonly value="{{ u.excel_token }}" style="width:130px" title="Token del add-in — click = copiar"
                        onclick="this.select();navigator.clipboard&&navigator.clipboard.writeText(this.value)">
+                <a class="btn-mini" title="Bajar el manifest con el token de {{ u.username }} ya embebido (necesario donde Office no comparte el runtime)"
+                   href="/excel/manifest.xml?base={{ excel_bases.local | urlencode }}&amp;token={{ u.excel_token | urlencode }}">⬇ con token</a>
                 <form method="post" action="/admin/users/excel/regen" style="display:inline"
                       onsubmit="return confirm('¿Regenerar el token de {{ u.username }}? El anterior deja de valer.')">
                   <input type="hidden" name="username" value="{{ u.username }}">
