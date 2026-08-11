@@ -10,6 +10,7 @@ sólo se toma para escribir/evictar. Misma API pública que antes
 """
 from __future__ import annotations
 
+import itertools
 import threading
 import time
 from typing import Any, Callable, Dict, Hashable, Tuple
@@ -51,6 +52,12 @@ class LockedTTLCache:
             # recomputa la próxima) — ningún productor cachea None de todos modos.
             if value is not None:
                 with self._lock:
+                    # pop+insert: la clave va SIEMPRE al final del dict (asignar
+                    # una clave existente NO la mueve). Con TTL constante y expiry
+                    # tomado al guardar, el orden de inserción ES el orden de
+                    # expiry — invariante del que depende `_evict_locked` (O(k)).
+                    now = time.monotonic()
+                    self._store.pop(key, None)
                     self._store[key] = (value, now + self._ttl)
                     if len(self._store) > self._maxsize:
                         self._evict_locked(now)
@@ -71,14 +78,23 @@ class LockedTTLCache:
         self._compute_locks = {k: lk for k, lk in self._compute_locks.items() if k in alive}
 
     def _evict_locked(self, now: float) -> None:
-        # Primero los expirados; si aún sobra, el bloque de menor expiry.
-        for k in [k for k, (_, exp) in self._store.items() if exp <= now]:
-            self._store.pop(k, None)
+        # El dict está en orden de expiry (get_or_compute y touch reinsertan al
+        # final): los expirados son un prefijo y "menor expiry" == el frente.
+        # Antes esto hacía un sorted() de TODO el store (~16k claves en el cache
+        # de curvas) BAJO el lock → spike de p99 justo con mercado activo. Ahora
+        # es O(expirados + k), sin ordenar nada.
+        drop = []
+        for k, (_, exp) in self._store.items():
+            if exp > now:
+                break
+            drop.append(k)
+        for k in drop:
+            del self._store[k]
         over = len(self._store) - self._maxsize
         if over > 0:
-            oldest = sorted(self._store, key=lambda k: self._store[k][1])
-            for k in oldest[: over + self._maxsize // 10 + 1]:
-                self._store.pop(k, None)
+            batch = over + self._maxsize // 10 + 1
+            for k in list(itertools.islice(self._store, batch)):
+                del self._store[k]
 
     def get(self, key: Hashable, default: Any = None) -> Any:
         """Lectura pura, lock-free (mismo hit path que get_or_compute): valor
@@ -96,9 +112,9 @@ class LockedTTLCache:
         if ent is None or ent[1] <= now:
             return False
         with self._lock:
-            cur = self._store.get(key)
-            if cur is None:
-                return False
+            cur = self._store.pop(key, None)   # pop+insert → mantiene el orden
+            if cur is None:                    # de inserción == orden de expiry
+                return False                   # (invariante de _evict_locked)
             self._store[key] = (cur[0], now + self._ttl)
         return True
 
