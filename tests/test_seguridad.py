@@ -131,3 +131,21 @@ def test_arranque_rechaza_sin_muro_en_host_expuesto(monkeypatch):
     monkeypatch.setenv("APP_HOST", "127.0.0.1")
     app = bmain.create_app()
     assert app is not None
+
+
+@pytest.mark.asyncio
+async def test_paginas_del_addin_excel_sin_headers_restrictivos():
+    """Las páginas del add-in viven en /static/excel/* y las FRAMEA Office +
+    cargan office.js del CDN. X-Frame-Options: DENY y CSP script-src 'self' las
+    rompían (runtime de funciones sin red → celdas en #N/D). Deben quedar EXENTAS,
+    igual que /excel/*. El resto del front web SÍ conserva los headers."""
+    async with _client() as ac:
+        for p in ("/static/excel/functions.html", "/static/excel/taskpane.html",
+                  "/static/excel/functions.js"):
+            r = await ac.get(p)
+            assert r.status_code == 200, p
+            assert r.headers.get("x-frame-options") is None, p
+            assert r.headers.get("content-security-policy") is None, p
+        # el front web sigue protegido
+        r = await ac.get("/static/css/style.css")
+        assert r.headers.get("x-frame-options") == "DENY"

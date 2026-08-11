@@ -499,7 +499,11 @@ def create_app() -> FastAPI:
     # Público (sin sesión): login/recuperación, estáticos, health, favicon.
     _PUBLIC_EXACT = {"/login", "/logout", "/forgot", "/reset", "/healthz",
                      "/favicon.ico", "/favicon.png"}
-    _PUBLIC_PREFIX = ("/static/",)
+    # /.well-known/*: Office sondea /.well-known/microsoft-officeaddins-allowed.json
+    # al cargar el runtime de funciones. Sin esto, el muro lo mandaba a /login
+    # (302 → HTML) en vez de un 404 limpio; que sea público lo deja responder
+    # "no existe" (no usamos SSO), que es lo que Office espera como fallback.
+    _PUBLIC_PREFIX = ("/static/", "/.well-known/")
     # Páginas / endpoints sensibles reservados al superuser (no son pestañas
     # gateables). /ordenes/live (armar el envío REAL al broker) y /ordenes/kill
     # (kill-switch del desk) son operaciones de mesa, no de un usuario cualquiera
@@ -681,11 +685,15 @@ def create_app() -> FastAPI:
                 await self.app(scope, receive, send)
                 return
             # El add-in de Excel corre en un iframe/webview de Office: mandarle
-            # X-Frame-Options/frame-ancestors rompería el taskpane. /excel/* se
-            # exime de TODO este middleware (headers + CSRF): se autentica por
-            # token X-OMS-Token (no cookie) → sin CSRF de credencial ambiente, y
-            # no es la superficie de clickjacking (esa es la UI que cursa órdenes).
-            is_excel = scope.get("path", "").startswith("/excel/")
+            # X-Frame-Options/frame-ancestors rompería el taskpane, y una CSP con
+            # script-src 'self' BLOQUEA el CDN de office.js (única lib externa
+            # permitida). Se exime de TODO el middleware (headers + CSRF) tanto la
+            # API `/excel/*` (token X-OMS-Token, no cookie → sin CSRF) como las
+            # PÁGINAS del add-in en `/static/excel/*` (taskpane.html/functions.html
+            # que Office framea y que cargan office.js del CDN). Ninguna es
+            # superficie de clickjacking (esa es la UI que cursa órdenes).
+            _path = scope.get("path", "")
+            is_excel = _path.startswith("/excel/") or _path.startswith("/static/excel/")
             # CSRF: en métodos que mutan y con sesión por cookie, rechazar el
             # cross-site. Si no hay Origin ni Referer (clientes no-browser, tests)
             # se deja pasar; SameSite=Lax ya es la primera línea, esto es
