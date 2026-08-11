@@ -4,19 +4,42 @@
       "id": "PING",
       "name": "PING",
       "description": "Diagnóstico: versión del add-in cargada + confirma que las funciones corren. Sin server.",
-      "result": { "type": "string" },
+      "result": {
+        "type": "string"
+      },
       "parameters": []
     },
     {
       "id": "DIAG",
       "name": "DIAG",
       "description": "Diagnóstico de OMS.TIREA: devuelve el resultado (o el error) como TEXTO — nunca #¡VALOR!. Ej: =OMS.DIAG(\"TZXM8\";0,977).",
-      "result": { "type": "string" },
+      "result": {
+        "type": "string"
+      },
       "parameters": [
-        { "name": "especie", "type": "string", "description": "Ticker" },
-        { "name": "precio", "type": "number", "description": "Precio", "optional": true },
-        { "name": "plazo", "type": "string", "description": "24hs (default) | CI | fecha DD/MM/AAAA", "optional": true },
-        { "name": "fx", "type": "number", "description": "FX custom", "optional": true }
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "precio",
+          "type": "number",
+          "description": "Precio",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom",
+          "optional": true
+        }
       ]
     },
     {
@@ -216,11 +239,7 @@
           "description": "FX custom (como en la ficha YAS)",
           "optional": true
         }
-      ],
-      "options": {
-        "stream": true,
-        "cancelable": true
-      }
+      ]
     },
     {
       "id": "PRECIO",
@@ -252,11 +271,7 @@
           "description": "FX custom",
           "optional": true
         }
-      ],
-      "options": {
-        "stream": true,
-        "cancelable": true
-      }
+      ]
     },
     {
       "id": "TNA",
@@ -289,11 +304,7 @@
           "description": "FX custom",
           "optional": true
         }
-      ],
-      "options": {
-        "stream": true,
-        "cancelable": true
-      }
+      ]
     },
     {
       "id": "TICKET",
@@ -333,11 +344,7 @@
           "description": "FX custom",
           "optional": true
         }
-      ],
-      "options": {
-        "stream": true,
-        "cancelable": true
-      }
+      ]
     },
     {
       "id": "CALC",
@@ -381,11 +388,7 @@
           "description": "FX custom",
           "optional": true
         }
-      ],
-      "options": {
-        "stream": true,
-        "cancelable": true
-      }
+      ]
     },
     {
       "id": "TR",
@@ -437,11 +440,7 @@
           "description": "FX custom",
           "optional": true
         }
-      ],
-      "options": {
-        "stream": true,
-        "cancelable": true
-      }
+      ]
     }
   ]
 }

@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v6 · 2026-08-10";
+var OMS_BUILD = "v7 · 2026-08-11";
 
 // ── Motor de datos compartido ────────────────────────────────────────────────
 var OMSFeed = (function () {
@@ -307,7 +307,20 @@ function makeStreaming(getter) {
   return function () {
     var args = Array.prototype.slice.call(arguments);
     var invocation = args.pop();
-    var lastPushed;
+    var lastPushed, got = false;
+    // Si en STREAM_TIMEOUT no llegó ningún snapshot, emitir un error LEGIBLE en
+    // vez de dejar la celda en #¡OCUPADO! para siempre (así se ve el motivo:
+    // token/red/feed). Sin esto, un runtime de funciones que no puede sondear
+    // el feed deja todas las celdas colgadas y no hay pista de por qué.
+    var t = setTimeout(function () {
+      if (!got) {
+        try {
+          invocation.setResult(naError(
+            "Sin datos del feed (estado: " + OMSFeed.status() + "). Revisá el token en " +
+            "el panel OMS Bonos y que el servidor esté corriendo."));
+        } catch (e) { /* noop */ }
+      }
+    }, 6000);
     var un = OMSFeed.subscribe(function (s, status) {
       var v;
       if (status === "auth") {
@@ -318,31 +331,37 @@ function makeStreaming(getter) {
         try { v = getter.apply(null, [s].concat(args)); }
         catch (e) { v = naError(String(e && e.message || e)); }
       }
+      got = true;
       var key = JSON.stringify(v);
       if (key !== lastPushed) { lastPushed = key; invocation.setResult(v); }
     });
-    invocation.onCanceled = function () { if (un) { un(); } };
+    invocation.onCanceled = function () { clearTimeout(t); if (un) { un(); } };
   };
 }
 
-// Las funciones de CÁLCULO emiten UNA vez por el canal streaming (setResult),
-// el mismo mecanismo probado de QUOTE/TABLA: en varias builds de Office una
-// custom function no-streaming que devuelve una Promise se pinta #¡VALOR!
-// aunque el cálculo haya salido bien. Sigue siendo puntual: un solo emit por
-// invocación; al cambiar un argumento Office cancela y re-invoca.
-function makeOnce(fn) {
+// Las funciones de CÁLCULO son async CLÁSICAS: devuelven una Promise y Office
+// espera el resultado. Es el MISMO camino (POST /excel/v1/calc) que el botón
+// "Probar" del panel, que funciona siempre. El streaming quedó para los datos
+// EN VIVO (QUOTE/TABLA/…): en algunas builds el runtime de funciones no logra
+// sondear el feed y esas celdas quedan en #¡OCUPADO! — pero el cálculo puntual
+// no depende del feed, sólo del POST, así que va por la vía confiable.
+//
+// `guard(fn)` sólo normaliza los throws SÍNCRONos (p. ej. calcItem valida y
+// tira ValueError) a un CustomFunctions.Error → #N/A con motivo, en vez de
+// #¡VALOR! sin mensaje. Los rechazos async ya salen como Error via calcField.
+function guard(fn) {
   return function () {
-    var args = Array.prototype.slice.call(arguments);
-    var invocation = args.pop();
-    invocation.onCanceled = function () { /* nada que cortar: emit único */ };
-    function emit(v) { try { invocation.setResult(v); } catch (e) { /* noop */ } }
-    function emitErr(e) {
-      emit((typeof CustomFunctions !== "undefined" && e instanceof CustomFunctions.Error)
-           ? e : naError(String((e && e.message) || e)));
-    }
     try {
-      Promise.resolve(fn.apply(null, args)).then(emit, emitErr);
-    } catch (e) { emitErr(e); }
+      return Promise.resolve(fn.apply(null, arguments)).catch(function (e) {
+        return Promise.reject(
+          (typeof CustomFunctions !== "undefined" && e instanceof CustomFunctions.Error)
+            ? e : naError(String((e && e.message) || e)));
+      });
+    } catch (e) {
+      return Promise.reject(
+        (typeof CustomFunctions !== "undefined" && e instanceof CustomFunctions.Error)
+          ? e : naError(String((e && e.message) || e)));
+    }
   };
 }
 
@@ -600,12 +619,12 @@ function registerFunctions() {
   CustomFunctions.associate("CAUCION", makeStreaming(caucionGet));
   CustomFunctions.associate("TABLA", makeStreaming(tablaGet));
   CustomFunctions.associate("HIST", histFn);
-  CustomFunctions.associate("TIREA", makeOnce(tireaFn));
-  CustomFunctions.associate("PRECIO", makeOnce(precioFn));
-  CustomFunctions.associate("TNA", makeOnce(tnaFn));
-  CustomFunctions.associate("TICKET", makeOnce(ticketFn));
-  CustomFunctions.associate("CALC", makeOnce(calcFn));
-  CustomFunctions.associate("TR", makeOnce(trFn));
+  CustomFunctions.associate("TIREA", guard(tireaFn));
+  CustomFunctions.associate("PRECIO", guard(precioFn));
+  CustomFunctions.associate("TNA", guard(tnaFn));
+  CustomFunctions.associate("TICKET", guard(ticketFn));
+  CustomFunctions.associate("CALC", guard(calcFn));
+  CustomFunctions.associate("TR", guard(trFn));
 }
 
 if (typeof Office !== "undefined" && Office.onReady) {

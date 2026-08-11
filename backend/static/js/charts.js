@@ -37,18 +37,15 @@
       "border-radius:6px;padding:3px 8px;font-size:11px;line-height:1.35;display:none;z-index:6;white-space:nowrap;color:var(--text)";
     box.appendChild(tip);
 
+    var cmpSel = [];   // [{key,label}] curvas de comparación elegidas (chips)
+
     function params() {
       var p = {};
       form.querySelectorAll("[name]").forEach(function (el) {
-        if (el.multiple) {
-          // 'Comparar con' es multi-select → coma-separado (el server lo splitea).
-          p[el.name] = Array.prototype.map.call(el.selectedOptions, function (o) {
-            return o.value;
-          }).filter(Boolean).join(",");
-        } else {
-          p[el.name] = (el.type === "checkbox") ? (el.checked ? "true" : "false") : el.value;
-        }
+        p[el.name] = (el.type === "checkbox") ? (el.checked ? "true" : "false") : el.value;
       });
+      // Las comparaciones NO son campos del form (son chips): se arman acá.
+      p.curve2 = cmpSel.map(function (c) { return c.key; }).join(",");
       return new URLSearchParams(p).toString();
     }
 
@@ -181,8 +178,14 @@
             var cds = best && codesOf(best.e), code = cds ? cds[i] : null;
             if (!code) { tip.style.display = "none"; return; }
             tip.innerHTML = tipHTML(code, meta[code], best.e.kind);
+            tip.style.display = "block";
+            // Anti-clip: si el globito se saldría por la derecha/arriba, lo
+            // volteamos para que SIEMPRE se vea completo dentro del gráfico.
             var L = uu.valToPos(uu.data[0][i], "x"), T = uu.valToPos(best.yv, "y");
-            tip.style.left = (L + 10) + "px"; tip.style.top = (T - 6) + "px"; tip.style.display = "block";
+            var bw = box.clientWidth, bh = box.clientHeight, tw = tip.offsetWidth, th = tip.offsetHeight;
+            var left = L + 12; if (left + tw > bw - 4) { left = L - tw - 12; } if (left < 2) { left = 2; }
+            var top = T - th - 8; if (top < 2) { top = T + 16; } if (top + th > bh - 2) { top = bh - th - 2; }
+            tip.style.left = left + "px"; tip.style.top = top + "px";
           }],
         },
       };
@@ -243,6 +246,61 @@
 
     // Doble-click resetea el zoom (default de uPlot): volvemos a auto-encuadrar.
     box.addEventListener("dblclick", function () { userZoomed = false; });
+
+    // ── Chips de comparación (dropdown #cmp-add → chips removibles) ──────────
+    var chipsBox = document.getElementById("cmp-chips");
+    var addSel = document.getElementById("cmp-add");
+    function renderChips() {
+      if (!chipsBox) return;
+      chipsBox.innerHTML = "";
+      cmpSel.forEach(function (c, i) {
+        var chip = document.createElement("span");
+        chip.className = "cmp-chip";
+        chip.style.borderLeftColor = CMP_COLORS[i % CMP_COLORS.length];
+        chip.appendChild(document.createTextNode(c.label + " "));
+        var x = document.createElement("b"); x.textContent = "✕";
+        x.onclick = function () { cmpSel.splice(i, 1); renderChips(); load(true); };
+        chip.appendChild(x);
+        chipsBox.appendChild(chip);
+      });
+      if (addSel) addSel.style.display = (cmpSel.length >= 3) ? "none" : "";
+    }
+    if (addSel) {
+      addSel.addEventListener("change", function () {
+        var v = addSel.value;
+        var opt = addSel.selectedOptions && addSel.selectedOptions[0];
+        var lbl = (opt && opt.getAttribute("data-label")) || v;
+        addSel.value = "";
+        if (!v || cmpSel.length >= 3 || cmpSel.some(function (c) { return c.key === v; })) return;
+        cmpSel.push({ key: v, label: lbl });
+        renderChips();
+        load(true);
+      });
+    }
+    renderChips();
+
+    // ── Descargar el gráfico como PNG (para pegar en PPT) ───────────────────
+    function downloadPNG() {
+      if (!u) return;
+      var src = u.ctx && u.ctx.canvas;
+      if (!src) return;
+      var tmp = document.createElement("canvas");
+      tmp.width = src.width; tmp.height = src.height;
+      var c = tmp.getContext("2d");
+      c.fillStyle = cssVar("--bg", "#0b0e13");        // fondo sólido (el canvas es transparente)
+      c.fillRect(0, 0, tmp.width, tmp.height);
+      c.drawImage(src, 0, 0);
+      var curEl = form.querySelector("[name=curve]");
+      var a = document.createElement("a");
+      a.download = "grafico-" + ((curEl && curEl.value) || "curva") + ".png";
+      a.href = tmp.toDataURL("image/png");
+      a.click();
+    }
+    var dl = document.createElement("button");
+    dl.type = "button"; dl.className = "graf-dl"; dl.textContent = "⤓ PNG";
+    dl.title = "Descargar el gráfico como imagen";
+    dl.onclick = downloadPNG;
+    box.appendChild(dl);
 
     load(true);
     form.querySelectorAll("[name]").forEach(function (el) {

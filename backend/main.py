@@ -423,12 +423,19 @@ def create_app() -> FastAPI:
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     for name, fn in JINJA_FILTERS.items():
         templates.env.filters[name] = fn
-    # Cache-busting de estáticos: versión = mtime del CSS, así el browser
-    # re-baja style.css/app.js cuando cambian (evita ver estilos viejos).
-    try:
-        _asset_v = int((STATIC_DIR / "css" / "style.css").stat().st_mtime)
-    except OSError:
-        _asset_v = 1
+    # Cache-busting de estáticos: versión = mtime MÁS NUEVO entre el CSS y los
+    # JS servidos, así el browser re-baja CUALQUIERA que cambie. Antes miraba
+    # sólo style.css → un cambio en charts.js/app.js SIN tocar el CSS dejaba al
+    # cliente con el JS viejo cacheado (p. ej. la etiqueta de la 2ª curva del
+    # gráfico "no aparecía" hasta que el CSS cambiaba por otro motivo).
+    def _mtime(*parts: str) -> float:
+        try:
+            return STATIC_DIR.joinpath(*parts).stat().st_mtime
+        except OSError:
+            return 0.0
+    _asset_v = int(max(_mtime("css", "style.css"),
+                       _mtime("js", "app.js"),
+                       _mtime("js", "charts.js"))) or 1
     templates.env.globals["asset_v"] = _asset_v
     # Horarios de mercado para los relojes de la topbar (configurables por env).
     templates.env.globals["mkt_horarios"] = {"arg": settings.mkt_horario_arg,

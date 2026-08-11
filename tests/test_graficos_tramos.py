@@ -141,7 +141,7 @@ async def test_graficos_page_trae_controles_nuevos() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         p = await ac.get("/graficos")
     assert p.status_code == 200
-    for frag in ('name="dmax"', 'name="fuente"', 'name="curve2"', "Vector CAFCI"):
+    for frag in ('name="dmax"', 'name="fuente"', 'id="cmp-add"', "Vector CAFCI"):
         assert frag in p.text
 
 

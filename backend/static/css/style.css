@@ -1425,3 +1425,20 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
   .curve-picker button, .curve-picker select, .curve-picker input,
   .table-tools button, .btn, .btn-primary { min-height: 38px; }
 }
+
+/* Gráficos: chips de comparación + botón de descarga PNG */
+.cmp-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.cmp-chip {
+  font-size: 11px; line-height: 1.4; padding: 1px 7px; white-space: nowrap;
+  border: 1px solid var(--border); border-left: 3px solid var(--border);
+  border-radius: 10px; background: rgba(255, 255, 255, .03); color: var(--text);
+}
+.cmp-chip b { margin-left: 4px; opacity: .55; font-weight: 400; cursor: pointer; }
+.cmp-chip b:hover { opacity: 1; color: var(--red); }
+.graf-dl {
+  position: absolute; top: 6px; right: 8px; z-index: 7;
+  font-size: 11px; padding: 2px 8px; border: 1px solid var(--border);
+  border-radius: 5px; background: var(--bg); color: var(--text-muted);
+  cursor: pointer; opacity: .5;
+}
+.graf-dl:hover { opacity: 1; color: var(--text); }
