@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v7 · 2026-08-11";
+var OMS_BUILD = "v8 · 2026-08-11 (runtime clásico)";
 
 // ── Motor de datos compartido ────────────────────────────────────────────────
 var OMSFeed = (function () {

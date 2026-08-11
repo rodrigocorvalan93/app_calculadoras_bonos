@@ -1,6 +1,8 @@
 /* Taskpane del add-in OMS Bonos: token, estado del feed y modo hoja CRUDA.
- * Comparte runtime (y por lo tanto el motor OMSFeed de functions.js) con las
- * funciones custom: guardar el token acá reconecta las celdas al instante. */
+ * Modelo CLÁSICO: las funciones custom corren en su propio runtime
+ * (functions.html); el panel es un runtime aparte. Ambos cargan functions.js
+ * (cada uno su OMSFeed) y comparten el token vía OfficeRuntime.storage, así
+ * guardar el token acá reconecta las celdas en ~1 s (el poll siguiente). */
 /* global Office, Excel, OMSFeed */
 "use strict";
 
