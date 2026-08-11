@@ -453,10 +453,19 @@ def create_app() -> FastAPI:
     # cada cambio de pestaña re-preguntaba por CSS/JS/íconos (~6-8 GETs 304)
     # — RTTs puros que se sentían como lentitud de navegación, sobre todo vía
     # Tailscale/celu. Cambia un archivo ⇒ cambia la URL ⇒ cache nueva.
+    # EXCEPCIÓN: los archivos del add-in de Excel (/static/excel/*) los pide el
+    # MANIFEST, que no lleva `?v=` → con cache inmutable Office se quedaba un año
+    # con la copia vieja y no había forma de actualizar salvo borrar la caché Wef
+    # a mano. Peor: podía quedar metadata vieja (functions.json con stream:true)
+    # contra código nuevo (Promise) → celdas colgadas en #¡OCUPADO! para siempre.
+    # Son 5 archivos chicos que Excel pide una vez por sesión: revalidar es gratis.
     class _StaticInmutable(StaticFiles):
         def file_response(self, *args, **kwargs):  # noqa: ANN002, ANN003
             resp = super().file_response(*args, **kwargs)
-            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            full = str(kwargs.get("full_path") or (args[0] if args else ""))
+            en_excel = "excel" in full.replace("\\", "/").split("/")
+            resp.headers["Cache-Control"] = ("no-cache, must-revalidate" if en_excel
+                                             else "public, max-age=31536000, immutable")
             return resp
 
     app.mount("/static", _StaticInmutable(directory=str(STATIC_DIR)), name="static")

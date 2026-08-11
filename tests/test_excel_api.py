@@ -325,3 +325,25 @@ async def test_manifest_token_en_url_y_saneado() -> None:
     assert "<Evil>" not in bad.text and "token=" not in bad.text   # inválido → se descarta
     assert "token=" not in none.text                               # sin token: compat
     assert "SharedRuntime" not in none.text                        # modelo clásico
+
+
+@pytest.mark.asyncio
+async def test_addin_no_se_cachea_pero_el_front_si() -> None:
+    """Los archivos del add-in los pide el MANIFEST (sin `?v=`): con cache
+    inmutable Office se quedaba con la copia vieja para siempre (y podía mezclar
+    metadata vieja con código nuevo → celdas en #¡OCUPADO!). Deben revalidar.
+    El front web sigue inmutable: ahí el versionado va en la URL (?v=asset_v)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        for p in ("/static/excel/functions.js", "/static/excel/functions.json",
+                  "/static/excel/taskpane.html", "/static/excel/functions.html"):
+            r = await ac.get(p)
+            assert r.status_code == 200, p
+            assert "no-cache" in (r.headers.get("cache-control") or ""), p
+        for p in ("/static/css/style.css", "/static/js/charts.js"):
+            r = await ac.get(p)
+            assert r.status_code == 200, p
+            assert "immutable" in (r.headers.get("cache-control") or ""), p
