@@ -227,7 +227,7 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>{app_id}</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.1.0.0</Version>
   <ProviderName>Mesa</ProviderName>
   <DefaultLocale>es-AR</DefaultLocale>
   <DisplayName DefaultValue="OMS Bonos"/>
@@ -241,11 +241,6 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <Hosts>
     <Host Name="Workbook"/>
   </Hosts>
-  <Requirements>
-    <Sets DefaultMinVersion="1.1">
-      <Set Name="SharedRuntime" MinVersion="1.1"/>
-    </Sets>
-  </Requirements>
   <DefaultSettings>
     <SourceLocation DefaultValue="{base}/static/excel/taskpane.html"/>
   </DefaultSettings>
@@ -253,16 +248,13 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
     <Hosts>
       <Host xsi:type="Workbook">
-        <Runtimes>
-          <Runtime resid="OMS.Page.Url" lifetime="long"/>
-        </Runtimes>
         <AllFormFactors>
           <ExtensionPoint xsi:type="CustomFunctions">
             <Script>
               <SourceLocation resid="OMS.Functions.Script.Url"/>
             </Script>
             <Page>
-              <SourceLocation resid="OMS.Page.Url"/>
+              <SourceLocation resid="OMS.Functions.Page.Url"/>
             </Page>
             <Metadata>
               <SourceLocation resid="OMS.Functions.Metadata.Url"/>
@@ -271,7 +263,7 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
           </ExtensionPoint>
         </AllFormFactors>
         <DesktopFormFactor>
-          <FunctionFile resid="OMS.Page.Url"/>
+          <FunctionFile resid="OMS.Functions.Page.Url"/>
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
             <OfficeTab id="TabHome">
               <Group id="OMS.Group">
@@ -311,6 +303,7 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="OMS.Page.Url" DefaultValue="{base}/static/excel/taskpane.html"/>
+        <bt:Url id="OMS.Functions.Page.Url" DefaultValue="{base}/static/excel/functions.html"/>
         <bt:Url id="OMS.Functions.Script.Url" DefaultValue="{base}/static/excel/functions.js"/>
         <bt:Url id="OMS.Functions.Metadata.Url" DefaultValue="{base}/static/excel/functions.json"/>
       </bt:Urls>
