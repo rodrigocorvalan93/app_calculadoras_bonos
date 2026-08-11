@@ -242,7 +242,7 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
     <Host Name="Workbook"/>
   </Hosts>
   <DefaultSettings>
-    <SourceLocation DefaultValue="{base}/static/excel/taskpane.html"/>
+    <SourceLocation DefaultValue="{base}/static/excel/taskpane.html{qs}"/>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -302,8 +302,8 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
         <bt:Image id="OMS.Icon.80" DefaultValue="{base}/static/icons/icon-192.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="OMS.Page.Url" DefaultValue="{base}/static/excel/taskpane.html"/>
-        <bt:Url id="OMS.Functions.Page.Url" DefaultValue="{base}/static/excel/functions.html"/>
+        <bt:Url id="OMS.Page.Url" DefaultValue="{base}/static/excel/taskpane.html{qs}"/>
+        <bt:Url id="OMS.Functions.Page.Url" DefaultValue="{base}/static/excel/functions.html{qs}"/>
         <bt:Url id="OMS.Functions.Script.Url" DefaultValue="{base}/static/excel/functions.js"/>
         <bt:Url id="OMS.Functions.Metadata.Url" DefaultValue="{base}/static/excel/functions.json"/>
       </bt:Urls>
@@ -582,16 +582,34 @@ def _safe_manifest_base(base: str, request: Request) -> str:
     return f"{request.url.scheme}://{request.url.netloc}"
 
 
+def _safe_manifest_token(token: str) -> str:
+    """Query `?token=…` para clavar en las URLs del add-in, o "" si no es válido.
+    En el runtime CLÁSICO el runtime de funciones es SEPARADO del panel y no
+    siempre comparte OfficeRuntime.storage → sin el token en su propia URL, todas
+    las celdas dan 401. El token es `secrets.token_urlsafe` (alfabeto
+    [A-Za-z0-9_-]): validamos ese alfabeto y longitud, así no hay forma de
+    inyectar XML (no interpolamos texto crudo con `<`, `"`, `&`)."""
+    tok = (token or "").strip()
+    if 8 <= len(tok) <= 128 and all(c.isalnum() or c in "-_" for c in tok):
+        return f"?token={tok}"
+    return ""
+
+
 @router.get("/manifest.xml")
-async def manifest(request: Request, base: str = Query("")) -> Response:
+async def manifest(request: Request, base: str = Query(""), token: str = Query("")) -> Response:
     """Manifest del add-in con la URL base resuelta: `?base=` explícito (lo usa
     la tarjeta de instalación de /admin para fijar la IP), o app_base_url, o el
     host con el que se está bajando. Se descarga y se sideloadea en Excel — sin
     editar XML a mano. TODO el add-in queda clavado a esa base en esa máquina:
     para otra compu conviene bajarlo apuntado a la IP del server, no al nombre
     de la notebook. El `base` se valida contra una allowlist de hosts y se
-    reconstruye desde componentes (no se interpola texto crudo en el XML)."""
+    reconstruye desde componentes (no se interpola texto crudo en el XML).
+
+    `?token=` (opcional) se embebe en las URLs de taskpane.html/functions.html
+    → el runtime clásico de funciones lee su token de su propia URL (necesario
+    donde OfficeRuntime.storage no lo comparte entre runtimes)."""
     base = _safe_manifest_base(base, request)
-    xml = _MANIFEST_XML.format(app_id=_MANIFEST_ID, base=base)
+    qs = _safe_manifest_token(token)
+    xml = _MANIFEST_XML.format(app_id=_MANIFEST_ID, base=base, qs=qs)
     return Response(content=xml, media_type="application/xml",
                     headers={"Content-Disposition": 'attachment; filename="oms-bonos-manifest.xml"'})
