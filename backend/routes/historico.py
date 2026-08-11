@@ -274,6 +274,12 @@ async def historicos_curva_fechas(
 
     from backend.services import curves as curves_svc, tr_realizado
 
+    loop = asyncio.get_running_loop()
+    # 1ª visita a esta pestaña: ensure_loaded lee el Excel de curvas (~20k filas,
+    # ~3-4s) bajo lock y el warmup NO lo precalienta → correrlo inline congelaba
+    # el event loop (y con él /market/seq y todos los paneles vivos) para TODOS.
+    # Offload upfront: después meta()/curves_with_history()/scatter son in-memory.
+    await loop.run_in_executor(None, historico_byma.ensure_loaded)
     meta = historico_byma.meta()
     keys = historico_byma.curves_with_history(None, None, proy)
     labels = {cv.key: cv.label for cv in curves_svc.list_curves()}
@@ -295,7 +301,6 @@ async def historicos_curva_fechas(
     fechas = [f for f in (f1, f2, f3, f4) if f]
     scatter = tr_tabla = None
     if sel and meta.get("loaded"):
-        loop = asyncio.get_running_loop()
         scatter = _scatter_chart(historico_byma.scatter_by_dates(sel, fechas, metric, proy))
         if trd1 and trd2 and trd1 < trd2:
             tr_tabla = await loop.run_in_executor(

@@ -76,8 +76,11 @@ async def dolares_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
 
 
 @router.get("/dolares/tables", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def dolares_tables(request: Request, plazo: str = "24hs") -> HTMLResponse:
-    """Partial htmx: tablas FX implícito + canje (auto-refresh)."""
+    """Partial htmx: tablas FX implícito + canje (auto-refresh). seq_cached como
+    sus hermanos oficial/rail → 1 render por tick compartido entre N viewers
+    (antes cada viewer re-renderizaba el partial en cada md-update)."""
     return _render(request, "partials/dolares_tables.html", **_tables_ctx(plazo))
 
 

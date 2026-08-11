@@ -549,16 +549,21 @@ def compute_metrics(
 
     try:
         if mode == "precio":
+            # calcula_tirea ya corre generate_cashflows + calcula_intereses_corridos
+            # adentro (rentafija:639-640) → no repetir el IC (recomputo idéntico).
             obj.calcula_tirea(float(value) / 100.0, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
         elif mode == "tir":
+            # idem: calcula_precio arma cashflows + IC adentro (rentafija:768-769).
             obj.calcula_precio(float(value), canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
         elif mode == "tna":
-            obj.generate_cashflows(canonical_settle)
+            # calcula_intereses_corridos (NO generate_cashflows) para poblar
+            # `dias_remanentes` ANTES de tirea_from_tna: la convención TNA del
+            # bucket default (LECAP/bullets ARS) es días_remanentes/365 y, sin ese
+            # atributo, tna_convention caía a la rama "—" → fallback con otra base
+            # (round-trip TNA→precio→TNA no inverso). El IC arma los cashflows igual.
+            obj.calcula_intereses_corridos(canonical_settle)
             tir = tirea_from_tna(obj, float(value), freq_override, base_override)
             obj.calcula_precio(tir, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
         elif mode == "margen":
             idx_name = getattr(obj, "index", None)
             bench_pct = _bench_pct(idx_name)
@@ -570,10 +575,9 @@ def compute_metrics(
                                  "no se puede pricear por margen.")
                 return base
             tna_target = (bench_pct / 100.0) + float(value)
-            obj.generate_cashflows(canonical_settle)
+            obj.calcula_intereses_corridos(canonical_settle)   # idem tna: dias_remanentes antes de tirea_from_tna
             tir = tirea_from_tna(obj, tna_target, freq_override, base_override)
             obj.calcula_precio(tir, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
         else:
             base["error"] = f"Modo desconocido: {mode!r}"
             return base

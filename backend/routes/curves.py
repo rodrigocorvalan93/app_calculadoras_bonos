@@ -577,6 +577,13 @@ async def mercado_book(
 #   fwd = [(1+y2)^t2 / (1+y1)^t1]^(1/(t2−t1)) − 1   (igual que plotter).
 forwards_router = APIRouter(tags=["forwards"])
 
+# Gap mínimo de duration (años ≈ 11 días): con t2−t1 → 0 el exponente 1/(t2−t1)
+# infla el forward a un valor FINITO pero absurdo (no siempre tira OverflowError,
+# así que el `except` no lo atrapa) que contamina vmin/vmax y colapsa el heatmap.
+# Mismo umbral que el histórico (forwards_hist._MIN_GAP) — compartido para no
+# divergir entre la matriz en vivo y la serie histórica.
+from backend.services.forwards_hist import _MIN_GAP as _FWD_MIN_GAP  # noqa: E402
+
 
 def _forwards_matrix(rows: list[dict], metric: str = "tirea") -> dict:
     """Matriz triangular de forwards. `metric`:
@@ -612,7 +619,7 @@ def _forwards_matrix(rows: list[dict], metric: str = "tirea") -> dict:
     finite: list[float] = []
     for i in range(n):
         for j in range(i + 1, n):
-            if ts[j] <= ts[i]:
+            if ts[j] - ts[i] < _FWD_MIN_GAP:   # gap ínfimo → forward absurdo (mismo guard que el histórico)
                 continue
             try:
                 if margen:

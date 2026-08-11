@@ -35,9 +35,13 @@ def model(x, b0, b1, b2, b3, t1, t2):
     e1 = np.exp(-z1)
     z2 = x / t2
     e2 = np.exp(-z2)
-    f1 = np.where(x == 0.0, 1.0, (1.0 - e1) / z1)
-    f2 = np.where(x == 0.0, 0.0, f1 - e1)
-    f3 = np.where(x == 0.0, 0.0, (1.0 - e2) / z2 - e2)
+    # np.where ya resuelve el límite x→0 (z=0), pero numpy evalúa la rama
+    # descartada igual → 0/0 spurio en x==0. errstate silencia ese warning
+    # (el resultado es correcto: la rama nan se descarta).
+    with np.errstate(invalid="ignore", divide="ignore"):
+        f1 = np.where(x == 0.0, 1.0, (1.0 - e1) / z1)
+        f2 = np.where(x == 0.0, 0.0, f1 - e1)
+        f3 = np.where(x == 0.0, 0.0, (1.0 - e2) / z2 - e2)
     return b0 + b1 * f1 + b2 * f2 + b3 * f3
 
 
@@ -144,7 +148,11 @@ def eval_at(xs: List[float], ys: List[float], xq: List[float], threshold: float 
         return None
     popt, x_min, x_max = f
     yq = model(np.asarray(xq, dtype=np.float64), *popt)
-    return [float(v) if (x_min <= float(x) <= x_max) else None for x, v in zip(xq, yq)]
+    # isfinite: un fit divergente (corp poco operado) puede dar inf/nan DENTRO del
+    # rango; Starlette serializa con allow_nan=False → json.dumps lanza y tira un
+    # 500 que se lleva TODO el gráfico, no sólo la línea NSS. None = sin punto.
+    return [float(v) if (x_min <= float(x) <= x_max and np.isfinite(v)) else None
+            for x, v in zip(xq, yq)]
 
 
 def estimate(duration: float, xs: List[float], ys: List[float],

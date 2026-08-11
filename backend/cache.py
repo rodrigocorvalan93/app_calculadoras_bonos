@@ -10,6 +10,7 @@ sólo se toma para escribir/evictar. Misma API pública que antes
 """
 from __future__ import annotations
 
+import itertools
 import threading
 import time
 from typing import Any, Callable, Dict, Hashable, Tuple
@@ -71,14 +72,21 @@ class LockedTTLCache:
         self._compute_locks = {k: lk for k, lk in self._compute_locks.items() if k in alive}
 
     def _evict_locked(self, now: float) -> None:
-        # Primero los expirados; si aún sobra, el bloque de menor expiry.
-        for k in [k for k, (_, exp) in self._store.items() if exp <= now]:
-            self._store.pop(k, None)
+        # El TTL es constante por cache, así que el orden de expiry == orden de
+        # INSERCIÓN, y el dict lo preserva → evictar el bloque más viejo por
+        # inserción es O(k) vía islice, sin el sorted() de las ~16k entradas bajo
+        # `_lock` (era un spike de p99 justo con mercado activo + curvas anchas,
+        # y encima el scan previo de expirados no liberaba nada con ttl=3600).
+        # Los ya-expirados quedan al frente y caen en el mismo corte; el hit path
+        # lock-free igual los trata como miss. touch() refresca el TTL sin mover
+        # la posición: a lo sumo evicta temprano una entrada recién tocada
+        # (recomputo), nunca devuelve dato viejo.
         over = len(self._store) - self._maxsize
-        if over > 0:
-            oldest = sorted(self._store, key=lambda k: self._store[k][1])
-            for k in oldest[: over + self._maxsize // 10 + 1]:
-                self._store.pop(k, None)
+        if over <= 0:
+            return
+        drop = over + self._maxsize // 10 + 1
+        for k in list(itertools.islice(self._store, drop)):
+            self._store.pop(k, None)
 
     def get(self, key: Hashable, default: Any = None) -> Any:
         """Lectura pura, lock-free (mismo hit path que get_or_compute): valor
