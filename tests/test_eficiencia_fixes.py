@@ -112,6 +112,22 @@ def test_cache_touch_reinserta_al_final() -> None:
     assert c.get(1) is None                            # la más vieja real se fue
 
 
+# ── Well-known de Office: JSON con schema documentado, público, sin 404 ──────
+@pytest.mark.asyncio
+async def test_officeaddins_allowed_json() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.get("/.well-known/microsoft-officeaddins-allowed.json")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data.get("allowed"), list)
+    assert any(u.endswith("/static/excel/functions.js") for u in data["allowed"])
+
+
 # ── /dolares/tables comparte render por tick como sus hermanos ────────────────
 @pytest.mark.asyncio
 async def test_dolares_tables_seq_cached() -> None:

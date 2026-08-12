@@ -495,14 +495,22 @@ def create_app() -> FastAPI:
     app.include_router(alertas_router)
     app.include_router(excel_router)
 
+    # /.well-known/microsoft-officeaddins-allowed.json: Office lo sondea al
+    # cargar el runtime de funciones (allowlist SSO/CORS del host). No usamos
+    # SSO, pero servirlo con el schema documentado ({"allowed": [<js>]}) saca
+    # el 404 rojo del log (confundía el diagnóstico del add-in) y cubre builds
+    # que lo exijan. Self-referencial al host del request — sin input de user.
+    @app.get("/.well-known/microsoft-officeaddins-allowed.json")
+    async def officeaddins_allowed(request: Request) -> JSONResponse:
+        base = str(request.base_url).rstrip("/")
+        return JSONResponse({"allowed": [f"{base}/static/excel/functions.js"]})
+
     # ── Login wall + gating por rol ───────────────────────────────────────
     # Público (sin sesión): login/recuperación, estáticos, health, favicon.
     _PUBLIC_EXACT = {"/login", "/logout", "/forgot", "/reset", "/healthz",
                      "/favicon.ico", "/favicon.png"}
-    # /.well-known/*: Office sondea /.well-known/microsoft-officeaddins-allowed.json
-    # al cargar el runtime de funciones. Sin esto, el muro lo mandaba a /login
-    # (302 → HTML) en vez de un 404 limpio; que sea público lo deja responder
-    # "no existe" (no usamos SSO), que es lo que Office espera como fallback.
+    # /.well-known/*: público (sin muro de login) para que Office reciba el
+    # JSON de arriba —o un 404 limpio— y no un 302 a /login con HTML adentro.
     _PUBLIC_PREFIX = ("/static/", "/.well-known/")
     # Páginas / endpoints sensibles reservados al superuser (no son pestañas
     # gateables). /ordenes/live (armar el envío REAL al broker) y /ordenes/kill
