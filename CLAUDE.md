@@ -169,7 +169,11 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
   no sale de la máquina (`/excel/ca.crt` sirve SOLO el certificado público).
   `/excel/v1/beacon` es público a propósito (diagnóstico del runtime headless:
   reporta cuando el token falta) — no devuelve datos, sólo loguea sanitizado
-  con throttle.
+  con throttle. `/excel/crl` también es público: es el punto de distribución
+  de CRL que llevan los certs del puente (schannel lo baja sin cookies; sin
+  él, máquinas con política estricta cortan el handshake con
+  `CRYPT_E_NO_REVOCATION_CHECK`) — sirve una CRL vacía firmada por la CA
+  local, no expone datos.
 
 ## Tests
 

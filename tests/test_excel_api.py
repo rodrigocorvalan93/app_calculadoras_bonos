@@ -134,6 +134,34 @@ async def test_manifest_publico_y_hist(auth_on):
         assert (await ac.get("/excel/v1/hist/a3500")).status_code == 401
 
 
+async def test_crl_publica_sin_token(auth_on, tmp_path, monkeypatch):
+    """/excel/crl es el punto de distribución que llevan los certs del puente:
+    schannel la baja SIN cookies ni token (por eso es pública) para poder
+    verificar revocación — sin ella el handshake muere con
+    CRYPT_E_NO_REVOCATION_CHECK y las celdas dan 'Network request failed'."""
+    from cryptography import x509
+
+    from backend.tools import https_local
+
+    monkeypatch.setattr(settings, "tls_cert_dir", str(tmp_path))
+    excel_route._crl_cache.clear()
+    try:
+        async with _client() as ac:
+            # sin CA generada → 404 claro, no un 500
+            assert (await ac.get("/excel/crl")).status_code == 404
+            https_local.generate(tmp_path, ["localhost", "127.0.0.1"])
+            r = await ac.get("/excel/crl")
+            assert r.status_code == 200
+            assert r.headers["content-type"].startswith("application/pkix-crl")
+            crl = x509.load_der_x509_crl(r.content)
+            ca = x509.load_pem_x509_certificate((tmp_path / https_local.CA_CERT).read_bytes())
+            assert crl.is_signature_valid(ca.public_key())
+            # segunda bajada: cacheada (mismos bytes)
+            assert (await ac.get("/excel/crl")).content == r.content
+    finally:
+        excel_route._crl_cache.clear()
+
+
 def test_snapshot_json_compacto(store_con_datos):
     body = excel_route._snapshot_bytes("")
     data = json.loads(body)

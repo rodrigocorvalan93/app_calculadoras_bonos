@@ -267,6 +267,38 @@ async def ca_cert() -> Response:
                     headers={"Content-Disposition": 'attachment; filename="oms-local-ca.crt"'})
 
 
+# CRL de la CA local, firmada on-demand y cacheada (la firma RSA es ~1 ms;
+# schannel además la cachea del suyo hasta next_update).
+_CRL_TTL = 3600.0
+_crl_cache: Dict[str, Any] = {}
+
+
+@router.get("/crl")
+async def crl() -> Response:
+    """CRL (vacía) de la CA local — el punto de distribución (CDP) que llevan
+    los certificados del puente. Schannel (runtime de Excel, WinHTTP, curl)
+    necesita PODER verificar revocación: en máquinas con política estricta un
+    cert sin CRL corta el handshake con CRYPT_E_NO_REVOCATION_CHECK y las
+    celdas quedan en "Network request failed" aunque la CA esté confiada.
+    PÚBLICO (sin token): Windows la baja sin cookies, y una CRL vacía no
+    expone datos. Va por http (uvicorn directo, no el puente): la validación
+    de la CRL no puede colgar del mismo https que se está validando."""
+    from backend.services import tls_bridge
+    from backend.tools import https_local
+
+    now = time.monotonic()
+    der = _crl_cache.get("der")
+    if der is None or now >= _crl_cache.get("exp", 0.0):
+        d = tls_bridge.cert_dir()
+        if not (d / https_local.CA_CERT).exists() or not (d / https_local.CA_KEY).exists():
+            return PlainTextResponse("Sin CA local: correr `python -m backend.tools.https_local` "
+                                     "en el server (el .bat lo hace solo).", status_code=404)
+        der = https_local.build_crl(d)
+        _crl_cache["der"], _crl_cache["exp"] = der, now + _CRL_TTL
+    return Response(content=der, media_type="application/pkix-crl",
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
 # ── Manifest del add-in (público: es el instalador, no expone datos) ─────────
 _MANIFEST_ID = "7c1f4c1e-9b0a-4b6e-9a51-0f2a9e6d4bb1"
 

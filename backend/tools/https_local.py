@@ -10,11 +10,19 @@ máquina confíe.
 
 Este módulo hace lo mismo que mkcert, sin instalar nada extra:
 
-  1. genera una CA local propia (una por máquina) y un certificado para
+  1. genera una CA local propia (se REUSA mientras esté vigente — regenerar
+     la hoja no invalida la confianza ya instalada) y un certificado para
      localhost / 127.0.0.1 / ::1 / la IP LAN, firmado por esa CA;
   2. en Windows, confía la CA en el store DEL USUARIO con
      `certutil -user -addstore -f Root` (no pide admin; WebView2/Edge/Chrome
-     leen ese store — es lo que valida el webview de Office).
+     leen ese store — es lo que valida el webview de Office);
+  3. la hoja lleva un punto de distribución de CRL (http://127.0.0.1:8000/
+     excel/crl, servido por la app): sin él, el schannel de máquinas con
+     política estricta (GPO/EDR corporativo) corta el handshake con
+     CRYPT_E_NO_REVOCATION_CHECK aunque la CA esté confiada, y las celdas
+     =OMS.* mueren con "Network request failed". Verificable con
+     `curl.exe -v https://localhost:8443/excel/ca.crt` (curl exige revocación
+     SIEMPRE: si curl pasa, Office pasa).
 
 Con los archivos presentes, el puente TLS (backend/services/tls_bridge.py)
 levanta https://localhost:8443 al arrancar la app y el manifest se baja de
@@ -47,6 +55,24 @@ LEAF_CERT = "oms-localhost.pem"      # fullchain: hoja + CA
 LEAF_KEY = "oms-localhost-key.pem"
 
 _RENOVAR_ANTES_DIAS = 30             # margen antes del vencimiento de la hoja
+
+# Puerto http de la app donde vive GET /excel/crl (el del .bat /
+# tls_target_port). El CDP queda HORNEADO en el certificado: si corrés
+# uvicorn en otro puerto, regenerá con --crl-port.
+_CRL_PORT_DEFAULT = 8000
+_CRL_DIAS = 7                        # vigencia de cada CRL firmada on-demand
+
+
+def default_crl_urls(port: int = _CRL_PORT_DEFAULT) -> List[str]:
+    """URLs del punto de distribución de CRL (extensión CDP de la hoja).
+
+    Sin CDP, schannel no tiene DÓNDE verificar revocación, y en máquinas con
+    política estricta (GPO/EDR corporativo — curl.exe siempre) el handshake
+    muere con CRYPT_E_NO_REVOCATION_CHECK aunque la CA esté confiada: el
+    runtime de Excel queda en "Network request failed". http a propósito:
+    la validación de la CRL no puede colgar del mismo https que se está
+    validando (huevo-gallina)."""
+    return [f"http://127.0.0.1:{port}/excel/crl", f"http://localhost:{port}/excel/crl"]
 
 
 def default_cert_dir() -> Path:
@@ -97,7 +123,8 @@ def _san_objects(hosts: List[str]):
     return out
 
 
-def _leaf_ok(cert_dir: Path, hosts: List[str]) -> Tuple[bool, str]:
+def _leaf_ok(cert_dir: Path, hosts: List[str],
+             crl_urls: Optional[List[str]] = None) -> Tuple[bool, str]:
     """(vigente_y_cubre_todo, motivo si no)."""
     from cryptography import x509
 
@@ -125,56 +152,133 @@ def _leaf_ok(cert_dir: Path, hosts: List[str]) -> Tuple[bool, str]:
     faltan = [h for h in hosts if h.lower() not in have and h not in have]
     if faltan:
         return False, f"SAN sin {', '.join(faltan)}"
+    # CDP: certs anteriores a este check no lo traen — schannel estricto los
+    # rechaza con CRYPT_E_NO_REVOCATION_CHECK, así que hay que regenerarlos.
+    try:
+        cdp = cert.extensions.get_extension_for_class(x509.CRLDistributionPoints).value
+        uris = {str(getattr(n, "value", "")) for dp in cdp for n in (dp.full_name or [])}
+    except Exception:  # noqa: BLE001 — sin extensión ⇒ regenerar
+        return False, "sin CDP (revocación schannel)"
+    faltan_crl = [u for u in (crl_urls or default_crl_urls()) if u not in uris]
+    if faltan_crl:
+        return False, f"CDP sin {', '.join(faltan_crl)}"
     return True, ""
 
 
+def _load_ca(cert_dir: Path):
+    """(ca_cert, ca_key) si los archivos existen, la clave corresponde al cert
+    y a la CA le queda cuerda; None ⇒ emitir una CA nueva. Reusar la CA es lo
+    que mantiene válida la confianza ya instalada (certutil en cada máquina);
+    y con certs/ compartido vía OneDrive entre compus, evita el ping-pong de
+    CAs nuevas cada vez que una máquina regenera la hoja."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+
+    ca_c, ca_k = cert_dir / CA_CERT, cert_dir / CA_KEY
+    if not ca_c.exists() or not ca_k.exists():
+        return None
+    try:
+        cert = x509.load_pem_x509_certificate(ca_c.read_bytes())
+        key = serialization.load_pem_private_key(ca_k.read_bytes(), password=None)
+    except Exception:  # noqa: BLE001 — ilegible ⇒ CA nueva
+        return None
+    vence = getattr(cert, "not_valid_after_utc", None)
+    if vence is None:
+        vence = cert.not_valid_after.replace(tzinfo=dt.timezone.utc)
+    if vence <= dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=_RENOVAR_ANTES_DIAS):
+        return None
+    try:
+        if key.public_key().public_numbers() != cert.public_key().public_numbers():
+            return None
+    except Exception:  # noqa: BLE001 — tipo de clave inesperado ⇒ CA nueva
+        return None
+    return cert, key
+
+
+def _san_existente(cert_dir: Path) -> List[str]:
+    """Hosts que ya cubre la hoja actual (si la hay). Al regenerar se UNEN con
+    los de esta máquina: con certs/ sincronizado entre dos compus (hostnames e
+    IPs distintos), cada una sumaba sus hosts pisando los de la otra en un
+    loop infinito de regeneraciones — la unión converge en una hoja que cubre
+    a ambas."""
+    from cryptography import x509
+
+    leaf_path = cert_dir / LEAF_CERT
+    if not leaf_path.exists():
+        return []
+    try:
+        cert = x509.load_pem_x509_certificate(leaf_path.read_bytes())
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except Exception:  # noqa: BLE001
+        return []
+    return ([str(v) for v in san.get_values_for_type(x509.DNSName)]
+            + [str(v) for v in san.get_values_for_type(x509.IPAddress)])
+
+
 def generate(cert_dir: Optional[Path] = None, hosts: Optional[List[str]] = None,
-             force: bool = False) -> dict:
+             force: bool = False, crl_urls: Optional[List[str]] = None) -> dict:
     """Genera (si hace falta) CA + certificado hoja. Devuelve un dict con
-    `regenerated` y los paths. Lanza ImportError si falta `cryptography`."""
+    `regenerated` / `ca_reused` y los paths. Lanza ImportError si falta
+    `cryptography`. La CA vigente se REUSA (regenerar la hoja no invalida la
+    confianza ya instalada con certutil)."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
     cert_dir = cert_dir or default_cert_dir()
-    hosts = hosts or wanted_hosts()
+    hosts = list(hosts or wanted_hosts())
+    crl_urls = crl_urls or default_crl_urls()
     cert_dir.mkdir(parents=True, exist_ok=True)
     paths = {"ca_cert": cert_dir / CA_CERT, "ca_key": cert_dir / CA_KEY,
              "leaf_cert": cert_dir / LEAF_CERT, "leaf_key": cert_dir / LEAF_KEY}
 
     if not force:
-        ok, motivo = _leaf_ok(cert_dir, hosts)
+        ok, motivo = _leaf_ok(cert_dir, hosts, crl_urls)
         if ok:
-            return {"regenerated": False, "reason": "vigente", "hosts": hosts, **paths}
+            return {"regenerated": False, "ca_reused": True, "reason": "vigente",
+                    "hosts": hosts, "crl_urls": crl_urls, **paths}
     else:
         motivo = "--force"
+
+    # SAN convergente entre máquinas que comparten certs/ (OneDrive): lo que
+    # ya cubría la hoja + lo que necesita esta máquina.
+    for h in _san_existente(cert_dir):
+        if h not in hosts:
+            hosts.append(h)
 
     now = dt.datetime.now(dt.timezone.utc)
     atras = now - dt.timedelta(days=1)          # margen por relojes corridos
 
-    # CA local (una por máquina; el hostname en el CN la identifica en el store)
-    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    ca_name = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, f"OMS Bonos CA local ({socket.gethostname()})"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "OMS Bonos"),
-    ])
-    ca_cert = (
-        x509.CertificateBuilder()
-        .subject_name(ca_name).issuer_name(ca_name)
-        .public_key(ca_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(atras).not_valid_after(now + dt.timedelta(days=3650))
-        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-        .add_extension(x509.KeyUsage(digital_signature=False, content_commitment=False,
-                                     key_encipherment=False, data_encipherment=False,
-                                     key_agreement=False, key_cert_sign=True,
-                                     crl_sign=True, encipher_only=False,
-                                     decipher_only=False), critical=True)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
-                       critical=False)
-        .sign(ca_key, hashes.SHA256())
-    )
+    # CA local: se reusa la vigente si la hay (mantiene la confianza instalada);
+    # sólo se emite una nueva si falta, venció o los archivos están rotos.
+    loaded = _load_ca(cert_dir)
+    ca_reused = loaded is not None
+    if ca_reused:
+        ca_cert, ca_key = loaded
+        ca_name = ca_cert.subject
+    else:
+        ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        ca_name = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, f"OMS Bonos CA local ({socket.gethostname()})"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "OMS Bonos"),
+        ])
+        ca_cert = (
+            x509.CertificateBuilder()
+            .subject_name(ca_name).issuer_name(ca_name)
+            .public_key(ca_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(atras).not_valid_after(now + dt.timedelta(days=3650))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(x509.KeyUsage(digital_signature=False, content_commitment=False,
+                                         key_encipherment=False, data_encipherment=False,
+                                         key_agreement=False, key_cert_sign=True,
+                                         crl_sign=True, encipher_only=False,
+                                         decipher_only=False), critical=True)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
+                           critical=False)
+            .sign(ca_key, hashes.SHA256())
+        )
 
     # Certificado hoja para los hosts locales
     leaf_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -196,18 +300,54 @@ def generate(cert_dir: Optional[Path] = None, hosts: Optional[List[str]] = None,
                        critical=False)
         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
                        critical=False)
+        # CDP: sin él, schannel estricto corta con CRYPT_E_NO_REVOCATION_CHECK
+        # (GET /excel/crl sirve la CRL firmada por esta CA).
+        .add_extension(x509.CRLDistributionPoints([
+            x509.DistributionPoint(full_name=[x509.UniformResourceIdentifier(u)],
+                                   relative_name=None, reasons=None, crl_issuer=None)
+            for u in crl_urls]), critical=False)
         .sign(ca_key, hashes.SHA256())
     )
 
     pem = serialization.Encoding.PEM
-    paths["ca_cert"].write_bytes(ca_cert.public_bytes(pem))
-    paths["ca_key"].write_bytes(ca_key.private_bytes(
-        pem, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
+    if not ca_reused:      # CA reusada ⇒ no reescribir (menos churn de OneDrive)
+        paths["ca_cert"].write_bytes(ca_cert.public_bytes(pem))
+        paths["ca_key"].write_bytes(ca_key.private_bytes(
+            pem, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
     # fullchain (hoja + CA): lo que espera ssl.load_cert_chain / el puente TLS
     paths["leaf_cert"].write_bytes(leaf.public_bytes(pem) + ca_cert.public_bytes(pem))
     paths["leaf_key"].write_bytes(leaf_key.private_bytes(
         pem, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
-    return {"regenerated": True, "reason": motivo, "hosts": hosts, **paths}
+    return {"regenerated": True, "ca_reused": ca_reused, "reason": motivo,
+            "hosts": hosts, "crl_urls": crl_urls, **paths}
+
+
+def build_crl(cert_dir: Optional[Path] = None, days: int = _CRL_DIAS) -> bytes:
+    """CRL (vacía — acá no se revoca nada) firmada por la CA local, en DER.
+
+    Es lo que sirve GET /excel/crl: le da a schannel el lugar donde verificar
+    la revocación que el CDP del certificado promete. Se firma on-demand con
+    `next_update` corto ⇒ nunca queda una CRL vencida dando vueltas aunque la
+    app esté semanas sin reiniciar."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+
+    cert_dir = cert_dir or default_cert_dir()
+    ca_cert = x509.load_pem_x509_certificate((cert_dir / CA_CERT).read_bytes())
+    ca_key = serialization.load_pem_private_key((cert_dir / CA_KEY).read_bytes(), password=None)
+    now = dt.datetime.now(dt.timezone.utc)
+    crl = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(ca_cert.subject)
+        .last_update(now - dt.timedelta(days=1))     # margen por relojes corridos
+        .next_update(now + dt.timedelta(days=days))
+        # CRLNumber monotónico (RFC 5280 lo exige): el epoch alcanza y sobra
+        .add_extension(x509.CRLNumber(int(now.timestamp())), critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()),
+                       critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    return crl.public_bytes(serialization.Encoding.DER)
 
 
 def trust_ca_windows(ca_cert_path: Path) -> Tuple[bool, str]:
@@ -233,6 +373,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--host", action="append", default=[],
                     help="host/IP extra para el SAN (repetible)")
     ap.add_argument("--dir", default="", help="carpeta destino (default: <repo>/certs)")
+    ap.add_argument("--crl-port", type=int, default=_CRL_PORT_DEFAULT,
+                    help="puerto http de la app para el punto CRL del cert (default 8000)")
     ap.add_argument("--quiet", action="store_true", help="sólo errores")
     args = ap.parse_args(argv)
 
@@ -249,13 +391,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     cert_dir = Path(args.dir) if args.dir else default_cert_dir()
-    res = generate(cert_dir, wanted_hosts(args.host), force=args.force)
+    res = generate(cert_dir, wanted_hosts(args.host), force=args.force,
+                   crl_urls=default_crl_urls(args.crl_port))
     if res["regenerated"]:
-        say(f"[https] certificado nuevo en {cert_dir} para: {', '.join(res['hosts'])}")
+        que = ("hoja nueva (misma CA: la confianza ya instalada sigue valiendo)"
+               if res["ca_reused"] else "CA + certificado nuevos")
+        say(f"[https] {que} en {cert_dir} para: {', '.join(res['hosts'])} "
+            f"(motivo: {res['reason']})")
         ok, det = trust_ca_windows(res["ca_cert"])
         say(f"[https] {det}" if ok else f"[https] CA no confiada automáticamente: {det}")
         if not ok and sys.platform == "win32":
             print(f"[https] a mano:  certutil -user -addstore -f Root {res['ca_cert']}")
+        say("[https] reiniciá la app (el puente carga el cert al arrancar) y cerrá "
+            "Excel POR COMPLETO antes de reabrirlo")
     else:
         say(f"[https] certificado vigente en {cert_dir} (cubre {', '.join(res['hosts'])}) — nada que hacer")
         # Re-asegurar la confianza es gratis e idempotente (p.ej. certs copiados
