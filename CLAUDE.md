@@ -160,6 +160,16 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
 - **`/conexion`**: la allowlist de hosts para no-superuser es la barrera
   anti-harvesting (el login MANDA la clave al host elegido). Mantené el
   match exacto de URL normalizada; la URL libre es superuser-only.
+- **Puente TLS del add-in** (`services/tls_bridge.py`): listener https
+  (default `127.0.0.1:8443`) que proxya al uvicorn http local — Office exige
+  https para el runtime de funciones custom. PISA `X-Forwarded-*` del cliente
+  (nadie inyecta scheme/IP) y fuerza `Connection: close` (1 request por
+  conexión → no parsea framing de respuestas). Certs estilo mkcert en
+  `certs/` (gitignored) vía `backend/tools/https_local.py`; la clave de la CA
+  no sale de la máquina (`/excel/ca.crt` sirve SOLO el certificado público).
+  `/excel/v1/beacon` es público a propósito (diagnóstico del runtime headless:
+  reporta cuando el token falta) — no devuelve datos, sólo loguea sanitizado
+  con throttle.
 
 ## Tests
 

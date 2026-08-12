@@ -135,6 +135,22 @@ class Settings(BaseSettings):
     app_smtp_password: str = ""
     app_smtp_from: str = ""
 
+    # ── HTTPS local para el add-in de Excel (puente TLS) ──────────────────
+    # Office exige https para el runtime de funciones custom (el taskpane
+    # tolera http; las celdas =OMS.* no arrancan). Con los certs presentes
+    # (python -m backend.tools.https_local — el .bat lo corre solo), la app
+    # levanta un listener TLS que proxya al uvicorn http local y el manifest
+    # se baja de https://localhost:<tls_port>. TLS_BRIDGE=0 lo apaga.
+    tls_bridge: bool = True
+    tls_port: int = 8443
+    # Dónde escucha el puente (loopback por default; 0.0.0.0 sólo para el
+    # flujo server-centralizado, con la IP LAN en el SAN del cert).
+    tls_bridge_host: str = "127.0.0.1"
+    # Puerto http del uvicorn local (el destino del puente; el del .bat).
+    tls_target_port: int = 8000
+    # Carpeta de los certs. Vacío → <repo>/certs (gitignored).
+    tls_cert_dir: str = ""
+
     # ── Mails operativos (cierre + watchdog del feed) ─────────────────────
     # Destino de los mails operativos. Vacío → mail del superuser del store
     # (o la casilla SMTP como último recurso).

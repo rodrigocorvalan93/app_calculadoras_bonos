@@ -67,7 +67,7 @@ class _QuietPolls(logging.Filter):
     y los partials live. Costo-0: menos I/O de log y consola legible; los
     endpoints 'reales' se siguen logueando igual."""
     _NOISY = ("/market/seq", "/tape", "/dolares/rail", "/news/marquee",
-              "/excel/v1/seq", "/excel/v1/snapshot")
+              "/excel/v1/seq", "/excel/v1/snapshot", "/excel/v1/beacon")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -357,9 +357,24 @@ async def lifespan(app: FastAPI):
 
         watchdog_task = asyncio.create_task(_feed_watchdog(), name="feed-watchdog")
 
+    # Puente HTTPS del add-in de Excel: Office exige https para el runtime de
+    # funciones custom (el taskpane tolera http; las celdas =OMS.* no arrancan
+    # y quedan #N/D con "iniciando el runtime…"). Con certs presentes
+    # (backend/tools/https_local, el .bat los genera) escucha en tls_port y
+    # proxya al uvicorn local. Failure-silent: sin certs la app sigue en http.
+    from backend.services import tls_bridge
+    try:
+        await tls_bridge.start_from_settings()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] tls bridge start failed (la app sigue por http)")
+
     yield
 
     logger.info("[main] shutting down")
+    try:
+        await tls_bridge.stop()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] tls bridge stop failed")
     snapshot_task.cancel()
     alertas_task.cancel()
     if watchdog_task is not None:
@@ -496,14 +511,17 @@ def create_app() -> FastAPI:
     app.include_router(excel_router)
 
     # /.well-known/microsoft-officeaddins-allowed.json: Office lo sondea al
-    # cargar el runtime de funciones (allowlist SSO/CORS del host). No usamos
-    # SSO, pero servirlo con el schema documentado ({"allowed": [<js>]}) saca
-    # el 404 rojo del log (confundía el diagnóstico del add-in) y cubre builds
-    # que lo exijan. Self-referencial al host del request — sin input de user.
+    # cargar el runtime de funciones (allowlist de archivos del add-in). No
+    # usamos SSO, pero servirlo con el schema documentado ({"allowed": […]})
+    # saca el 404 rojo del log y cubre builds que lo exijan. Listamos el
+    # script Y las páginas: el runtime WebView2 carga functions.html, no sólo
+    # functions.js. Self-referencial al host del request — sin input de user.
     @app.get("/.well-known/microsoft-officeaddins-allowed.json")
     async def officeaddins_allowed(request: Request) -> JSONResponse:
         base = str(request.base_url).rstrip("/")
-        return JSONResponse({"allowed": [f"{base}/static/excel/functions.js"]})
+        return JSONResponse({"allowed": [f"{base}/static/excel/functions.js",
+                                         f"{base}/static/excel/functions.html",
+                                         f"{base}/static/excel/taskpane.html"]})
 
     # ── Login wall + gating por rol ───────────────────────────────────────
     # Público (sin sesión): login/recuperación, estáticos, health, favicon.
@@ -557,7 +575,11 @@ def create_app() -> FastAPI:
         # "token inválido" en la celda/taskpane, no hay redirect a /login.
         # El manifest es público (es el instalador del add-in, no expone datos).
         if path.startswith("/excel/") and settings.auth_enabled:
-            if path == "/excel/manifest.xml":
+            # Público sin token: el manifest (instalador), la CA local (se
+            # confía ANTES de tener conexión) y el beacon de diagnóstico (el
+            # runtime reporta justamente cuando el token falta/está roto;
+            # sólo escribe una línea sanitizada en el log, no expone datos).
+            if path in ("/excel/manifest.xml", "/excel/ca.crt", "/excel/v1/beacon"):
                 return await call_next(request)
             token = request.headers.get("x-oms-token") or request.query_params.get("token")
             uname = auth_svc.user_for_excel_token(token)

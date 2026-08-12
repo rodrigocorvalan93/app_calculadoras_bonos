@@ -147,6 +147,13 @@
       <div class="card-title"><span>Add-in de Excel · instalar en otra máquina</span>
         <span class="card-title-aux">cada compu corre su app → el add-in debe apuntar a localhost</span></div>
       <div class="card-body" style="font-size:12.5px">
+        {% if not excel_bases.tls %}
+        <p style="margin:0 0 8px;color:#f0883e"><strong>⚠ Sin HTTPS local:</strong> Office exige https para el
+          runtime de las funciones — con este manifest http el panel conecta pero las celdas
+          <code>=OMS.*</code> quedan en <code>#N/D</code> ("iniciando el runtime de los complementos…").
+          Cerrá la app y volvé a correr el <code>.bat</code> actualizado: genera el certificado local y
+          levanta el puente <code>https://localhost:8443</code> solo.</p>
+        {% endif %}
         <p style="margin:0 0 8px">Como cada uno corre la app en su notebook, el manifest correcto apunta a
           <code>{{ excel_bases.local }}</code>: el add-in de cada máquina lee los precios de <strong>su propia
           instancia</strong>, y el MISMO archivo sirve tal cual en todas las compus ·

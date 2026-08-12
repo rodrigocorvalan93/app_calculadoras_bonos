@@ -11,7 +11,17 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v10 · 2026-08-12 (rescate one-shot + aviso manifest sin token)";
+var OMS_BUILD = "v11 · 2026-08-12 (HTTPS del runtime + beacons de diagnóstico)";
+
+// Telemetría al log del server — SÓLO activa en functions.html, que define
+// window.OMS_BEACON (el taskpane comparte este archivo pero no la define, así
+// no mete ruido: al panel se lo ve a ojo; al runtime de funciones headless
+// sólo se lo ve por estas líneas en el log). Jamás tira.
+function _beacon(st, d) {
+  try {
+    if (typeof window !== "undefined" && window.OMS_BEACON) { window.OMS_BEACON(st, d); }
+  } catch (e) { /* noop */ }
+}
 
 // ── Motor de datos compartido ────────────────────────────────────────────────
 var OMSFeed = (function () {
@@ -22,6 +32,8 @@ var OMSFeed = (function () {
   var timer = null;
   var status = "off";     // off | live | idle | auth | error
   var sinks = [];         // callbacks (celdas + taskpane)
+  var lastErr = "";       // detalle del último error de red (para el beacon)
+  var beaconed = {};      // estados ya reportados (1 beacon por estado y vida)
 
   function getTokenSync() { return token; }
 
@@ -83,6 +95,14 @@ var OMSFeed = (function () {
   function headers() { return { "X-OMS-Token": token }; }
 
   function notify() {
+    // La PRIMERA vez que el feed pisa cada estado lo reporta al server (live/
+    // idle/auth/error una vez por vida del runtime, no por tick): con eso el
+    // log muestra si este runtime llegó a datos o dónde quedó trabado.
+    if (!beaconed[status]) {
+      beaconed[status] = 1;
+      _beacon("feed-" + status,
+              status === "error" ? lastErr : (lastSeq != null ? "seq " + lastSeq : ""));
+    }
     for (var i = 0; i < sinks.length; i++) {
       try { sinks[i](snap, status); } catch (e) { /* una celda rota no frena al resto */ }
     }
@@ -120,7 +140,11 @@ var OMSFeed = (function () {
               return null;
             });
         })
-        .catch(function () { if (status !== "auth") { status = "error"; } notify(); });
+        .catch(function (e) {
+          if (status !== "auth") { status = "error"; }
+          lastErr = String((e && e.message) || e);
+          notify();
+        });
     });
   }
 
@@ -362,7 +386,9 @@ function tablaGet(s, panel, opcion) {
 // ── Registro de funciones streaming ──────────────────────────────────────────
 // Cada celda se suscribe al feed; en cada snapshot nuevo recalcula su valor y
 // sólo pushea si cambió (evita repaints de celdas quietas).
-function makeStreaming(getter) {
+var _celdaOkReportada = false;   // 1 beacon "celda-ok" por vida del runtime
+
+function makeStreaming(nombre, getter) {
   return function () {
     var args = Array.prototype.slice.call(arguments);
     var invocation = args.pop();
@@ -374,6 +400,8 @@ function makeStreaming(getter) {
     // universal instalado) de red/feed — en vez de #¡OCUPADO! eterno.
     var t = setTimeout(function () {
       if (got) { return; }
+      _beacon("celda-timeout", nombre + "(" + String(args[0] == null ? "" : args[0]) +
+              ") estado=" + OMSFeed.status());
       OMSFeed.oneshot().then(function (d) {
         if (got || d) { return; }          // la inyección ya resolvió via sink
         try {
@@ -397,6 +425,11 @@ function makeStreaming(getter) {
         catch (e) { v = naError(String(e && e.message || e)); }
       }
       got = true;
+      if (!_celdaOkReportada && typeof CustomFunctions !== "undefined" &&
+          !(v instanceof CustomFunctions.Error)) {
+        _celdaOkReportada = true;
+        _beacon("celda-ok", nombre + "(" + String(args[0] == null ? "" : args[0]) + ")");
+      }
       var key = JSON.stringify(v);
       if (key !== lastPushed) { lastPushed = key; invocation.setResult(v); }
     });
@@ -683,14 +716,17 @@ function diagFn(especie, precio, plazo, fx) {
 }
 
 function registerFunctions() {
-  if (typeof CustomFunctions === "undefined") { return; }
+  if (typeof CustomFunctions === "undefined") {
+    _beacon("sin-customfunctions", "en registerFunctions (runtime sin soporte de funciones)");
+    return;
+  }
   CustomFunctions.associate("PING", pingFn);
   CustomFunctions.associate("DIAG", diagFn);
-  CustomFunctions.associate("QUOTE", makeStreaming(quoteGet));
-  CustomFunctions.associate("FX", makeStreaming(fxGet));
-  CustomFunctions.associate("ROFEX", makeStreaming(rofexGet));
-  CustomFunctions.associate("CAUCION", makeStreaming(caucionGet));
-  CustomFunctions.associate("TABLA", makeStreaming(tablaGet));
+  CustomFunctions.associate("QUOTE", makeStreaming("QUOTE", quoteGet));
+  CustomFunctions.associate("FX", makeStreaming("FX", fxGet));
+  CustomFunctions.associate("ROFEX", makeStreaming("ROFEX", rofexGet));
+  CustomFunctions.associate("CAUCION", makeStreaming("CAUCION", caucionGet));
+  CustomFunctions.associate("TABLA", makeStreaming("TABLA", tablaGet));
   CustomFunctions.associate("HIST", histFn);
   CustomFunctions.associate("TIREA", guard(tireaFn));
   CustomFunctions.associate("PRECIO", guard(precioFn));
@@ -698,10 +734,15 @@ function registerFunctions() {
   CustomFunctions.associate("TICKET", guard(ticketFn));
   CustomFunctions.associate("CALC", guard(calcFn));
   CustomFunctions.associate("TR", guard(trFn));
+  // Marca para el watchdog de functions.html + confirmación en el log de QUÉ
+  // build registró (si esta línea no aparece, el runtime murió antes).
+  try { if (typeof window !== "undefined") { window.OMS_REGISTRADO = true; } } catch (e) { /* noop */ }
+  _beacon("funciones-registradas", OMS_BUILD);
 }
 
 if (typeof Office !== "undefined" && Office.onReady) {
-  Office.onReady(function () { registerFunctions(); });
+  Office.onReady(function () { _beacon("office-ready"); registerFunctions(); });
 } else {
+  _beacon("sin-office", "office.js no está — registro directo");
   registerFunctions();
 }
