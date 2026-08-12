@@ -28,6 +28,32 @@ def _bono(code: Optional[str]):
     return bond_universe.get(code) if code else None
 
 
+def _ficha_leg(code: Optional[str]):
+    """Fallback de ficha para PATAS FX sin match exacto en el universo: GD46D /
+    GD30D (MEP de un global cuya ficha nativa es la …C) o MGCQOD (MEP de una ON
+    de base …O) → prueba base, base+C, base+D. Cualquier pata es el MISMO papel
+    (mismo vencimiento/emisor). Se usa sólo para atributos estáticos del papel
+    (columna Vto); las métricas y la categoría siguen atadas al match exacto,
+    que es el que define la valuación."""
+    if not code:
+        return None
+    c = str(code).strip().upper()
+    if len(c) > 2 and c[-1] in ("C", "D") and not c.endswith(("CC", "DD")):
+        base = c[:-1]
+        cands = [base, base + "C", base + "D"]
+        if base.endswith("O") and len(base) > 2:
+            # ONs: la pata FX REEMPLAZA la O final del ticker ARS (MGCQO →
+            # MGCQD/MGCQC), pero el cod_delta de la cartera viene base+sufijo
+            # (MGCQOD) → probar también las fichas con la O reemplazada.
+            cands += [base[:-1] + "D", base[:-1] + "C"]
+        for cand in cands:
+            if cand != c:
+                obj = _bono(cand)
+                if obj is not None:
+                    return obj
+    return None
+
+
 def _dual_label(obj) -> Optional[str]:
     """Etiqueta de bono dual, leída del campo `Industria` de la especie (p.ej.
     'Soberano ARS Dual CER/Tamar' o '… Dual Fija/Tamar'). None si no es dual.
@@ -234,7 +260,9 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             "tna": (m or {}).get("tna"),
             "tna_convention_label": (m or {}).get("tna_convention_label"),
             "duration": (m or {}).get("duration"),
-            "vencimiento": _venc_date(obj),
+            # Vto: si el código no tiene ficha propia (pata FX como GD46D),
+            # cae a la ficha nativa del mismo papel — antes quedaba "—".
+            "vencimiento": _venc_date(obj if obj is not None else _ficha_leg(code)),
             "last": last_val,
             "price_source": (m or {}).get("price_source") if m is not None else eq_src,
         })

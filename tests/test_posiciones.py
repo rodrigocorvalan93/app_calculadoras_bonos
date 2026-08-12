@@ -171,3 +171,27 @@ async def test_tenencias_columna_vencimiento() -> None:
     assert r.status_code == 200
     if "tenencias" in r.text.lower() and "<th" in r.text:
         assert ">Vto</th>" in r.text
+
+
+def test_vto_resuelve_pata_fx() -> None:
+    """La columna Vto de Posiciones se puebla también para patas FX sin ficha
+    propia (GD46D → ficha nativa GD46C/GD46): mismo papel, mismo vencimiento.
+    Antes esas filas mostraban "—" aunque el papel tuviera ficha en el universo."""
+    from backend.routes.posiciones import _bono, _ficha_leg, _venc_date
+    from backend.services import bond_universe
+
+    nat = next(
+        (c for c in bond_universe.all_codes()
+         if c.endswith("C") and _bono(c[:-1] + "D") is None
+         and _venc_date(_bono(c)) is not None),
+        None,
+    )
+    if nat is None:
+        pytest.skip("sin fichas nativas …C en el universo")
+    leg = nat[:-1] + "D"                       # pata MEP sin ficha propia
+    assert _bono(leg) is None                  # premisa: no hay match exacto
+    obj = _ficha_leg(leg)
+    assert obj is not None
+    assert _venc_date(obj) == _venc_date(_bono(nat))
+    # los códigos de Liquidez no deben resolver a ninguna ficha
+    assert _ficha_leg("USD") is None and _ficha_leg("$") is None
