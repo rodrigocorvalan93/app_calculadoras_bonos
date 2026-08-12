@@ -30,6 +30,23 @@
         " (definido por el manifest instalado en ESTA máquina)";
     } catch (e) { /* noop */ }
 
+    // Manifest SIN token embebido (el "universal" de /admin): en los Excel
+    // donde el runtime de funciones no comparte storage con el panel, las
+    // celdas =OMS.QUOTE(…) no autentican NUNCA aunque acá diga conectado.
+    // Avisarlo acá corta la persecución del #N/D a ciegas.
+    try {
+      if (!/[?&]token=/.test(window.location.search || "")) {
+        var warn = document.createElement("div");
+        warn.className = "muted";
+        warn.style.cssText = "margin-top:6px;font-size:11px;color:#e0a800";
+        warn.textContent = "⚠ El manifest instalado no trae token embebido: si las celdas " +
+          "=OMS.QUOTE(…) dan #N/D, bajá el manifest “⬇ con token” de tu usuario desde " +
+          "/admin y reinstalalo (borrando la caché Wef como siempre).";
+        var sl = $("server-line");
+        sl.parentNode.insertBefore(warn, sl.nextSibling);
+      }
+    } catch (e) { /* noop */ }
+
     $("save").onclick = function () {
       OMSFeed.setToken($("token").value);
       $("test-result").textContent = "Token guardado.";

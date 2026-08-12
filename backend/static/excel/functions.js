@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v9 · 2026-08-11 (runtime clásico + token en URL)";
+var OMS_BUILD = "v10 · 2026-08-12 (rescate one-shot + aviso manifest sin token)";
 
 // ── Motor de datos compartido ────────────────────────────────────────────────
 var OMSFeed = (function () {
@@ -43,22 +43,31 @@ var OMSFeed = (function () {
 
   function loadToken() {
     return new Promise(function (resolve) {
+      var done = false;
+      function fin() { if (!done) { done = true; resolve(token); } }
       // 1) URL de la página (manifest per-usuario) — determinístico.
       var ut = urlToken();
-      if (ut) { token = ut; resolve(token); return; }
+      if (ut) { token = ut; fin(); return; }
       // 2) OfficeRuntime.storage (compartido cuando el build lo soporta).
       // 3) localStorage de fallback (mismo origen).
       function fromLS() {
         try { token = window.localStorage.getItem("oms_token") || token; } catch (e) { /* noop */ }
       }
+      // OfficeRuntime.storage puede COLGARSE en algunas builds (la promise no
+      // resuelve nunca) y como tick() espera loadToken(), eso frenaba TODO el
+      // poll del feed sin error visible → tope de 1,5 s y seguimos con lo que
+      // haya (URL / localStorage).
+      var guard = setTimeout(function () { fromLS(); fin(); }, 1500);
       try {
         OfficeRuntime.storage.getItem("oms_token").then(function (t) {
+          clearTimeout(guard);
           if (t) { token = t; } else { fromLS(); }
-          resolve(token);
-        }, function () { fromLS(); resolve(token); });
+          fin();
+        }, function () { clearTimeout(guard); fromLS(); fin(); });
       } catch (e) {
+        clearTimeout(guard);
         fromLS();
-        resolve(token);
+        fin();
       }
     });
   }
@@ -119,6 +128,34 @@ var OMSFeed = (function () {
     if (!timer) { timer = setInterval(tick, POLL_MS); tick(); }
   }
 
+  // Rescate one-shot: baja el snapshot por HTTP directo cuando una celda llegó
+  // a su timeout sin datos (p. ej. el poller del runtime no arrancó — la causa
+  // del #¡OCUPADO! eterno en algunas builds). Single-flight: N celdas en
+  // timeout → 1 solo fetch; si funciona, inyecta el snapshot y notifica a
+  // TODAS las suscripciones (el poller sigue reintentando por su lado).
+  var _oneshot = null;
+  function oneshot() {
+    if (_oneshot) { return _oneshot; }
+    _oneshot = loadToken().then(function () {
+      if (!token) { status = "auth"; notify(); return null; }
+      return fetch("/excel/v1/snapshot", { headers: headers(), cache: "no-store" })
+        .then(function (r) {
+          if (r.status === 401) { status = "auth"; notify(); return null; }
+          if (!r.ok) { throw new Error("http " + r.status); }
+          return r.json();
+        })
+        .then(function (data) {
+          if (data) {
+            snap = data; lastSeq = data.seq;
+            status = (data.health && data.health.warn) ? "stale" : "live";
+            notify();
+          }
+          return data;
+        });
+    }).catch(function () { return null; }).then(function (d) { _oneshot = null; return d; });
+    return _oneshot;
+  }
+
   function subscribe(fn) {
     sinks.push(fn);
     start();
@@ -133,7 +170,7 @@ var OMSFeed = (function () {
 
   return { subscribe: subscribe, setToken: setToken, loadToken: loadToken,
            getToken: getTokenSync, snapshot: function () { return snap; },
-           status: function () { return status; }, tick: tick };
+           status: function () { return status; }, tick: tick, oneshot: oneshot };
 })();
 
 // ── Normalización de argumentos ──────────────────────────────────────────────
@@ -330,23 +367,29 @@ function makeStreaming(getter) {
     var args = Array.prototype.slice.call(arguments);
     var invocation = args.pop();
     var lastPushed, got = false;
-    // Si en STREAM_TIMEOUT no llegó ningún snapshot, emitir un error LEGIBLE en
-    // vez de dejar la celda en #¡OCUPADO! para siempre (así se ve el motivo:
-    // token/red/feed). Sin esto, un runtime de funciones que no puede sondear
-    // el feed deja todas las celdas colgadas y no hay pista de por qué.
+    // Si en 6 s no llegó ningún snapshot, ANTES de errorear se intenta un
+    // snapshot one-shot por HTTP (si el poller del runtime no arrancó, esto
+    // resuelve igual y alimenta a todas las celdas). Si tampoco, error LEGIBLE
+    // con el motivo real — distinguiendo "runtime sin token" (manifest
+    // universal instalado) de red/feed — en vez de #¡OCUPADO! eterno.
     var t = setTimeout(function () {
-      if (!got) {
+      if (got) { return; }
+      OMSFeed.oneshot().then(function (d) {
+        if (got || d) { return; }          // la inyección ya resolvió via sink
         try {
-          invocation.setResult(naError(
-            "Sin datos del feed (estado: " + OMSFeed.status() + "). Revisá el token en " +
-            "el panel OMS Bonos y que el servidor esté corriendo."));
+          invocation.setResult(naError(!OMSFeed.getToken()
+            ? "El runtime de funciones no tiene token: instalá el manifest “⬇ con token” de tu usuario desde /admin (el manifest universal no autentica las celdas en este Excel)"
+            : "Sin datos del feed (estado: " + OMSFeed.status() + "). Revisá el token en " +
+              "el panel OMS Bonos y que el servidor esté corriendo."));
         } catch (e) { /* noop */ }
-      }
+      });
     }, 6000);
     var un = OMSFeed.subscribe(function (s, status) {
       var v;
       if (status === "auth") {
-        v = naError("Token de Excel inválido o no configurado (abrí el panel OMS Bonos)");
+        v = naError(OMSFeed.getToken()
+          ? "Token de Excel inválido o deshabilitado (revisá /admin o el panel OMS Bonos)"
+          : "El runtime de funciones no tiene token: instalá el manifest “⬇ con token” de tu usuario desde /admin");
       } else if (!s) {
         return;                               // todavía sin primer snapshot
       } else {
@@ -422,10 +465,14 @@ var OMSCalc = (function () {
   var flushTimer = null;
 
   function keyOf(it) {
+    // El DÍA local va en la key: el server keyea su cache por fecha de
+    // liquidación (que rueda con el día), pero este memo cortaba antes de
+    // llegar al server → un libro abierto de ayer devolvía el TIREA de AYER
+    // en cada F9 hasta recargar el add-in.
     return [it.code, it.modo, (it.valor == null ? "@mercado" : it.valor),
             it.plazo, it.settle || "", it.fx || "", it.nominales || "",
             it.tipo || "", it.tir_salida == null ? "" : it.tir_salida,
-            it.fecha_salida || ""].join("|");
+            it.fecha_salida || "", new Date().toDateString()].join("|");
   }
 
   function request(it) {
@@ -446,7 +493,11 @@ var OMSCalc = (function () {
   function settle(k, val, err) {
     var subs = pending[k] || [];
     delete pending[k];
-    if (val && !err && !noMemo[k]) {
+    // `val.error` NO se memoiza: el server marca los errores como _nocache
+    // (transitorios: índice sin cargar, warmup, sin precio de mercado) pero el
+    // memo del cliente los retenía para SIEMPRE → celdas en #N/D permanente
+    // hasta recargar el add-in, aunque el server ya estuviera sano.
+    if (val && !err && !val.error && !noMemo[k]) {
       if (memoN >= MEMO_MAX) { memo = {}; memoN = 0; }
       memo[k] = val; memoN++;
     }

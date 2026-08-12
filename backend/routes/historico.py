@@ -274,6 +274,13 @@ async def historicos_curva_fechas(
 
     from backend.services import curves as curves_svc, tr_realizado
 
+    # La 1ª carga de la base (~20k filas de Excel/parquet) es sync y el warmup no
+    # la precalienta: corría INLINE vía meta() y congelaba el event loop entero
+    # (~3-4 s sin /market/seq ni paneles para nadie). Al pool; caliente es un
+    # lookup de dict y las llamadas de abajo quedan todas warm.
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, historico_byma.ensure_loaded)
+
     meta = historico_byma.meta()
     keys = historico_byma.curves_with_history(None, None, proy)
     labels = {cv.key: cv.label for cv in curves_svc.list_curves()}
@@ -295,7 +302,6 @@ async def historicos_curva_fechas(
     fechas = [f for f in (f1, f2, f3, f4) if f]
     scatter = tr_tabla = None
     if sel and meta.get("loaded"):
-        loop = asyncio.get_running_loop()
         scatter = _scatter_chart(historico_byma.scatter_by_dates(sel, fechas, metric, proy))
         if trd1 and trd2 and trd1 < trd2:
             tr_tabla = await loop.run_in_executor(

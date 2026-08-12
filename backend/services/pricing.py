@@ -547,18 +547,23 @@ def compute_metrics(
         if auto is not None:
             obj._a3500_override = auto
 
+    # `calcula_tirea` / `calcula_precio` ya corren `generate_cashflows` +
+    # `calcula_intereses_corridos` ADENTRO (rentafija), así que acá no se repiten:
+    # cada llamada extra reconstruía los cashflows completos (sin memo) y era puro
+    # costo en el hot path. En tna/margen la inversión TNA→TIR necesita
+    # `dias_remanentes` ANTES de `tirea_from_tna` (la convención del bucket default
+    # es días_remanentes/365 y sólo lo puebla `calcula_intereses_corridos`; con
+    # `generate_cashflows` la inversión caía al fallback `cnv_tna` con OTRA base y
+    # el round-trip TNA→precio→TNA no era inverso en LECAP/bullets ARS).
     try:
         if mode == "precio":
             obj.calcula_tirea(float(value) / 100.0, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
         elif mode == "tir":
             obj.calcula_precio(float(value), canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
         elif mode == "tna":
-            obj.generate_cashflows(canonical_settle)
+            obj.calcula_intereses_corridos(canonical_settle)
             tir = tirea_from_tna(obj, float(value), freq_override, base_override)
             obj.calcula_precio(tir, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
         elif mode == "margen":
             idx_name = getattr(obj, "index", None)
             bench_pct = _bench_pct(idx_name)
@@ -570,10 +575,9 @@ def compute_metrics(
                                  "no se puede pricear por margen.")
                 return base
             tna_target = (bench_pct / 100.0) + float(value)
-            obj.generate_cashflows(canonical_settle)
+            obj.calcula_intereses_corridos(canonical_settle)
             tir = tirea_from_tna(obj, tna_target, freq_override, base_override)
             obj.calcula_precio(tir, canonical_settle)
-            obj.calcula_intereses_corridos(canonical_settle)
         else:
             base["error"] = f"Modo desconocido: {mode!r}"
             return base

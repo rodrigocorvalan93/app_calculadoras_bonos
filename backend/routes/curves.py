@@ -578,6 +578,11 @@ async def mercado_book(
 forwards_router = APIRouter(tags=["forwards"])
 
 
+# Gap mínimo de duration para un forward (años ≈ 11 días) — única fuente: el
+# umbral del histórico, así la matriz viva y la serie histórica filtran igual.
+from backend.services.forwards_hist import _MIN_GAP as _FWD_MIN_GAP  # noqa: E402
+
+
 def _forwards_matrix(rows: list[dict], metric: str = "tirea") -> dict:
     """Matriz triangular de forwards. `metric`:
     - "tirea": forward de descuento clásico ((d1/d2)^(1/Δt) − 1).
@@ -612,7 +617,11 @@ def _forwards_matrix(rows: list[dict], metric: str = "tirea") -> dict:
     finite: list[float] = []
     for i in range(n):
         for j in range(i + 1, n):
-            if ts[j] <= ts[i]:
+            # Mismo umbral que el histórico (forwards_hist._MIN_GAP): dos bonos con
+            # duration casi igual dan 1/(t2−t1) enorme → un forward finito pero
+            # absurdo que no cae en el except, envenena vmin/vmax y lava el heatmap
+            # entero. Con gap < ~11 días la celda queda "·" como en el histórico.
+            if ts[j] - ts[i] < _FWD_MIN_GAP:
                 continue
             try:
                 if margen:

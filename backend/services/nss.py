@@ -35,10 +35,15 @@ def model(x, b0, b1, b2, b3, t1, t2):
     e1 = np.exp(-z1)
     z2 = x / t2
     e2 = np.exp(-z2)
-    f1 = np.where(x == 0.0, 1.0, (1.0 - e1) / z1)
-    f2 = np.where(x == 0.0, 0.0, f1 - e1)
-    f3 = np.where(x == 0.0, 0.0, (1.0 - e2) / z2 - e2)
-    return b0 + b1 * f1 + b2 * f2 + b3 * f3
+    # np.where evalúa AMBAS ramas: con x == 0 el (1-e)/z hace 0/0 y emitía un
+    # RuntimeWarning inocuo (el where ya elige el límite correcto). El overflow
+    # de la suma con betas desbocados (fit divergente) también se silencia: los
+    # consumidores ya filtran no-finitos (eval_at/estimate).
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        f1 = np.where(x == 0.0, 1.0, (1.0 - e1) / z1)
+        f2 = np.where(x == 0.0, 0.0, f1 - e1)
+        f3 = np.where(x == 0.0, 0.0, (1.0 - e2) / z2 - e2)
+        return b0 + b1 * f1 + b2 * f2 + b3 * f3
 
 
 def _mad_mask(resid: np.ndarray, k: float = 3.0) -> np.ndarray:
@@ -144,7 +149,11 @@ def eval_at(xs: List[float], ys: List[float], xq: List[float], threshold: float 
         return None
     popt, x_min, x_max = f
     yq = model(np.asarray(xq, dtype=np.float64), *popt)
-    return [float(v) if (x_min <= float(x) <= x_max) else None for x, v in zip(xq, yq)]
+    # Un fit divergente (betas desbocados) puede dar inf/nan DENTRO del rango.
+    # Este array va a una JSONResponse y Starlette serializa con allow_nan=False
+    # → un solo punto no-finito 500-eaba /graficos/data y se llevaba el gráfico.
+    return [float(v) if (x_min <= float(x) <= x_max and np.isfinite(v)) else None
+            for x, v in zip(xq, yq)]
 
 
 def estimate(duration: float, xs: List[float], ys: List[float],
