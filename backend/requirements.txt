@@ -22,6 +22,10 @@ holidays>=0.50
 # requests is still used by indices.py (BCRA backup fetch) and OMSapi.py
 requests>=2.32
 
+# HTTPS local del add-in de Excel: CA + cert estilo mkcert (backend/tools/
+# https_local.py). Office exige https para el runtime de funciones custom.
+cryptography>=41
+
 # utils.py imports matplotlib at module load. Until we untangle that import,
 # the backend needs it on the path even though we don't render any plots.
 matplotlib>=3.8

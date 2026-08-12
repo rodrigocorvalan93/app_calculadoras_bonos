@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
+from backend.config import settings
 from backend.services import auth
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -27,16 +28,28 @@ def _excel_bases(request: Request) -> dict:
     """Bases para instalar el add-in. Topología de la mesa: CADA UNO corre la
     app en su notebook → el manifest tiene que apuntar a `localhost`, así el
     add-in de cada compu pega contra SU instancia y el mismo archivo sirve en
-    todas (además Office exime a localhost de la exigencia de HTTPS). La IP LAN
-    queda como alternativa sólo para un server centralizado."""
+    todas. OJO: Office sólo tolera http en el TASKPANE — el runtime de las
+    funciones =OMS.* exige HTTPS (por http queda "iniciando el runtime…" y
+    las celdas en #N/D). Con el puente TLS activo, la base local es la https
+    (la única con la que las celdas andan); sin puente se cae a http con
+    aviso en la tarjeta. La IP LAN queda para un server centralizado."""
     from backend.routes import excel as excel_routes
+    from backend.services import tls_bridge
 
+    tls_port = tls_bridge.active_port()
+    ip = excel_routes.lan_ip()
+    if tls_port:
+        # La IP https sólo sirve si el puente escucha fuera de loopback (flujo
+        # server centralizado: TLS_BRIDGE_HOST=0.0.0.0 + CA confiada en cada PC).
+        ip_base = f"https://{ip}:{tls_port}" if ip and settings.tls_bridge_host not in (
+            "127.0.0.1", "localhost", "::1") else None
+        return {"local": f"https://localhost:{tls_port}", "ip": ip_base, "tls": True}
     port = request.url.port
     suf = f":{port}" if port else ""
     scheme = request.url.scheme
-    ip = excel_routes.lan_ip()
     return {"local": f"{scheme}://localhost{suf}",
-            "ip": f"{scheme}://{ip}{suf}" if ip else None}
+            "ip": f"{scheme}://{ip}{suf}" if ip else None,
+            "tls": scheme == "https"}
 
 
 def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = None) -> HTMLResponse:

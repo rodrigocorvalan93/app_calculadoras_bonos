@@ -7,8 +7,43 @@
 <!-- Página HEADLESS del runtime DEDICADO de funciones custom (modelo clásico,
      sin SharedRuntime). Excel la carga oculta y ejecuta functions.js acá para
      registrar OMS.QUOTE/TIREA/…. No se muestra nunca; el panel visible es
-     taskpane.html (runtime aparte). office.js SOLO se distribuye por el CDN de
-     Microsoft (única excepción a "sin libs externas"). -->
+     taskpane.html (runtime aparte). OJO: Office sólo ARRANCA este runtime
+     sobre HTTPS — por http el taskpane anda pero esta página queda en
+     "iniciando el runtime…" y las celdas en #N/D (ver README, puente TLS).
+     office.js SOLO se distribuye por el CDN de Microsoft (única excepción a
+     "sin libs externas"). -->
+<script>
+/* Beacons: este runtime es headless (no hay consola a mano en el Excel de
+   Windows), así que reporta su ciclo de vida al LOG DEL SERVER vía
+   GET /excel/v1/beacon (público: sólo escribe una línea sanitizada).
+   Cadena sana: page-cargada → office-ready → funciones-registradas →
+   feed-live → celda-ok. Si se corta, el último estado + js-error dicen
+   dónde. Se define ANTES de office.js para cazar hasta su falla de carga. */
+(function () {
+  function b(st, d) {
+    try {
+      var q = "/excel/v1/beacon?p=functions&st=" + encodeURIComponent(st) +
+              (d ? "&d=" + encodeURIComponent(String(d).slice(0, 220)) : "");
+      if (typeof fetch === "function") { fetch(q, { cache: "no-store" })["catch"](function () {}); }
+      else if (typeof Image !== "undefined") { (new Image()).src = q; }
+    } catch (e) { /* la telemetría jamás rompe el runtime */ }
+  }
+  window.OMS_BEACON = b;
+  b("page-cargada");
+  window.onerror = function (msg, src, line) {
+    b("js-error", msg + " @ " + (src || "?") + ":" + (line || "?"));
+  };
+  setTimeout(function () {
+    if (typeof CustomFunctions === "undefined") {
+      b("sin-customfunctions", typeof Office === "undefined"
+        ? "office.js NO cargo: sin salida al CDN appsforoffice.microsoft.com desde este webview"
+        : "office.js cargo pero CustomFunctions no existe");
+    } else if (!window.OMS_REGISTRADO) {
+      b("sin-registro", "CustomFunctions existe pero associate() no corrio");
+    }
+  }, 8000);
+})();
+</script>
 <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <script src="functions.js"></script>
 </head>

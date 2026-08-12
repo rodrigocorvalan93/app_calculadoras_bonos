@@ -347,3 +347,74 @@ async def test_addin_no_se_cachea_pero_el_front_si() -> None:
             r = await ac.get(p)
             assert r.status_code == 200, p
             assert "immutable" in (r.headers.get("cache-control") or ""), p
+
+
+# ── Beacon de diagnóstico, CA local y .well-known ────────────────────────────
+async def test_beacon_publico_sanitizado_y_con_throttle(auth_on, caplog):
+    """El runtime de funciones es headless: reporta su ciclo de vida a
+    /excel/v1/beacon, PÚBLICO a propósito (dispara justo cuando el token
+    falta/está roto). Sólo loguea: sanitizado (sin CR/LF → sin log-forging),
+    acotado y con throttle por (página, estado)."""
+    import logging
+
+    excel_route._beacon_last.clear()
+    caplog.set_level(logging.INFO, logger="backend.excel.addin")
+    async with _client() as ac:
+        r = await ac.get("/excel/v1/beacon",
+                         params={"p": "functions", "st": "page-cargada",
+                                 "d": "línea\r\n[uvicorn] trucha " + "x" * 500})
+        assert r.status_code == 204                      # sin token, muro ON
+        r2 = await ac.get("/excel/v1/beacon",
+                          params={"p": "functions", "st": "page-cargada"})
+        assert r2.status_code == 204                     # throttled: no loguea
+    lines = [rec.getMessage() for rec in caplog.records
+             if rec.name == "backend.excel.addin"]
+    assert len(lines) == 1
+    assert "page-cargada" in lines[0]
+    assert "\r" not in lines[0] and "\n" not in lines[0]
+    assert len(lines[0]) < 350
+
+
+async def test_wellknown_lista_script_y_paginas(auth_on):
+    """Office valida el runtime contra /.well-known/…-allowed.json: tienen que
+    estar el script Y las páginas (el runtime WebView2 carga functions.html)."""
+    async with _client() as ac:
+        r = await ac.get("/.well-known/microsoft-officeaddins-allowed.json")
+    assert r.status_code == 200
+    nombres = [u.rsplit("/", 1)[1] for u in r.json()["allowed"]]
+    assert nombres == ["functions.js", "functions.html", "taskpane.html"]
+
+
+async def test_ca_crt_publico_404_sin_certs(auth_on, tmp_path, monkeypatch):
+    """/excel/ca.crt es público (se confía ANTES de tener conexión) y da un 404
+    con instrucciones si los certs no se generaron todavía."""
+    monkeypatch.setattr(settings, "tls_cert_dir", str(tmp_path))
+    async with _client() as ac:
+        r = await ac.get("/excel/ca.crt")
+    assert r.status_code == 404 and "https_local" in r.text
+
+
+async def test_manifest_base_https_del_puente(auth_on):
+    """Con el puente TLS activo la tarjeta de /admin apunta el manifest a la
+    base https — Office exige https para el runtime de funciones custom (por
+    http el taskpane anda pero las celdas quedan en #N/D)."""
+    async with _client() as ac:
+        r = await ac.get("/excel/manifest.xml", params={"base": "https://localhost:8443"})
+    assert r.status_code == 200
+    assert "https://localhost:8443/static/excel/functions.html" in r.text
+    assert "http://t/" not in r.text
+
+
+def test_funciones_beacon_wiring():
+    """El bootstrap de beacons vive en functions.html ANTES de office.js (caza
+    hasta su falla de carga) y functions.js reporta registro/feed/celdas — si
+    esto se cae, volvemos a debuggear el runtime headless a ciegas."""
+    from pathlib import Path
+
+    base = Path(excel_route.__file__).parent.parent / "static" / "excel"
+    html = (base / "functions.html").read_text(encoding="utf-8")
+    js = (base / "functions.js").read_text(encoding="utf-8")
+    assert "OMS_BEACON" in html and "/excel/v1/beacon" in html
+    assert html.index("OMS_BEACON") < html.index("appsforoffice.microsoft.com")
+    for marca in ("funciones-registradas", "celda-timeout", "feed-", "office-ready"):
+        assert marca in js, marca

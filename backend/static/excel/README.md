@@ -33,8 +33,11 @@ es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
 1. **Habilitar el usuario**: el superuser entra a `/admin` → tabla Usuarios →
    columna **Excel** → *Habilitar*. Copia el token y se lo pasa al usuario.
    (El mismo botón corta el acceso al instante; `⟳` rota el token.)
-2. **Descargar el manifest**: `https://<host>/excel/manifest.xml` (ya sale con
-   la URL del server puesta).
+2. **Descargar el manifest** de la base **https** del puente TLS:
+   `https://localhost:8443/excel/manifest.xml` — o mejor, el botón
+   **⬇ con token** de la tarjeta de `/admin` (ya sale con la URL y el token
+   del usuario puestos). Un manifest bajado por `http://` instala un add-in
+   donde el panel anda pero las celdas no (ver «HTTPS» abajo).
 3. **Sideload en Excel**:
    - *Windows*: compartir una carpeta de red con el manifest → Archivo →
      Opciones → Centro de confianza → Catálogos de complementos de confianza →
@@ -45,29 +48,61 @@ es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
 4. En la cinta aparece **OMS Bonos** → abrir el panel → pegar el token →
    *Guardar y conectar*. El dot en verde = feed vivo.
 
-## Requisitos y HTTPS
+## Requisitos y HTTPS (la causa del "iniciando el runtime…" eterno)
 
 - Las funciones `=OMS.*` streaming requieren **Excel de Microsoft 365**
   (Windows ≥ 1904, Mac o Excel web). Para Excel perpetuo (2016/2019/2021) usar
   el **modo hoja CRUDA** del panel: escribe todo en la hoja `OMS_DATA` una vez
   por tick y el libro sigue con `VLOOKUP` (keys `GD30|24hs`, `FX|MEP`,
   `FUT|DLR/AGO26M`, `CAU|ARS|7D`, `MAE|GD30`).
-- Office exige **HTTPS en TODAS las URLs del manifest** — también en localhost.
-  Un manifest bajado por `http://` es rechazado con "el manifiesto no es válido"
-  (Excel web lo corta en el upload; el desktop tampoco lo carga).
-  - Server local (Windows): certificado con [mkcert](https://github.com/FiloSottile/mkcert)
-    — una vez: `mkcert -install` y `mkcert localhost 127.0.0.1`; después correr
-
-        uvicorn backend.main:app --port 8443 --ssl-certfile localhost+1.pem --ssl-keyfile localhost+1-key.pem
-
-    y bajar el manifest de `https://localhost:8443/excel/manifest.xml` (las URLs
-    salen con el esquema/host desde donde se lo descarga).
-  - Server en la red: con Tailscale, `tailscale cert` emite un certificado
-    válido `*.ts.net`; si no, un cert interno (mkcert) confiado en cada PC.
-  - Setear `APP_BASE_URL=https://…` para fijar la URL del manifest sin depender
-    del host del request.
+- **Office exige HTTPS para el runtime de las funciones custom.** Con un
+  manifest `http://localhost:…` el add-in CARGA y engaña: el taskpane anda
+  (conecta, Probar da OK — a los webviews visibles Office les tolera http en
+  localhost), pero el runtime headless de las celdas NO ARRANCA: Excel queda
+  con "Se está iniciando el runtime de los complementos…" en la barra de
+  estado, re-baja `functions.html/js/json` en loop y toda celda `=OMS.*` da
+  `#N/D`, sin ningún error que diga por qué.
+- **El HTTPS local ya viene resuelto** — no hay que instalar nada:
+  1. el `.bat` corre `python -m backend.tools.https_local` en cada arranque:
+     genera una CA local + certificado para `localhost`/`127.0.0.1`/IP LAN en
+     `certs/` (gitignored) y confía la CA en el usuario de Windows
+     (`certutil -user`, sin admin). Idempotente: con el cert vigente no hace
+     nada;
+  2. con los certs presentes, la app levanta sola el **puente TLS**
+     (`backend/services/tls_bridge.py`): `https://localhost:8443` → proxy al
+     uvicorn http local. `TLS_BRIDGE=0` lo apaga; puerto con `TLS_PORT`;
+  3. el manifest se baja de `https://localhost:8443/excel/manifest.xml` (la
+     tarjeta de `/admin` ya apunta ahí cuando el puente está activo).
+- **Otra compu de la mesa contra un server central**: correr el puente
+  escuchando afuera (`TLS_BRIDGE_HOST=0.0.0.0`), bajar la CA pública de
+  `https://<server>:8443/excel/ca.crt` en cada PC y confiarla:
+  `certutil -user -addstore -f Root oms-local-ca.crt`. Con Tailscale,
+  `tailscale cert` emite un certificado válido `*.ts.net` (sin CA propia).
+- Setear `APP_BASE_URL=https://…` para fijar la URL del manifest sin depender
+  del host del request.
 - `office.js` se carga del CDN de Microsoft (obligatorio para add-ins): las PCs
   necesitan salida a `appsforoffice.microsoft.com`.
+
+## Diagnóstico: el runtime le reporta al log del server
+
+El runtime de funciones es headless (no hay consola a mano en el Excel de
+Windows), así que `functions.html`/`functions.js` reportan su ciclo de vida a
+`GET /excel/v1/beacon` (público, sólo escribe una línea sanitizada). Con el
+add-in sano, el log del server (`[backend.excel.addin]`) muestra en orden:
+
+    page-cargada → office-ready → funciones-registradas → feed-live → celda-ok
+
+Dónde se corta la cadena dice qué falló:
+
+| Último estado | Significa |
+|---|---|
+| *(nada)* | El runtime ni ejecutó JS: manifest http (ver arriba), o Excel sin runtime de funciones. |
+| `page-cargada` + `sin-customfunctions` | `office.js` no cargó (sin salida al CDN) o el runtime no soporta funciones. |
+| `office-ready` sin `funciones-registradas` | `associate()` no corrió — mirar `js-error`. |
+| `funciones-registradas` + `feed-auth` | Token ausente/roto: instalar el manifest "⬇ con token" desde `/admin`. |
+| `funciones-registradas` + `feed-error` | El runtime no llega al server (red/cert) — el detalle viene en la línea. |
+| `celda-timeout` | Una celda esperó 6 s sin datos; el detalle trae función, especie y estado del feed. |
+| `js-error` | Excepción JS en el runtime, con archivo y línea. |
 
 ## Cómo funciona (y por qué no carga al server)
 

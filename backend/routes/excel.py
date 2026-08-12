@@ -217,6 +217,56 @@ async def hist(serie: str, days: Optional[int] = Query(None, ge=1)) -> Dict[str,
     return out
 
 
+# ── Beacon de diagnóstico del runtime del add-in ─────────────────────────────
+# El runtime de funciones custom es HEADLESS (sin consola a mano en el Excel
+# de Windows): la única forma de ver desde afuera si arrancó, registró las
+# funciones o en qué estado quedó el feed es que ÉL reporte al log del server.
+# functions.html/functions.js pegan acá en cada transición de estado; la
+# cadena sana es: page-cargada → office-ready → funciones-registradas →
+# feed-live → celda-ok. Si se corta, el último estado dice dónde.
+_addin_log = logging.getLogger("backend.excel.addin")
+_BEACON_MIN_INTERVAL = 2.0            # anti-spam por (página, estado)
+_beacon_last: Dict[Tuple[str, str], float] = {}
+
+
+def _beacon_txt(v: Optional[str], n: int) -> str:
+    """Sanitiza texto que viene del webview para el log: sólo ASCII imprimible
+    (nada de CR/LF → sin log-forging) y largo acotado."""
+    s = "".join(ch if " " <= ch <= "~" else "·" for ch in (v or ""))
+    return s[:n] or "-"
+
+
+@router.get("/v1/beacon")
+async def beacon(st: str = Query(""), p: str = Query(""), d: str = Query("")) -> Response:
+    """Telemetría mínima del add-in → una línea en el log. PÚBLICO (sin token)
+    a propósito: reporta justamente cuando el token falta o está roto. No
+    devuelve datos ni toca estado — sólo loguea, sanitizado y con throttle."""
+    key = (_beacon_txt(p, 24), _beacon_txt(st, 48))
+    now = time.monotonic()
+    last = _beacon_last.get(key)
+    if last is None or now - last >= _BEACON_MIN_INTERVAL:
+        if len(_beacon_last) > 512:   # bound absoluto; llaves reales son ~10
+            _beacon_last.clear()
+        _beacon_last[key] = now
+        _addin_log.info("[addin %s] %s — %s", key[0], key[1], _beacon_txt(d, 220))
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/ca.crt")
+async def ca_cert() -> Response:
+    """Certificado (público) de la CA local del puente HTTPS — para confiarlo
+    en OTRA compu de la mesa: bajar y `certutil -user -addstore -f Root
+    oms-local-ca.crt`. No es secreto (la clave privada nunca se sirve)."""
+    from backend.services import tls_bridge
+
+    path = tls_bridge.ca_cert_path()
+    if not path.exists():
+        return PlainTextResponse("Sin CA local: correr `python -m backend.tools.https_local` "
+                                 "en el server (el .bat lo hace solo).", status_code=404)
+    return Response(content=path.read_bytes(), media_type="application/x-x509-ca-cert",
+                    headers={"Content-Disposition": 'attachment; filename="oms-local-ca.crt"'})
+
+
 # ── Manifest del add-in (público: es el instalador, no expone datos) ─────────
 _MANIFEST_ID = "7c1f4c1e-9b0a-4b6e-9a51-0f2a9e6d4bb1"
 
