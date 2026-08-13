@@ -309,7 +309,7 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>{app_id}</Id>
-  <Version>1.1.0.0</Version>
+  <Version>1.2.0.0</Version>
   <ProviderName>Mesa</ProviderName>
   <DefaultLocale>es-AR</DefaultLocale>
   <DisplayName DefaultValue="OMS Bonos"/>
@@ -328,15 +328,30 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <!-- RUNTIME COMPARTIDO: las funciones =OMS.* corren en el MISMO webview
+         (WebView2) que el taskpane, no en el runtime headless clásico. Motivos:
+         (a) el headless valida TLS con su propio stack y en máquinas
+         corporativas con política estricta muere con "Network request failed"
+         aunque el panel conecte perfecto; (b) al compartir página, el token
+         guardado en el panel es la MISMA instancia de OMSFeed que usan las
+         celdas — el manifest sin token embebido también autentica. -->
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.1">
+        <bt:Set Name="SharedRuntime" MinVersion="1.1"/>
+      </bt:Sets>
+    </Requirements>
     <Hosts>
       <Host xsi:type="Workbook">
+        <Runtimes>
+          <Runtime resid="OMS.Page.Url" lifetime="long"/>
+        </Runtimes>
         <AllFormFactors>
           <ExtensionPoint xsi:type="CustomFunctions">
             <Script>
               <SourceLocation resid="OMS.Functions.Script.Url"/>
             </Script>
             <Page>
-              <SourceLocation resid="OMS.Functions.Page.Url"/>
+              <SourceLocation resid="OMS.Page.Url"/>
             </Page>
             <Metadata>
               <SourceLocation resid="OMS.Functions.Metadata.Url"/>
@@ -345,7 +360,7 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
           </ExtensionPoint>
         </AllFormFactors>
         <DesktopFormFactor>
-          <FunctionFile resid="OMS.Functions.Page.Url"/>
+          <FunctionFile resid="OMS.Page.Url"/>
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
             <OfficeTab id="TabHome">
               <Group id="OMS.Group">
@@ -385,7 +400,6 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="OMS.Page.Url" DefaultValue="{base}/static/excel/taskpane.html{qs}"/>
-        <bt:Url id="OMS.Functions.Page.Url" DefaultValue="{base}/static/excel/functions.html{qs}"/>
         <bt:Url id="OMS.Functions.Script.Url" DefaultValue="{base}/static/excel/functions.js"/>
         <bt:Url id="OMS.Functions.Metadata.Url" DefaultValue="{base}/static/excel/functions.json"/>
       </bt:Urls>

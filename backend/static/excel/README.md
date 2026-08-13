@@ -93,6 +93,30 @@ es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
   cert apuntando al puerto 8000 — si uvicorn corre en otro puerto, regenerar
   con `--crl-port`. Después de regenerar: reiniciar la app y cerrar Excel
   por completo.
+
+## Runtime compartido (manifest 1.2) — las celdas corren en el webview del panel
+
+Desde el manifest **1.2.0.0** el add-in declara `SharedRuntime 1.1`: las
+funciones `=OMS.*` corren en el **mismo WebView2 que el taskpane**, no en el
+runtime headless clásico. Dos consecuencias grandes:
+
+- **Se acaba la clase de fallas del runtime headless**: ese proceso valida
+  TLS con su propio stack, y en máquinas corporativas puede quedar bloqueado
+  (celdas en `Network request failed`) aunque el panel conecte perfecto. Con
+  el runtime compartido, si el panel conecta (dot verde), las celdas
+  conectan — es la misma página.
+- **El token del panel alcanza**: panel y celdas comparten la misma instancia
+  de `OMSFeed`, así que "Guardar y conectar" autentica también a las celdas.
+  El manifest "⬇ con token" sigue siendo lo más cómodo (autentica sin abrir
+  el panel), pero ya no es obligatorio.
+
+Al actualizar de un manifest viejo: reinstalar el XML nuevo (versión
+1.2.0.0), cerrar Excel POR COMPLETO y reabrir. `=OMS.PING()` tiene que
+reportar build `v12` o posterior; si sigue mostrando `v11`, Excel está
+sirviendo caché vieja (borrar `%LOCALAPPDATA%\Microsoft\Office\16.0\Wef` con
+Excel cerrado). `functions.html` sigue existiendo sólo para manifests viejos
+ya instalados (modelo clásico); en el log, los beacons del runtime
+compartido salen con `p=shared` y los del clásico con `p=functions`.
 - **Otra compu de la mesa contra un server central**: correr el puente
   escuchando afuera (`TLS_BRIDGE_HOST=0.0.0.0`), bajar la CA pública de
   `https://<server>:8443/excel/ca.crt` en cada PC y confiarla:

@@ -11,12 +11,11 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v11 · 2026-08-12 (HTTPS del runtime + beacons de diagnóstico)";
+var OMS_BUILD = "v12 · 2026-08-13 (runtime compartido: funciones en el webview del panel)";
 
-// Telemetría al log del server — SÓLO activa en functions.html, que define
-// window.OMS_BEACON (el taskpane comparte este archivo pero no la define, así
-// no mete ruido: al panel se lo ve a ojo; al runtime de funciones headless
-// sólo se lo ve por estas líneas en el log). Jamás tira.
+// Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
+// functions.html (runtime clásico headless, p=functions) y taskpane.html
+// (runtime compartido, p=shared). Jamás tira.
 function _beacon(st, d) {
   try {
     if (typeof window !== "undefined" && window.OMS_BEACON) { window.OMS_BEACON(st, d); }
@@ -37,11 +36,12 @@ var OMSFeed = (function () {
 
   function getTokenSync() { return token; }
 
-  // Token embebido en la URL de la página (functions.html?token=… del manifest
-  // per-usuario). Es la fuente MÁS confiable en el modelo clásico: el runtime
-  // de funciones es SEPARADO del panel, y OfficeRuntime.storage no siempre le
-  // comparte el token → sin esto, todas las celdas dan 401/#N/D aunque el panel
-  // esté conectado. La URL lo tiene siempre, sin depender de storage compartido.
+  // Token embebido en la URL de la página (?token=… del manifest per-usuario).
+  // Con el runtime COMPARTIDO (manifest 1.2) el token del panel ya es la misma
+  // instancia de OMSFeed que usan las celdas, así que esto es sólo el arranque
+  // sin panel abierto. En el modelo clásico (manifests viejos, functions.html
+  // headless) sigue siendo la fuente MÁS confiable: ese runtime es SEPARADO
+  // del panel y OfficeRuntime.storage no siempre le comparte el token.
   var _urlToken = null;
   function urlToken() {
     if (_urlToken !== null) { return _urlToken; }
