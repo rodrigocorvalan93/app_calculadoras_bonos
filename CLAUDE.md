@@ -135,6 +135,16 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
   página-exacta (partials compartidos como `/dolares/rail` no se atan a su
   prefijo); si agregás una pestaña con data confidencial y sub-endpoints
   propios, sumala acá.
+- **Fondos visibles por usuario** (`auth.visible_fondos` / campo `fondos` del
+  store; editor en /admin): filtro fino ADENTRO de las pestañas con
+  tenencias. None = todos (default); lista = allowlist de `cod_fondo` (un
+  fondo nuevo NO se muestra a un restringido hasta tildarlo). Se aplica
+  SERVER-SIDE en `services.positions` (param `visibles`) y entra por
+  `auth.visible_fondos_for(request)` en Posiciones/Matriz (páginas y
+  partials, robusto a `?fondo=` a mano) y en los desplegables de tenencia
+  (`position_for`) de YAS / Comparador / Curvas, recalculando totales sobre
+  lo visible. Si agregás una vista nueva que muestre tenencias por fondo,
+  pasale `visibles` — nunca filtres en el template.
 - **Middleware `_SecurityMiddleware`** (el más externo, ASGI puro en
   `main.create_app`): agrega `X-Frame-Options: DENY`, CSP con
   `frame-ancestors 'none'`/`object-src 'none'`/`base-uri 'self'`, `nosniff`,

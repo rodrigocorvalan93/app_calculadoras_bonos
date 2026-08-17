@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.services import curves as curves_svc, bond_universe, delta_especies, marketdata_store, positions, pricing, symbols as syms
+from backend.services import auth as auth_svc, curves as curves_svc, bond_universe, delta_especies, marketdata_store, positions, pricing, symbols as syms
 
 router = APIRouter(tags=["comparador"])
 
@@ -202,7 +202,9 @@ async def comparador_result(
         locate_label=(lambda k: curves_svc.curve_def(k).label if k and curves_svc.curve_def(k) else None)(
             (lambda ca, cb: ca if (ca and ca == cb) else None)(
                 curves_svc.curve_key_for((a or "").strip()), curves_svc.curve_key_for((b or "").strip()))),
-        pos_a=positions.position_for(a), pos_b=positions.position_for(b),
+        # tenencias filtradas por los fondos visibles del usuario (None = todos)
+        pos_a=positions.position_for(a, auth_svc.visible_fondos_for(request)),
+        pos_b=positions.position_for(b, auth_svc.visible_fondos_for(request)),
         esp_a=delta_especies.info(a), esp_b=delta_especies.info(b),
         a=a, b=b, mode=mode, plazo=plazo, vn=vn,
     )
