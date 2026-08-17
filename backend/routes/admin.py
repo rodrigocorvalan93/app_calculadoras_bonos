@@ -53,6 +53,8 @@ def _excel_bases(request: Request) -> dict:
 
 
 def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = None) -> HTMLResponse:
+    from backend.services import positions
+
     rt = auth.role_tabs()
     # Las tabs superuser-only (Alertas) no se ofrecen como checkbox: aunque se
     # tildaran, el middleware las corta con 403 — sería un link muerto.
@@ -65,6 +67,9 @@ def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = Non
          "tabs": tabs, "role_tabs": {r: set(rt.get(r, [])) for r in ("premium", "basico")},
          "features": [{"key": k, "label": lbl} for k, lbl in auth.FEATURES],
          "role_features": {r: set(rf.get(r, [])) for r in ("premium", "basico")},
+         # Todos los fondos cargados (vista superuser) — para el editor de
+         # visibilidad por usuario. [] si no hay carteras: la tarjeta lo avisa.
+         "fondos_all": positions.fondos(),
          "excel_bases": _excel_bases(request),
          "msg": msg, "error": error},
     )
@@ -154,6 +159,29 @@ async def regen_excel(request: Request, username: str = Form(...)) -> HTMLRespon
         return _ctx(request, msg=f"Token de Excel de '{username.strip().lower()}' regenerado "
                                  "(el anterior dejó de valer).")
     except auth.AuthError as exc:
+        return _ctx(request, error=str(exc))
+
+
+@router.post("/users/fondos", response_class=HTMLResponse)
+async def set_fondos(request: Request) -> HTMLResponse:
+    """Fondos visibles del usuario (tenencias): checkbox `todos` (default) o
+    allowlist de `cod` (multi). Lista vacía = no ve ninguna cartera. El filtro
+    lo aplican los providers server-side (services.positions) en Posiciones /
+    Matriz / YAS / Comparador / Curvas."""
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    form = await request.form()
+    username = str(form.get("username") or "")
+    try:
+        if form.get("todos"):
+            auth.set_visible_fondos(username, None)
+            return _ctx(request, msg=f"'{username.strip().lower()}' ve todos los fondos.")
+        cods = [int(c) for c in form.getlist("cod")]
+        auth.set_visible_fondos(username, cods)
+        n = len(cods)
+        det = f"{n} fondo{'s' if n != 1 else ''}" if n else "NINGÚN fondo"
+        return _ctx(request, msg=f"'{username.strip().lower()}' ahora ve {det}.")
+    except (auth.AuthError, ValueError) as exc:
         return _ctx(request, error=str(exc))
 
 

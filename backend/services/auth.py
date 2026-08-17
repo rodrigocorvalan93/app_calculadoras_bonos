@@ -33,7 +33,7 @@ import secrets
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 logger = logging.getLogger("backend.auth")
 
@@ -279,7 +279,9 @@ def list_users() -> List[Dict[str, Any]]:
     out = [{"username": name, "role": u.get("role"), "email": u.get("email", ""),
             "created": u.get("created"),
             "excel_enabled": bool(u.get("excel_enabled")),
-            "excel_token": u.get("excel_token") or ""} for name, u in _store()["users"].items()]
+            "excel_token": u.get("excel_token") or "",
+            # None = ve todos los fondos; lista = allowlist (panel /admin)
+            "fondos": u.get("fondos")} for name, u in _store()["users"].items()]
     out.sort(key=lambda x: (x["role"] != "superuser", x["username"]))
     return out
 
@@ -410,6 +412,9 @@ def set_password(username: str, password: str) -> None:
         # el reset de contraseña no debe cortar el acceso Excel ya otorgado
         rec["excel_enabled"] = bool(u.get("excel_enabled"))
         rec["excel_token"] = u.get("excel_token", "")
+        # ...ni pisar la visibilidad de fondos configurada
+        if u.get("fondos") is not None:
+            rec["fondos"] = u.get("fondos")
         data["users"][name] = rec
         _save_locked(data)
 
@@ -500,6 +505,62 @@ def set_role_features(role: str, keys: List[str]) -> None:
 
 def _count_superusers(data: Dict[str, Any]) -> int:
     return sum(1 for u in data["users"].values() if u.get("role") == "superuser")
+
+
+# ── Visibilidad de FONDOS por usuario ────────────────────────────────────────
+# Filtro fino ADENTRO de las pestañas con tenencias (Posiciones / Matriz / los
+# desplegables de tenencia en YAS / Comparador / Curvas): el superuser elige
+# POR USUARIO qué fondos ve. Campo `fondos` del record: ausente/None = TODOS
+# (default de siempre, premium y básico); lista = allowlist de cod_fondo — un
+# fondo NUEVO que aparezca en carteras NO se le muestra a un usuario
+# restringido hasta que el superuser lo tilde (safe default: es tenencia real
+# del desk). El superuser ve todo siempre. El filtro corre SERVER-SIDE en los
+# providers de datos (services.positions), no escondiendo columnas en el HTML.
+
+def visible_fondos(username: Optional[str]) -> Optional[FrozenSet[int]]:
+    """None = ve todos los fondos; frozenset = sólo esos cod_fondo."""
+    if not username:
+        return None
+    u = _store()["users"].get(_norm(username))
+    if not u or u.get("role") == "superuser":
+        return None
+    cods = u.get("fondos")
+    if cods is None:
+        return None
+    try:
+        return frozenset(int(c) for c in cods)
+    except (TypeError, ValueError):     # store editado a mano y roto → no filtrar
+        return None
+
+
+def visible_fondos_for(request: Any) -> Optional[FrozenSet[int]]:
+    """Fondos visibles para el usuario del request (None = todos). Sin muro de
+    login (dev) o superuser → sin filtro. Duck-typed sobre request.state para
+    no importar FastAPI acá."""
+    u = getattr(getattr(request, "state", None), "user", None)
+    if not u or u.get("role") == "superuser":
+        return None
+    return visible_fondos(u.get("username"))
+
+
+def set_visible_fondos(username: str, cods: Optional[List[int]]) -> None:
+    """None = todos (borra la restricción); lista = allowlist de cod_fondo."""
+    name = _norm(username)
+    with _lock:
+        data = _store()
+        u = data["users"].get(name)
+        if not u:
+            raise AuthError(f"El usuario '{name}' no existe.")
+        if u.get("role") == "superuser":
+            raise AuthError("El superuser siempre ve todos los fondos.")
+        if cods is None:
+            u.pop("fondos", None)
+        else:
+            try:
+                u["fondos"] = sorted({int(c) for c in cods})
+            except (TypeError, ValueError):
+                raise AuthError("Códigos de fondo inválidos.") from None
+        _save_locked(data)
 
 
 # ── Acceso Excel (add-in) por usuario ────────────────────────────────────────

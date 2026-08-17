@@ -46,6 +46,12 @@ def test_certs_validos_y_firmados_por_la_ca(certs):
     # fullchain: hoja + CA en el mismo pem (lo que espera load_cert_chain)
     assert leaf_pem.count(b"BEGIN CERTIFICATE") == 2
 
+    # CDP: sin punto de CRL, el schannel estricto (curl / runtime de Excel en
+    # máquinas corporativas) corta con CRYPT_E_NO_REVOCATION_CHECK
+    cdp = leaf.extensions.get_extension_for_class(x509.CRLDistributionPoints).value
+    uris = {str(n.value) for dp in cdp for n in dp.full_name}
+    assert set(https_local.default_crl_urls()) <= uris
+
 
 def test_certs_idempotente_y_force(certs):
     d = certs["leaf_cert"].parent
@@ -54,6 +60,57 @@ def test_certs_idempotente_y_force(certs):
     # un host nuevo que el SAN no cubre fuerza la regeneración
     res3 = https_local.generate(d, ["localhost", "127.0.0.1", "::1", "10.1.2.3"])
     assert res3["regenerated"] and "10.1.2.3" in res3["reason"]
+
+
+def test_ca_se_reusa_y_san_se_une(certs):
+    """Regenerar la hoja NO cambia la CA (la confianza instalada con certutil
+    sigue valiendo) y el SAN nuevo es la UNIÓN con el anterior — clave para
+    dos máquinas que comparten certs/ vía OneDrive (hostnames distintos): sin
+    unión se pisaban los hosts mutuamente en un loop de regeneraciones."""
+    from cryptography import x509
+
+    d = certs["leaf_cert"].parent
+    ca_antes = certs["ca_cert"].read_bytes()
+    res = https_local.generate(d, ["localhost", "127.0.0.1", "::1", "10.9.9.9"])
+    assert res["regenerated"] and res["ca_reused"]
+    assert certs["ca_cert"].read_bytes() == ca_antes         # misma CA en disco
+
+    leaf = x509.load_pem_x509_certificate(certs["leaf_cert"].read_bytes())
+    ca = x509.load_pem_x509_certificate(ca_antes)
+    assert leaf.issuer == ca.subject                          # firmada por la CA vieja
+    san = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    ips = {str(i) for i in san.get_values_for_type(x509.IPAddress)}
+    # el host nuevo Y el del test anterior (10.1.2.3, ya en el SAN previo)
+    assert {"10.9.9.9", "10.1.2.3", "127.0.0.1"} <= ips
+
+
+def test_cert_viejo_sin_cdp_se_regenera(tmp_path):
+    """Un cert generado para OTRO punto CRL (p.ej. versión vieja del código u
+    otro puerto) se detecta y regenera solo."""
+    otro = ["http://127.0.0.1:9000/excel/crl"]
+    res = https_local.generate(tmp_path, ["localhost"], crl_urls=otro)
+    assert res["regenerated"]
+    res2 = https_local.generate(tmp_path, ["localhost"])      # CDP default (8000)
+    assert res2["regenerated"] and "CDP" in res2["reason"]
+    assert res2["ca_reused"]
+
+
+def test_crl_firmada_y_fresca(certs):
+    import datetime as dt
+
+    from cryptography import x509
+
+    d = certs["leaf_cert"].parent
+    der = https_local.build_crl(d)
+    crl = x509.load_der_x509_crl(der)
+    ca = x509.load_pem_x509_certificate(certs["ca_cert"].read_bytes())
+    assert crl.issuer == ca.subject
+    assert crl.is_signature_valid(ca.public_key())
+    vence = getattr(crl, "next_update_utc", None)
+    if vence is None:
+        vence = crl.next_update.replace(tzinfo=dt.timezone.utc)
+    assert vence > dt.datetime.now(dt.timezone.utc)
+    assert len(list(crl)) == 0                               # vacía: nada revocado
 
 
 # ── Puente TLS ───────────────────────────────────────────────────────────────

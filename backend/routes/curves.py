@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from backend.config import settings
 from backend.locale_ar import fmt_pct, hoy_ba, parse_ar_num
 from backend.cache_seq import seq_cached
-from backend.services import bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
+from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
 # hits keep the work small, but the first poll after a price tick still
@@ -561,7 +561,8 @@ async def mercado_book(
         symbol=symbol,
         snap=snap,
         row=row,
-        position=positions.position_for(code),                  # tenencia (desplegable)
+        # tenencia (desplegable) — filtrada por los fondos visibles del usuario
+        position=positions.position_for(code, auth_svc.visible_fondos_for(request)),
         instr=await instruments.detail(symbol),                 # lámina mínima / tick / límites
         bids=bids,
         offers=offers,

@@ -267,6 +267,38 @@ async def ca_cert() -> Response:
                     headers={"Content-Disposition": 'attachment; filename="oms-local-ca.crt"'})
 
 
+# CRL de la CA local, firmada on-demand y cacheada (la firma RSA es ~1 ms;
+# schannel además la cachea del suyo hasta next_update).
+_CRL_TTL = 3600.0
+_crl_cache: Dict[str, Any] = {}
+
+
+@router.get("/crl")
+async def crl() -> Response:
+    """CRL (vacía) de la CA local — el punto de distribución (CDP) que llevan
+    los certificados del puente. Schannel (runtime de Excel, WinHTTP, curl)
+    necesita PODER verificar revocación: en máquinas con política estricta un
+    cert sin CRL corta el handshake con CRYPT_E_NO_REVOCATION_CHECK y las
+    celdas quedan en "Network request failed" aunque la CA esté confiada.
+    PÚBLICO (sin token): Windows la baja sin cookies, y una CRL vacía no
+    expone datos. Va por http (uvicorn directo, no el puente): la validación
+    de la CRL no puede colgar del mismo https que se está validando."""
+    from backend.services import tls_bridge
+    from backend.tools import https_local
+
+    now = time.monotonic()
+    der = _crl_cache.get("der")
+    if der is None or now >= _crl_cache.get("exp", 0.0):
+        d = tls_bridge.cert_dir()
+        if not (d / https_local.CA_CERT).exists() or not (d / https_local.CA_KEY).exists():
+            return PlainTextResponse("Sin CA local: correr `python -m backend.tools.https_local` "
+                                     "en el server (el .bat lo hace solo).", status_code=404)
+        der = https_local.build_crl(d)
+        _crl_cache["der"], _crl_cache["exp"] = der, now + _CRL_TTL
+    return Response(content=der, media_type="application/pkix-crl",
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
 # ── Manifest del add-in (público: es el instalador, no expone datos) ─────────
 _MANIFEST_ID = "7c1f4c1e-9b0a-4b6e-9a51-0f2a9e6d4bb1"
 
@@ -277,7 +309,7 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>{app_id}</Id>
-  <Version>1.1.0.0</Version>
+  <Version>1.2.0.0</Version>
   <ProviderName>Mesa</ProviderName>
   <DefaultLocale>es-AR</DefaultLocale>
   <DisplayName DefaultValue="OMS Bonos"/>
@@ -296,15 +328,30 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <!-- RUNTIME COMPARTIDO: las funciones =OMS.* corren en el MISMO webview
+         (WebView2) que el taskpane, no en el runtime headless clásico. Motivos:
+         (a) el headless valida TLS con su propio stack y en máquinas
+         corporativas con política estricta muere con "Network request failed"
+         aunque el panel conecte perfecto; (b) al compartir página, el token
+         guardado en el panel es la MISMA instancia de OMSFeed que usan las
+         celdas — el manifest sin token embebido también autentica. -->
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.1">
+        <bt:Set Name="SharedRuntime" MinVersion="1.1"/>
+      </bt:Sets>
+    </Requirements>
     <Hosts>
       <Host xsi:type="Workbook">
+        <Runtimes>
+          <Runtime resid="OMS.Page.Url" lifetime="long"/>
+        </Runtimes>
         <AllFormFactors>
           <ExtensionPoint xsi:type="CustomFunctions">
             <Script>
               <SourceLocation resid="OMS.Functions.Script.Url"/>
             </Script>
             <Page>
-              <SourceLocation resid="OMS.Functions.Page.Url"/>
+              <SourceLocation resid="OMS.Page.Url"/>
             </Page>
             <Metadata>
               <SourceLocation resid="OMS.Functions.Metadata.Url"/>
@@ -313,7 +360,7 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
           </ExtensionPoint>
         </AllFormFactors>
         <DesktopFormFactor>
-          <FunctionFile resid="OMS.Functions.Page.Url"/>
+          <FunctionFile resid="OMS.Page.Url"/>
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
             <OfficeTab id="TabHome">
               <Group id="OMS.Group">
@@ -353,7 +400,6 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="OMS.Page.Url" DefaultValue="{base}/static/excel/taskpane.html{qs}"/>
-        <bt:Url id="OMS.Functions.Page.Url" DefaultValue="{base}/static/excel/functions.html{qs}"/>
         <bt:Url id="OMS.Functions.Script.Url" DefaultValue="{base}/static/excel/functions.js"/>
         <bt:Url id="OMS.Functions.Metadata.Url" DefaultValue="{base}/static/excel/functions.json"/>
       </bt:Urls>

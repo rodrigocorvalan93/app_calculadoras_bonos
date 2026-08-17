@@ -14,9 +14,14 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _row_for_code
-from backend.services import bond_universe, positions, pricing
+from backend.services import auth, bond_universe, positions, pricing
 
 router = APIRouter(tags=["posiciones"])
+
+# Visibilidad de fondos POR USUARIO (auth.visible_fondos_for): None = todos.
+# El filtro entra por acá en cada endpoint y baja al provider — un fondo no
+# visible no aparece en el selector, ni por ?fondo= a mano (URL-hack), ni como
+# columna de la matriz.
 
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
@@ -282,12 +287,15 @@ async def posiciones_page(
     loop = asyncio.get_running_loop()
     if refresh:
         await loop.run_in_executor(None, positions.refresh)   # relee Excels (I/O)
-    fs = positions.fondos()
+    vis = auth.visible_fondos_for(request)
+    fs = positions.fondos(vis)
+    # `selected` se valida contra la lista YA filtrada: un ?fondo= oculto para
+    # este usuario degrada al primero visible, nunca muestra el ajeno.
     selected = fondo if (fondo is not None and any(f["cod"] == fondo for f in fs)) \
         else (fs[0]["cod"] if fs else None)
     # _fondo_ctx valúa cada tenencia (pricing GIL-bound, cold ~200 ms–segundos):
     # fuera del event loop para no congelar todos los tabs live durante el refresh.
-    ctx = await loop.run_in_executor(None, _fondo_ctx, selected, plazo)
+    ctx = await loop.run_in_executor(None, _fondo_ctx, selected, plazo, vis)
     return _render(
         request, "posiciones.html",
         fondos=fs, selected=selected, plazo=plazo, status=positions.status(),
@@ -318,12 +326,18 @@ def _agrupar_tenencias(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
-def _fondo_ctx(selected: Optional[int], plazo: str) -> Dict[str, Any]:
+def _fondo_ctx(selected: Optional[int], plazo: str,
+               visibles: Optional[frozenset] = None) -> Dict[str, Any]:
+    # `holdings(…, visibles)` devuelve [] si el fondo está oculto para el
+    # usuario: el panel queda vacío también con ?fondo= inyectado a mano.
     if selected is None:
         return {"rows": [], "grupos": [], "summary": {}, "pn": None,
                 "total_valor": 0.0, "nombre": ""}
+    hs = positions.holdings(selected, visibles)
+    if not hs:
+        return {"rows": [], "grupos": [], "summary": {}, "pn": None,
+                "total_valor": 0.0, "nombre": ""}
     pn = positions.pn_of(selected)
-    hs = positions.holdings(selected)
     rows = _enrich(hs, pn, plazo)
     return {
         "rows": rows,
@@ -351,7 +365,8 @@ async def posiciones_table(request: Request, fondo: Optional[str] = None, plazo:
     # `fondo` opcional: el poll live (md-update) puede llegar sin selección
     # (sin carteras cargadas) y no debe romper con 422.
     bond_universe.ensure_loaded()
-    ctx = await asyncio.get_running_loop().run_in_executor(None, _fondo_ctx, _fondo_param(fondo), plazo)
+    ctx = await asyncio.get_running_loop().run_in_executor(
+        None, _fondo_ctx, _fondo_param(fondo), plazo, auth.visible_fondos_for(request))
     return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **ctx)
 
 
@@ -368,10 +383,12 @@ async def posiciones_targets(request: Request, fondo: Optional[str] = None,
     cat_actual: List[Dict[str, Any]] = []
     nombre = ""
     if f is not None:
-        summary = _composicion_summary(positions.holdings(f), positions.pn_of(f))
-        cat_actual = [{"cat": r["cat"], "actual": r["pct"]}
-                      for r in summary.get("Categoría", []) if r.get("pct") is not None]
-        nombre = positions.fondo_label(f)
+        hs = positions.holdings(f, auth.visible_fondos_for(request))
+        if hs:
+            summary = _composicion_summary(hs, positions.pn_of(f))
+            cat_actual = [{"cat": r["cat"], "actual": r["pct"]}
+                          for r in summary.get("Categoría", []) if r.get("pct") is not None]
+            nombre = positions.fondo_label(f)
     return _render(request, "partials/posiciones_targets.html",
                    cat_actual=cat_actual, fondo=f, nombre=nombre)
 
@@ -382,20 +399,26 @@ async def matriz_page(request: Request, view: str = "vn", refresh: bool = False)
     bond_universe.ensure_loaded()
     if refresh:
         await asyncio.get_running_loop().run_in_executor(None, positions.refresh)   # relee Excels (I/O)
-    return _render(request, "matriz.html", view=view, status=positions.status(), **_matriz_ctx())
+    return _render(request, "matriz.html", view=view, status=positions.status(),
+                   **_matriz_ctx(auth.visible_fondos_for(request)))
 
 
 @router.get("/matriz/table", response_class=HTMLResponse)
 async def matriz_table(request: Request, view: str = "vn") -> HTMLResponse:
     bond_universe.ensure_loaded()
-    return _render(request, "partials/matriz_table.html", view=view, **_matriz_ctx())
+    return _render(request, "partials/matriz_table.html", view=view,
+                   **_matriz_ctx(auth.visible_fondos_for(request)))
 
 
-def _matriz_ctx() -> Dict[str, Any]:
+def _matriz_ctx(visibles: Optional[frozenset] = None) -> Dict[str, Any]:
     c = positions.ensure_loaded()
-    fs = positions.fondos()
+    fs = positions.fondos(visibles)
     esps: Dict[str, Dict[int, Dict[str, float]]] = {}
     for h in c["holdings"]:
+        # Un fondo oculto no aporta ni columna ni fila: una especie que SÓLO
+        # está en fondos ocultos no debe aparecer (delataría la tenencia).
+        if visibles is not None and h["cod_fondo"] not in visibles:
+            continue
         e = h.get("cod_delta") or h.get("especie")
         if not e:
             continue

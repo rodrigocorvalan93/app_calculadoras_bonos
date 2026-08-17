@@ -134,6 +134,49 @@ async def test_manifest_publico_y_hist(auth_on):
         assert (await ac.get("/excel/v1/hist/a3500")).status_code == 401
 
 
+async def test_manifest_runtime_compartido(auth_on):
+    """Las funciones corren en el MISMO webview que el taskpane (shared
+    runtime): sin runtime headless aparte, que en máquinas corporativas con
+    TLS estricto moría con 'Network request failed', y el token del panel les
+    llega directo. Page/FunctionFile tienen que apuntar a la página del panel."""
+    async with _client() as ac:
+        xml = (await ac.get("/excel/manifest.xml")).text
+    assert '<bt:Set Name="SharedRuntime" MinVersion="1.1"/>' in xml
+    assert '<Runtime resid="OMS.Page.Url" lifetime="long"/>' in xml
+    assert '<FunctionFile resid="OMS.Page.Url"/>' in xml
+    # el ExtensionPoint de funciones carga la página compartida, no functions.html
+    assert xml.count('<SourceLocation resid="OMS.Page.Url"/>') >= 2
+    assert "OMS.Functions.Page.Url" not in xml
+
+
+async def test_crl_publica_sin_token(auth_on, tmp_path, monkeypatch):
+    """/excel/crl es el punto de distribución que llevan los certs del puente:
+    schannel la baja SIN cookies ni token (por eso es pública) para poder
+    verificar revocación — sin ella el handshake muere con
+    CRYPT_E_NO_REVOCATION_CHECK y las celdas dan 'Network request failed'."""
+    from cryptography import x509
+
+    from backend.tools import https_local
+
+    monkeypatch.setattr(settings, "tls_cert_dir", str(tmp_path))
+    excel_route._crl_cache.clear()
+    try:
+        async with _client() as ac:
+            # sin CA generada → 404 claro, no un 500
+            assert (await ac.get("/excel/crl")).status_code == 404
+            https_local.generate(tmp_path, ["localhost", "127.0.0.1"])
+            r = await ac.get("/excel/crl")
+            assert r.status_code == 200
+            assert r.headers["content-type"].startswith("application/pkix-crl")
+            crl = x509.load_der_x509_crl(r.content)
+            ca = x509.load_pem_x509_certificate((tmp_path / https_local.CA_CERT).read_bytes())
+            assert crl.is_signature_valid(ca.public_key())
+            # segunda bajada: cacheada (mismos bytes)
+            assert (await ac.get("/excel/crl")).content == r.content
+    finally:
+        excel_route._crl_cache.clear()
+
+
 def test_snapshot_json_compacto(store_con_datos):
     body = excel_route._snapshot_bytes("")
     data = json.loads(body)
@@ -303,10 +346,10 @@ async def test_calc_sin_precio_usa_last_del_mercado(auth_on):
 
 @pytest.mark.asyncio
 async def test_manifest_token_en_url_y_saneado() -> None:
-    """Runtime CLÁSICO: el runtime de funciones es SEPARADO del panel y no
-    siempre comparte OfficeRuntime.storage → el token va embebido en la URL de
-    functions.html/taskpane.html. El valor se valida (alfabeto de token_urlsafe)
-    para que no se pueda inyectar XML."""
+    """El token per-usuario va embebido en la URL de la página compartida
+    (taskpane.html?token=…): con el runtime compartido autentica a panel y
+    celdas de una, incluso sin abrir el panel. El valor se valida (alfabeto de
+    token_urlsafe) para que no se pueda inyectar XML."""
     import xml.dom.minidom as MD
 
     from httpx import ASGITransport, AsyncClient
@@ -320,11 +363,10 @@ async def test_manifest_token_en_url_y_saneado() -> None:
     for r in (ok, bad, none):
         assert r.status_code == 200
         MD.parseString(r.text)                      # XML siempre bien formado
-    assert "functions.html?token=AbC-123_xyzAbC123xyz" in ok.text
+        assert "SharedRuntime" in r.text            # runtime compartido SIEMPRE
     assert "taskpane.html?token=AbC-123_xyzAbC123xyz" in ok.text
     assert "<Evil>" not in bad.text and "token=" not in bad.text   # inválido → se descarta
     assert "token=" not in none.text                               # sin token: compat
-    assert "SharedRuntime" not in none.text                        # modelo clásico
 
 
 @pytest.mark.asyncio
@@ -401,7 +443,7 @@ async def test_manifest_base_https_del_puente(auth_on):
     async with _client() as ac:
         r = await ac.get("/excel/manifest.xml", params={"base": "https://localhost:8443"})
     assert r.status_code == 200
-    assert "https://localhost:8443/static/excel/functions.html" in r.text
+    assert "https://localhost:8443/static/excel/taskpane.html" in r.text
     assert "http://t/" not in r.text
 
 
@@ -412,9 +454,12 @@ def test_funciones_beacon_wiring():
     from pathlib import Path
 
     base = Path(excel_route.__file__).parent.parent / "static" / "excel"
-    html = (base / "functions.html").read_text(encoding="utf-8")
     js = (base / "functions.js").read_text(encoding="utf-8")
-    assert "OMS_BEACON" in html and "/excel/v1/beacon" in html
-    assert html.index("OMS_BEACON") < html.index("appsforoffice.microsoft.com")
     for marca in ("funciones-registradas", "celda-timeout", "feed-", "office-ready"):
         assert marca in js, marca
+    # functions.html (runtime clásico, manifests viejos) y taskpane.html (la
+    # página del runtime compartido) definen ambos el beacon ANTES de office.js
+    for nombre, p in (("functions.html", "p=functions"), ("taskpane.html", "p=shared")):
+        html = (base / nombre).read_text(encoding="utf-8")
+        assert "OMS_BEACON" in html and "/excel/v1/beacon" in html and p in html
+        assert html.index("OMS_BEACON") < html.index("appsforoffice.microsoft.com")

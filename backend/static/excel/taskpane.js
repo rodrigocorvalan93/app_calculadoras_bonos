@@ -30,12 +30,15 @@
         " (definido por el manifest instalado en ESTA máquina)";
     } catch (e) { /* noop */ }
 
-    // Manifest SIN token embebido (el "universal" de /admin): en los Excel
-    // donde el runtime de funciones no comparte storage con el panel, las
-    // celdas =OMS.QUOTE(…) no autentican NUNCA aunque acá diga conectado.
-    // Avisarlo acá corta la persecución del #N/D a ciegas.
+    // Manifest SIN token embebido (el "universal" de /admin): sólo es un
+    // problema en el modelo CLÁSICO, donde el runtime de funciones corre
+    // separado del panel y no siempre comparte storage → las celdas no
+    // autentican nunca aunque acá diga conectado. Con el runtime COMPARTIDO
+    // (manifest 1.2, CustomFunctions definido en ESTA página) las celdas usan
+    // el mismo OMSFeed que el panel y el token guardado alcanza — sin cartel.
     try {
-      if (!/[?&]token=/.test(window.location.search || "")) {
+      if (!/[?&]token=/.test(window.location.search || "")
+          && typeof CustomFunctions === "undefined") {
         var warn = document.createElement("div");
         warn.className = "muted";
         warn.style.cssText = "margin-top:6px;font-size:11px;color:#e0a800";

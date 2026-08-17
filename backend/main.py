@@ -576,10 +576,13 @@ def create_app() -> FastAPI:
         # El manifest es público (es el instalador del add-in, no expone datos).
         if path.startswith("/excel/") and settings.auth_enabled:
             # Público sin token: el manifest (instalador), la CA local (se
-            # confía ANTES de tener conexión) y el beacon de diagnóstico (el
+            # confía ANTES de tener conexión), la CRL (schannel la baja sin
+            # cookies para validar revocación — sin ella el handshake muere
+            # con CRYPT_E_NO_REVOCATION_CHECK) y el beacon de diagnóstico (el
             # runtime reporta justamente cuando el token falta/está roto;
             # sólo escribe una línea sanitizada en el log, no expone datos).
-            if path in ("/excel/manifest.xml", "/excel/ca.crt", "/excel/v1/beacon"):
+            if path in ("/excel/manifest.xml", "/excel/ca.crt", "/excel/crl",
+                        "/excel/v1/beacon"):
                 return await call_next(request)
             token = request.headers.get("x-oms-token") or request.query_params.get("token")
             uname = auth_svc.user_for_excel_token(token)

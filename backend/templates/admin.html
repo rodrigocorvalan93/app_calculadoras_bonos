@@ -96,6 +96,52 @@
       </div>
     </div>
 
+    {# ── Fondos visibles por usuario ── #}
+    <div class="card">
+      <div class="card-title"><span>Fondos visibles por usuario</span>
+        <span class="card-title-aux">tenencias — el superuser ve todos</span></div>
+      <div class="card-body">
+        {% if not fondos_all %}
+        <p class="muted" style="margin:0">Sin carteras cargadas: cuando la app tenga la composición
+          (Delta_Composicion.xlsx), acá se elige qué fondos ve cada usuario.</p>
+        {% else %}
+        <p class="muted" style="margin:0 0 8px">“Todos” = ve todas las carteras (default, incluye
+          fondos nuevos). Con una selección, ve <strong>sólo</strong> los tildados — un fondo nuevo no se
+          muestra hasta tildarlo. Aplica a Posiciones, Matriz y los desplegables de tenencia
+          (YAS / Comparador / Curvas).</p>
+        <table class="cashflows admin-tabs">
+          <thead><tr><th style="text-align:left">Usuario</th><th style="text-align:left">Fondos</th><th></th></tr></thead>
+          <tbody>
+            {% for u in users if u.role != 'superuser' %}
+            <tr>
+              <td style="text-align:left;vertical-align:top"><b>{{ u.username }}</b>
+                <div class="muted" style="font-size:11px">{{ role_labels[u.role] }}</div></td>
+              <td style="text-align:left">
+                <form method="post" action="/admin/users/fondos" id="fondos-{{ u.username }}"
+                      style="display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <label style="white-space:nowrap"><input type="checkbox" name="todos" value="1"
+                         {{ 'checked' if u.fondos is none else '' }}
+                         onchange="this.form.querySelectorAll('input[name=cod]').forEach(c=>c.disabled=this.checked)">
+                    <b>todos</b></label>
+                  {% for f in fondos_all %}
+                  <label style="white-space:nowrap" title="{{ f.nombre }}"><input type="checkbox" name="cod" value="{{ f.cod }}"
+                         {{ 'checked' if u.fondos is not none and f.cod in u.fondos else '' }}
+                         {{ 'disabled' if u.fondos is none else '' }}> {{ f.nombre }}</label>
+                  {% endfor %}
+                </form>
+              </td>
+              <td style="vertical-align:top"><button class="btn-mini" type="submit" form="fondos-{{ u.username }}">Guardar</button></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="muted">Sin usuarios (además del superuser).</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </div>
+
     {# ── Pestañas por rol ── #}
     <div class="card">
       <div class="card-title"><span>Pestañas visibles por rol</span>

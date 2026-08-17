@@ -67,12 +67,56 @@ es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
      genera una CA local + certificado para `localhost`/`127.0.0.1`/IP LAN en
      `certs/` (gitignored) y confía la CA en el usuario de Windows
      (`certutil -user`, sin admin). Idempotente: con el cert vigente no hace
-     nada;
+     nada. La CA se REUSA entre regeneraciones (la confianza instalada no se
+     invalida) y el certificado lleva un **punto de distribución de CRL**
+     (`http://127.0.0.1:8000/excel/crl`, servida por la app) — ver el punto
+     de revocación abajo;
   2. con los certs presentes, la app levanta sola el **puente TLS**
      (`backend/services/tls_bridge.py`): `https://localhost:8443` → proxy al
      uvicorn http local. `TLS_BRIDGE=0` lo apaga; puerto con `TLS_PORT`;
   3. el manifest se baja de `https://localhost:8443/excel/manifest.xml` (la
      tarjeta de `/admin` ya apunta ahí cuando el puente está activo).
+- **CA confiada pero las celdas dan `Network request failed`** (DIAG muestra
+  `REJECT: Network request failed`, y en el log del server no aparece NI el
+  beacon): revocación. En máquinas con política estricta (GPO/EDR
+  corporativo), schannel exige poder **verificar la revocación** del cert y
+  corta el handshake con `CRYPT_E_NO_REVOCATION_CHECK` si el cert no trae
+  CRL — los archivos estáticos cargan igual (el loader de Office es más
+  laxo), lo que despista. Los certs nuevos ya traen el punto CRL; uno viejo
+  se regenera solo al correr `python -m backend.tools.https_local` (misma
+  CA: no hay que re-confiar nada). Verificación definitiva, porque el
+  `curl.exe` de Windows usa schannel y exige revocación SIEMPRE:
+
+      curl.exe -v https://localhost:8443/excel/ca.crt -o NUL
+
+  Si curl conecta limpio, Office conecta. Ojo: el CDP queda horneado en el
+  cert apuntando al puerto 8000 — si uvicorn corre en otro puerto, regenerar
+  con `--crl-port`. Después de regenerar: reiniciar la app y cerrar Excel
+  por completo.
+
+## Runtime compartido (manifest 1.2) — las celdas corren en el webview del panel
+
+Desde el manifest **1.2.0.0** el add-in declara `SharedRuntime 1.1`: las
+funciones `=OMS.*` corren en el **mismo WebView2 que el taskpane**, no en el
+runtime headless clásico. Dos consecuencias grandes:
+
+- **Se acaba la clase de fallas del runtime headless**: ese proceso valida
+  TLS con su propio stack, y en máquinas corporativas puede quedar bloqueado
+  (celdas en `Network request failed`) aunque el panel conecte perfecto. Con
+  el runtime compartido, si el panel conecta (dot verde), las celdas
+  conectan — es la misma página.
+- **El token del panel alcanza**: panel y celdas comparten la misma instancia
+  de `OMSFeed`, así que "Guardar y conectar" autentica también a las celdas.
+  El manifest "⬇ con token" sigue siendo lo más cómodo (autentica sin abrir
+  el panel), pero ya no es obligatorio.
+
+Al actualizar de un manifest viejo: reinstalar el XML nuevo (versión
+1.2.0.0), cerrar Excel POR COMPLETO y reabrir. `=OMS.PING()` tiene que
+reportar build `v12` o posterior; si sigue mostrando `v11`, Excel está
+sirviendo caché vieja (borrar `%LOCALAPPDATA%\Microsoft\Office\16.0\Wef` con
+Excel cerrado). `functions.html` sigue existiendo sólo para manifests viejos
+ya instalados (modelo clásico); en el log, los beacons del runtime
+compartido salen con `p=shared` y los del clásico con `p=functions`.
 - **Otra compu de la mesa contra un server central**: correr el puente
   escuchando afuera (`TLS_BRIDGE_HOST=0.0.0.0`), bajar la CA pública de
   `https://<server>:8443/excel/ca.crt` en cada PC y confiarla:
@@ -97,6 +141,7 @@ Dónde se corta la cadena dice qué falló:
 | Último estado | Significa |
 |---|---|
 | *(nada)* | El runtime ni ejecutó JS: manifest http (ver arriba), o Excel sin runtime de funciones. |
+| *(nada)* pero `=OMS.PING()` responde y DIAG da `REJECT: Network request failed` | El JS corre pero NINGÚN fetch sale (ni el beacon): TLS bloqueado en el cliente — casi siempre revocación (`CRYPT_E_NO_REVOCATION_CHECK`, ver arriba); verificar con `curl.exe`. |
 | `page-cargada` + `sin-customfunctions` | `office.js` no cargó (sin salida al CDN) o el runtime no soporta funciones. |
 | `office-ready` sin `funciones-registradas` | `associate()` no corrió — mirar `js-error`. |
 | `funciones-registradas` + `feed-auth` | Token ausente/roto: instalar el manifest "⬇ con token" desde `/admin`. |

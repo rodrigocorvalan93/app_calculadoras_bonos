@@ -4,6 +4,34 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OMS Bonos</title>
+<!-- Con el runtime COMPARTIDO (manifest 1.2), esta página es también el
+     runtime de las funciones =OMS.*: hereda de functions.html el beacon de
+     telemetría y el watchdog de registro. p=shared distingue en el log del
+     server la arquitectura nueva de la clásica (p=functions). -->
+<script>
+(function () {
+  function b(st, d) {
+    try {
+      var q = "/excel/v1/beacon?p=shared&st=" + encodeURIComponent(st) +
+              (d ? "&d=" + encodeURIComponent(String(d).slice(0, 220)) : "");
+      if (typeof fetch === "function") { fetch(q, { cache: "no-store" })["catch"](function () {}); }
+      else if (typeof Image !== "undefined") { (new Image()).src = q; }
+    } catch (e) { /* la telemetría jamás rompe el runtime */ }
+  }
+  window.OMS_BEACON = b;
+  b("page-cargada");
+  window.onerror = function (msg, src, line) {
+    b("js-error", msg + " @ " + (src || "?") + ":" + (line || "?"));
+  };
+  setTimeout(function () {
+    if (typeof CustomFunctions === "undefined") {
+      b("sin-customfunctions", "el host no levanto el runtime compartido (Office sin SharedRuntime 1.1?)");
+    } else if (!window.OMS_REGISTRADO) {
+      b("sin-registro", "CustomFunctions existe pero associate() no corrio");
+    }
+  }, 8000);
+})();
+</script>
 <!-- office.js es obligatorio para add-ins y SOLO se distribuye por el CDN de
      Microsoft (no se puede self-hostear con soporte). Es la única excepción a
      la regla "sin libs externas" del repo. -->
