@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 
 from backend.config import settings
 from backend.locale_ar import parse_ar_num
-from backend.services import bond_universe, curves as curves_svc, delta_especies, marketdata_store, positions, pricing, symbols as syms
+from backend.services import auth as auth_svc, bond_universe, curves as curves_svc, delta_especies, marketdata_store, positions, pricing, symbols as syms
 
 router = APIRouter(prefix="/yas", tags=["yas"])
 
@@ -117,7 +117,8 @@ async def yas_recompute(
         ticket=ticket,
         meta=pricing.bond_meta(code),
         mode=mode,
-        position=positions.position_for(code),
+        # tenencia filtrada por los fondos visibles del usuario (None = todos)
+        position=positions.position_for(code, auth_svc.visible_fondos_for(request)),
         especie=delta_especies.info(code),
     )
 

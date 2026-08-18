@@ -22,7 +22,7 @@ import os
 import re
 import threading
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from backend.services import deltapaths
 
@@ -333,14 +333,25 @@ def fondo_label(cod: int) -> str:
     return f"{cod} — {nombre}" if nombre else f"Fondo {cod}"
 
 
-def fondos() -> List[Dict[str, Any]]:
+# `visibles` en toda la API pública: filtro de fondos por usuario (None = sin
+# filtro; set de cod_fondo = sólo esos). Lo setea el superuser desde /admin
+# (auth.visible_fondos_for(request)) y se aplica ACÁ, en el provider, para que
+# ninguna vista (Posiciones/Matriz/YAS/Comparador/Curvas) pueda filtrar
+# tenencias de fondos ajenos por accidente de template.
+
+def fondos(visibles: Optional[Iterable[int]] = None) -> List[Dict[str, Any]]:
     """Lista de fondos presentes en la composición, con su PN."""
     c = ensure_loaded()
     cods = sorted({h["cod_fondo"] for h in c["holdings"]})
+    if visibles is not None:
+        vis = set(visibles)
+        cods = [cod for cod in cods if cod in vis]
     return [{"cod": cod, "nombre": fondo_label(cod), "pn": c["pn"].get(cod)} for cod in cods]
 
 
-def holdings(cod_fondo: int) -> List[Dict[str, Any]]:
+def holdings(cod_fondo: int, visibles: Optional[Iterable[int]] = None) -> List[Dict[str, Any]]:
+    if visibles is not None and cod_fondo not in set(visibles):
+        return []
     c = ensure_loaded()
     return [h for h in c["holdings"] if h["cod_fondo"] == cod_fondo]
 
@@ -350,16 +361,19 @@ def pn_of(cod_fondo: int) -> Optional[float]:
 
 
 def especies_universe() -> List[str]:
-    """Cod_Delta únicos (para la matriz especies×fondos)."""
+    """Cod_Delta únicos (para el warmup de la matriz especies×fondos)."""
     c = ensure_loaded()
     return sorted({h["cod_delta"] for h in c["holdings"] if h["cod_delta"]})
 
 
-def position_for(code: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Posición agregada en un instrumento (suma de todos los fondos).
+def position_for(code: Optional[str],
+                 visibles: Optional[Iterable[int]] = None) -> Optional[Dict[str, Any]]:
+    """Posición agregada en un instrumento (suma de los fondos VISIBLES).
 
-    `code` matchea Cod_Delta (upper). None si no se tiene el papel. Incluye
-    el detalle por fondo (nombre + % PN) ordenado por valor.
+    `code` matchea Cod_Delta (upper). None si no se tiene el papel (o si el
+    usuario no ve ningún fondo que lo tenga — no debe enterarse de que el desk
+    lo tiene). Incluye el detalle por fondo (nombre + % PN) ordenado por valor;
+    con filtro, los totales se recalculan sobre lo visible.
     """
     if not code:
         return None
@@ -378,8 +392,11 @@ def position_for(code: Optional[str]) -> Optional[Dict[str, Any]]:
         agg = by.get(key)
     if not agg:
         return None
+    vis = set(visibles) if visibles is not None else None
     funds = []
     for f in agg["funds"]:
+        if vis is not None and f["cod_fondo"] not in vis:
+            continue
         pn = c["pn"].get(f["cod_fondo"])
         funds.append({
             "cod_fondo": f["cod_fondo"],
@@ -388,11 +405,18 @@ def position_for(code: Optional[str]) -> Optional[Dict[str, Any]]:
             "valor": f["valor"],
             "pct_pn": (f["valor"] / pn) if (f["valor"] and pn and pn > 0) else None,
         })
+    if not funds:                     # ningún fondo visible lo tiene ⇒ "no hay posición"
+        return None
     funds.sort(key=lambda x: (x["valor"] or 0.0), reverse=True)
+    if vis is None:
+        total_cantidad, total_valor = agg["total_cantidad"], agg["total_valor"]
+    else:                             # totales SOLO de lo visible (no filtrar el agregado)
+        total_cantidad = sum((f["cantidad"] or 0.0) for f in funds)
+        total_valor = sum((f["valor"] or 0.0) for f in funds)
     return {
         "code": key,
-        "total_cantidad": agg["total_cantidad"],
-        "total_valor": agg["total_valor"],
+        "total_cantidad": total_cantidad,
+        "total_valor": total_valor,
         "n_fondos": len(funds),
         "funds": funds,
     }
