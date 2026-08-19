@@ -29,17 +29,17 @@ DEFAULT_ENTRIES = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP,IV"
 DEFAULT_DEPTH = 3
 
 # --- Rate limit del broker (HTTP 429) -----------------------------------------
-# DEFAULT: SIN pacing (levantar todo a fondo con el pool de 9 threads) — la
-# cuota la maneja el broker y el pedido a IT. Si el server te frena con 429:
-# 1) los reintentos con backoff (siempre activos, respetan Retry-After) suelen
-#    absorber cortes esporádicos sin que pierdas precios;
-# 2) para un límite duro sostenido, seteá BYMA_REQ_INTERVAL en secrets.txt
-#    (seg entre requests, GLOBAL entre threads — ej. cuota 120/min → 0.5)
-#    hasta que te amplíen la cuota. Todo sin tocar código.
-REQ_MIN_INTERVAL = float(os.getenv("BYMA_REQ_INTERVAL", "0"))     # 0 = sin límite (default)
-REQ_RETRIES_429 = int(os.getenv("BYMA_REQ_RETRIES", "4"))         # reintentos ante 429
-_REQ_BACKOFF_BASE = 0.5                                           # piso del backoff sin pacing
-_REQ_MAX_WAIT = 30.0                                              # tope de espera por intento
+# Canilla ABIERTA por defecto: el barrido va a fondo con el pool de 9 threads
+# (la cuota la maneja el broker / el pedido a IT). Si el server te frena con
+# 429 sostenido y todavía no te ampliaron la cuota, subí REQ_MIN_INTERVAL acá
+# (seg entre requests, GLOBAL entre threads — ej. cuota 120/min → 0.5) y
+# volvé a dejarlo en 0 cuando IT libere. Los reintentos ante 429 quedan
+# siempre activos: gratis en el camino feliz, absorben cortes esporádicos
+# respetando el Retry-After del server.
+REQ_MIN_INTERVAL = 0.0   # 0 = sin límite (default); >0 activa el turnstile global
+REQ_RETRIES_429 = 4      # reintentos ante 429
+_REQ_BACKOFF_BASE = 0.5  # piso del backoff sin pacing (no reintentar en caliente)
+_REQ_MAX_WAIT = 30.0     # tope de espera por intento
 _req_lock = threading.Lock()
 _req_ultimo = [0.0]                                               # monotonic del último request
 
@@ -276,7 +276,7 @@ def get_market_data(
     response = _get_paced(session, url)
 
     if response.status_code != 200:
-        extra = " (rate limit: agotó los reintentos — subí BYMA_REQ_INTERVAL)" \
+        extra = " (rate limit: agotó los reintentos — subí REQ_MIN_INTERVAL en bymaapi.py)" \
             if response.status_code == 429 else ""
         print(f"Error en la solicitud para {symbol}: {response.status_code}{extra}")
         return {}
