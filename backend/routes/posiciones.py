@@ -8,6 +8,8 @@ Calificación × Monto/%PN) matcheando Cod_Delta ↔ ticker del universo.
 from __future__ import annotations
 
 import asyncio
+import threading
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
@@ -449,6 +451,129 @@ async def posiciones_targets(request: Request, fondo: Optional[str] = None,
             nombre = positions.fondo_label(f)
     return _render(request, "partials/posiciones_targets.html",
                    cat_actual=cat_actual, fondo=f, nombre=nombre)
+
+
+# ── Perfil de vencimientos (flujos futuros del fondo) ──────────────────────
+# Barras de cashflows proyectados (renta + amortización) del fondo, bucketeados
+# por trimestre los primeros ~2 años y por año después. NO vive en el panel
+# live: los flujos dependen de la ficha y del VN tenido, no del tick — se
+# calcula al elegir fondo y se cachea por día/cartera. El costo (generate_
+# cashflows por bono, ~ms c/u) corre en el executor y sólo la primera vez.
+_perfil_cache: Dict[Any, Dict[str, Any]] = {}
+_perfil_lock = threading.Lock()
+
+
+def _bucket_flujo(d: date, hoy: date) -> str:
+    """Trimestral hasta fin del año que viene ('4Q2026'), anual después ('2029')
+    — granularidad útil cerca, sin 80 barras para un GD46."""
+    if d.year <= hoy.year + 1:
+        return f"{(d.month - 1) // 3 + 1}Q{d.year}"
+    return str(d.year)
+
+
+def _bucket_orden(label: str):
+    try:
+        if "Q" in label:
+            q, y = label.split("Q")
+            return (int(y), int(q))
+        return (int(label), 0)
+    except ValueError:
+        return (9999, 9)
+
+
+def _perfil_vencimientos(selected: Optional[int],
+                         visibles: Optional[frozenset] = None) -> Dict[str, Any]:
+    """Flujos futuros del fondo en ARS por bucket + resto sin vencimiento.
+
+    Por tenencia con ficha: generate_cashflows(hoy) → cashflow_cpn_full
+    (mismo camino que el TR realizado; `Total` es por 1 VN) × cantidad. Las
+    fichas hard-dollar se convierten con el FX implícito vigente (USD→CCL,
+    USB→MEP). Sin ficha / sin flujos / sin FX ⇒ el VALOR de la tenencia suma
+    al bucket "sin vencimiento" (acciones, CEDEARs, FCI, liquidez).
+    """
+    vacio = {"bars": [], "otros_pct": None, "otros_ars": 0.0,
+             "total_ars": 0.0, "nombre": "", "fondo": selected}
+    if selected is None:
+        return vacio
+    hs = positions.holdings(selected, visibles)
+    if not hs:
+        return vacio
+    hoy = date.today()
+    key = (selected, visibles, hoy.toordinal(), positions.status().get("asof"))
+    with _perfil_lock:
+        cached = _perfil_cache.get(key)
+    if cached is not None:
+        return cached
+
+    from backend.services import fx as fx_svc
+    fxs = fx_svc.get_fx("24hs")
+
+    flujos: Dict[str, float] = {}
+    otros = 0.0
+    for h in hs:
+        code, cant, valor = h.get("cod_delta"), h.get("cantidad"), (h.get("valor") or 0.0)
+        obj = pricing._bond_obj_copy(code) if code else None
+        if obj is None or not hasattr(obj, "generate_cashflows") or not cant:
+            otros += valor
+            continue
+        mon = (getattr(obj, "moneda", "") or "").upper()
+        rate = 1.0
+        if mon == "USD":
+            rate = fxs.ccl or fxs.usb or 0.0
+        elif mon == "USB":
+            rate = fxs.usb or fxs.ccl or 0.0
+        if not rate:                    # ficha en dólares sin FX: no inventar
+            otros += valor
+            continue
+        try:
+            import pandas as pd
+            obj.generate_cashflows(hoy.strftime("%d/%m/%Y"))
+            cf = obj.cashflow_cpn_full
+            # Fechas viene como object-de-dates en las fichas reales; el
+            # to_datetime lo hace robusto también a un datetime64 futuro
+            # (comparar datetime64 vs date revienta en pandas moderno).
+            fut = cf[pd.to_datetime(cf["Fechas"]) > pd.Timestamp(hoy)]
+        except Exception:  # noqa: BLE001 — ficha rara: cuenta como sin vencimiento
+            otros += valor
+            continue
+        if fut.empty:
+            otros += valor
+            continue
+        for fecha, tot in zip(fut["Fechas"], fut["Total"]):
+            d = fecha.date() if hasattr(fecha, "date") else fecha
+            b = _bucket_flujo(d, hoy)
+            flujos[b] = flujos.get(b, 0.0) + float(tot) * float(cant) * rate
+
+    total_valor = sum((h.get("valor") or 0.0) for h in hs)
+    pn = positions.pn_of(selected)
+    denom = pn if (pn and pn > 0) else (total_valor if total_valor > 0 else None)
+    max_ars = max(flujos.values(), default=0.0)
+    bars = [{"label": k, "ars": v,
+             "pct": (v / denom) if denom else None,
+             "alto": (v / max_ars * 100.0) if max_ars > 0 else 0.0}
+            for k, v in sorted(flujos.items(), key=lambda kv: _bucket_orden(kv[0]))]
+    out = {"bars": bars,
+           "otros_pct": (otros / denom) if denom else None,
+           "otros_ars": otros,
+           "total_ars": sum(flujos.values()),
+           "nombre": positions.fondo_label(selected),
+           "fondo": selected}
+    with _perfil_lock:
+        if len(_perfil_cache) > 64:     # fondos × días: nunca crece de verdad
+            _perfil_cache.clear()
+        _perfil_cache[key] = out
+    return out
+
+
+@router.get("/posiciones/vencimientos", response_class=HTMLResponse)
+async def posiciones_vencimientos(request: Request, fondo: Optional[str] = None) -> HTMLResponse:
+    """Partial del gráfico de vencimientos — FUERA del panel live (los flujos
+    no dependen del tick); se pide al cargar la página y al cambiar de fondo.
+    Filtrado por los fondos visibles del usuario como todo el subárbol."""
+    bond_universe.ensure_loaded()
+    ctx = await asyncio.get_running_loop().run_in_executor(
+        None, _perfil_vencimientos, _fondo_param(fondo), auth.visible_fondos_for(request))
+    return _render(request, "partials/posiciones_vencimientos.html", **ctx)
 
 
 # ── Matriz de tenencias (pestaña aparte) ───────────────────────────────────
