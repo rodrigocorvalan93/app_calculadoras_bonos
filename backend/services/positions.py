@@ -312,6 +312,14 @@ def ensure_loaded() -> Dict[str, Any]:
         return _cache
 
 
+def is_loaded() -> bool:
+    """True si el cache ya está poblado, SIN disparar la carga. Para vistas
+    que quieren mostrar data sólo si ya está (p. ej. la tarjeta de fondos de
+    /admin durante el boot) sin bloquear el event loop con la lectura de los
+    Excel — el warmup la puebla enseguida igual."""
+    return _cache is not None
+
+
 def refresh() -> Dict[str, Any]:
     """Fuerza relectura de los Excel (botón 'actualizar')."""
     global _cache
