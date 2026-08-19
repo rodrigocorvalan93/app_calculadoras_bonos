@@ -20,6 +20,7 @@ class _Bono:
         self.index = kw.get("index", "")
         self.moneda = kw.get("moneda", "ARS")
         self.step_up = kw.get("step_up", False)
+        self.vencimiento = kw.get("venc")
 
 
 def test_dual_label_por_industria() -> None:
@@ -54,6 +55,64 @@ def test_no_duales_sin_cambios() -> None:
     assert _categoria(usd) == "USD"
     tamar = _Bono(industria="Soberano ARS", tipo="VARIABLE_CAP", index="TAMAR")
     assert _tasa(tamar) == "TAMAR" and _categoria(tamar) == "ARS TAMAR"
+
+
+def test_venc_bucket_trimestral() -> None:
+    """Composición por vencimiento: bucket '<trimestre>Q<año>' cronológico;
+    sin ficha/vencimiento (acciones, FCI) → 'Sin vencimiento' al final."""
+    from datetime import date
+
+    from backend.routes.posiciones import _venc_bucket, _venc_sort_key
+
+    assert _venc_bucket(_Bono(venc=date(2026, 1, 15))) == "1Q2026"
+    assert _venc_bucket(_Bono(venc=date(2026, 3, 31))) == "1Q2026"
+    assert _venc_bucket(_Bono(venc=date(2026, 4, 1))) == "2Q2026"
+    assert _venc_bucket(_Bono(venc=date(2026, 12, 31))) == "4Q2026"
+    assert _venc_bucket(_Bono()) == "Sin vencimiento"
+    assert _venc_bucket(None) == "Sin vencimiento"
+    assert (_venc_sort_key("1Q2026") < _venc_sort_key("2Q2026")
+            < _venc_sort_key("4Q2026") < _venc_sort_key("1Q2027")
+            < _venc_sort_key("Sin vencimiento"))
+
+
+def test_composicion_vencimiento_e_infra(monkeypatch) -> None:
+    """El cuadro 'Vencimiento' sale en TODOS los fondos (orden cronológico) y
+    'Activos infra' SOLO con infra=True (fondo Crecimiento), con el orden fijo
+    Multidestino / Destino Específico / No infraestructura y la clasificación
+    de Delta-Especies (Clasificacion_especifico) — la misma del KPI legacy."""
+    from datetime import date
+
+    from backend.routes import posiciones as P
+    from backend.services import delta_especies
+
+    fichas = {
+        "TX26": _Bono(venc=date(2026, 11, 9), industria="Soberano ARS CER", ajuste="CER"),
+        "TZXM7": _Bono(venc=date(2027, 6, 30), industria="Soberano ARS CER", ajuste="CER"),
+    }
+    monkeypatch.setattr(P, "_bono", lambda c: fichas.get(c))
+    clasif = {
+        "TX26": {"Clasificacion_especifico": "Infraestructura Multidestino"},
+        "TZXM7": {"Clasificacion_especifico": "Infraestructura Destino Específico"},
+    }
+    monkeypatch.setattr(delta_especies, "info", lambda c: clasif.get(c))
+
+    hs = [
+        {"cod_delta": "TX26", "valor": 60.0, "clase": "Títulos Públicos"},
+        {"cod_delta": "TZXM7", "valor": 30.0, "clase": "Títulos Públicos"},
+        {"cod_delta": "GGAL", "valor": 10.0, "clase": "Acciones"},
+    ]
+
+    s = P._composicion_summary(hs, pn=200.0)
+    assert "Activos infra" not in s                      # sólo el fondo infra lo computa
+    assert [(r["cat"], r["monto"]) for r in s["Vencimiento"]] == [
+        ("4Q2026", 60.0), ("2Q2027", 30.0), ("Sin vencimiento", 10.0)]
+    assert s["Vencimiento"][0]["pct"] == pytest.approx(0.30)
+
+    s2 = P._composicion_summary(hs, pn=200.0, infra=True)
+    assert [(r["cat"], r["monto"]) for r in s2["Activos infra"]] == [
+        ("Multidestino", 60.0), ("Destino Específico", 30.0), ("No infraestructura", 10.0)]
+    # los cuadros de siempre no cambian
+    assert {"Clase de Activo", "Categoría", "Tasa", "Calificación"} <= set(s2)
 
 
 @pytest.mark.asyncio
