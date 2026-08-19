@@ -5,6 +5,7 @@
 
 # %% Imports
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
@@ -27,11 +28,56 @@ GUARDAR_BYMA_XLSX = False  # ponelo True solo para debug
 DEFAULT_ENTRIES = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP,IV"
 DEFAULT_DEPTH = 3
 
+# --- Rate limit del broker (HTTP 429) -----------------------------------------
+# El REST de xOMS corta las ráfagas: el barrido dispara cientos de requests
+# (uno por especie × plazo + todos los DLR) y sin pacing el server responde
+# 429 a casi todo → la base "se llena" de NaN. Regulador GLOBAL: los threads
+# del pool comparten un turnstile (mínimo intervalo entre requests) y ante un
+# 429 se reintenta con backoff respetando el header Retry-After si viene.
+# Ajustables por secrets.txt / env sin tocar código.
+REQ_MIN_INTERVAL = float(os.getenv("BYMA_REQ_INTERVAL", "0.25"))  # seg entre requests (~4/s)
+REQ_RETRIES_429 = int(os.getenv("BYMA_REQ_RETRIES", "4"))         # reintentos ante 429
+_REQ_MAX_WAIT = 30.0                                              # tope de espera por intento
+_req_lock = threading.Lock()
+_req_ultimo = [0.0]                                               # monotonic del último request
+
+
+def _get_paced(session: requests.Session, url: str, params: dict | None = None) -> requests.Response:
+    """GET con pacing global anti-429 + reintentos con backoff.
+
+    El lock serializa el turno entre TODOS los threads del pool (el cupo del
+    server es por cliente, no por thread). Ante 429 espera `Retry-After` (o
+    backoff exponencial con tope) y reintenta; agotados los reintentos
+    devuelve el último Response para que el caller reporte el status real.
+    Cualquier otro status se devuelve tal cual (el caller decide)."""
+    r: requests.Response
+    for intento in range(REQ_RETRIES_429 + 1):
+        with _req_lock:
+            espera = _req_ultimo[0] + REQ_MIN_INTERVAL - time.monotonic()
+            if espera > 0:
+                time.sleep(espera)          # con el lock tomado: es el turnstile
+            _req_ultimo[0] = time.monotonic()
+        r = session.get(url, params=params)
+        if r.status_code != 429:
+            return r
+        try:
+            retry_after = float(r.headers.get("Retry-After") or 0.0)
+        except ValueError:                   # Retry-After como fecha HTTP → backoff propio
+            retry_after = 0.0
+        time.sleep(min(max(retry_after, REQ_MIN_INTERVAL * (2 ** intento)), _REQ_MAX_WAIT))
+    return r
+
+
 # =============================================================================
 # Constantes
 # =============================================================================
-BASE_URL = "https://api.latinsecurities.matrizoms.com.ar/"
-#BASE_URL = "https://api.lbo.xoms.com.ar/"
+# Host del broker — dos vigentes: latinsecurities.matrizoms y lbo.xoms. Se
+# elige por secrets.txt (OMS_BASE_URL=https://api.lbo.xoms.com.ar/) sin tocar
+# código; sin la clave queda el default de siempre.
+BASE_URL = (os.getenv("OMS_BASE_URL", "").strip() or
+            "https://api.latinsecurities.matrizoms.com.ar/")
+if not BASE_URL.endswith("/"):
+    BASE_URL += "/"
 
 # =============================================================================
 # Conexión / Instrumentos
@@ -57,11 +103,20 @@ def login_xoms(username: str, password: str) -> requests.Session:
     credentials = {"j_username": username, "j_password": password}
     response = session.post(url, data=credentials)
     final_url = (response.url or "").lower()
+    if response.status_code == 429:
+        raise RuntimeError(
+            "El server rate-limiteó el LOGIN (HTTP 429) — no son las credenciales: "
+            "esperá unos minutos antes de reintentar (el bloqueo por ráfagas previas "
+            f"puede tardar en levantarse). Retry-After={response.headers.get('Retry-After')!r}, "
+            f"host {BASE_URL}."
+        )
     if not response.ok or "login" in final_url or "error" in final_url:
         raise RuntimeError(
             f"Autenticación fallida (HTTP {response.status_code}, URL final {response.url}). "
             f"Revisá usuario/clave y que BASE_URL apunte al server vigente ({BASE_URL}) — "
-            "el broker tiene dos hosts (latinsecurities.matrizoms y lbo.xoms)."
+            "el broker tiene dos hosts (latinsecurities.matrizoms y lbo.xoms) y las "
+            "credenciales suelen ser DISTINTAS en cada uno. Respuesta del server: "
+            f"{(response.text or '')[:200]!r}"
         )
     if not session.cookies:
         raise RuntimeError(
@@ -80,7 +135,7 @@ def _get_json(session: requests.Session, path: str) -> dict:
     en vez del traceback críptico, dice exactamente qué pasó y qué hacer.
     """
     url = BASE_URL + path
-    r = session.get(url)
+    r = _get_paced(session, url)
     if r.status_code != 200:
         raise RuntimeError(f"{path} → HTTP {r.status_code}: {r.text[:300]}")
     if not r.text.strip():
@@ -139,7 +194,7 @@ def get_instruments_details(session: requests.Session, retries: int = 3) -> pd.D
 
     last_payload: dict = {}
     for intento in range(1, retries + 1):
-        response = session.get(url)
+        response = _get_paced(session, url)
 
         if response.status_code != 200:
             raise RuntimeError(
@@ -181,7 +236,7 @@ def get_instrument_detail(session: requests.Session, symbol: str) -> pd.DataFram
     """
     url = BASE_URL + "rest/instruments/detail"
     params = {"marketId": "ROFX", "symbol": symbol}
-    response = session.get(url, params=params)
+    response = _get_paced(session, url, params=params)
 
     if response.status_code != 200:
         raise Exception(f"Error HTTP {response.status_code}: {response.text}")
@@ -213,10 +268,12 @@ def get_market_data(
     """
     symbol_encoded = requests.utils.quote(symbol)
     url = f"{BASE_URL}rest/marketdata/get?marketId={market_id}&symbol={symbol_encoded}&entries={entries}&depth={depth}"
-    response = session.get(url)
+    response = _get_paced(session, url)
 
     if response.status_code != 200:
-        print(f"Error en la solicitud para {symbol}: {response.status_code}")
+        extra = " (rate limit: agotó los reintentos — subí BYMA_REQ_INTERVAL)" \
+            if response.status_code == 429 else ""
+        print(f"Error en la solicitud para {symbol}: {response.status_code}{extra}")
         return {}
 
     mkt_dict = response.json()
@@ -300,7 +357,7 @@ def get_mktdata(
     code_encoded = requests.utils.quote(code)
 
     url = f"{BASE_URL}rest/marketdata/get?marketId={market_id}&symbol={code_encoded}&entries={entries}&depth={depth}"
-    response = session.get(url)
+    response = _get_paced(session, url)
 
     if not response.ok:
         print(f"Error en la solicitud para {symbol}: {response.status_code}")
