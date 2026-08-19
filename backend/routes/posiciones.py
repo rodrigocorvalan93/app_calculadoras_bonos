@@ -176,19 +176,69 @@ def _emisor_for(code: Optional[str], obj) -> Optional[str]:
     return em
 
 
-def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float]) -> Dict[str, List[Dict[str, Any]]]:
+def _venc_bucket(obj) -> str:
+    """Bucket trimestral del vencimiento ('3Q2026') para la composición.
+    Sin ficha o sin vencimiento (acciones, FCI, liquidez) → 'Sin vencimiento'.
+    Reusa el obj que el loop ya levantó: cero lookups extra."""
+    v = _venc_date(obj)
+    if v is None:
+        return "Sin vencimiento"
+    try:
+        return f"{(v.month - 1) // 3 + 1}Q{v.year}"
+    except AttributeError:              # vencimiento no-fecha en una ficha rota
+        return "Sin vencimiento"
+
+
+def _venc_sort_key(cat: str):
+    """Orden CRONOLÓGICO de los buckets ('1Q2026' < '2Q2026' < …); el bucket
+    sin vencimiento va último."""
+    try:
+        return (int(cat[2:]), int(cat[0]))
+    except (ValueError, IndexError):
+        return (9999, 9)
+
+
+# Clasificación regulatoria del fondo de infraestructura ("Crecimiento") —
+# misma fuente que el KPI del legacy OMSposiciones (fondo 18): la columna
+# `Clasificacion_especifico` del Excel Delta-Especies, servida por el cache en
+# memoria de delta_especies (lookup µs). Todo lo que no es infra explícita
+# (Pymes, sin ficha, acciones, liquidez) cuenta como "No infraestructura".
+_INFRA_ORDEN = ("Multidestino", "Destino Específico", "No infraestructura")
+
+
+def _infra_bucket(code: Optional[str]) -> str:
+    from backend.services import delta_especies
+    ce = str((delta_especies.info(code) or {}).get("Clasificacion_especifico") or "") if code else ""
+    if "Infraestructura" in ce:
+        if "Multidestino" in ce:
+            return "Multidestino"
+        if "Destino" in ce:
+            return "Destino Específico"
+    return "No infraestructura"
+
+
+def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float],
+                         infra: bool = False) -> Dict[str, List[Dict[str, Any]]]:
     groups: Dict[str, Dict[str, float]] = {
         "Clase de Activo": {}, "Categoría": {}, "Tasa": {}, "Calificación": {},
+        "Vencimiento": {},
     }
+    if infra:
+        groups["Activos infra"] = {}
     for h in hs:
         valor = h.get("valor") or 0.0
-        obj = _bono(h.get("cod_delta"))
+        code = h.get("cod_delta")
+        obj = _bono(code)
         keys = {
             "Clase de Activo": h.get("clase") or "(sin clasif.)",
             "Categoría": _cat_for(h, obj),
             "Tasa": _tasa(obj),
             "Calificación": _calif(obj),
+            # mismo fallback de ficha que la columna Vto de la tabla (patas FX)
+            "Vencimiento": _venc_bucket(obj if obj is not None else _ficha_leg(code)),
         }
+        if infra:
+            keys["Activos infra"] = _infra_bucket(code)
         for g, k in keys.items():
             groups[g][k] = groups[g].get(k, 0.0) + valor
     out: Dict[str, List[Dict[str, Any]]] = {}
@@ -199,7 +249,12 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float]) -> Dict[
         denom = pn if (pn and pn > 0) else (total if total > 0 else None)
         rows = [{"cat": k, "monto": v, "pct": (v / denom) if denom else None}
                 for k, v in d.items()]
-        rows.sort(key=lambda r: -abs(r["monto"]))
+        if g == "Vencimiento":
+            rows.sort(key=lambda r: _venc_sort_key(r["cat"]))        # cronológico
+        elif g == "Activos infra":
+            rows.sort(key=lambda r: _INFRA_ORDEN.index(r["cat"]))    # orden fijo
+        else:
+            rows.sort(key=lambda r: -abs(r["monto"]))
         out[g] = rows
     return out
 
@@ -339,13 +394,16 @@ def _fondo_ctx(selected: Optional[int], plazo: str,
                 "total_valor": 0.0, "nombre": ""}
     pn = positions.pn_of(selected)
     rows = _enrich(hs, pn, plazo)
+    nombre = positions.fondo_label(selected)
+    # Cuadro "Activos infra" SOLO para el fondo de infraestructura (Crecimiento
+    # — el del KPI regulatorio del legacy): para el resto ni se computa.
     return {
         "rows": rows,
         "grupos": _agrupar_tenencias(rows),
-        "summary": _composicion_summary(hs, pn),
+        "summary": _composicion_summary(hs, pn, infra="CRECIMIENTO" in nombre.upper()),
         "pn": pn,
         "total_valor": sum((r.get("valor") or 0.0) for r in rows),
-        "nombre": positions.fondo_label(selected),
+        "nombre": nombre,
         "fondo": selected,
     }
 

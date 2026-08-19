@@ -6,7 +6,10 @@
   </div>
   <div class="card-body">
     <div class="resumen-grid">
-      {% for label in ["Clase de Activo", "Categoría", "Tasa", "Calificación"] %}
+      {# Itera los grupos que arme _composicion_summary (orden de inserción):
+         Clase / Categoría / Tasa / Calificación / Vencimiento (+ Activos infra
+         sólo en el fondo de infraestructura). #}
+      {% for label in summary %}
       <div>
         <div class="resumen-h">{{ label }}</div>
         <table class="cashflows">
