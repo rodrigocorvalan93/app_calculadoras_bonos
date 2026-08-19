@@ -102,6 +102,11 @@ class TlsBridge:
         self.host, self.port = host, port
         self.target_host, self.target_port = target_host, target_port
         self._server: Optional[asyncio.base_events.Server] = None
+        # Conexiones en vuelo: stop() las cancela explícitamente. Sin esto, el
+        # shutdown (p.ej. el auto-reload al tocar especies.py) destruía los
+        # tasks pendientes y asyncio ensuciaba el log con "Task was destroyed
+        # but it is pending!" por cada add-in conectado.
+        self._tasks: "set[asyncio.Task]" = set()
 
     async def start(self) -> None:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -118,8 +123,17 @@ class TlsBridge:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+        # Cancelar y DRENAR las conexiones en vuelo antes de devolver el
+        # control: el finally de cada _handle cierra sus writers.
+        for t in list(self._tasks):
+            t.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
 
     async def _handle(self, cr: asyncio.StreamReader, cw: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self._tasks.add(task)
         tw: Optional[asyncio.StreamWriter] = None
         try:
             try:
@@ -152,6 +166,8 @@ class TlsBridge:
         except Exception:  # noqa: BLE001 — nunca tirar el server por una conexión
             logger.debug("[tls] conexión con error", exc_info=True)
         finally:
+            if task is not None:
+                self._tasks.discard(task)
             for w in (tw, cw):
                 if w is not None:
                     try:

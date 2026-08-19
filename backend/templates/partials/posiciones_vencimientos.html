@@ -1,38 +1,51 @@
-{# Perfil de vencimientos del fondo: flujos futuros (renta + amortización)
-   bucketeados por trimestre (~2 años) y año. Una sola serie → un solo tono
-   del sistema; valores en tinta muted; tooltip nativo por barra con ambas
-   unidades. El toggle % ↔ ARS es sólo un swap de etiquetas por CSS
-   (data-m del contenedor): las alturas son proporcionales en ambos modos. #}
+{# Perfil de vencimientos del fondo: flujos futuros bucketeados por trimestre
+   (~2 años) y año, APILADOS en amortización (abajo, accent) + interés (arriba,
+   cyan) con leyenda de series. Valores en tinta muted, etiqueta en TODAS las
+   barras, tooltip nativo con el desglose. El toggle % ↔ ARS es un swap de
+   etiquetas por CSS (data-m): las alturas son proporcionales en ambos modos.
+   ⤓ PNG lo dibuja app.js en un canvas desde los data-attrs (colores tomados
+   del computed style → sale igual en dark y light). #}
 {% if bars %}
-<div class="card venc-chart" data-m="pct">
+<div class="card venc-chart" data-m="pct" data-nombre="{{ nombre }}"
+     data-leyenda="Σ flujos {{ (total_ars / 1000000) | ar_num(0) }}M ARS{% if otros_ars and otros_pct is not none %} · Sin vencimiento específico: {{ (otros_pct * 100) | ar_pct_pp(1) }} del fondo{% endif %}">
   <div class="card-title">
     <span>Perfil de vencimientos · {{ nombre }}</span>
     <span class="card-title-aux">
-      flujos proyectados (renta + amortización)
+      flujos proyectados
       · <button type="button" class="btn-mini venc-btn venc-btn-pct"
                 onclick="this.closest('.venc-chart').dataset.m='pct'">% fondo</button>
       <button type="button" class="btn-mini venc-btn venc-btn-ars"
               onclick="this.closest('.venc-chart').dataset.m='ars'">ARS</button>
+      <button type="button" class="btn-mini venc-dl" style="margin-left:6px"
+              title="Descargar el gráfico como imagen (respeta el modo % / ARS elegido)">⤓ PNG</button>
     </span>
   </div>
   <div class="card-body">
     <div class="venc-bars">
       {% for b in bars %}
-      <div class="venc-col"
-           title="{{ b.label }} · {{ b.ars | ar_int }} ARS{% if b.pct is not none %} · {{ (b.pct * 100) | ar_pct_pp(2) }} del fondo{% endif %}">
+      <div class="venc-col" data-label="{{ b.label }}" data-ars="{{ b.ars }}"
+           data-renta="{{ b.renta_ars }}" data-amort="{{ b.amort_ars }}"
+           data-pct="{{ b.pct if b.pct is not none else '' }}" data-alto="{{ '%.2f' % b.alto }}"
+           title="{{ b.label }} · {{ b.ars | ar_int }} ARS{% if b.pct is not none %} · {{ (b.pct * 100) | ar_pct_pp(2) }} del fondo{% endif %} — amortización {{ b.amort_ars | ar_int }} · interés {{ b.renta_ars | ar_int }}">
         <div class="venc-val">
-          {%- if b.alto >= 18 -%}
-            <span class="v-pct">{{ (b.pct * 100) | ar_pct_pp(1) if b.pct is not none else "" }}</span
-            ><span class="v-ars">{{ (b.ars / 1000000) | ar_num(0) }}M</span>
-          {%- endif -%}
+          <span class="v-pct">{{ (b.pct * 100) | ar_pct_pp(1) if b.pct is not none else "" }}</span
+          ><span class="v-ars">{{ (b.ars / 1000000) | ar_num(0) }}M</span>
         </div>
-        <div class="venc-track"><div class="venc-bar" style="height:{{ '%.1f' % b.alto }}%"></div></div>
+        <div class="venc-track">
+          <div class="venc-stack" style="height:{{ '%.1f' % b.alto }}%">
+            {% if b.renta_share > 0.5 %}<div class="venc-seg-renta" style="height:{{ '%.1f' % b.renta_share }}%"></div>{% endif %}
+            <div class="venc-seg-amort"></div>
+          </div>
+        </div>
         <div class="venc-lbl">{{ b.label }}</div>
       </div>
       {% endfor %}
     </div>
     <div class="muted venc-leyenda">
-      Σ flujos {{ (total_ars / 1000000) | ar_num(0) }}M ARS (fichas hard-dollar al FX implícito de hoy)
+      <span class="venc-chip venc-chip-amort"></span> Amortización
+      <span class="venc-chip venc-chip-renta" style="margin-left:10px"></span> Interés
+      <span style="margin-left:14px">Σ flujos {{ (total_ars / 1000000) | ar_num(0) }}M ARS
+      (fichas hard-dollar al FX implícito de hoy)</span>
       {%- if otros_ars and otros_pct is not none %} ·
       <span title="{{ otros_ars | ar_int }} ARS de valuación actual">Sin vencimiento específico
       (acciones / CEDEARs / FCI / liquidez): <b>{{ (otros_pct * 100) | ar_pct_pp(1) }}</b> del fondo</span>

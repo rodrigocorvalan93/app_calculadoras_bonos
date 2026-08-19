@@ -184,6 +184,29 @@ async def test_bridge_reescribe_forwarded_y_pipea(certs):
         assert low.count(b"\r\nconnection:") == 1 and b"connection: close" in low
 
 
+async def test_stop_cancela_conexiones_en_vuelo(certs):
+    """El shutdown (p.ej. auto-reload) cancela y DRENA las conexiones vivas:
+    antes quedaban tasks pendientes al cerrarse el loop y asyncio ensuciaba el
+    log con 'Task was destroyed but it is pending!' por cada add-in conectado."""
+    back = _DummyBackend()
+    await back.start()
+    bridge = await _bridge_up(certs, back.port)
+    ctx = ssl.create_default_context(cafile=str(certs["ca_cert"]))
+    # head INCOMPLETO: _handle queda esperando en readuntil (conexión en vuelo)
+    _, w = await asyncio.open_connection("127.0.0.1", bridge.port, ssl=ctx)
+    w.write(b"GET /colgada HTTP/1.1\r\n")
+    await w.drain()
+    for _ in range(50):                      # hasta que el server registre el task
+        if bridge._tasks:
+            break
+        await asyncio.sleep(0.01)
+    assert bridge._tasks
+    await asyncio.wait_for(bridge.stop(), 5)  # no cuelga y drena todo
+    assert not bridge._tasks
+    w.close()
+    await back.stop()
+
+
 async def test_bridge_502_si_el_target_no_esta(certs):
     # puerto efímero cerrado: abrir y cerrar un server para reservar uno libre
     tmp = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)

@@ -1449,15 +1449,26 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
    alturas son proporcionales en ambos modos, sólo cambian los textos. */
 .venc-bars { display: flex; align-items: flex-end; gap: 2px; height: 170px;
              padding-top: 4px; overflow-x: auto; }
-.venc-col  { flex: 1 1 0; min-width: 26px; display: flex; flex-direction: column;
+.venc-col  { flex: 1 1 0; min-width: 36px; display: flex; flex-direction: column;
              align-items: center; height: 100%; }
-.venc-val  { font-size: 9.5px; color: var(--text-muted); height: 14px;
+.venc-val  { font-size: 9px; color: var(--text-muted); height: 14px;
              font-variant-numeric: tabular-nums; white-space: nowrap; }
 .venc-track { flex: 1; width: 100%; display: flex; align-items: flex-end;
               justify-content: center; }
-.venc-bar  { width: 72%; max-width: 34px; background: var(--accent); opacity: .82;
-             border-radius: 3px 3px 0 0; min-height: 1px; }
-.venc-col:hover .venc-bar { opacity: 1; }
+/* Stack amortización (abajo, accent) + interés (arriba, cyan), gap 2px de
+   superficie entre segmentos. Sin interés (lecaps/zeros) el stack es 1 bloque. */
+.venc-stack { width: 72%; max-width: 34px; min-height: 1px; display: flex;
+              flex-direction: column; gap: 2px; }
+.venc-seg-amort { flex: 1; background: var(--accent); opacity: .85;
+                  border-radius: 0 0 2px 2px; min-height: 1px; }
+.venc-stack > .venc-seg-amort:first-child { border-radius: 3px 3px 2px 2px; }
+.venc-seg-renta { background: var(--cyan); opacity: .85; border-radius: 3px 3px 2px 2px;
+                  min-height: 2px; }
+.venc-col:hover .venc-seg-amort, .venc-col:hover .venc-seg-renta { opacity: 1; }
+.venc-chip { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+             vertical-align: -1px; }
+.venc-chip-amort { background: var(--accent); }
+.venc-chip-renta { background: var(--cyan); }
 .venc-lbl  { font-size: 9.5px; color: var(--text-muted); margin-top: 3px;
              border-top: 1px solid var(--border); width: 100%; text-align: center;
              padding-top: 2px; white-space: nowrap; }

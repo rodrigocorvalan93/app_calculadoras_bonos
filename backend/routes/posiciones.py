@@ -508,7 +508,7 @@ def _perfil_vencimientos(selected: Optional[int],
     from backend.services import fx as fx_svc
     fxs = fx_svc.get_fx("24hs")
 
-    flujos: Dict[str, float] = {}
+    flujos: Dict[str, List[float]] = {}      # bucket → [renta, amortización] ARS
     otros = 0.0
     for h in hs:
         code, cant, valor = h.get("cod_delta"), h.get("cantidad"), (h.get("valor") or 0.0)
@@ -539,23 +539,44 @@ def _perfil_vencimientos(selected: Optional[int],
         if fut.empty:
             otros += valor
             continue
-        for fecha, tot in zip(fut["Fechas"], fut["Total"]):
+        # Split interés/capital: Total = (Intereses + Amortización) × Ajuste/100
+        # por 1 VN (verificado contra fichas reales). renta = Int×Ajuste/100 y
+        # amort = Total − renta ⇒ la suma cierra EXACTA con Total (sin drift).
+        con_detalle = "Intereses" in fut.columns and "Ajuste" in fut.columns
+        ints = fut["Intereses"] if con_detalle else None
+        ajs = fut["Ajuste"] if con_detalle else None
+        for i, (fecha, tot) in enumerate(zip(fut["Fechas"], fut["Total"])):
             d = fecha.date() if hasattr(fecha, "date") else fecha
             b = _bucket_flujo(d, hoy)
-            flujos[b] = flujos.get(b, 0.0) + float(tot) * float(cant) * rate
+            tot_ars = float(tot) * float(cant) * rate
+            try:
+                renta_ars = (float(ints.iloc[i]) * float(ajs.iloc[i]) / 100.0
+                             * float(cant) * rate) if con_detalle else 0.0
+            except (TypeError, ValueError):
+                renta_ars = 0.0
+            renta_ars = min(max(renta_ars, 0.0), max(tot_ars, 0.0))
+            cell = flujos.setdefault(b, [0.0, 0.0])
+            cell[0] += renta_ars
+            cell[1] += tot_ars - renta_ars
 
     total_valor = sum((h.get("valor") or 0.0) for h in hs)
     pn = positions.pn_of(selected)
     denom = pn if (pn and pn > 0) else (total_valor if total_valor > 0 else None)
-    max_ars = max(flujos.values(), default=0.0)
-    bars = [{"label": k, "ars": v,
-             "pct": (v / denom) if denom else None,
-             "alto": (v / max_ars * 100.0) if max_ars > 0 else 0.0}
-            for k, v in sorted(flujos.items(), key=lambda kv: _bucket_orden(kv[0]))]
+    max_ars = max((r + a for r, a in flujos.values()), default=0.0)
+    bars = []
+    for k, (renta, amort) in sorted(flujos.items(), key=lambda kv: _bucket_orden(kv[0])):
+        v = renta + amort
+        bars.append({
+            "label": k, "ars": v, "renta_ars": renta, "amort_ars": amort,
+            "pct": (v / denom) if denom else None,
+            "alto": (v / max_ars * 100.0) if max_ars > 0 else 0.0,
+            # % de la barra que es interés (para el segmento de arriba del stack)
+            "renta_share": (renta / v * 100.0) if v > 0 else 0.0,
+        })
     out = {"bars": bars,
            "otros_pct": (otros / denom) if denom else None,
            "otros_ars": otros,
-           "total_ars": sum(flujos.values()),
+           "total_ars": sum(b["ars"] for b in bars),
            "nombre": positions.fondo_label(selected),
            "fondo": selected}
     with _perfil_lock:
