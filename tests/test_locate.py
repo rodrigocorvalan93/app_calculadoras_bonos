@@ -8,10 +8,14 @@ from backend.services import bond_universe, curves
 
 def test_curve_key_for() -> None:
     bond_universe.ensure_loaded()
-    assert curves.curve_key_for("TX26") == "cer"
-    assert curves.curve_key_for("TXMJ9") == "dualcer"
+    # Los códigos cortos van tomados de la PROPIA curva: hardcodear un ticker
+    # era una bomba de tiempo — al vencer sale de la curva (build_curve_codes
+    # filtra vencidos) y el lookup devuelve None (pasó con S31L6, jul-2026).
+    table = curves.build_curve_codes()
+    assert curves.curve_key_for(table["cer"][0]) == "cer"
+    assert curves.curve_key_for(table["lecap"][0]) == "lecap"
+    assert curves.curve_key_for("TXMJ9") == "dualcer"    # dual jun-2029
     assert curves.curve_key_for("TXMJ9v") == "dualtamar"
-    assert curves.curve_key_for("S31L6") == "lecap"
     assert curves.curve_key_for("GGAL") is None          # acciones: sin curva
 
 

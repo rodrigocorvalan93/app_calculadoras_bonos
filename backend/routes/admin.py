@@ -69,7 +69,9 @@ def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = Non
          "role_features": {r: set(rf.get(r, [])) for r in ("premium", "basico")},
          # Todos los fondos cargados (vista superuser) — para el editor de
          # visibilidad por usuario. [] si no hay carteras: la tarjeta lo avisa.
-         "fondos_all": positions.fondos(),
+         # is_loaded(): sólo si el cache YA está (el warmup lo puebla al boot)
+         # — nunca leer Excel acá adentro, que esto corre en el event loop.
+         "fondos_all": positions.fondos() if positions.is_loaded() else [],
          "excel_bases": _excel_bases(request),
          "msg": msg, "error": error},
     )

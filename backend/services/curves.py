@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date as _date
 from typing import Dict, List, Set, Tuple
 
 from . import bond_universe
@@ -123,7 +124,10 @@ def build_curve_codes() -> Dict[str, List[str]]:
     global _codes_cache
     bond_universe.ensure_loaded()
     all_codes = bond_universe.all_codes()
-    cache_key = len(all_codes)
+    hoy = _date.today()
+    # El día entra en la key: un bono que vence mientras la app corre sale de
+    # las curvas en el próximo rollover sin reiniciar.
+    cache_key = (len(all_codes), hoy.toordinal())
     if _codes_cache and _codes_cache[0] == cache_key:
         return _codes_cache[1]
 
@@ -135,6 +139,19 @@ def build_curve_codes() -> Dict[str, List[str]]:
         b = bond_universe.get(code)
         if b is None:
             continue
+        # Bonos VENCIDOS afuera. El legacy los filtraba implícitamente al
+        # cruzar contra la lista viva del broker (BONDS); el port de Fase 2
+        # perdió ese guard y los vencidos quedaban en las curvas hasta
+        # borrarlos de especies.py: filas muertas en Curvas, warmup en vano
+        # y el pago al vencimiento apareciendo como ✂ en "Qué pasó" semanal.
+        v = getattr(b, "vencimiento", None)
+        if v is not None:
+            try:
+                vd = v.date() if hasattr(v, "hour") else v
+                if vd < hoy:
+                    continue
+            except (TypeError, AttributeError):   # ficha rara: no filtrar
+                pass
         ind = getattr(b, "industria", None) or ""
         clas = getattr(b, "clasificacion", None) or ""
         qpc = (getattr(b, "quote_price_cnv", None) or "").strip().upper()
