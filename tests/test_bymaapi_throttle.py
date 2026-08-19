@@ -61,8 +61,8 @@ def _paced(fake_time: _FakeTime, interval: float = 0.25, retries: int = 4):
                 if isinstance(n, ast.FunctionDef) and n.name == "_get_paced")
     ns = {"time": fake_time, "requests": requests,
           "REQ_MIN_INTERVAL": interval, "REQ_RETRIES_429": retries,
-          "_REQ_MAX_WAIT": 30.0, "_req_lock": threading.Lock(),
-          "_req_ultimo": [0.0]}
+          "_REQ_BACKOFF_BASE": 0.5, "_REQ_MAX_WAIT": 30.0,
+          "_req_lock": threading.Lock(), "_req_ultimo": [0.0]}
     exec(compile(ast.Module(body=[node], type_ignores=[]), "bymaapi.py", "exec"), ns)  # noqa: S102
     return ns["_get_paced"]
 
@@ -94,6 +94,28 @@ def test_429_agotado_devuelve_el_ultimo_response():
     # backoff exponencial creciente entre reintentos (sin Retry-After)
     esperas = [s for s in ft.sleeps if s not in (0.25,)]
     assert esperas == sorted(esperas)
+
+
+def test_default_sin_limite_no_duerme():
+    """BYMA_REQ_INTERVAL sin setear (default 0) = levantar todo a fondo:
+    ningún sleep en el camino feliz — el pacing es 100 % opt-in."""
+    ft = _FakeTime()
+    get_paced = _paced(ft, interval=0.0)
+    ses = _FakeSession([_resp(200), _resp(200), _resp(200)])
+    for i in range(3):
+        get_paced(ses, f"http://x/{i}")
+    assert ft.sleeps == []
+
+
+def test_sin_limite_429_usa_piso_de_backoff():
+    """Aun a fondo, un 429 sin Retry-After NO se reintenta en caliente: espera
+    el piso (_REQ_BACKOFF_BASE) — sin esto, interval 0 ⇒ backoff 0 ⇒ 4
+    reintentos instantáneos que el server vuelve a rechazar."""
+    ft = _FakeTime()
+    get_paced = _paced(ft, interval=0.0)
+    ses = _FakeSession([_resp(429), _resp(200)])
+    r = get_paced(ses, "http://x/md")
+    assert r.status_code == 200 and ft.sleeps == [0.5]
 
 
 def test_retry_after_no_numerico_no_explota():

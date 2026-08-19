@@ -29,34 +29,39 @@ DEFAULT_ENTRIES = "LA,BI,OF,OP,CL,SE,HI,LO,TV,OI,EV,NV,ACP,IV"
 DEFAULT_DEPTH = 3
 
 # --- Rate limit del broker (HTTP 429) -----------------------------------------
-# El REST de xOMS corta las ráfagas: el barrido dispara cientos de requests
-# (uno por especie × plazo + todos los DLR) y sin pacing el server responde
-# 429 a casi todo → la base "se llena" de NaN. Regulador GLOBAL: los threads
-# del pool comparten un turnstile (mínimo intervalo entre requests) y ante un
-# 429 se reintenta con backoff respetando el header Retry-After si viene.
-# Ajustables por secrets.txt / env sin tocar código.
-REQ_MIN_INTERVAL = float(os.getenv("BYMA_REQ_INTERVAL", "0.25"))  # seg entre requests (~4/s)
+# DEFAULT: SIN pacing (levantar todo a fondo con el pool de 9 threads) — la
+# cuota la maneja el broker y el pedido a IT. Si el server te frena con 429:
+# 1) los reintentos con backoff (siempre activos, respetan Retry-After) suelen
+#    absorber cortes esporádicos sin que pierdas precios;
+# 2) para un límite duro sostenido, seteá BYMA_REQ_INTERVAL en secrets.txt
+#    (seg entre requests, GLOBAL entre threads — ej. cuota 120/min → 0.5)
+#    hasta que te amplíen la cuota. Todo sin tocar código.
+REQ_MIN_INTERVAL = float(os.getenv("BYMA_REQ_INTERVAL", "0"))     # 0 = sin límite (default)
 REQ_RETRIES_429 = int(os.getenv("BYMA_REQ_RETRIES", "4"))         # reintentos ante 429
+_REQ_BACKOFF_BASE = 0.5                                           # piso del backoff sin pacing
 _REQ_MAX_WAIT = 30.0                                              # tope de espera por intento
 _req_lock = threading.Lock()
 _req_ultimo = [0.0]                                               # monotonic del último request
 
 
 def _get_paced(session: requests.Session, url: str, params: dict | None = None) -> requests.Response:
-    """GET con pacing global anti-429 + reintentos con backoff.
+    """GET con reintentos anti-429 y pacing global OPCIONAL.
 
-    El lock serializa el turno entre TODOS los threads del pool (el cupo del
-    server es por cliente, no por thread). Ante 429 espera `Retry-After` (o
-    backoff exponencial con tope) y reintenta; agotados los reintentos
-    devuelve el último Response para que el caller reporte el status real.
-    Cualquier otro status se devuelve tal cual (el caller decide)."""
+    Sin BYMA_REQ_INTERVAL (default) va a fondo: cero espera, cero lock. Con
+    intervalo seteado, el lock serializa el turno entre TODOS los threads del
+    pool (el cupo del server es por cliente, no por thread). Ante 429 espera
+    `Retry-After` (o backoff exponencial con piso y tope) y reintenta;
+    agotados los reintentos devuelve el último Response para que el caller
+    reporte el status real. Cualquier otro status se devuelve tal cual."""
+    backoff_base = REQ_MIN_INTERVAL if REQ_MIN_INTERVAL > 0 else _REQ_BACKOFF_BASE
     r: requests.Response
     for intento in range(REQ_RETRIES_429 + 1):
-        with _req_lock:
-            espera = _req_ultimo[0] + REQ_MIN_INTERVAL - time.monotonic()
-            if espera > 0:
-                time.sleep(espera)          # con el lock tomado: es el turnstile
-            _req_ultimo[0] = time.monotonic()
+        if REQ_MIN_INTERVAL > 0:
+            with _req_lock:
+                espera = _req_ultimo[0] + REQ_MIN_INTERVAL - time.monotonic()
+                if espera > 0:
+                    time.sleep(espera)      # con el lock tomado: es el turnstile
+                _req_ultimo[0] = time.monotonic()
         r = session.get(url, params=params)
         if r.status_code != 429:
             return r
@@ -64,7 +69,7 @@ def _get_paced(session: requests.Session, url: str, params: dict | None = None) 
             retry_after = float(r.headers.get("Retry-After") or 0.0)
         except ValueError:                   # Retry-After como fecha HTTP → backoff propio
             retry_after = 0.0
-        time.sleep(min(max(retry_after, REQ_MIN_INTERVAL * (2 ** intento)), _REQ_MAX_WAIT))
+        time.sleep(min(max(retry_after, backoff_base * (2 ** intento)), _REQ_MAX_WAIT))
     return r
 
 
