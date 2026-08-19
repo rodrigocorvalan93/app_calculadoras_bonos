@@ -37,12 +37,21 @@ _cup_bond_cache = LockedTTLCache(maxsize=8192, ttl=6 * 3600)
 _cup_fail_logged: set = set()
 
 
-def cupones_entre_cached(code: str, d1_iso: str, d2_iso: str) -> Optional[float]:
+def cupones_entre_cached(code: str, d1_iso, d2_iso) -> Optional[float]:
     """Cobros por 100 VN en (d1, d2] (ficha real), cacheado por bono+ventana.
+
+    Acepta las fechas como ISO string o como date (se normalizan acá: así la
+    key del cache es una sola por ventana y un caller con date no revienta en
+    el fromisoformat del factory).
 
     Una falla de ficha devuelve None y NO SE CACHEA (el cache ignora None):
     el próximo render reintenta — una falla transitoria (boot, lock) no deja
     el ✂ apagado 6 horas — y queda un warning visible con el código."""
+    if hasattr(d1_iso, "isoformat"):
+        d1_iso = d1_iso.isoformat()
+    if hasattr(d2_iso, "isoformat"):
+        d2_iso = d2_iso.isoformat()
+
     def _factory() -> Optional[float]:
         try:
             cup = _cupones_entre(code, date.fromisoformat(d1_iso), date.fromisoformat(d2_iso))

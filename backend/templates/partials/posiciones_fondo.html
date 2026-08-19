@@ -21,6 +21,7 @@
           <tr>
             <th data-sort style="text-align:left">Especie</th>
             <th data-sort style="text-align:left">Emisor</th>
+            <th data-sort>Vto</th>
             <th data-sort style="text-align:left">Categoría</th>
             <th data-sort>Rating</th>
             <th data-sort>VN</th>
@@ -32,7 +33,6 @@
             <th data-sort class="grp">TIREA</th>
             <th data-sort>TNA</th>
             <th data-sort>Dur</th>
-            <th data-sort>Vto</th>
             <th>P.Src</th>
           </tr>
         </thead>
@@ -43,7 +43,9 @@
              (app.js): se ordena/filtra DENTRO de cada grupo. #}
           {% for g in grupos %}
           <tr class="pos-grp" data-grp="{{ g.cat }}" title="Click para plegar/desplegar">
-            <td colspan="4" style="text-align:left"><span class="grp-caret">▾</span>{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
+            {# colspan 5 = Especie+Emisor+Vto+Categoría+Rating: los subtotales
+               tienen que caer bajo Valor / %PN #}
+            <td colspan="5" style="text-align:left"><span class="grp-caret">▾</span>{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
             <td></td>
             <td>{{ g.valor | ar_int }}</td>
             <td>{{ (g.pct_pn * 100) | ar_pct_pp(2) if g.pct_pn is not none else "—" }}</td>
@@ -59,6 +61,8 @@
                 {% if r.in_universe %}<a href="/yas?code={{ r.cod_delta }}" title="Abrir en YAS">{{ r.especie }}</a>{% else %}{{ r.especie }}{% endif %}
               </td>
               <td style="text-align:left;font-size:11px;color:var(--text-soft);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.emisor or '' }}">{{ r.emisor or "—" }}</td>
+              {# data-sort = ordinal del date → el sort es cronológico, no "por día del mes" #}
+              <td style="font-size:11px" data-sort="{{ r.vencimiento.toordinal() if r.vencimiento else '' }}">{{ r.vencimiento | ar_date }}</td>
               <td style="text-align:left;font-size:11px">{{ r.categoria }}</td>
               <td style="font-size:11px;color:var(--text-muted)">{{ r.rating }}</td>
               <td>{{ r.cantidad | ar_int }}</td>
@@ -77,8 +81,6 @@
                 {% if r.tna_convention_label and r.tirea is not none %}<span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ r.tna_convention_label }}</span>{% endif %}
               </td>
               <td>{{ r.duration | ar_num(2) }}</td>
-              {# data-sort = ordinal del date → el sort es cronológico, no "por día del mes" #}
-              <td style="font-size:11px" data-sort="{{ r.vencimiento.toordinal() if r.vencimiento else '' }}">{{ r.vencimiento | ar_date }}</td>
               <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
             </tr>
           {% endfor %}
