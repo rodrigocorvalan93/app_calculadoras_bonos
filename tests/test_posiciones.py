@@ -143,17 +143,22 @@ def test_perfil_vencimientos_flujos_fx_y_otros(monkeypatch) -> None:
     f_y = _d(hoy.year + 2, 3, 10)                   # bucket anual
 
     class _BonoCF:
-        def __init__(self, fechas, tots, moneda="ARS"):
+        def __init__(self, fechas, ints, amorts, moneda="ARS"):
             self.moneda = moneda
-            # mismas columnas/dtype que la ficha real: object con datetime.date
-            self._df = pd.DataFrame({"Fechas": fechas, "Total": tots})
+            # mismas columnas/dtype que la ficha real (object con datetime.date;
+            # Total = (Intereses + Amortización) × Ajuste / 100 por 1 VN)
+            self._df = pd.DataFrame({
+                "Fechas": fechas, "Intereses": ints, "Amortización": amorts,
+                "Ajuste": [1.0] * len(fechas),
+                "Total": [(i + a) / 100.0 for i, a in zip(ints, amorts)],
+            })
 
         def generate_cashflows(self, settle: str) -> None:
             self.cashflow_cpn_full = self._df
 
     fichas = {
-        "BARS": _BonoCF([f_q, f_y], [0.10, 1.05]),                  # ARS: renta + amort final
-        "BUSD": _BonoCF([f_q], [1.0], moneda="USD"),                # hard-dollar
+        "BARS": _BonoCF([f_q, f_y], [2.0, 5.0], [8.0, 100.0]),      # ARS: renta + amort
+        "BUSD": _BonoCF([f_q], [50.0], [50.0], moneda="USD"),       # hard-dollar
     }
     monkeypatch.setattr(pricing, "_bond_obj_copy", lambda c: fichas.get(c))
     monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx_svc.FxSnapshot(ccl=1200.0, usb=1180.0))
@@ -172,11 +177,16 @@ def test_perfil_vencimientos_flujos_fx_y_otros(monkeypatch) -> None:
     P._perfil_cache.clear()
     try:
         out = P._perfil_vencimientos(7)
-        por_label = {b["label"]: b["ars"] for b in out["bars"]}
+        por_label = {b["label"]: b for b in out["bars"]}
         bq = P._bucket_flujo(f_q, hoy)
         # trimestre cercano: 0.10×1000 (ARS) + 1.0×10×1200 (USD→CCL) = 12.100
-        assert por_label[bq] == pytest.approx(0.10 * 1000 + 1.0 * 10 * 1200.0)
-        assert por_label[str(f_y.year)] == pytest.approx(1.05 * 1000)   # amort final ARS
+        assert por_label[bq]["ars"] == pytest.approx(0.10 * 1000 + 1.0 * 10 * 1200.0)
+        # split interés/capital: BARS 20/80 + BUSD 6.000/6.000, y renta+amort = total
+        assert por_label[bq]["renta_ars"] == pytest.approx(0.02 * 1000 + 0.50 * 10 * 1200.0)
+        assert por_label[bq]["amort_ars"] == pytest.approx(
+            por_label[bq]["ars"] - por_label[bq]["renta_ars"])
+        assert por_label[str(f_y.year)]["ars"] == pytest.approx(1.05 * 1000)
+        assert por_label[str(f_y.year)]["renta_ars"] == pytest.approx(0.05 * 1000)
         assert out["otros_ars"] == pytest.approx(5000.0)                # GGAL sin ficha
         assert out["otros_pct"] == pytest.approx(5000.0 / 200000.0)     # % del PN
         # barras ordenadas cronológicamente y la más alta con alto = 100

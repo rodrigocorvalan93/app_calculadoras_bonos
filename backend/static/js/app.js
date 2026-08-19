@@ -1032,3 +1032,84 @@ window.lsSet = function (k, v) {
     if (hist && hist.scrollIntoView) hist.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 })();
+
+// ── Perfil de vencimientos (Posiciones): descarga PNG ────────────────────────
+// Dibuja el gráfico en un canvas desde los data-attrs del partial (delegado en
+// body: sobrevive los swaps de htmx). Colores tomados del computed style de la
+// página → el PNG sale igual que el tema activo (dark o light). Misma UX que
+// el ⤓ PNG de la pestaña Gráficos (toDataURL + <a download>).
+(function () {
+  function fmtAR(n, dec) {
+    return n.toLocaleString('es-AR', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  }
+  document.body.addEventListener('click', function (evt) {
+    var btn = evt.target.closest && evt.target.closest('.venc-dl');
+    if (!btn) return;
+    var card = btn.closest('.venc-chart');
+    var cols = card.querySelectorAll('.venc-col');
+    if (!cols.length) return;
+
+    var cs = getComputedStyle(document.body);
+    var seg = card.querySelector('.venc-seg-amort');
+    var segR = card.querySelector('.venc-seg-renta');
+    var cAmort = seg ? getComputedStyle(seg).backgroundColor : '#ff9f00';
+    var cRenta = segR ? getComputedStyle(segR).backgroundColor : '#4cc9f0';
+    var cBg = cs.backgroundColor, cTxt = cs.color;
+    var cMut = getComputedStyle(card.querySelector('.venc-lbl') || card).color;
+
+    var modo = card.dataset.m || 'pct';
+    var S = 2;                                    // escala retina
+    var bw = 40, gap = 6, padL = 24, padR = 24, padT = 64, padB = 64, plotH = 240;
+    var W = (padL + padR + cols.length * (bw + gap) - gap) * S;
+    var H = (padT + plotH + padB) * S;
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var g = cv.getContext('2d');
+    g.scale(S, S);
+    g.fillStyle = cBg; g.fillRect(0, 0, W, H);
+
+    g.fillStyle = cTxt; g.font = '600 13px system-ui, sans-serif';
+    g.fillText('Perfil de vencimientos · ' + (card.dataset.nombre || ''), padL, 22);
+    g.font = '11px system-ui, sans-serif'; g.fillStyle = cMut;
+    g.fillText('flujos proyectados (renta + amortización) · ' +
+               (modo === 'pct' ? '% del fondo' : 'millones de ARS'), padL, 38);
+
+    var maxA = 0;
+    cols.forEach(function (c) { maxA = Math.max(maxA, parseFloat(c.dataset.ars) || 0); });
+    var base = padT + plotH;
+    cols.forEach(function (c, i) {
+      var x = padL + i * (bw + gap);
+      var ars = parseFloat(c.dataset.ars) || 0;
+      var renta = parseFloat(c.dataset.renta) || 0;
+      var amort = parseFloat(c.dataset.amort) || 0;
+      var h = maxA > 0 ? (ars / maxA) * plotH : 0;
+      var hR = ars > 0 ? h * (renta / ars) : 0;
+      g.fillStyle = cAmort;
+      g.fillRect(x, base - (h - (hR ? hR + 2 : 0)), bw, Math.max(h - hR - (hR ? 2 : 0), 1));
+      if (hR >= 1) { g.fillStyle = cRenta; g.fillRect(x, base - h, bw, hR); }
+      g.fillStyle = cMut; g.font = '9.5px system-ui, sans-serif'; g.textAlign = 'center';
+      var pct = parseFloat(c.dataset.pct);
+      var vTxt = modo === 'pct'
+        ? (isNaN(pct) ? '' : fmtAR(pct * 100, 1) + '%')
+        : fmtAR(ars / 1e6, 0) + 'M';
+      g.fillText(vTxt, x + bw / 2, base - h - 5);
+      g.fillText(c.dataset.label || '', x + bw / 2, base + 14);
+      g.textAlign = 'left';
+    });
+    g.strokeStyle = cMut; g.globalAlpha = 0.35;
+    g.beginPath(); g.moveTo(padL, base + 0.5); g.lineTo(W / S - padR, base + 0.5); g.stroke();
+    g.globalAlpha = 1;
+
+    var ly = base + 34;
+    g.fillStyle = cAmort; g.fillRect(padL, ly - 8, 9, 9);
+    g.fillStyle = cMut; g.fillText('Amortización', padL + 14, ly);
+    g.fillStyle = cRenta; g.fillRect(padL + 105, ly - 8, 9, 9);
+    g.fillStyle = cMut; g.fillText('Interés', padL + 119, ly);
+    g.fillText(card.dataset.leyenda || '', padL + 180, ly);
+
+    var a = document.createElement('a');
+    a.download = 'vencimientos-' + (card.dataset.nombre || 'fondo').replace(/[^\w-]+/g, '_') + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  });
+})();
