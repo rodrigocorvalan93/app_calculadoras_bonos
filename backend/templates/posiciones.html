@@ -74,5 +74,13 @@
        hx-include="[name=fondo], [name=plazo]"
        hx-trigger="load, change from:select[name='fondo'], change from:select[name='plazo']">
   </div>
+
+  {# Perfil de vencimientos: flujos proyectados del fondo. FUERA del panel live
+     (los cashflows no dependen del tick): se pide al cargar y al cambiar de
+     fondo; el server lo cachea por día/cartera. #}
+  <div id="pos-venc" hx-get="/posiciones/vencimientos" hx-swap="innerHTML"
+       hx-include="[name=fondo]"
+       hx-trigger="load, change from:select[name='fondo']">
+  </div>
 </section>
 {% endblock %}

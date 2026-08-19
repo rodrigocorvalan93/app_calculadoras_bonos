@@ -115,6 +115,93 @@ def test_composicion_vencimiento_e_infra(monkeypatch) -> None:
     assert {"Clase de Activo", "Categoría", "Tasa", "Calificación"} <= set(s2)
 
 
+def test_bucket_flujo_trimestral_cerca_anual_lejos() -> None:
+    from datetime import date as _d
+
+    from backend.routes.posiciones import _bucket_flujo, _bucket_orden
+
+    hoy = _d(2026, 8, 19)
+    assert _bucket_flujo(_d(2026, 9, 30), hoy) == "3Q2026"
+    assert _bucket_flujo(_d(2027, 12, 1), hoy) == "4Q2027"    # hasta hoy.año+1: trimestre
+    assert _bucket_flujo(_d(2028, 2, 1), hoy) == "2028"       # después: año
+    assert (_bucket_orden("3Q2026") < _bucket_orden("4Q2027")
+            < _bucket_orden("2028") < _bucket_orden("2029"))
+
+
+def test_perfil_vencimientos_flujos_fx_y_otros(monkeypatch) -> None:
+    """Flujos = Total(por 1 VN) × cantidad, hard-dollar al FX implícito (ccl);
+    lo sin ficha (acciones) va al bucket 'sin vencimiento' como % del PN."""
+    from datetime import date as _d, timedelta
+
+    import pandas as pd
+
+    from backend.routes import posiciones as P
+    from backend.services import fx as fx_svc, positions, pricing
+
+    hoy = _d.today()
+    f_q = hoy + timedelta(days=40)                  # bucket trimestral
+    f_y = _d(hoy.year + 2, 3, 10)                   # bucket anual
+
+    class _BonoCF:
+        def __init__(self, fechas, tots, moneda="ARS"):
+            self.moneda = moneda
+            # mismas columnas/dtype que la ficha real: object con datetime.date
+            self._df = pd.DataFrame({"Fechas": fechas, "Total": tots})
+
+        def generate_cashflows(self, settle: str) -> None:
+            self.cashflow_cpn_full = self._df
+
+    fichas = {
+        "BARS": _BonoCF([f_q, f_y], [0.10, 1.05]),                  # ARS: renta + amort final
+        "BUSD": _BonoCF([f_q], [1.0], moneda="USD"),                # hard-dollar
+    }
+    monkeypatch.setattr(pricing, "_bond_obj_copy", lambda c: fichas.get(c))
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx_svc.FxSnapshot(ccl=1200.0, usb=1180.0))
+    monkeypatch.setattr(positions, "_cache", {
+        "loaded": True, "error": None, "paths": {}, "asof": "t",
+        "holdings": [
+            {"cod_fondo": 7, "cod_delta": "BARS", "especie": "BARS", "cantidad": 1000.0,
+             "valor": 90000.0, "clase": "Títulos Públicos"},
+            {"cod_fondo": 7, "cod_delta": "BUSD", "especie": "BUSD", "cantidad": 10.0,
+             "valor": 12000.0, "clase": "Títulos Públicos"},
+            {"cod_fondo": 7, "cod_delta": "GGAL", "especie": "GGAL", "cantidad": 5.0,
+             "valor": 5000.0, "clase": "Acciones"},
+        ],
+        "pn": {7: 200000.0}, "fondos": {7: "Test"}, "by_code": {},
+    })
+    P._perfil_cache.clear()
+    try:
+        out = P._perfil_vencimientos(7)
+        por_label = {b["label"]: b["ars"] for b in out["bars"]}
+        bq = P._bucket_flujo(f_q, hoy)
+        # trimestre cercano: 0.10×1000 (ARS) + 1.0×10×1200 (USD→CCL) = 12.100
+        assert por_label[bq] == pytest.approx(0.10 * 1000 + 1.0 * 10 * 1200.0)
+        assert por_label[str(f_y.year)] == pytest.approx(1.05 * 1000)   # amort final ARS
+        assert out["otros_ars"] == pytest.approx(5000.0)                # GGAL sin ficha
+        assert out["otros_pct"] == pytest.approx(5000.0 / 200000.0)     # % del PN
+        # barras ordenadas cronológicamente y la más alta con alto = 100
+        assert [b["label"] for b in out["bars"]] == sorted(
+            por_label, key=P._bucket_orden)
+        assert max(b["alto"] for b in out["bars"]) == pytest.approx(100.0)
+        # cache: la segunda llamada devuelve el MISMO objeto (sin recomputar)
+        assert P._perfil_vencimientos(7) is out
+        # filtro de fondos visibles: fondo oculto ⇒ perfil vacío
+        assert P._perfil_vencimientos(7, frozenset({9}))["bars"] == []
+    finally:
+        P._perfil_cache.clear()
+
+
+@pytest.mark.asyncio
+async def test_perfil_vencimientos_endpoint_ok() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/posiciones/vencimientos")
+    assert r.status_code == 200          # sin carteras: partial vacío, nunca error
+
+
 @pytest.mark.asyncio
 async def test_posiciones_endpoint_ok() -> None:
     from httpx import ASGITransport, AsyncClient
