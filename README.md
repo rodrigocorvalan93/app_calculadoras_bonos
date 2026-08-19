@@ -2,6 +2,11 @@
 
 Suite de herramientas para análisis de **renta fija argentina**: pricing de bonos, curvas de tasas, monitoreo de mercado en tiempo real (BYMA), gestión de posiciones y un Order Management System (OMS).
 
+**Autor: [Rodrigo Corvalán](https://github.com/rodrigocorvalan93)** · código fuente disponible bajo
+[licencia de uso](LICENSE) para **Grupo Latin Securities / Delta Asset Management / Galileo**.
+La administración del repositorio, los roles y la aceptación de cambios sobre el código canónico
+son potestad del autor.
+
 El **front actual** es una reescritura en **FastAPI + Jinja2 + HTMX + Alpine** (`backend/`), enfocada en performance (objetivo < 50 ms p95 server-side en el path caliente). La app Streamlit original (`OMSweb_app.py`) queda como referencia/legacy para portar lógica de negocio.
 
 ---
