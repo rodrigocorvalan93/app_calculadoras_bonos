@@ -115,7 +115,7 @@ gana; `freq_override` + `base_override` del YAS siempre pisan el default
 El margen TNA usa la fórmula cap32 para `VARIABLE_CAP` y `TNA − bench/100`
 para `VARIABLE` (benchmark = avg últimos 5 obs BCRA).
 
-## Add-in de Excel «OMS Bonos»
+## Add-in de Excel «YieldVertex»
 
 Reemplazo del feed Reuters + calculadora YAS en la celda. Funciones en vivo
 (`OMS.QUOTE/FX/ROFEX/CAUCION/TABLA/HIST`) vía snapshot compartido (1 build/s

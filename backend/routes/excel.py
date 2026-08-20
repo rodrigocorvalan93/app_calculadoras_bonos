@@ -309,10 +309,10 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>{app_id}</Id>
-  <Version>1.2.0.0</Version>
-  <ProviderName>Mesa</ProviderName>
+  <Version>1.2.1.0</Version>
+  <ProviderName>Rodrigo Corvalán Salguero</ProviderName>
   <DefaultLocale>es-AR</DefaultLocale>
-  <DisplayName DefaultValue="OMS Bonos"/>
+  <DisplayName DefaultValue="YieldVertex"/>
   <Description DefaultValue="Cotizaciones de la calculadora de bonos en tiempo real (reemplazo Reuters)."/>
   <IconUrl DefaultValue="{base}/static/icons/icon-192.png"/>
   <HighResolutionIconUrl DefaultValue="{base}/static/icons/icon-512.png"/>
@@ -405,8 +405,8 @@ _MANIFEST_XML = """<?xml version="1.0" encoding="UTF-8"?>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="OMS.Namespace" DefaultValue="OMS"/>
-        <bt:String id="OMS.Group.Label" DefaultValue="OMS Bonos"/>
-        <bt:String id="OMS.Taskpane.Label" DefaultValue="OMS Bonos"/>
+        <bt:String id="OMS.Group.Label" DefaultValue="YieldVertex"/>
+        <bt:String id="OMS.Taskpane.Label" DefaultValue="YieldVertex"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="OMS.Taskpane.Tooltip" DefaultValue="Configurar la conexión en tiempo real con la calculadora de bonos."/>

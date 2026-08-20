@@ -1,0 +1,49 @@
+LICENCIA DE USO — ΔYIELDVERTEX (EX OMS BONOS) / APP CALCULADORAS DE BONOS
+=========================================================
+
+Copyright (c) 2024-2026 Rodrigo Corvalán Salguero
+Repositorio canónico: https://github.com/rodrigocorvalan93/app_calculadoras_bonos
+
+1. TITULARIDAD Y AUTORÍA
+   Este software —código fuente, diseño, documentación y estructura de
+   datos— es obra y titularidad exclusiva de Rodrigo Corvalán Salguero ("el Autor").
+   Toda copia o derivado debe conservar este archivo y la atribución de
+   autoría visible en la aplicación.
+
+2. ENTIDADES AUTORIZADAS
+   Se concede una licencia de uso NO exclusiva, intransferible y revocable,
+   con código fuente disponible, a las siguientes entidades y su personal
+   (las "Entidades Autorizadas"):
+     - Grupo Latin Securities (y sus afiliadas)
+     - Delta Asset Management
+     - Galileo
+   El uso autorizado comprende ejecutar, leer y modificar el software para
+   las operaciones internas de las Entidades Autorizadas.
+
+3. ADMINISTRACIÓN DEL CÓDIGO
+   La administración del repositorio canónico, la definición de roles y
+   permisos (incluidos los roles/visibilidades internos de la aplicación
+   configurados vía /admin), y la aceptación o rechazo de cambios sobre el
+   código canónico son potestad exclusiva del Autor. Las modificaciones
+   hechas por las Entidades Autorizadas para uso interno no obligan al
+   Autor a incorporarlas ni transfieren titularidad alguna.
+
+4. RESTRICCIONES
+   Salvo autorización escrita del Autor, NO está permitido:
+   a) redistribuir, publicar o sublicenciar el software (total o parcial)
+      fuera de las Entidades Autorizadas;
+   b) comercializarlo o incorporarlo a productos de terceros;
+   c) remover o alterar las notas de autoría y esta licencia.
+
+5. SIN GARANTÍA
+   EL SOFTWARE SE PROVEE "TAL CUAL" (AS IS), SIN GARANTÍA DE NINGÚN TIPO,
+   EXPRESA O IMPLÍCITA. Los precios, tasas, métricas y proyecciones que
+   calcula son herramientas de análisis y NO constituyen asesoramiento
+   financiero ni recomendación de inversión. El Autor no será responsable
+   por decisiones tomadas en base al software ni por errores en datos de
+   mercado de terceros (BYMA, MAE, BCRA, brokers u otras fuentes).
+
+6. VIGENCIA
+   Esta licencia rige mientras el Autor no la revoque por escrito respecto
+   de una Entidad Autorizada. La revocación no afecta la titularidad del
+   Autor ni las obligaciones de los puntos 1, 4 y 5.
