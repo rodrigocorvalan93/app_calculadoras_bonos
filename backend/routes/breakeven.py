@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from backend.cache_seq import seq_cached
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
@@ -83,6 +84,7 @@ async def breakeven_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
 
 
 @router.get("/breakeven/table", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)          # live (md-update): tabla y chart disparan juntos
 async def breakeven_table(request: Request, plazo: str = "24hs",
                           incl: Optional[List[str]] = Query(None),
                           incl_set: Optional[str] = None) -> HTMLResponse:
@@ -92,6 +94,7 @@ async def breakeven_table(request: Request, plazo: str = "24hs",
 
 
 @router.get("/breakeven/chart", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)          # — sin cache eran 4 builds de curva por tick
 async def breakeven_chart(request: Request, plazo: str = "24hs",
                           metric: str = Query("tem", alias="be-metric"),
                           incl: Optional[List[str]] = Query(None),

@@ -35,7 +35,11 @@ async def creditos_page(
     score_min: float = 1.0,
     solo_ons: bool = False,
 ) -> HTMLResponse:
-    return _render(request, "creditos.html", **_table_ctx(sector, score_min, solo_ons))
+    # _table_ctx dispara el init de credito (especies + scoring) en frío:
+    # al executor — en la ventana del boot bloqueaba el loop segundos.
+    ctx = await asyncio.get_running_loop().run_in_executor(
+        None, _table_ctx, sector, score_min, solo_ons)
+    return _render(request, "creditos.html", **ctx)
 
 
 @router.get("/creditos/table", response_class=HTMLResponse)
@@ -45,13 +49,15 @@ async def creditos_table(
     score_min: float = 1.0,
     solo_ons: bool = False,
 ) -> HTMLResponse:
-    return _render(request, "partials/creditos_table.html", **_table_ctx(sector, score_min, solo_ons))
+    ctx = await asyncio.get_running_loop().run_in_executor(
+        None, _table_ctx, sector, score_min, solo_ons)
+    return _render(request, "partials/creditos_table.html", **ctx)
 
 
 @router.get("/creditos/detail", response_class=HTMLResponse)
 async def creditos_detail(request: Request, ticker: str = "") -> HTMLResponse:
     """Ficha del emisor + sus ONs con métricas live (TIREA/TNA/Duration/Paridad)."""
-    d = credito.detail(ticker)
+    d = await asyncio.get_running_loop().run_in_executor(None, credito.detail, ticker)
     store = marketdata_store.get_store()
 
     # Una TIREA por ON del emisor: cache-miss ~20-150 ms en frío. En el handler

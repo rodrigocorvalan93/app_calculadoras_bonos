@@ -26,7 +26,6 @@ from backend.cache import LockedTTLCache
 
 _memo = LockedTTLCache(maxsize=512, ttl=300)
 
-VENTANAS = (30, 60, 90, 0)          # ruedas; 0 = toda la historia
 VENTANA_DEFAULT = 60
 _N_MIN_AVISO = 20                   # con menos ruedas el percentil es humo
 # Gap mínimo de duration (años ≈ 11 días): con t2−t1 → 0 la anualización del

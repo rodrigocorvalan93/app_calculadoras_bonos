@@ -169,16 +169,6 @@ async def yas_tr(
                    tasa_salida=tasa_salida, fecha_salida=fecha_salida)
 
 
-@router.get("/meta/{code}", response_class=HTMLResponse)
-async def yas_meta(request: Request, code: str) -> HTMLResponse:
-    """Used by the dropdown to refresh the header strip when the bond changes."""
-    return _render(
-        request,
-        "partials/yas_header.html",
-        meta=pricing.bond_meta(code),
-    )
-
-
 @router.get("/market", response_class=HTMLResponse)
 async def yas_market_card(
     request: Request,

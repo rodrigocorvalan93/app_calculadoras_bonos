@@ -21,7 +21,6 @@ logger = logging.getLogger("backend.dolares.routes")
 
 router = APIRouter(tags=["dolares"])
 
-_PLAZOS = ("24hs", "CI")
 _LEGS = (("USD", "USD · Cable"), ("USB", "USB · MEP"))
 
 

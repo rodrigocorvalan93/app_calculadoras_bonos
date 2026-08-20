@@ -59,10 +59,6 @@ class Settings(BaseSettings):
     # Default settlement
     default_plazo: str = "24hs"
 
-    # Phase 1 caches
-    metrics_ttl_seconds: int = 5
-    metrics_cache_max: int = 4096
-
     # OMS (cursado de órdenes). SEGURIDAD: oms_live arranca APAGADO — en False
     # toda orden se registra como PAPER (simulada) y NUNCA viaja al broker.
     # Para operar en serio: OMS_LIVE=1 en secrets.txt/env, con límites abajo.

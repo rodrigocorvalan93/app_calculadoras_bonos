@@ -141,6 +141,11 @@ def _build(df) -> Dict[str, Any]:
             "n_dates": len(all_dates), "n_obs": n_obs, "last_update": bounds[1]}
 
 
+# Contador monótono de cargas: token de identidad para caches derivados
+# (weekly_segments) — id(dict) no sirve porque CPython reusa direcciones.
+_load_ver = __import__("itertools").count(1)
+
+
 def _load() -> Dict[str, Any]:
     xlsx = _resolve_path()
     path, fmt = _pick_source(xlsx)
@@ -173,6 +178,7 @@ def _load() -> Dict[str, Any]:
             df = df[~((df["TIREA"] > 2.0) | (df["TIREA"] <= -0.99))].copy()
         out = _build(df)
         out["path"] = path
+        out["ver"] = next(_load_ver)     # versión de carga (key del weekly cache)
         logger.info("[historico_byma] %d códigos · %d fechas · %d obs (fuente %s)",
                     out["n_codes"], out["n_dates"], out["n_obs"], fmt)
         return out
@@ -483,7 +489,11 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
     if _weekly_cache is None:
         _weekly_cache = LockedTTLCache(maxsize=8, ttl=600)
     data = ensure_loaded()
-    key = (int(days), id(data), (data.get("bounds") or (None, None))[1])
+    # ver: contador de carga (no id(dict) — CPython reusa direcciones y un
+    # refresh sin fechas nuevas podía servir el resumen viejo hasta el TTL).
+    # `ver` lo estampa _load(); un dict armado a mano (tests) no lo trae → cae a
+    # id(data) para no colisionar entre datasets distintos con mismos días/bounds.
+    key = (int(days), data.get("ver") or id(data), (data.get("bounds") or (None, None))[1])
     return _weekly_cache.get_or_compute(key, lambda: _weekly_segments_compute(days, data))
 
 

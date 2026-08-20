@@ -11,6 +11,7 @@ pesado corre en executor y se cachea por inputs.
 from __future__ import annotations
 
 import asyncio
+import logging
 import hashlib
 import json
 import math
@@ -24,6 +25,8 @@ from backend.cache import LockedTTLCache
 from backend.locale_ar import hoy_ba, parse_ar_num
 from backend.routes.curves import _rows_for, _row_pool
 from backend.services import bond_universe, escenario as esc, escenario_prefs, total_return as tr_svc
+
+logger = logging.getLogger("backend.escenario")
 
 router = APIRouter(tags=["escenario"])
 
@@ -83,6 +86,10 @@ def _a3500_drift(settle: str, terminal: str) -> float:
     try:
         return float(tr_svc._index_drift(_O(), sd, td))
     except Exception:  # noqa: BLE001
+        # 0% es el default visible del input, pero un FALLO acá alimentaba
+        # ccl/mep proyectados sin deva como si fuera dato bueno — que al
+        # menos cante en el log.
+        logger.warning("[escenario] drift A3500 falló — deva default 0%%", exc_info=True)
         return 0.0
 
 
@@ -114,10 +121,18 @@ def _implied_infl_monthly(settle: str, terminal: str) -> Optional[float]:
     return (1.0 + drift) ** (1.0 / months) - 1.0
 
 
-async def _cat_rows(cat: esc.Cat, plazo: str) -> List[Dict[str, Any]]:
-    """Filas de la curva de la categoría filtradas al bucket de duration y a
-    bonos con TIREA + duration válidas."""
-    rows, _meta = await _rows_for(cat.curve, plazo)
+async def _rows_by_curve(cats: List[esc.Cat], plazo: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Una build por curva ÚNICA y EN PARALELO. Las 12 categorías cubren 9
+    curvas (cer ×3 buckets, lecap ×2): el loop anterior por categoría hacía
+    12 _rows_for SERIALIZADOS con 5 repetidos. Recibe SOLO las categorías a
+    procesar: las destildadas del comparativo no cuestan ni su curva."""
+    curvas = sorted({cat.curve for cat in cats})
+    res = await asyncio.gather(*(_rows_for(c, plazo) for c in curvas))
+    return {c: r[0] for c, r in zip(curvas, res)}
+
+
+def _filter_cat(cat: esc.Cat, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filas de la categoría: bucket de duration + TIREA/duration válidas."""
     return [r for r in rows
             if r.get("tirea") is not None and r["tirea"] == r["tirea"]
             and esc.in_bucket(cat, r.get("duration"))]
@@ -133,8 +148,9 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
     deva = _a3500_drift(settle, terminal)
     cauc_tna = 0.20
     cats: List[Dict[str, Any]] = []
+    rows_map = await _rows_by_curve(esc.CATEGORIES, plazo)
     for cat in esc.CATEGORIES:
-        rows = await _cat_rows(cat, plazo)
+        rows = _filter_cat(cat, rows_map.get(cat.curve) or [])
         ytm = esc._avg([r.get("tirea") for r in rows])
         cats.append({"key": cat.key, "label": cat.label, "fx": cat.fx,
                      "n": len(rows), "ytm": ytm})
@@ -248,10 +264,10 @@ async def escenario_table(
 
     # Reúno filas + TIR de salida por categoría (async, fuera del executor).
     prepared: List[Tuple[esc.Cat, List[Dict[str, Any]], Dict[str, float], float]] = []
-    for cat in esc.CATEGORIES:
-        if cat.key in off:
-            continue
-        rows = await _cat_rows(cat, plazo)
+    cats_on = [cat for cat in esc.CATEGORIES if cat.key not in off]
+    rows_map = await _rows_by_curve(cats_on, plazo)
+    for cat in cats_on:
+        rows = _filter_cat(cat, rows_map.get(cat.curve) or [])
         level = ytm_by_cat.get(cat.key)
         if level is None:                      # sin input → mantiene la TIR actual (carry puro)
             level = esc._avg([r.get("tirea") for r in rows]) or 0.0
@@ -342,8 +358,9 @@ async def warm_escenario_default(plazo: str = "24hs", refresh_only: bool = False
     sd, td = _parse_d(settle), _parse_d(terminal)
     loop = asyncio.get_running_loop()
     warmed = 0
+    rows_map = await _rows_by_curve(esc.CATEGORIES, plazo)
     for cat in esc.CATEGORIES:
-        rows = await _cat_rows(cat, plazo)
+        rows = _filter_cat(cat, rows_map.get(cat.curve) or [])
         level = esc._avg([r.get("tirea") for r in rows]) or 0.0
 
         def _warm(rows=rows, level=level) -> int:

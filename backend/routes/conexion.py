@@ -22,11 +22,15 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+import logging
+
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from backend.config import settings
 from backend.services import primary_ws
+
+logger = logging.getLogger("backend.conexion")
 
 router = APIRouter(tags=["conexion"])
 
@@ -65,19 +69,20 @@ def _status_ctx(result: str | None = None, ok: bool | None = None) -> Dict[str, 
     try:
         from backend.services import mae as mae_svc
         mae_on = bool(mae_svc.enabled())
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception:  # noqa: BLE001 — la página de diagnóstico no debe caerse,
+        logger.warning("[conexion] mae.enabled() falló", exc_info=True)  # pero sí avisar
+
     stats = {}
     try:
         stats = ws.stats() or {}
     except Exception:  # noqa: BLE001
-        pass
+        logger.warning("[conexion] ws.stats() falló", exc_info=True)
     health = {}
     try:
         from backend.services import feed_health
         health = feed_health.snapshot()
     except Exception:  # noqa: BLE001
-        pass
+        logger.warning("[conexion] feed_health.snapshot() falló", exc_info=True)
     return {
         "result": result, "ok": ok,
         "authenticated": getattr(ws, "authenticated", False),

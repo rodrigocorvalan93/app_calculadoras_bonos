@@ -709,7 +709,12 @@ def _bond_index_kind(code: str) -> str:
             k = "tamar" if (m.get("index") or "").upper() == "TAMAR" else "badlar"
         else:
             k = ""
-        _index_kind[code] = k
+        # NO cachear el miss (m vacío = código fuera del universo): el batch de
+        # Excel manda codes arbitrarios tipeados por el usuario y este dict no
+        # tiene evicción — cachearlos era un leak monótono. Mismo criterio que
+        # bond_meta, que tampoco cachea el miss.
+        if m:
+            _index_kind[code] = k
     return k
 
 

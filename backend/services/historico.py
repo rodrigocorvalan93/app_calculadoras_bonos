@@ -15,6 +15,13 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
+
+# Los horarios de publicación del BCRA son de Buenos Aires: la comparación va
+# en reloj BA explícito, no en el local del server (deployado en UTC, los slots
+# 11:00/15:30 caían 08:00/12:30 BA — antes de que el BCRA publique — y el riel
+# servía macro de ayer todo el día). Mismo criterio que dolares._TZ_BA.
+_TZ_BA = ZoneInfo("America/Argentina/Buenos_Aires")
 
 logger = logging.getLogger("backend.historico")
 
@@ -96,7 +103,15 @@ def _load() -> Dict[str, Any]:
 
 
 def ensure_loaded() -> Dict[str, Any]:
+    """Fast path SIN lock cuando ya está cargado (lectura de referencia,
+    atómica por el GIL): los lectores viven en el event loop (riel del dólar
+    en todas las pestañas) y tomar el lock incondicionalmente los dejaba
+    esperando los ~50 ms de un refresh() en curso — anulando el executor del
+    macro_maybe_refresh. Mismo patrón que historico_byma.ensure_loaded."""
     global _cache
+    c = _cache
+    if c is not None:
+        return c
     with _lock:
         if _cache is None:
             _cache = _load()
@@ -104,9 +119,13 @@ def ensure_loaded() -> Dict[str, Any]:
 
 
 def refresh() -> Dict[str, Any]:
+    """Carga FUERA del lock y swap adentro: el lock protege el swap, no los
+    ~50 ms de json.load — así un lector concurrente sigue sirviendo la versión
+    vieja en vez de bloquearse."""
     global _cache
+    nuevo = _load()
     with _lock:
-        _cache = _load()
+        _cache = nuevo
         return _cache
 
 
@@ -122,11 +141,11 @@ def series_list() -> List[Dict[str, Any]]:
 
 def macro_maybe_refresh() -> None:
     """Re-lee el backup BCRA (barato; NO toca la API del BCRA) sólo cuando se
-    cruza un horario programado (11:00 / 15:30 hora local). Idempotente: dispara
+    cruza un horario programado (11:00 / 15:30 hora de Buenos Aires). Idempotente: dispara
     como mucho 1 re-lectura por horario por día, aunque el riel pegue cada 15s.
     """
     global _macro_slot
-    now = datetime.now()
+    now = datetime.now(_TZ_BA)
     idx = None
     for i, (h, m) in enumerate(_MACRO_REFRESH_TIMES):
         if (now.hour, now.minute) >= (h, m):

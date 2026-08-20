@@ -151,5 +151,7 @@ async def nueva_guardar(request: Request, token: str = Form(...)) -> HTMLRespons
     if not _can_save(request):
         return _render(request, "partials/nueva_guardar.html",
                        res={"ok": False, "error": "Sólo el superuser puede guardar en especies.py."})
-    res = adhoc.guardar(token)
+    # read+write de especies.py (1,5 MB) y build del bono: al executor —
+    # esporádico y superuser, pero no hay razón para frenar el loop.
+    res = await asyncio.get_running_loop().run_in_executor(None, adhoc.guardar, token)
     return _render(request, "partials/nueva_guardar.html", res=res)

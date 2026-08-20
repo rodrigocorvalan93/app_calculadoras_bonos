@@ -134,9 +134,15 @@ async def total_return_table(
     y1_map = _y1_by_code(rows, mode, p, overrides)
 
     # Cómputo pesado en executor; cacheado por inputs.
+    # La key lleva TAMBIÉN las tasas vivas (tirea/duration por fila): sin
+    # eso, la misma query tras un movimiento de mercado servía la tabla del
+    # snapshot anterior hasta el TTL (20 s). Mismo criterio que el sig de
+    # escenario.py.
     key = (curve, plazo, terminal, settle, mode,
            hashlib.md5(json.dumps({"p": {k: p.get(k) for k in ("level", "slope", "convex", "anchor", "popt", "points")},
-                                   "ov": overrides, "codes": [r["code"] for r in rows]},
+                                   "ov": overrides,
+                                   "live": [(r["code"], round(r.get("tirea") or 0.0, 6),
+                                             round(r.get("duration") or 0.0, 6)) for r in rows]},
                                   default=str, sort_keys=True).encode()).hexdigest())
 
     def _compute():
