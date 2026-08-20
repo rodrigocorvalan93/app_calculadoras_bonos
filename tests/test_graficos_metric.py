@@ -6,7 +6,6 @@ en modo TEM (fit en espacio TEM, recupera la TIREA anual para las TNAs) y
 """
 from __future__ import annotations
 
-import math
 
 import pytest
 

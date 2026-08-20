@@ -4,7 +4,7 @@ con las métricas live de sus ONs. Lee todo de cache (credit_scores.json + store
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse

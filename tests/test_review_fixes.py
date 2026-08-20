@@ -2,7 +2,6 @@
 variación SIOPEL del dólar oficial (venía 100× por usar ar_pct sobre puntos)."""
 from __future__ import annotations
 
-import pytest
 
 
 # ── parsers es-AR: el caso "sólo miles" (antes daba None o 1000× chico) ───────

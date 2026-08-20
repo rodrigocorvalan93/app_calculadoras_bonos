@@ -7,7 +7,6 @@ Lee todo de cache (store + official_fx + curva DLK) → sub-50 ms.
 from __future__ import annotations
 
 import asyncio
-from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request

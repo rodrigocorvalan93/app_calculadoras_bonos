@@ -15,7 +15,6 @@ request sobre una copia y se descarta. Reusa `pricing.compute_metrics` vía
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse

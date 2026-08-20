@@ -10,9 +10,8 @@ import asyncio
 import functools
 import math
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
