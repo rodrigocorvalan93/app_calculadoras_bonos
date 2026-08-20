@@ -35,7 +35,7 @@ echo Iniciando FastAPI (uvicorn) en http://127.0.0.1:8000  ...
 echo (el puente HTTPS del add-in arranca solo si hay certs)
 echo (Ctrl+C para detener)
 echo.
-"%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+"%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload --timeout-graceful-shutdown 10
 
 echo.
 echo Backend se cerro. Codigo de salida: %ERRORLEVEL%

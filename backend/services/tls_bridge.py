@@ -119,16 +119,31 @@ class TlsBridge:
                     self.port, self.target_host, self.target_port, self.port)
 
     async def stop(self) -> None:
+        # Orden CRÍTICO: cerrar el listener y CANCELAR los handlers antes de
+        # esperar nada. En Python ≥3.12 Server.wait_closed() espera a que
+        # TODAS las conexiones terminen — acá se esperaba primero y se
+        # cancelaba después, así que con un add-in conectado (p.ej. un webview
+        # suspendido por Office a mitad de respuesta, cuyo pump no tiene
+        # timeout) el shutdown deadlockeaba… y el auto-reload de uvicorn, que
+        # espera al proceso viejo SIN timeout, nunca volvía a levantar la app.
         if self._server:
             self._server.close()
-            await self._server.wait_closed()
-            self._server = None
-        # Cancelar y DRENAR las conexiones en vuelo antes de devolver el
-        # control: el finally de cada _handle cierra sus writers.
         for t in list(self._tasks):
             t.cancel()
+        # Drenar ACOTADO: el shutdown del reload no puede quedar rehén de una
+        # conexión que no coopere con la cancelación.
         if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._tasks, return_exceptions=True), 3.0)
+            except asyncio.TimeoutError:
+                logger.warning("[tls] conexiones sin drenar tras 3s; sigo el shutdown")
+        if self._server:
+            try:
+                await asyncio.wait_for(self._server.wait_closed(), 2.0)
+            except asyncio.TimeoutError:
+                pass
+            self._server = None
 
     async def _handle(self, cr: asyncio.StreamReader, cw: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
@@ -161,6 +176,10 @@ class TlsBridge:
                 await _pump(tr, cw)
             finally:
                 c2t.cancel()
+                try:
+                    await c2t          # drenado: sin task pendiente al cerrar el loop
+                except (Exception, asyncio.CancelledError):
+                    pass
         except (ConnectionError, ssl.SSLError):
             pass  # handshake fallido / cliente cortó: ruido normal, sin log
         except Exception:  # noqa: BLE001 — nunca tirar el server por una conexión

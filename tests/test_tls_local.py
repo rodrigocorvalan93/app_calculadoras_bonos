@@ -207,6 +207,49 @@ async def test_stop_cancela_conexiones_en_vuelo(certs):
     await back.stop()
 
 
+async def test_stop_no_deadlockea_con_respuesta_en_vuelo(certs):
+    """Regresión del deadlock de shutdown: en Python ≥3.12 Server.wait_closed()
+    espera a que TODOS los handlers terminen, y stop() lo llamaba ANTES de
+    cancelarlos — con una conexión a mitad de respuesta (p.ej. el webview de
+    Office suspendido mientras el add-in descargaba algo) el shutdown quedaba
+    eterno y el auto-reload de uvicorn nunca relevaba el proceso (join sin
+    timeout): la app no volvía hasta matarla a mano. stop() debe cancelar
+    primero y volver acotado. En 3.11 wait_closed() no espera handlers, así
+    que el deadlock sólo se manifiesta corriendo 3.12+ (la máquina real)."""
+    mudos: list = []
+
+    async def _mudo(r, w):
+        # target que lee el head y NUNCA responde: el handler del puente queda
+        # en el pump target→cliente, que no tiene (ni debe tener) timeout.
+        mudos.append(asyncio.current_task())
+        try:
+            await r.readuntil(b"\r\n\r\n")
+            await asyncio.sleep(3600)
+        except (asyncio.IncompleteReadError, asyncio.CancelledError, OSError):
+            pass
+
+    tgt = await asyncio.start_server(_mudo, "127.0.0.1", 0)
+    bridge = await _bridge_up(certs, tgt.sockets[0].getsockname()[1])
+    try:
+        ctx = ssl.create_default_context(cafile=str(certs["ca_cert"]))
+        _, w = await asyncio.open_connection("127.0.0.1", bridge.port, ssl=ctx)
+        w.write(b"GET /lenta HTTP/1.1\r\nHost: x\r\n\r\n")   # head COMPLETO
+        await w.drain()
+        for _ in range(100):                 # handler registrado y pumpeando
+            if bridge._tasks and mudos:
+                break
+            await asyncio.sleep(0.01)
+        assert bridge._tasks
+        await asyncio.wait_for(bridge.stop(), 5)   # acá deadlockeaba en 3.12+
+        assert not bridge._tasks
+        w.close()
+    finally:
+        tgt.close()
+        for t in mudos:
+            t.cancel()
+        await asyncio.gather(*mudos, return_exceptions=True)
+
+
 async def test_bridge_502_si_el_target_no_esta(certs):
     # puerto efímero cerrado: abrir y cerrar un server para reservar uno libre
     tmp = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
