@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v12 · 2026-08-13 (runtime compartido: funciones en el webview del panel)";
+var OMS_BUILD = "v13 · 2026-08-19 (rebrand YieldVertex — las fórmulas siguen siendo =OMS.*)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -408,7 +408,7 @@ function makeStreaming(nombre, getter) {
           invocation.setResult(naError(!OMSFeed.getToken()
             ? "El runtime de funciones no tiene token: instalá el manifest “⬇ con token” de tu usuario desde /admin (el manifest universal no autentica las celdas en este Excel)"
             : "Sin datos del feed (estado: " + OMSFeed.status() + "). Revisá el token en " +
-              "el panel OMS Bonos y que el servidor esté corriendo."));
+              "el panel YieldVertex y que el servidor esté corriendo."));
         } catch (e) { /* noop */ }
       });
     }, 6000);
@@ -416,7 +416,7 @@ function makeStreaming(nombre, getter) {
       var v;
       if (status === "auth") {
         v = naError(OMSFeed.getToken()
-          ? "Token de Excel inválido o deshabilitado (revisá /admin o el panel OMS Bonos)"
+          ? "Token de Excel inválido o deshabilitado (revisá /admin o el panel YieldVertex)"
           : "El runtime de funciones no tiene token: instalá el manifest “⬇ con token” de tu usuario desde /admin");
       } else if (!s) {
         return;                               // todavía sin primer snapshot
@@ -694,7 +694,7 @@ function ticketFn(especie, precio, nominales, plazo, fx) {
 // PING: función SÍNCRONA, sin server, sin async → si esto no devuelve el texto,
 // el problema es de carga/registro del add-in (metadata o JS cacheados), NO del
 // cálculo. Confirma además QUÉ build cargó Excel.
-function pingFn() { return "OMS Bonos " + OMS_BUILD; }
+function pingFn() { return "YieldVertex " + OMS_BUILD; }
 
 // DIAG: mismo camino de cálculo que TIREA pero devuelve TEXTO (nunca #¡VALOR!):
 // el resultado, o el motivo del error, visible en la celda. Async "clásica"

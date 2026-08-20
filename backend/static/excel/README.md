@@ -1,4 +1,4 @@
-# Add-in de Excel «OMS Bonos» (reemplazo del feed Reuters)
+# Add-in de Excel «YieldVertex» (reemplazo del feed Reuters — ex «OMS Bonos»; las fórmulas siguen siendo `=OMS.*` por compatibilidad con los libros existentes)
 
 Funciones en tiempo real dentro de Excel alimentadas por esta app (mismo feed
 Primary/BYMA + MAE que la web). Sin licencias: el server arma un snapshot por
@@ -42,10 +42,10 @@ es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
    - *Windows*: compartir una carpeta de red con el manifest → Archivo →
      Opciones → Centro de confianza → Catálogos de complementos de confianza →
      agregar la carpeta → reiniciar Excel → Insertar → Complementos →
-     CARPETA COMPARTIDA → OMS Bonos.
+     CARPETA COMPARTIDA → YieldVertex.
    - *Excel web*: Insertar → Complementos → Cargar mi complemento → subir el XML.
    - *Mac*: copiar el XML a `~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/`.
-4. En la cinta aparece **OMS Bonos** → abrir el panel → pegar el token →
+4. En la cinta aparece **YieldVertex** → abrir el panel → pegar el token →
    *Guardar y conectar*. El dot en verde = feed vivo.
 
 ## Requisitos y HTTPS (la causa del "iniciando el runtime…" eterno)
