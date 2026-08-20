@@ -372,7 +372,10 @@ async def lifespan(app: FastAPI):
 
     logger.info("[main] shutting down")
     try:
-        await tls_bridge.stop()
+        # wait_for de cinturón: stop() ya está acotado adentro, pero el
+        # shutdown del auto-reload NUNCA puede quedar rehén de esta pieza
+        # (el reloader de uvicorn espera al proceso viejo sin timeout).
+        await asyncio.wait_for(tls_bridge.stop(), timeout=8.0)
     except Exception:  # noqa: BLE001
         logger.exception("[main] tls bridge stop failed")
     snapshot_task.cancel()
