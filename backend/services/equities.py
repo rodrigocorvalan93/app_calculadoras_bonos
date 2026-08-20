@@ -80,19 +80,32 @@ def panel_rows(panel: str, plazo: str = "24hs") -> List[Dict[str, Any]]:
     return rows
 
 
+_merval_sym = None                      # símbolo MERVAL resuelto (memo)
+
+
 def merval_snapshot():
     """Snapshot del índice Merval. Prueba las variantes conocidas y, si ninguna
     pega, ESCANEA el store por cualquier símbolo que contenga 'MERVAL' — robusto al
     formato exacto que mande el broker (los índices no siempre llegan con el string
     esperado, que era por qué el 'MERVAL US$' del tape no aparecía)."""
+    global _merval_sym
     store = mds.get_store()
+    # símbolo ya descubierto: lookup directo — el escaneo de ~2k símbolos
+    # (bajo el lock del store, disputado con el thread del feed) corría en
+    # CADA render del tape porque el fallback ES el caso común.
+    if _merval_sym:
+        snap = store.get(_merval_sym)
+        if snap is not None and (snap.last is not None or snap.close is not None):
+            return snap
     for s in MERVAL_SYMBOLS:
         snap = store.get(s)
         if snap is not None and (snap.last is not None or snap.close is not None):
+            _merval_sym = s
             return snap
     for s in store.symbols():                       # fallback: cualquier I.MERVAL del feed
         if "MERVAL" in s.upper():
             snap = store.get(s)
             if snap is not None and (snap.last is not None or snap.close is not None):
+                _merval_sym = s
                 return snap
     return None

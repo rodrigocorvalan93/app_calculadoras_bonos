@@ -17,6 +17,7 @@ difiere, el error crudo se muestra en el panel para ajustar el path.
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import logging
@@ -26,6 +27,12 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+# El audit es el registro de trazabilidad de órdenes REALES: sus timestamps
+# van en reloj de Buenos Aires (naive, mismo formato de siempre) para poder
+# reconciliar contra la rueda/el broker aunque el server corra en UTC.
+_TZ_BA = ZoneInfo("America/Argentina/Buenos_Aires")
 
 from backend.config import settings
 
@@ -68,11 +75,20 @@ def kill_switch(on: Optional[bool] = None) -> bool:
 
 
 def audit(event: str, data: Dict[str, Any]) -> None:
-    rec = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event,
-           "live": is_live(), **data}
+    rec = {"ts": datetime.now(_TZ_BA).replace(tzinfo=None).isoformat(timespec="seconds"),
+           "event": event, "live": is_live(), **data}
     with _audit_lock:
         with open(_AUDIT_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+
+
+async def audit_async(event: str, data: Dict[str, Any]) -> None:
+    """audit() desde código async SIN bloquear el event loop: el write va al
+    executor (el archivo vive en la carpeta OneDrive — un write puede clavarse
+    decenas de ms — y encima el lock serializa: un handler esperando el lock
+    frenaba a TODOS los usuarios). El await preserva el orden audit-antes-de-
+    mandar que exige el diseño."""
+    await asyncio.get_running_loop().run_in_executor(None, audit, event, data)
 
 
 def _tail_lines(n: int) -> List[str]:
@@ -336,13 +352,13 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     client_order_id = f"calc-{uuid.uuid4().hex[:12]}"
     rec = {**payload, "client_order_id": client_order_id}
     if _kill["on"]:
-        audit("rechazada_kill", rec)
+        await audit_async("rechazada_kill", rec)
         return {"status": "RECHAZADA", "motivo": "kill-switch activado", **rec}
     if not is_live():
-        audit("paper_enviada", rec)
+        await audit_async("paper_enviada", rec)
         return {"status": "PAPER", "motivo": "modo paper (OMS_LIVE=0): NO viajó al broker", **rec}
 
-    audit("live_enviando", rec)
+    await audit_async("live_enviando", rec)
     from backend.services.primary_ws import get_ws_client
 
     # Guard pre-trade: no mandes a un símbolo que el broker NO tiene en su
@@ -361,7 +377,7 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
                          + ", ".join(cands) + "." if cands else
                          "No hay símbolos parecidos en el universo del broker "
                          "(¿ticker mal o ON que no opera en este broker?)."))
-            audit("live_instrumento_inexistente", {**rec, "candidatos": cands})
+            await audit_async("live_instrumento_inexistente", {**rec, "candidatos": cands})
             return {"status": "ERROR", "motivo": motivo, "candidatos": cands, **rec}
 
     ordtype = payload.get("ordtype", "limit")
@@ -378,25 +394,25 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
         params["price"] = payload["price"]
     try:
         d = await get_ws_client().get_json_checked("rest/order/newSingleOrder", params)
-        audit("live_respuesta", {**rec, "broker": d})
+        await audit_async("live_respuesta", {**rec, "broker": d})
         return {"status": d.get("status", "?"), "broker": d, **rec}
     except Exception as exc:  # noqa: BLE001
-        audit("live_error", {**rec, "error": str(exc)})
+        await audit_async("live_error", {**rec, "error": str(exc)})
         return {"status": "ERROR", "motivo": str(exc), **rec}
 
 
 async def cancel(client_order_id: str, proprietary: str = "api") -> Dict[str, Any]:
     rec = {"client_order_id": client_order_id, "proprietary": proprietary}
     if not is_live():
-        audit("paper_cancelada", rec)
+        await audit_async("paper_cancelada", rec)
         return {"status": "PAPER", **rec}
-    audit("live_cancelando", rec)
+    await audit_async("live_cancelando", rec)
     from backend.services.primary_ws import get_ws_client
     try:
         d = await get_ws_client().get_json_checked("rest/order/cancelById", {
             "clientOrderId": client_order_id, "proprietary": proprietary})
-        audit("live_cancel_respuesta", {**rec, "broker": d})
+        await audit_async("live_cancel_respuesta", {**rec, "broker": d})
         return {"status": d.get("status", "?"), "broker": d, **rec}
     except Exception as exc:  # noqa: BLE001
-        audit("live_cancel_error", {**rec, "error": str(exc)})
+        await audit_async("live_cancel_error", {**rec, "error": str(exc)})
         return {"status": "ERROR", "motivo": str(exc), **rec}

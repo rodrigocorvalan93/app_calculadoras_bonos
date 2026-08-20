@@ -74,7 +74,7 @@ async def test_graficos_data_overlay_y_fuente(monkeypatch) -> None:
     from httpx import ASGITransport, AsyncClient
 
     from backend.main import app
-    from backend.services import cafci, curves, marketdata_store as mds, symbols as syms
+    from backend.services import curves, marketdata_store as mds, symbols as syms
 
     bond_universe.ensure_loaded()
     table = curves.build_curve_codes()

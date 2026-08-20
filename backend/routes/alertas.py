@@ -9,6 +9,7 @@ store + cache de métricas, sin cómputo nuevo en el request.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -17,6 +18,8 @@ from fastapi.responses import HTMLResponse
 
 from backend.locale_ar import parse_ar_num
 from backend.services import alertas as alertas_svc, mailer
+
+logger = logging.getLogger("backend.alertas")
 
 router = APIRouter(prefix="/alertas", tags=["alertas"])
 
@@ -43,6 +46,10 @@ def _tabla_ctx(error: Optional[str] = None) -> dict:
         try:
             cur = alertas_svc.current_value(a["code"], a["metric"])
         except Exception:  # noqa: BLE001
+            # '—' en la columna Actual con rastro en el log: sin esto, un
+            # cálculo roto era indistinguible de 'sin precio'.
+            logger.warning("[alertas] current_value(%s, %s) falló",
+                           a.get("code"), a.get("metric"), exc_info=True)
             cur = None
         rows.append({**a, "actual": cur, "disparada_fmt": _disparada_fmt(a.get("disparada_at"))})
     return {"alertas": rows, "error": error, "smtp_ok": mailer.is_configured()}

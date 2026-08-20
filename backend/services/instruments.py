@@ -112,13 +112,6 @@ async def valid_symbols() -> Optional[Set[str]]:
     return syms
 
 
-def reset_symbols_cache() -> None:
-    """Invalida el cache del universo (tests / reconexión manual)."""
-    global _sym_cache, _sym_cache_host
-    with _sym_lock:
-        _sym_cache = _sym_cache_host = None
-
-
 def match_candidates(symbols: Set[str], code: str, limit: int = 12) -> List[str]:
     """Símbolos del broker cuyo código coincide con `code` (o comparte raíz).
     El código BYMA es el 3er token de `MERV - XMEV - <cod> - <plazo>[ - <seg>]`.

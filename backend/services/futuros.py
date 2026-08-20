@@ -18,7 +18,6 @@ Sólo lee de cache → sub-50 ms.
 """
 from __future__ import annotations
 
-import math
 import re
 from calendar import monthrange
 from datetime import date

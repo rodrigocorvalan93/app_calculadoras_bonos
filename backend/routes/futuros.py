@@ -7,7 +7,7 @@ Lee todo de cache (store + official_fx + curva DLK) → sub-50 ms.
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
@@ -15,6 +15,9 @@ from fastapi.responses import HTMLResponse
 
 from backend.locale_ar import hoy_ba, parse_ar_num
 from backend.services import bond_universe, dolares, futuros as fut, marketdata_store
+from backend.cache_seq import seq_cached
+
+logger = logging.getLogger("backend.futuros")
 
 router = APIRouter(tags=["futuros"])
 
@@ -53,6 +56,9 @@ async def _ctx(spot_override: str = "") -> Dict[str, Any]:
         )
         dlk_rows, ars_rows = dlk_rows[0], ars_rows[0]
     except Exception:  # noqa: BLE001
+        # visible en el log: sin esto, un fallo de pricing dejaba los dos
+        # paneles de sintéticos vacíos y se leía como 'no hay datos'.
+        logger.exception("[futuros] curvas DLK/ARS fallaron — paneles de sintéticos vacíos")
         dlk_rows, ars_rows = [], []
 
     matchable = [r for r in may_rows if r["dias"] and r["dias"] > 0 and r.get("td") is not None]
@@ -120,6 +126,7 @@ async def futuros_page(request: Request, spot_override: str = "") -> HTMLRespons
 
 
 @router.get("/futuros/table", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)          # partial live (md-update): 1 build por tick
 async def futuros_table(request: Request, spot_override: str = "") -> HTMLResponse:
     return _render(request, "partials/futuros_table.html", **(await _ctx(spot_override)))
 

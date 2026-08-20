@@ -5,7 +5,6 @@ MAE/pollers y los precios que se veían eran los persistidos de la última rueda
 `feed_down` (sesión sin socket) no saltaba y hubo que darse cuenta a ojo."""
 from __future__ import annotations
 
-import time
 
 import pytest
 

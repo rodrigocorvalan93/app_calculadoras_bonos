@@ -148,7 +148,7 @@ def compute_category(
                           tamar_path=tp, price=r.get("px_calc"))
         if not res:
             continue
-        carry, comp, aj, trn = res["carry"], res["compresion"], res["ajuste"], res["tr_total"]
+        carry, aj, trn = res["carry"], res["ajuste"], res["tr_total"]
         peso = (1.0 + trn) * (1.0 + fx_proy) - 1.0
         if not math.isfinite(peso):                         # no dejes filtrar nan%/inf a la celda
             continue
