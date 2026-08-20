@@ -19,7 +19,7 @@ async def test_manifest_e_iconos_servidos() -> None:
         assert m.status_code == 200
         assert "manifest" in m.headers["content-type"] or "json" in m.headers["content-type"]
         data = m.json()
-        assert data["display"] == "standalone" and data["short_name"] == "Bonos"
+        assert data["display"] == "standalone" and data["short_name"] == "ΔYV"
         assert {i["sizes"] for i in data["icons"]} >= {"192x192", "512x512"}
         for path in ("/static/icons/icon-180.png", "/static/icons/icon-192.png",
                      "/static/icons/icon-512.png"):
