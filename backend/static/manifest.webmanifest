@@ -1,6 +1,6 @@
 {
-  "name": "Calculadora de Bonos — Delta",
-  "short_name": "Bonos",
+  "name": "ΔYieldVertex — Calculadora de Bonos",
+  "short_name": "ΔYV",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0d1117",

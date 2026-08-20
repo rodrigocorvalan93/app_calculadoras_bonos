@@ -176,22 +176,25 @@ async def test_prefs_endpoints_guardan_y_resetean(prefs_tmp) -> None:
 @pytest.mark.asyncio
 async def test_tabla_saltea_categorias_destildadas(prefs_tmp, monkeypatch) -> None:
     # Sin precios en el store no hay filas que renderizar, así que el skip se
-    # verifica en el lugar que importa (eficiencia): las categorías
-    # destildadas NI SE PROCESAN (no se piden sus filas de curva).
+    # verifica en el lugar que importa (eficiencia): las curvas cuyas categorías
+    # están TODAS destildadas NI SE CONSTRUYEN (las filas se piden por curva
+    # única vía _rows_for, deduplicadas y en paralelo).
     from backend.routes import escenario as route
 
     pedidas: list = []
 
-    async def _spy(cat, plazo):
-        pedidas.append(cat.key)
-        return []
+    async def _spy(curve, plazo):
+        pedidas.append(curve)
+        return ([], [])
 
-    monkeypatch.setattr(route, "_cat_rows", _spy)
+    monkeypatch.setattr(route, "_rows_for", _spy)
     async with _client() as ac:
         r = await ac.get("/escenario/table", params={
             "cats_off": "globales,bonares,dlk,dual_tamar_cer,dual_cer",
         })
     assert r.status_code == 200
     assert "globales" not in pedidas and "bonares" not in pedidas
-    assert "dual_tamar_cer" not in pedidas and "dual_cer" not in pedidas
-    assert "tasa_fija" in pedidas and "tamar" in pedidas      # las prendidas sí
+    assert "dualtamar_cer" not in pedidas and "dualcer" not in pedidas
+    assert "dolarlinked" not in pedidas
+    assert "lecap" in pedidas and "tamar" in pedidas          # curvas de las prendidas sí
+    assert len(pedidas) == len(set(pedidas))                  # sin duplicados

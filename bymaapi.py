@@ -992,7 +992,6 @@ def main():
             and b.quote_price_cnv == "DIRTY"
         ]
     lista_global_24hs = [f"MERV - XMEV - {s} - 24hs" for s in lista_curva_global]
-    lista_global_ci = [f"MERV - XMEV - {s} - CI" for s in lista_curva_global]
 
     lista_curva_dlksob = [
             b.codigo for b in todos_los_bonos
@@ -1183,7 +1182,7 @@ if __name__ == '__main__':
 # buscar activo:        get_market_data(session,"ROFX","MERV - XMEV - AL30 - CI")
 # calcular fx:          CCL_AL30_LAST_CI =calcula_tipo_de_cambio("AL30","CCL","CI","LAST",session)
 # buscador de detalles: search_instrument_by_description(instrumentos_detallados_df, "MERV - XMEV - AL30 - CI")
-# detalle simplificado: get_instrumento_detalle(session, "T30E6")
+# detalle simplificado: get_instrument_detail(session, "T30E6")
 # market data simple:   get_mktdata(session,"T30E6")
 # Ejemplo obtener BID/OFFER de un bono y su tasa: PARP.genera_ticket(get_mktdata(session,"PARP").get("OF")[0].get('price')/100)
 # Ejemplo last: PARP.genera_ticket(get_mktdata(session,"PARP").get("LA").get("price")/100)

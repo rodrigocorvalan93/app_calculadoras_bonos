@@ -232,18 +232,18 @@ def test_macro_refresh_is_time_gated(monkeypatch) -> None:
     try:
         class _FakeDT:
             @staticmethod
-            def now():
+            def now(tz=None):
                 return datetime(2026, 6, 9, 9, 0)      # antes de las 11 → no refresca
         monkeypatch.setattr(historico, "datetime", _FakeDT)
         historico.macro_maybe_refresh()
         assert calls["n"] == 0
 
-        _FakeDT.now = staticmethod(lambda: datetime(2026, 6, 9, 12, 0))  # pasó 11:00
+        _FakeDT.now = staticmethod(lambda tz=None: datetime(2026, 6, 9, 12, 0))  # pasó 11:00
         historico.macro_maybe_refresh()
         historico.macro_maybe_refresh()                # 2da llamada misma franja → no re-refresca
         assert calls["n"] == 1
 
-        _FakeDT.now = staticmethod(lambda: datetime(2026, 6, 9, 16, 0))  # pasó 15:30
+        _FakeDT.now = staticmethod(lambda tz=None: datetime(2026, 6, 9, 16, 0))  # pasó 15:30
         historico.macro_maybe_refresh()
         assert calls["n"] == 2                          # nueva franja → 1 refresh más
     finally:

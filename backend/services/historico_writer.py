@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -119,15 +120,28 @@ def operados_hoy(df: "Any") -> int:
     return n
 
 
+# El read→concat→write de la base NO es reentrante: dos guardados a la vez
+# (autosave 17:01 + botón manual, o doble click del botón — cada POST va a un
+# thread distinto del executor) compartían el MISMO tmp determinístico y se
+# pisaban (xlsx corrupto promovido a base, o lost update). El tmp+replace
+# protege contra un CORTE, no contra concurrencia — esto sí.
+_save_lock = threading.Lock()
+
+
 def append_and_save(df: "Any", xlsx_path: str) -> Dict[str, Any]:
     """Appendea `df` a la base (Excel + espejo Parquet) con la semántica de
     bymaapi.guardar_excel: concat con lo existente, dedup (symbol, Código,
     fecha_hoy) keep last, dropna de métricas, Proy por sufijo 'j'. Escritura
     atómica (tmp + replace) — un corte a mitad de escritura no corrompe la
-    base."""
+    base — y SERIALIZADA (_save_lock) — dos guardados concurrentes tampoco."""
     import numpy as np
     import pandas as pd
 
+    with _save_lock:
+        return _append_and_save_locked(df, xlsx_path, np, pd)
+
+
+def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd) -> Dict[str, Any]:
     if os.path.exists(xlsx_path):
         prev = pd.read_excel(xlsx_path, parse_dates=["fecha_hoy"])
         prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date

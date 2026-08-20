@@ -303,10 +303,19 @@ def orden_anormal(snap: Optional[MarketSnapshot], bid_vn: float, offer_vn: float
 
 
 _store: Optional[MarketDataStore] = None
+_store_init_lock = threading.Lock()
 
 
 def get_store() -> MarketDataStore:
+    """Singleton con double-checked lock. El init lazy sin lock era una carrera
+    real al boot: feed WS, warmup, persistencia y primeras requests arrancan en
+    paralelo, y el thread del feed CACHEA la referencia de por vida
+    (primary_ws.self.store) — si perdía la carrera, escribía cada tick en un
+    store huérfano para siempre y la app quedaba en precios persistidos sin
+    ningún error visible."""
     global _store
     if _store is None:
-        _store = MarketDataStore()
+        with _store_init_lock:
+            if _store is None:
+                _store = MarketDataStore()
     return _store

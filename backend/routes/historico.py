@@ -88,81 +88,6 @@ def _line_chart(serie: str, rango: str, desde: Optional[str] = None,
     }
 
 
-def _curve_chart(cs: Dict[str, Any], desde: Optional[str] = None, hasta: Optional[str] = None,
-                 width: int = 980, height: int = 520) -> Dict[str, Any]:
-    """Multi-línea: una TIREA/TNA/TEM/Paridad por bono de la curva + bandas
-    prom/mín/máx. Eje X por fecha (ordinal), todas las métricas ×100 (%)."""
-    from datetime import date
-    lines = cs.get("lines") or []
-    if not lines:
-        return {"loaded": cs.get("loaded", False), "n_lines": 0, "metric": cs.get("metric"),
-                "curve_label": cs.get("curve_label")}
-    scale = float(cs.get("scale", 100.0))   # métricas: fracción→% · Precio: tal cual
-    ends = [p[0] for ln in lines for p in (ln["points"][0], ln["points"][-1])]
-    dmin, dmax = (desde or min(ends)), (hasta or max(ends))
-    try:
-        o0, o1 = date.fromisoformat(dmin).toordinal(), date.fromisoformat(dmax).toordinal()
-    except ValueError:
-        o0, o1 = 0, 1
-    if o1 <= o0:
-        o1 = o0 + 1
-    ys = [v * scale for ln in lines for _, v in ln["points"]]
-    ymin, ymax = min(ys), max(ys)
-    if ymax == ymin:
-        ymax = ymin + 1.0
-    pad = (ymax - ymin) * 0.08
-    ymin -= pad
-    ymax += pad
-    ml, mr, mt, mb = 60, 104, 16, 42
-    pw, ph = width - ml - mr, height - mt - mb
-
-    def sx(diso):
-        try:
-            o = date.fromisoformat(diso).toordinal()
-        except ValueError:
-            o = o0
-        return round(ml + (o - o0) / (o1 - o0) * pw, 1)
-
-    def sy(v):
-        return round(mt + (1 - (v - ymin) / (ymax - ymin)) * ph, 1)
-
-    out_lines = []
-    for i, ln in enumerate(lines):
-        pts = ln["points"]
-        step = max(1, len(pts) // 160)
-        sample = pts[::step]
-        if sample[-1] != pts[-1]:
-            sample.append(pts[-1])
-        path = "M " + " L ".join(f"{sx(d)},{sy(v * scale)}" for d, v in sample)
-        out_lines.append({"code": ln["code"], "path": path, "color": _PALETTE[i % len(_PALETTE)],
-                          "delta": ln["delta"], "delta_unit": ln["delta_unit"], "last": ln["last"] * scale})
-    agg = cs.get("agg")
-    bands = None
-    if agg:
-        bands = {k: {"y": sy(agg[k] * scale), "v": round(agg[k] * scale, 1)} for k in ("mean", "min", "max")}
-    yticks = [{"y": sy(ymin + (ymax - ymin) / 5 * i), "v": round(ymin + (ymax - ymin) / 5 * i, 1)} for i in range(6)]
-    xticks = []
-    for i in range(6):
-        o = round(o0 + i / 5 * (o1 - o0))
-        xticks.append({"x": round(ml + (o - o0) / (o1 - o0) * pw, 1), "v": date.fromordinal(o).isoformat()})
-    return {"loaded": True, "n_lines": len(out_lines), "lines": out_lines, "bands": bands,
-            "metric": cs.get("metric"), "curve_label": cs.get("curve_label"), "is_yield": cs.get("is_yield"),
-            "yticks": yticks, "xticks": xticks, "width": width, "height": height,
-            "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph, "dmin": dmin, "dmax": dmax}
-
-
-def _curve_ctx(curve: Optional[str], metric: str, desde: Optional[str],
-               hasta: Optional[str], proy: str) -> Dict[str, Any]:
-    from backend.services import curves
-    keys = historico_byma.curves_with_history(desde, hasta, proy)
-    labels = {cv.key: cv.label for cv in curves.list_curves()}
-    sel = curve if curve in keys else (keys[0] if keys else None)
-    cs = historico_byma.curve_series(sel, metric, desde, hasta, proy) if sel else {"loaded": False, "lines": []}
-    return {"curve_opts": [{"key": k, "label": labels.get(k, k)} for k in keys],
-            "curve_sel": sel, "metric": metric, "proy": proy,
-            "curve_chart": _curve_chart(cs, desde, hasta), "hist_meta": historico_byma.meta()}
-
-
 @router.get("/historicos", response_class=HTMLResponse)
 async def historicos_page(
     request: Request,
@@ -189,14 +114,6 @@ async def historicos_page(
         series=series, selected=selected, rango=rango, desde=desde or "", hasta=hasta or "",
         chart=chart, status=historico.status(),
     )
-
-
-@router.get("/historicos/svg", response_class=HTMLResponse)
-async def historicos_svg(request: Request, serie: str = "", rango: str = "1a",
-                         desde: Optional[str] = None, hasta: Optional[str] = None) -> HTMLResponse:
-    return _render(request, "partials/historico_svg.html",
-                   chart=_line_chart(serie, rango, desde, hasta), serie=serie, rango=rango,
-                   desde=desde or "", hasta=hasta or "")
 
 
 @router.get("/historicos/curva", response_class=HTMLResponse)
@@ -282,7 +199,8 @@ async def historicos_curva_fechas(
     await loop.run_in_executor(None, historico_byma.ensure_loaded)
 
     meta = historico_byma.meta()
-    keys = historico_byma.curves_with_history(None, None, proy)
+    keys = await loop.run_in_executor(
+        None, historico_byma.curves_with_history, None, None, proy)
     labels = {cv.key: cv.label for cv in curves_svc.list_curves()}
     sel = curve if curve in keys else (keys[0] if keys else None)
 
@@ -302,7 +220,10 @@ async def historicos_curva_fechas(
     fechas = [f for f in (f1, f2, f3, f4) if f]
     scatter = tr_tabla = None
     if sel and meta.get("loaded"):
-        scatter = _scatter_chart(historico_byma.scatter_by_dates(sel, fechas, metric, proy))
+        # scatter_by_dates es O(fechas × códigos × obs) de Python puro: al
+        # pool, como el resto del handler — inline congelaba el loop por click.
+        scatter = _scatter_chart(await loop.run_in_executor(
+            None, historico_byma.scatter_by_dates, sel, fechas, metric, proy))
         if trd1 and trd2 and trd1 < trd2:
             tr_tabla = await loop.run_in_executor(
                 None, tr_realizado.tabla, sel, trd1, trd2, proy)

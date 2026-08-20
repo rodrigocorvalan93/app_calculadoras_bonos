@@ -343,16 +343,6 @@ class PrimaryWS:
             return {}
         return payload if isinstance(payload, dict) else {}
 
-    @staticmethod
-    def _symbols_from_error(message: Any) -> List[str]:
-        """Extrae los símbolos del payload 'smd' eco-devuelto en el ERROR."""
-        out: List[str] = []
-        for p in PrimaryWS._payload_from_error(message).get("products", []) or []:
-            sym = p.get("symbol") if isinstance(p, dict) else None
-            if sym:
-                out.append(sym)
-        return out
-
     def _recover_from_error(self, message: Any) -> None:
         payload = self._payload_from_error(message)
         syms = [p.get("symbol") for p in payload.get("products", []) or []

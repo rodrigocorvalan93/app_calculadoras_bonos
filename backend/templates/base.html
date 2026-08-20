@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Calculadora de Bonos{% endblock %}</title>
+  <title>ΔYieldVertex - {% block title %}Calculadora de Bonos{% endblock %}</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', path='favicon.ico') }}?v={{ asset_v }}">
   <link rel="icon" type="image/png" href="{{ url_for('static', path='favicon.png') }}?v={{ asset_v }}">
   {# PWA: instalable desde el navegador del celu ("Agregar a inicio") sin
@@ -38,11 +38,13 @@
 <body hx-boost="false"
       x-data="{ railOpen: (function(){ try { return localStorage.getItem('fx_rail') !== '0'; } catch (e) { return true; } })() }">
   <header class="topbar" x-data="themeSwitcher()">
-    <a class="brand" href="/yas">
-      <svg class="brand-mark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+    {# Marca ΔYV en dos colores: el Δ (triángulo SVG de siempre) en accent,
+       "YV" en tinta normal. Nombre completo (ΔYieldVertex) en footer y title. #}
+    <a class="brand" href="/yas" title="ΔYieldVertex">
+      <svg class="brand-mark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style="color:var(--accent)">
         <path d="M12 3.6 L21.2 20.4 L2.8 20.4 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
       </svg>
-      <span class="brand-text">Calculadora · Bonos</span>
+      <span class="brand-text">YV</span>
     </a>
     <nav class="tabs" id="nav-tabs">
       {# Sólo las pestañas permitidas para el rol del usuario (auth.nav_for),
@@ -142,6 +144,12 @@
 
   <footer class="footer">
     <span>FastAPI rewrite · sub-50 ms p95 target</span>
+    <span style="margin-left:12px;opacity:.75">·</span>
+    <span style="margin-left:12px">ΔYieldVertex 2024-2026 · autoría
+      <a href="https://github.com/rodrigocorvalan93/app_calculadoras_bonos"
+         target="_blank" rel="noopener" style="color:inherit"
+         title="Repositorio canónico del autor">Rodrigo Corvalán Salguero</a>
+      · licenciado a Grupo Latin Securities / Delta AM / Galileo</span>
   </footer>
 
   <script>

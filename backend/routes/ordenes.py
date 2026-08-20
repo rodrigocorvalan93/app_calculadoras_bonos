@@ -124,7 +124,10 @@ async def ordenes_quote(request: Request, code: str = "", plazo: str = "24hs") -
 
 @router.get("/ordenes/blotter", response_class=HTMLResponse)
 async def ordenes_blotter(request: Request) -> HTMLResponse:
-    return _render(request, "partials/ordenes_blotter.html", blotter=oms.blotter(60))
+    # el blotter lee el final del audit (archivo en la carpeta OneDrive):
+    # I/O de disco fuera del event loop — el partial se auto-refresca.
+    rows = await asyncio.get_running_loop().run_in_executor(None, oms.blotter, 60)
+    return _render(request, "partials/ordenes_blotter.html", blotter=rows)
 
 
 @router.get("/ordenes/panel", response_class=HTMLResponse)
@@ -177,9 +180,9 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
     motivo = oms.validate(code, side, fqty, fpx, account, ref, moneda, ordtype,
                           theo_ref=theo, confirmed=(confirm_no_ref == "1"))
     if motivo:
-        oms.audit("rechazada_pretrade", {"code": code, "side": side, "qty": fqty,
-                                         "price": fpx, "account": account,
-                                         "ordtype": ordtype, "motivo": motivo})
+        await oms.audit_async("rechazada_pretrade", {"code": code, "side": side, "qty": fqty,
+                                                     "price": fpx, "account": account,
+                                                     "ordtype": ordtype, "motivo": motivo})
         return _render(request, "partials/orden_confirm.html", error=motivo,
                        trigger="orden-done", **_base_ctx())
     est_px = fpx if ordtype != "market" else ref
@@ -189,7 +192,7 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
                "ordtype": ordtype, "qty": fqty, "price": fpx, "account": account,
                "plazo": plazo, "moneda": moneda, "ref": ref,
                "notional": (fqty * est_px / 100.0) if est_px else None}
-    token = oms.new_token(payload)
+    token = await asyncio.get_running_loop().run_in_executor(None, oms.new_token, payload)
     return _render(request, "partials/orden_confirm.html",
                    p=payload, token=token, **_base_ctx())
 
@@ -255,7 +258,8 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
     if not batch:
         return _render(request, "partials/orden_confirm.html",
                        error="Sin líneas válidas. " + " · ".join(errors), **_base_ctx())
-    token = oms.new_token({"batch": batch})
+    token = await asyncio.get_running_loop().run_in_executor(
+        None, oms.new_token, {"batch": batch})
     return _render(request, "partials/orden_confirm.html",
                    batch=batch, batch_total=sum((b["notional"] or 0) for b in batch),
                    batch_moneda=("USD" if (moneda or "ARS").upper() in ("USD", "USB") else "ARS"),
