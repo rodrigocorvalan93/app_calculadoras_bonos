@@ -29,8 +29,7 @@ if [ ! -x .venv/bin/uvicorn ]; then
   echo "▶ Primera vez: creando .venv e instalando dependencias…"
   python3 -m venv .venv
   .venv/bin/pip install --upgrade pip setuptools wheel
-  # openpyxl: los Excel de Posiciones/Delta · feedparser: cinta de noticias
-  .venv/bin/pip install -r backend/requirements.txt openpyxl feedparser
+  .venv/bin/pip install -r backend/requirements.txt
 fi
 
 # Abrir el navegador apenas el server responda (hasta ~30 s).

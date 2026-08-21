@@ -1,4 +1,5 @@
-# Phase 1 backend — FastAPI + Jinja2 + HTMX. No WebSocket / charts yet.
+# Backend FastAPI + Jinja2 + HTMX (una sola fuente de verdad de dependencias:
+# el .bat, correr_app.command y el deploy del server instalan ESTE archivo).
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30,<1.0
 jinja2>=3.1,<4.0
@@ -8,7 +9,9 @@ python-multipart>=0.0.9
 itsdangerous>=2.1
 httpx>=0.27,<1.0
 cachetools>=5.3,<6.0
-websockets>=12.0,<14.0
+# El feed del broker soporta websockets viejo y nuevo (primary_ws detecta la
+# API ≥14 en runtime) — sin techo para no pelearse con un install fresco.
+websockets>=12.0
 
 # Math / data — same versions the legacy app exercises against
 numpy>=1.26
@@ -18,9 +21,13 @@ pyarrow>=15
 scipy>=1.11
 python-dateutil>=2.9
 holidays>=0.50
+# Excel de Posiciones / Delta - Especies (lectura) y guardado del histórico
+openpyxl>=3.1
 
 # requests is still used by indices.py (BCRA backup fetch) and OMSapi.py
 requests>=2.32
+# Cinta de noticias (RSS)
+feedparser>=6.0
 
 # HTTPS local del add-in de Excel: CA + cert estilo mkcert (backend/tools/
 # https_local.py). Office exige https para el runtime de funciones custom.
