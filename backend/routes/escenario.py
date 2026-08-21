@@ -184,6 +184,9 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
     esc_init = json.dumps({
         "n_months": n_months, "senderos": senderos,
         "saved_keys": sorted(saved.keys()), "cats_off": cats_off,
+        # Etiquetas de los 18 slots posibles (cap del resize client-side): el
+        # grid puede crecer al cambiar `terminal` sin volver al server.
+        "slots": escenario_prefs.slot_meses(_parse_d(settle) or hoy_ba(), 18),
     }).replace("</", "<\\/")
     return _render(request, "escenario.html", cats=cats, terminal=terminal, plazo=plazo,
                    settle=settle, dias=dias, deva_pct=deva * 100.0,

@@ -62,7 +62,11 @@
           <table class="cashflows sendero-tbl">
             <thead><tr>
               <th style="text-align:left">Driver</th>
-              <template x-for="m in nMonths" :key="m"><th x-text="'M'+m"></th></template>
+              {# Meses reales en vez de M1/M2 (tooltip: nº de tramo + fechas exactas) #}
+              <template x-for="m in nMonths" :key="m">
+                <th x-text="(slots[m-1]||{}).mes || ('M'+m)"
+                    :title="'M'+m+((slots[m-1]||{}).rango ? ' · '+slots[m-1].rango : '')"></th>
+              </template>
               <th></th>
             </tr></thead>
             <tbody>
@@ -73,7 +77,11 @@
                     <td><input type="text" class="sendero-in" inputmode="decimal" autocomplete="off"
                                :placeholder="d.ph" x-model="cells[d.key][i-1]"
                                :style="isDirty(d.key) ? 'font-weight:600' : ''"
-                               @input.debounce.450ms="touch(d.key)"></td>
+                               @input.debounce.450ms="touch(d.key)">
+                      {# Sólo Inflación: qué dato de INDEC va en este casillero (lag del CER) #}
+                      <template x-if="d.key==='infl_path'">
+                        <div class="sendero-ipc" x-text="'IPC '+((slots[i-1]||{}).ipc||'')"></div>
+                      </template></td>
                   </template>
                   <td><button type="button" class="lnk" @click="clearRow(d.key)" title="Vaciar fila (vacío = serie/proyección actual)">✕</button></td>
                 </tr>
@@ -93,8 +101,12 @@
           inflación ≈ <b>{{ infl_pct | ar_num(2) if infl_pct is not none else '—' }}%</b>/mes ·
           deva A3500 ≈ <b>{{ deva_mens_pct | ar_num(2) }}%</b>/mes ·
           TAMAR ≈ <b>{{ tamar_now | ar_num(2) if tamar_now is not none else '—' }}%</b> TNA.
-          <b>Inflación/devas en %/mes; TAMAR en nivel TNA.</b> Con sendero TAMAR la <b>TIR de entrada</b>
-          de los floaters se re-deriva del precio bajo ese cupón (más TAMAR ⇒ más carry).</p>
+          <b>Inflación/devas en %/mes; TAMAR en nivel TNA.</b> Columna = mes que impacta cada tramo
+          (el mouse sobre el mes muestra las fechas exactas). En <b>Inflación</b> cada casillero dice
+          qué dato va ahí: <i>IPC jul</i> = inflación de julio — se publica a mediados de ago y rige
+          el CER hasta mediados de sep (lag del índice). Devas y TAMAR sin lag (mes corriente).
+          Con sendero TAMAR la <b>TIR de entrada</b> de los floaters se re-deriva del precio bajo
+          ese cupón (más TAMAR ⇒ más carry).</p>
       </div>
 
       <div class="esc-cats">
@@ -137,7 +149,8 @@
   function escSenderosInit() {
     var cfg = {};
     try { cfg = JSON.parse(document.getElementById("esc-init").textContent || "{}"); } catch (e) {}
-    return escSenderos(cfg.n_months || 6, cfg.senderos || {}, cfg.saved_keys || [], cfg.cats_off || []);
+    return escSenderos(cfg.n_months || 6, cfg.senderos || {}, cfg.saved_keys || [], cfg.cats_off || [],
+                       cfg.slots || []);
   }
   // Senderos mensuales (Escenario). Vienen PRECARGADOS del server con
   // defaults vivos (inflación economista / deva ROFEX / TAMAR actual) más
@@ -145,7 +158,7 @@
   // se persiste en el server (POST /escenario/prefs, debounced) → sobrevive
   // reinicios y se comparte entre PC/Mac/celu. "↺ defaults" borra lo fijado.
   // Cada fila se serializa "v1;v2;…" en un hidden que htmx manda al calcular.
-  function escSenderos(nMonths, senderos, savedKeys, catsOff) {
+  function escSenderos(nMonths, senderos, savedKeys, catsOff, slots) {
     var drivers = [
       { key: "infl_path",  label: "Inflación",  unit: "· CER/UVA · %/mes",  ph: "" },
       { key: "a3500_path", label: "Deva A3500", unit: "· DLK · %/mes",      ph: "" },
@@ -162,7 +175,7 @@
     });
     var saveTimer = null;
     return {
-      drivers: drivers, cells: cells, nMonths: nMonths,
+      drivers: drivers, cells: cells, nMonths: nMonths, slots: slots || [],
       dirty: (savedKeys || []).slice(),          // filas fijadas (persistidas)
       catsOff: (catsOff || []).slice(),
       init: function () {

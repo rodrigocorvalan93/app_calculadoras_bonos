@@ -3,8 +3,8 @@
 Defaults (lo que ve el usuario al abrir la pestaña, todo desde memoria,
 costo ~µs):
   - Inflación: la proyección mensual de la economista cargada a mano en
-    `indices.proyeccion_inflacion_mensual` (%/mes), alineada al mes del
-    settle.
+    `indices.proyeccion_inflacion_mensual` (%/mes), alineada al mes del DATO
+    que rige el CER en cada tramo (lag del índice; ver _slot_ipc_ref).
   - Deva A3500: mes a mes implícita en los futuros ROFEX del store —
     ln(1+deva) lineal en días entre contratos con precio (interpola meses
     faltantes y extrapola con la última pendiente). Sin futuros con precio,
@@ -26,7 +26,7 @@ import logging
 import math
 import os
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -179,10 +179,54 @@ def _month_add(d: date, n: int) -> date:
     return date(d.year + y, m + 1, 1)
 
 
+_MESES_AR = ("ene", "feb", "mar", "abr", "may", "jun",
+             "jul", "ago", "sep", "oct", "nov", "dic")
+
+
+def _slot_mid(settle_d: date, k: int) -> date:
+    """Punto medio de la ventana del slot k (0-based): el slot compone sobre
+    settle+k·30,44d → settle+(k+1)·30,44d (ver total_return.compound_path)."""
+    return settle_d + timedelta(days=round((k + 0.5) * 30.4375))
+
+
+def _slot_ipc_ref(settle_d: date, k: int) -> date:
+    """Mes del DATO de IPC (INDEC) que rige el CER en la ventana del slot k.
+
+    Mecánica del índice: el CER de mediados de M a mediados de M+1 corre con
+    el IPC de M−1 (publicado a mediados de M). Evaluado en el punto medio de
+    la ventana: antes del día 16 ⇒ IPC de 2 meses atrás; después ⇒ 1 mes."""
+    mid = _slot_mid(settle_d, k)
+    return _month_add(date(mid.year, mid.month, 1), -(2 if mid.day < 16 else 1))
+
+
+def slot_meses(settle_d: date, n: int) -> List[Dict[str, str]]:
+    """Etiquetas de los slots del grid de senderos, por slot:
+      mes   → mes calendario que el tramo impacta (punto medio de su ventana;
+              con ’AA cuando cruza de año) — vale para devas y TAMAR (sin lag).
+      ipc   → mes del dato de INDEC que va en ese casillero de Inflación
+              (regla del lag del CER, ver _slot_ipc_ref).
+      rango → fechas exactas del tramo (tooltip).
+    """
+    def _lbl(d: date) -> str:
+        m = _MESES_AR[d.month - 1]
+        return m if d.year == settle_d.year else f"{m} ’{d.year % 100:02d}"
+
+    out: List[Dict[str, str]] = []
+    for k in range(max(0, int(n))):
+        mid = _slot_mid(settle_d, k)
+        d0 = settle_d + timedelta(days=round(k * 30.4375))
+        d1 = settle_d + timedelta(days=round((k + 1) * 30.4375))
+        out.append({"mes": _lbl(mid), "ipc": _lbl(_slot_ipc_ref(settle_d, k)),
+                    "rango": f"{d0.day:02d}/{d0.month:02d} → {d1.day:02d}/{d1.month:02d}"})
+    return out
+
+
 def infl_default(settle_d: date, n_months: int) -> str:
     """Sendero de inflación desde `indices.proyeccion_inflacion_mensual`
-    (la proyección manual de la economista, %/mes), alineado al mes del
-    settle. Meses sin proyección: se extiende el último valor conocido."""
+    (la proyección manual de la economista, %/mes), alineado al MES DEL DATO
+    que rige el CER en cada slot (mismo mes que la fila Inflación muestra como
+    'IPC <mes>'; regla del lag en _slot_ipc_ref). Meses sin proyección: hacia
+    atrás usa la primera conocida, hacia adelante extiende la última."""
     try:
         import indices
         proy = {datetime.strptime(k, "%b-%y").date().replace(day=1): float(v)
@@ -195,7 +239,7 @@ def infl_default(settle_d: date, n_months: int) -> str:
     out: List[str] = []
     last = None
     for i in range(n_months):
-        v = proy.get(_month_add(settle_d, i))
+        v = proy.get(_slot_ipc_ref(settle_d, i))
         if v is None:
             v = last if last is not None else proy[min(proy)]
         last = v
