@@ -30,6 +30,7 @@
 # Documentación
 !README.md
 !CLAUDE.md
+!DEPLOY.md
 !LICENSE
 
 # Dependencias
@@ -47,6 +48,10 @@ generar_fondos.py
 # Scripts de arranque
 !*.bat
 !correr_app.command
+# Pack de montaje para IT (servicio + deploy; ver DEPLOY.md)
+!deploy/
+!deploy/*.ps1
+!deploy/*.service
 
 # ── Datasets de referencia (estables, no sensibles) ──────────
 # A3500 (BCRA tipo de cambio mayorista) — serie histórica de uso público

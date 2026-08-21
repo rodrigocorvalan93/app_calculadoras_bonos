@@ -17,7 +17,7 @@ Puntos de entrada según el caso de uso:
 
 | Entry point | Tipo | Para qué se usa |
 |---|---|---|
-| `backend/` (`uvicorn backend.main:app`) | ⭐ **FastAPI web app** | **Front actual.** Muro de login + roles, YAS, Nueva especie ad-hoc, Curvas, Mercado, Qué pasó, Posiciones, OMS, etc. Arquitectura y detalle: `backend/README.md` |
+| `backend/` (`uvicorn backend.main:app`) | ⭐ **FastAPI web app** | **Front actual.** Muro de login + roles, YAS, Nueva especie ad-hoc, Curvas, Mercado, Qué pasó, Posiciones, OMS, etc. Arquitectura y detalle: `backend/README.md` · **montaje en server / operación (IT): [`DEPLOY.md`](DEPLOY.md)** |
 | `backend/static/excel/` | Add-in de Excel «YieldVertex» | Feed en vivo + calculadora YAS en la celda (`=OMS.*`), servido por la app local |
 | `OMSweb_app.py` | Streamlit web app (legacy) | Dashboard original. Referencia para portar lógica; no se importa desde `backend/` |
 | `bymaapi.py` | Script REPL | **Calculadora en vivo** desde VS Code Interactive (`bymaapi.bat` lanza `python -i`) |

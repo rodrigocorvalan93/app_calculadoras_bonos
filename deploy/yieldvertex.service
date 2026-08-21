@@ -1,0 +1,40 @@
+# Servicio systemd de referencia — si IT prefiere una VM Linux en vez de Windows.
+# La app es UN SOLO proceso stateful (estado de mercado en memoria): nunca
+# --workers, nunca dos instancias detrás de un balanceador.
+#
+# Instalación:
+#   sudo useradd -r -m -d /opt/yieldvertex yieldvertex
+#   sudo -u yieldvertex git clone <repo> /opt/yieldvertex/app
+#   cd /opt/yieldvertex/app
+#   sudo -u yieldvertex python3 -m venv .venv
+#   sudo -u yieldvertex .venv/bin/pip install -r backend/requirements.txt
+#   # credenciales en /opt/yieldvertex/app/.env (mismas claves que secrets.txt)
+#   sudo cp deploy/yieldvertex.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now yieldvertex
+#
+# Deploy de una versión nueva:
+#   cd /opt/yieldvertex/app && sudo -u yieldvertex git pull --ff-only \
+#     && sudo -u yieldvertex .venv/bin/pip install -q -r backend/requirements.txt \
+#     && sudo systemctl restart yieldvertex
+#   curl -s http://127.0.0.1:8000/healthz
+
+[Unit]
+Description=YieldVertex (calculadora de bonos) — un solo proceso, no escalar en workers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=yieldvertex
+WorkingDirectory=/opt/yieldvertex/app
+Environment=APP_HOST=0.0.0.0
+# Credenciales/config fuera de git (mismas claves que secrets.txt):
+EnvironmentFile=-/opt/yieldvertex/app/.env
+ExecStart=/opt/yieldvertex/app/.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 10
+Restart=always
+RestartSec=3
+# Parada prolija: SIGINT = Ctrl+C (guarda snapshot, cierra el puente TLS) antes del kill.
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
