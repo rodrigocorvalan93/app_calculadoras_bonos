@@ -79,13 +79,36 @@ async def test_preset_endpoint_y_select_en_pagina(prefs_tmp) -> None:
 
 
 # ── defaults ────────────────────────────────────────────────────────────────
-def test_infl_default_alineada_y_extendida(monkeypatch) -> None:
+def test_infl_default_alineada_al_dato_ipc(monkeypatch) -> None:
     import indices
     monkeypatch.setattr(indices, "proyeccion_inflacion_mensual",
                         {"Jul-26": 1.8, "Aug-26": 1.6, "Sep-26": 1.4})
-    # settle en julio: M1=jul, M2=ago, M3=sep, M4/M5 extienden el último (1,4)
+    # settle 09/07: los puntos medios de los tramos caen el ~24 de cada mes
+    # (≥16 ⇒ rige el IPC del MES ANTERIOR): jun,jul,ago,sep,oct. Sin dato de
+    # jun usa la primera proyección conocida (jul); oct extiende la última.
     got = prefs.infl_default(date(2026, 7, 9), 5)
-    assert got == "1,80;1,60;1,40;1,40;1,40"
+    assert got == "1,80;1,80;1,60;1,40;1,40"
+
+
+def test_slot_meses_lag_cer() -> None:
+    # settle 21/08: mid del tramo 1 = 05/09 (día <16 ⇒ IPC de 2 meses atrás,
+    # el dato de julio publicado a mediados de agosto).
+    slots = prefs.slot_meses(date(2026, 8, 21), 6)
+    assert [s["mes"] for s in slots[:4]] == ["sep", "oct", "nov", "dic"]
+    assert [s["ipc"] for s in slots[:4]] == ["jul", "ago", "sep", "oct"]
+    assert slots[4]["mes"] == "ene ’27" and slots[4]["ipc"] == "nov"   # cruce de año
+    assert slots[0]["rango"] == "21/08 → 20/09"
+    # settle 05/09: mid del tramo 1 = 20/09 (≥16 ⇒ IPC del mes anterior).
+    s2 = prefs.slot_meses(date(2026, 9, 5), 1)
+    assert s2[0] == {"mes": "sep", "ipc": "ago", "rango": "05/09 → 05/10"}
+
+
+async def test_page_incluye_slots_de_meses(prefs_tmp) -> None:
+    async with _client() as ac:
+        r = await ac.get("/escenario")
+    assert r.status_code == 200
+    assert '"slots"' in r.text          # etiquetas en el JSON de bootstrap
+    assert "sendero-ipc" in r.text      # sub-etiqueta IPC en la fila Inflación
 
 
 def test_rofex_monthly_interpola_y_extrapola(monkeypatch) -> None:

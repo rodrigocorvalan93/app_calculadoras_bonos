@@ -1358,6 +1358,9 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
   border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 5px;
   font-size: 12px; font-family: inherit; font-variant-numeric: tabular-nums; text-align: right; }
 .sendero-in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+/* Fila Inflación: qué dato de INDEC va en cada casillero (lag del CER) */
+.sendero-ipc { font-size: 9.5px; color: var(--text-muted); text-align: center;
+               margin-top: 1px; white-space: nowrap; }
 .lnk { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 11px;
   font-family: inherit; padding: 2px 4px; }
 .lnk:hover { text-decoration: underline; }
