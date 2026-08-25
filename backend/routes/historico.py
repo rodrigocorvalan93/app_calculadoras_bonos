@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from backend.services import historico, historico_byma
+from backend.services import historico, historico_byma, nss
 
 router = APIRouter(tags=["historicos"])
 
@@ -138,14 +138,28 @@ async def historicos_curva(request: Request, curve: str = "", metric: str = "TIR
 
 def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> Dict[str, Any]:
     """SVG scatter 'curva en varias fechas': X = Duration, Y = métrica (%),
-    una serie de puntos por fecha (+ polilínea punteada uniendo por duration,
-    estilo el Excel del usuario). Pura geometría sobre el índice en memoria."""
+    una serie de puntos por fecha + la CURVA NSS AJUSTADA a esa nube (misma
+    nss.py que Gráficos/Curvas, robusta a outliers). Unir punto a punto era un
+    serrucho ilegible con los cortos dispersos; la polilínea queda sólo como
+    fallback cuando el fit no aplica (<4 puntos). Corre en el executor (el
+    curve_fit frío cuesta ~ms; después cachea por fingerprint)."""
     series = sc.get("series") or []
     if not series:
         return {"loaded": sc.get("loaded", False), "n": 0, "metric": sc.get("metric"),
                 "curve_label": sc.get("curve_label")}
+    # Fit por serie ANTES de fijar los ejes: el rango Y contempla los puntos Y
+    # la curva ajustada (sin esto, un valle de la NSS entre puntos quedaba
+    # planchado contra el piso del gráfico). Guardia anti-divergencia: valores
+    # del fit a más de 1,5 spans de la data no agrandan el eje (y el dibujo
+    # clampea al rango final igual).
+    fits = [nss.sample([p["dur"] for p in s["points"]],
+                       [p["v"] * 100.0 for p in s["points"]], n=70) for s in series]
     xs = [p["dur"] for s in series for p in s["points"]]
     ys = [p["v"] * 100.0 for s in series for p in s["points"]]
+    dlo, dhi = min(ys), max(ys)
+    span = (dhi - dlo) or 1.0
+    ys += [v for fp in fits for _, v in (fp or [])
+           if dlo - 1.5 * span <= v <= dhi + 1.5 * span]
     xmin, xmax = min(xs), max(xs)
     ymin, ymax = min(ys), max(ys)
     if xmax == xmin:
@@ -164,8 +178,14 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> D
     for i, s in enumerate(series):
         pts = [{"x": sx(p["dur"]), "y": sy(p["v"] * 100.0), "code": p["code"],
                 "dur": p["dur"], "v": p["v"] * 100.0} for p in s["points"]]
+        fit_pts = fits[i]
+        if fit_pts:
+            path = "M " + " L ".join(f"{sx(d)},{sy(max(ymin, min(ymax, v)))}"
+                                     for d, v in fit_pts)
+        else:
+            path = "M " + " L ".join(f'{p["x"]},{p["y"]}' for p in pts)
         out.append({"fecha": s["fecha"], "color": _PALETTE[i % len(_PALETTE)], "points": pts,
-                    "path": "M " + " L ".join(f'{p["x"]},{p["y"]}' for p in pts)})
+                    "path": path, "fit": bool(fit_pts)})
     yticks = [{"y": sy(ymin + (ymax - ymin) / 5 * i), "v": round(ymin + (ymax - ymin) / 5 * i, 2)}
               for i in range(6)]
     xticks = [{"x": sx(xmin + (xmax - xmin) / 6 * i), "v": round(xmin + (xmax - xmin) / 6 * i, 1)}
@@ -220,10 +240,12 @@ async def historicos_curva_fechas(
     fechas = [f for f in (f1, f2, f3, f4) if f]
     scatter = tr_tabla = None
     if sel and meta.get("loaded"):
-        # scatter_by_dates es O(fechas × códigos × obs) de Python puro: al
-        # pool, como el resto del handler — inline congelaba el loop por click.
-        scatter = _scatter_chart(await loop.run_in_executor(
-            None, historico_byma.scatter_by_dates, sel, fechas, metric, proy))
+        # scatter_by_dates es O(fechas × códigos × obs) de Python puro y el
+        # chart ahora fitea NSS (curve_fit ~ms frío): TODO al pool — inline
+        # congelaba el loop por click.
+        scatter = await loop.run_in_executor(
+            None, lambda: _scatter_chart(
+                historico_byma.scatter_by_dates(sel, fechas, metric, proy)))
         if trd1 and trd2 and trd1 < trd2:
             tr_tabla = await loop.run_in_executor(
                 None, tr_realizado.tabla, sel, trd1, trd2, proy)
