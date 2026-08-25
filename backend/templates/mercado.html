@@ -30,7 +30,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel]"
+            hx-include="[name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym]"
           >
             {% for c in all_curves %}
               {% set count = (table.get(c.key) or []) | length %}
@@ -48,7 +48,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=only_quoting], [name=leg], [name=fuente], [name=panel]"
+            hx-include="[name=curve], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym]"
           >
             <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
@@ -62,7 +62,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=fuente], [name=panel]"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=fuente], [name=panel], [name=ym]"
             title="Nativa: precio del ticker propio (fx-free). USD/USB: precio cable/MEP directo. ARS: precio pesos ÷ FX nativo."
           >
             <option value="native" {% if leg == "native" %}selected{% endif %}>Nativa</option>
@@ -79,11 +79,33 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=panel]"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=panel], [name=ym]"
             title="BYMA: book en vivo del broker. MAE: precios OTC (último/cierre/var/mín-máx/volumen), sin libro; cae a BYMA si no hay dato MAE para el bono."
           >
             <option value="byma" {% if fuente != "mae" %}selected{% endif %}>BYMA (book)</option>
             <option value="mae"  {% if fuente == "mae" %}selected{% endif %}>MAE (OTC)</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Tasa</span>
+          {# TIREA clásica o margen TNA s/benchmark en las 3 columnas de tasa.
+             Mismo costo: el margen sale del MISMO cálculo cacheado que la TIR
+             (metrics_for_market_price); el server sólo cambia qué campo
+             renderiza. Elección persistida en localStorage (m_ym). #}
+          <select
+            name="ym"
+            id="m-ym"
+            hx-get="/mercado/table"
+            hx-trigger="change"
+            hx-target="#mercado-table"
+            hx-swap="innerHTML"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel]"
+            onchange="lsSet('m_ym', this.value)"
+            title="TIREA clásica o margen TNA sobre el benchmark (TAMAR/BADLAR). El margen sólo aplica a tasa variable benchmarkeada; el resto muestra —."
+          >
+            <option value="tir"    {% if ym != "margen" %}selected{% endif %}>TIREA</option>
+            <option value="margen" {% if ym == "margen" %}selected{% endif %}>Margen s/bench</option>
           </select>
         </label>
 
@@ -100,7 +122,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=leg], [name=fuente], [name=panel], [name=only_quoting]"
+            hx-include="[name=curve], [name=plazo], [name=leg], [name=fuente], [name=panel], [name=only_quoting], [name=ym]"
           >
           Solo con cotización
         </label>
@@ -138,7 +160,7 @@
     hx-get="/mercado/table"
     hx-trigger="md-update from:body, every 30s"
     hx-swap="innerHTML"
-    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel]"
+    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym]"
   >
     {% include "partials/mercado_table.html" %}
   </div>
@@ -152,4 +174,19 @@
        hx-trigger="load" hx-swap="innerHTML"
        hx-on::after-swap="this.scrollIntoView({behavior:'smooth', block:'start'})"{% endif %}></div>
 </section>
+<script>
+  // Restaurar el modo TIREA/Margen guardado: si difiere del default renderizado,
+  // un change re-pide la tabla (GET cacheado por seq, ~ms). En 'load' porque
+  // htmx recién engancha sus triggers en DOMContentLoaded.
+  window.addEventListener('load', function () {
+    try {
+      var sel = document.getElementById('m-ym');
+      var v = localStorage.getItem('m_ym');
+      if (sel && v && sel.value !== v) {
+        sel.value = v;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } catch (e) { /* queda el modo por defecto */ }
+  });
+</script>
 {% endblock %}

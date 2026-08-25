@@ -84,6 +84,17 @@ def _tirea_at(code: str, price_pct, settle=None):
     return (m or {}).get("tirea") if m else None
 
 
+def _tirea_margen_at(code: str, price_pct, settle=None):
+    """(TIREA, margen TNA) al precio dado — el MISMO dict de métricas cacheado
+    que usa _tirea_at: el margen ya venía calculado adentro y se descartaba,
+    devolverlo es gratis. (None, None) sin precio; margen NaN (bono sin
+    benchmark TAMAR/BADLAR) pasa tal cual — ar_pct lo muestra '—'."""
+    if price_pct is None:
+        return None, None
+    m = pricing.metrics_for_market_price(code, price_pct, settle) or {}
+    return m.get("tirea"), m.get("margen_tna")
+
+
 def _px_cls(px, close) -> str:
     """Color de letra de un precio vs el cierre previo: verde si sube, rojo
     si baja, gris si el movimiento es < 2 bps (o no hay cierre)."""
@@ -246,9 +257,12 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         }
     )
     if book:
-        row["tirea_bid"] = _tirea_at(code, cp(bid), settle)
-        row["tirea_offer"] = _tirea_at(code, cp(offer), settle)
-        row["tirea_last"] = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last), settle)
+        row["tirea_bid"], row["margen_bid"] = _tirea_margen_at(code, cp(bid), settle)
+        row["tirea_offer"], row["margen_offer"] = _tirea_margen_at(code, cp(offer), settle)
+        if price_source == "LA":
+            row["tirea_last"], row["margen_last"] = m.get("tirea"), m.get("margen_tna")
+        else:
+            row["tirea_last"], row["margen_last"] = _tirea_margen_at(code, cp(last), settle)
         # tirea_low/high/close son sólo para el panel del libro (un bono), NO
         # para cada fila de la tabla — se calculan en la route /mercado/book.
         # Cross-venue MAE (OTC): último/volumen del mismo bono en MAE (cache).
@@ -277,8 +291,9 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
                 "price_source": "MAE", "src": "MAE", "last_cls": _px_cls(mlast, mclose),
             })
             if book:
-                row["tirea_last"] = _tirea_at(code, cp(mlast), settle)
+                row["tirea_last"], row["margen_last"] = _tirea_margen_at(code, cp(mlast), settle)
                 row["tirea_bid"] = row["tirea_offer"] = None
+                row["margen_bid"] = row["margen_offer"] = None
         else:
             row["src"] = "BYMA*"        # sin dato MAE → se muestra BYMA
     else:
@@ -438,8 +453,10 @@ async def mercado_page(
     only_quoting: bool = True,
     leg: str = "native",
     fuente: str = "byma",
+    ym: str = "tir",           # métrica de las 3 columnas de tasa: TIREA o margen s/benchmark
     book: str | None = None,   # deep-link: abre el libro de esta especie al cargar (⚠ de Curvas)
 ) -> HTMLResponse:
+    ym = "margen" if ym == "margen" else "tir"
     bond_universe.ensure_loaded()
     all_curves = curves.list_curves()
     table = curves.build_curve_codes()
@@ -462,6 +479,7 @@ async def mercado_page(
         only_quoting=only_quoting,
         leg=leg,
         fuente=fuente,
+        ym=ym,
         book_open=book,
     )
 
@@ -475,6 +493,7 @@ async def mercado_table_partial(
     only_quoting: bool = True,
     leg: str = "native",
     fuente: str = "byma",
+    ym: str = "tir",
     panel: str = "rf",
 ) -> HTMLResponse:
     """HTMX partial: blotter body for the requested curve."""
@@ -496,6 +515,7 @@ async def mercado_table_partial(
         only_quoting=only_quoting,
         leg=leg,
         fuente=fuente,
+        ym="margen" if ym == "margen" else "tir",
     )
 
 
