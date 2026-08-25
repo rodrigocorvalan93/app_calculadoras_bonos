@@ -129,3 +129,32 @@ async def test_csv_export_que_paso(base_sintetica) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         h = await ac.get("/historicos/semanal", params={"dias": 30})
     assert "semanal.csv" in h.text
+
+def test_scatter_chart_linea_es_curva_nss_no_serrucho() -> None:
+    """La línea del scatter es la NSS ajustada a la nube (suave, ~70 muestras,
+    robusta a los cortos dispersos), NO la polilínea punto a punto (serrucho).
+    Con <4 puntos no hay fit → cae a la polilínea punteada (fit=False)."""
+    from backend.routes.historico import _scatter_chart
+
+    # Nube estilo CER real: decreciente con ruido fuerte en los cortos.
+    puntos = [{"code": f"B{i}", "dur": d, "v": v} for i, (d, v) in enumerate([
+        (0.10, 0.29), (0.15, 0.02), (0.20, 0.31), (0.30, 0.05),
+        (0.45, 0.27), (0.60, 0.24), (0.90, 0.20), (1.30, 0.16),
+        (1.80, 0.13), (2.50, 0.11), (4.00, 0.10), (7.00, 0.095),
+    ])]
+    sc = {"loaded": True, "metric": "TIREA", "curve_label": "CER",
+          "series": [{"fecha": "2026-08-13", "points": puntos}]}
+    ch = _scatter_chart(sc)
+    s = ch["series"][0]
+    assert s["fit"] is True
+    assert len(s["points"]) == len(puntos)              # los puntos no se tocan
+    assert s["path"].count(" L ") + 1 >= 60             # muestreo suave (n=70)
+    # la curva ajustada no se sale del área del gráfico (clamp al rango Y)
+    ys = [float(seg.split(",")[1]) for seg in s["path"][2:].split(" L ")]
+    assert min(ys) >= ch["y0"] - 0.6 and max(ys) <= ch["y1"] + 0.6
+
+    # <4 puntos: sin fit → polilínea de los puntos tal cual, punteada
+    sc2 = {"loaded": True, "metric": "TIREA", "curve_label": "CER",
+           "series": [{"fecha": "2026-08-13", "points": puntos[:3]}]}
+    s2 = _scatter_chart(sc2)["series"][0]
+    assert s2["fit"] is False and s2["path"].count(" L ") == 2
