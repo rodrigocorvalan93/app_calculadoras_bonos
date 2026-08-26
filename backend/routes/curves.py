@@ -843,6 +843,7 @@ async def forwards_body(
 
 
 @forwards_router.get("/forwards/table", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def forwards_table_partial(
     request: Request,
     curve: str = "",
@@ -865,6 +866,7 @@ async def forwards_table_partial(
 
 
 @forwards_router.get("/forwards/hist", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def forwards_hist_partial(
     request: Request,
     curve: str = "",
