@@ -40,6 +40,31 @@ async def test_etag_hit_y_304() -> None:
 
 
 @pytest.mark.asyncio
+async def test_paneles_periodicos_revalidan() -> None:
+    """Todo panel COMPARTIDO con refresh periódico sale con ETag (la vía 304).
+    Órdenes queda afuera a propósito: contenido sensible/por rol, no se
+    cachea compartido (invariante de seguridad)."""
+    bond_universe.ensure_loaded()
+    async with _client() as ac:
+        for url, params in [
+            ("/tasas/table", {}),
+            ("/yas/market", {"code": "GD30"}),
+            ("/alertas/tabla", {}),
+            ("/cafci/fondos", {}),
+            ("/mercado/book/GD30", {}),
+        ]:
+            r = await ac.get(url, params=params)
+            assert r.status_code == 200, url
+            assert r.headers.get("etag"), f"sin ETag: {url}"
+            assert r.headers.get("cache-control") == "private, no-cache", url
+        # marquee: con el poller RSS frío el body es vacío y el decorador (bien)
+        # no cachea vacíos → ETag sólo cuando hay titulares.
+        r = await ac.get("/news/marquee")
+        assert r.status_code == 200
+        assert r.headers.get("etag") or not r.content
+
+
+@pytest.mark.asyncio
 async def test_miss_304_cuando_la_seq_avanza_sin_cambios() -> None:
     """Tick de otro símbolo (la seq global avanza) → el panel se re-renderiza;
     si quedó idéntico, el cliente recibe 304 igual (no re-baja el HTML)."""

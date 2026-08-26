@@ -520,6 +520,7 @@ async def mercado_table_partial(
 
 
 @mercado_router.get("/mercado/book/{code}", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def mercado_book(
     request: Request,
     code: str,
