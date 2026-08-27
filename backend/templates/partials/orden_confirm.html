@@ -52,8 +52,14 @@
         </table>
       </div>
       {% if warnings %}<div class="alert" style="font-size:11.5px">Descartadas: {{ warnings | join(' · ') }}</div>{% endif %}
+      {% if confirm_err %}<div class="alert" style="font-size:12px">{{ confirm_err }}</div>{% endif %}
       <form hx-post="/ordenes/multi/confirmar" hx-target="#orden-result" hx-swap="innerHTML" style="display:inline">
         <input type="hidden" name="token" value="{{ token }}">
+        {% if live %}
+          {# Gate LIVE anti fat-finger: retipear el VN TOTAL exacto de la tanda #}
+          <input type="text" name="confirm_live" inputmode="numeric" autocomplete="off"
+                 placeholder="reescribí el VN total p/ enviar" style="width:200px;margin-right:6px">
+        {% endif %}
         <button type="submit" class="btn-primary" style="background:{{ 'var(--red)' if live else 'var(--accent)' }}">
           {{ '🔴 ENVIAR ' ~ (batch|length) ~ ' AL BROKER' if live else 'Confirmar ' ~ (batch|length) ~ ' (paper)' }}</button>
       </form>
@@ -74,8 +80,14 @@
         {% else %}· <b style="color:var(--red)">sin referencia de precio</b>{% endif %}
         {% if p.ref %}· ref. mercado {{ p.ref | ar_num(2) }}{% endif %}
       </p>
+      {% if confirm_err %}<div class="alert" style="font-size:12px">{{ confirm_err }}</div>{% endif %}
       <form hx-post="/ordenes/confirmar" hx-target="#orden-result" hx-swap="innerHTML" style="display:inline">
         <input type="hidden" name="token" value="{{ token }}">
+        {% if live %}
+          {# Gate LIVE anti fat-finger: retipear el nominal exacto de la orden #}
+          <input type="text" name="confirm_live" inputmode="numeric" autocomplete="off"
+                 placeholder="reescribí el VN p/ enviar" style="width:180px;margin-right:6px">
+        {% endif %}
         <button type="submit" class="btn-primary" style="background:{{ 'var(--red)' if live else 'var(--accent)' }}">
           {{ '🔴 ENVIAR AL BROKER' if live else 'Confirmar (paper)' }}</button>
       </form>

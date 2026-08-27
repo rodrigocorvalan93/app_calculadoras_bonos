@@ -77,6 +77,16 @@ def _base_ctx() -> Dict[str, Any]:
             "band": settings.oms_price_band_pct}
 
 
+def _req_user(request: Request) -> str:
+    """Username para la auditoría (quién armó/confirmó/switcheó)."""
+    u = getattr(request.state, "user", None) or {}
+    return str(u.get("username") or "_local")
+
+
+def _digits(s: str) -> str:
+    return "".join(ch for ch in (s or "") if ch.isdigit())
+
+
 def _role_block(request: Request, *, superuser: bool = False) -> Optional[HTMLResponse]:
     """Defensa en profundidad sobre el gating del middleware: cada endpoint que
     mueve plata re-chequea el rol server-side. Devuelve un partial de error si el
@@ -182,7 +192,8 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
     if motivo:
         await oms.audit_async("rechazada_pretrade", {"code": code, "side": side, "qty": fqty,
                                                      "price": fpx, "account": account,
-                                                     "ordtype": ordtype, "motivo": motivo})
+                                                     "ordtype": ordtype, "motivo": motivo,
+                                                     "user": _req_user(request)})
         return _render(request, "partials/orden_confirm.html", error=motivo,
                        trigger="orden-done", **_base_ctx())
     est_px = fpx if ordtype != "market" else ref
@@ -191,22 +202,35 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
     payload = {"code": code, "symbol": syms.md_symbol(code, plazo), "side": side,
                "ordtype": ordtype, "qty": fqty, "price": fpx, "account": account,
                "plazo": plazo, "moneda": moneda, "ref": ref,
-               "notional": (fqty * est_px / 100.0) if est_px else None}
+               "notional": (fqty * est_px / 100.0) if est_px else None,
+               "user": _req_user(request)}
     token = await asyncio.get_running_loop().run_in_executor(None, oms.new_token, payload)
     return _render(request, "partials/orden_confirm.html",
                    p=payload, token=token, **_base_ctx())
 
 
 @router.post("/ordenes/confirmar", response_class=HTMLResponse)
-async def ordenes_confirmar(request: Request, token: str = Form("")) -> HTMLResponse:
+async def ordenes_confirmar(request: Request, token: str = Form(""),
+                            confirm_live: str = Form("")) -> HTMLResponse:
     blocked = _role_block(request)
     if blocked is not None:
         return blocked
+    # Gate LIVE (anti fat-finger): con el modo real armado, confirmar exige
+    # RETIPEAR el nominal exacto. Se valida ANTES de consumir el token — un
+    # error de tipeo re-muestra la card con el mismo ticket, sin rearmar.
+    peek = oms.peek_token(token)
+    if peek is not None and "batch" not in peek and oms.is_live():
+        if _digits(confirm_live) != str(int(round(peek.get("qty") or 0))):
+            return _render(request, "partials/orden_confirm.html",
+                           p=peek, token=token, confirm_err="Estás en LIVE: "
+                           "reescribí el nominal exacto (VN) para enviar.",
+                           **_base_ctx())
     payload = oms.pop_token(token)
     if payload is None or "batch" in payload:
         return _render(request, "partials/orden_confirm.html",
                        error="Token vencido o ya usado — volvé a armar el ticket.",
                        **_base_ctx())
+    payload.setdefault("confirmed_by", _req_user(request))
     res = await oms.place(payload)
     return _render(request, "partials/orden_confirm.html", result=res,
                    trigger="orden-done", **_base_ctx())
@@ -254,7 +278,8 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
         batch.append({"code": code, "symbol": syms.md_symbol(code, plazo), "side": side,
                       "ordtype": ordtype, "qty": q, "price": fpx, "account": acct,
                       "plazo": plazo, "moneda": moneda, "ref": ref,
-                      "notional": (q * est_px / 100.0) if est_px else None})
+                      "notional": (q * est_px / 100.0) if est_px else None,
+                      "user": _req_user(request)})
     if not batch:
         return _render(request, "partials/orden_confirm.html",
                        error="Sin líneas válidas. " + " · ".join(errors), **_base_ctx())
@@ -267,10 +292,21 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
 
 
 @router.post("/ordenes/multi/confirmar", response_class=HTMLResponse)
-async def ordenes_multi_confirmar(request: Request, token: str = Form("")) -> HTMLResponse:
+async def ordenes_multi_confirmar(request: Request, token: str = Form(""),
+                                  confirm_live: str = Form("")) -> HTMLResponse:
     blocked = _role_block(request)
     if blocked is not None:
         return blocked
+    peek = oms.peek_token(token)
+    if peek is not None and "batch" in peek and oms.is_live():
+        total = int(round(sum((b.get("qty") or 0) for b in peek["batch"])))
+        if _digits(confirm_live) != str(total):
+            return _render(request, "partials/orden_confirm.html",
+                           batch=peek["batch"],
+                           batch_total=sum((b.get("notional") or 0) for b in peek["batch"]),
+                           token=token, confirm_err="Estás en LIVE: reescribí el "
+                           "VN TOTAL exacto de la tanda para enviar.",
+                           **_base_ctx())
     payload = oms.pop_token(token)
     if payload is None or "batch" not in payload:
         return _render(request, "partials/orden_confirm.html",
@@ -286,7 +322,7 @@ async def ordenes_kill(request: Request, on: str = Form("1")) -> HTMLResponse:
     blocked = _role_block(request, superuser=True)
     if blocked is not None:
         return blocked
-    oms.kill_switch(on == "1")
+    oms.kill_switch(on == "1", user=_req_user(request))
     return _render(request, "partials/oms_status.html", trigger="orden-done", **_base_ctx())
 
 
@@ -303,9 +339,9 @@ async def ordenes_live(request: Request, arm: str = Form("0"),
             return _render(request, "partials/oms_status.html",
                            live_msg="Para activar LIVE escribí exactamente LIVE y confirmá.",
                            **_base_ctx())
-        oms.set_live(True)
+        oms.set_live(True, user=_req_user(request))
     else:
-        oms.set_live(False)
+        oms.set_live(False, user=_req_user(request))
     return _render(request, "partials/oms_status.html", trigger="orden-done",
                    live_msg=("⚠️ MODO LIVE activado — las órdenes viajan al broker."
                              if oms.is_live() else "Modo PAPER — nada viaja al broker."),

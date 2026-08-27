@@ -24,21 +24,21 @@ def _client() -> AsyncClient:
 
 # ── persistencia ────────────────────────────────────────────────────────────
 def test_prefs_roundtrip_y_reset(prefs_tmp) -> None:
-    assert prefs.load() == {}
+    assert prefs.load_user("_local")["senderos"] == {}
     prefs.save(senderos={"infl_path": "2,0;1,8"}, cats_off=["dlk", "bonares"])
-    got = prefs.load()
+    got = prefs.load_user("_local")
     assert got["senderos"] == {"infl_path": "2,0;1,8"}
     assert got["cats_off"] == ["dlk", "bonares"]
     # save parcial: cats_off None no pisa lo guardado
     prefs.save(senderos={"tamar_path": "36,5"})
-    got = prefs.load()
+    got = prefs.load_user("_local")
     assert got["senderos"] == {"tamar_path": "36,5"}     # senderos se REEMPLAZA
     assert got["cats_off"] == ["dlk", "bonares"]         # cats_off intacto
     # claves desconocidas se descartan (nunca basura al archivo)
     prefs.save(senderos={"infl_path": "1", "hack": "x"})
-    assert "hack" not in prefs.load()["senderos"]
+    assert "hack" not in prefs.load_user("_local")["senderos"]
     prefs.reset()
-    assert prefs.load() == {}
+    assert prefs.load_user("_local")["senderos"] == {}
 
 
 # ── presets nombrados ───────────────────────────────────────────────────────
@@ -50,11 +50,11 @@ def test_presets_fotografian_aplican_y_sobreviven_al_reset(prefs_tmp) -> None:
     assert prefs.preset_names() == ["base", "estrés deva"]
     # apply carga el snapshot como estado activo
     assert prefs.preset_apply("base")
-    got = prefs.load()
+    got = prefs.load_user("_local")
     assert got["senderos"] == {"infl_path": "2,0"} and got["cats_off"] == ["dlk"]
     # reset borra lo ACTIVO pero la biblioteca de presets sobrevive
     prefs.reset()
-    got = prefs.load()
+    got = prefs.load_user("_local")
     assert got["senderos"] == {} and got["cats_off"] == []
     assert prefs.preset_names() == ["base", "estrés deva"]
     # delete + inexistentes
@@ -186,14 +186,15 @@ async def test_prefs_endpoints_guardan_y_resetean(prefs_tmp) -> None:
         r = await ac.post("/escenario/prefs",
                           json={"senderos": {"infl_path": "2,5;2,0"}, "cats_off": ["dlk"]})
         assert r.status_code == 200 and r.json()["ok"] is True
-        assert prefs.load() == {"senderos": {"infl_path": "2,5;2,0"}, "cats_off": ["dlk"]}
+        got = prefs.load_user("_local")
+        assert got["senderos"] == {"infl_path": "2,5;2,0"} and got["cats_off"] == ["dlk"]
         # la página siguiente muestra lo fijado y la categoría destildada
         page = await ac.get("/escenario")
         assert "2,5;2,0" in page.text
         assert '"dlk"' in page.text                           # cats_off_json
         r = await ac.post("/escenario/prefs/reset")
         assert r.status_code == 200
-        assert prefs.load() == {}
+        assert prefs.load_user("_local")["senderos"] == {}
 
 
 @pytest.mark.asyncio
@@ -221,3 +222,46 @@ async def test_tabla_saltea_categorias_destildadas(prefs_tmp, monkeypatch) -> No
     assert "dolarlinked" not in pedidas
     assert "lecap" in pedidas and "tamar" in pedidas          # curvas de las prendidas sí
     assert len(pedidas) == len(set(pedidas))                  # sin duplicados
+
+
+# ── multi-usuario ───────────────────────────────────────────────────────────
+def test_prefs_por_usuario_aisladas(prefs_tmp) -> None:
+    """El estado ACTIVO (senderos/tildes) es por usuario: lo que guarda uno no
+    pisa lo del otro. Los presets nombrados son COMPARTIDOS (biblioteca)."""
+    prefs.save({"infl_path": "2,0;2,0"}, ["globales"], user="rodri")
+    prefs.save({"infl_path": "9,9"}, None, user="jose")
+
+    r = prefs.load_user("rodri")
+    j = prefs.load_user("jose")
+    assert r["senderos"]["infl_path"] == "2,0;2,0" and r["cats_off"] == ["globales"]
+    assert j["senderos"]["infl_path"] == "9,9" and j["cats_off"] == []
+
+    # preset compartido: lo guarda rodri, lo aplica jose sobre SU estado
+    assert prefs.preset_save("base", user="rodri")
+    assert "base" in prefs.load_user("jose").get("presets", {})
+    assert prefs.preset_apply("base", user="jose")
+    assert prefs.load_user("jose")["senderos"]["infl_path"] == "2,0;2,0"
+    assert prefs.load_user("rodri")["cats_off"] == ["globales"]   # rodri intacto
+
+    # reset de jose no toca a rodri ni a los presets
+    prefs.reset(user="jose")
+    assert prefs.load_user("jose")["senderos"] == {}
+    assert prefs.load_user("rodri")["senderos"]["infl_path"] == "2,0;2,0"
+    assert prefs.preset_names() == ["base"]
+
+
+def test_prefs_migra_formato_viejo(prefs_tmp, tmp_path) -> None:
+    """Un archivo v1 (estado global único) migra sin perder nada: sirve de
+    fallback para usuarios sin estado propio y los presets sobreviven."""
+    import json as _json
+    (tmp_path / "prefs.json").write_text(_json.dumps({
+        "senderos": {"tamar_path": "24,0"}, "cats_off": ["dlk"],
+        "presets": {"viejo": {"senderos": {"infl_path": "1,5"}, "cats_off": []}},
+    }), encoding="utf-8")
+    u = prefs.load_user("cualquiera")
+    assert u["senderos"]["tamar_path"] == "24,0" and u["cats_off"] == ["dlk"]
+    assert "viejo" in u["presets"]
+    # al guardar, el usuario pasa a tener estado propio (el fallback no se toca)
+    prefs.save({"infl_path": "3,0"}, None, user="cualquiera")
+    assert prefs.load_user("cualquiera")["senderos"] == {"infl_path": "3,0"}
+    assert prefs.load_user("otro")["senderos"]["tamar_path"] == "24,0"

@@ -1113,3 +1113,54 @@ window.lsSet = function (k, v) {
     a.click();
   });
 })();
+
+// ── Export CSV client-side ─────────────────────────────────────────────────
+// Botón [data-csv-of="#id-tabla"]: serializa la tabla COMO SE VE (respeta
+// filtros client-side, orden elegido y columnas ocultas por toggles) a CSV
+// es-AR (';' + BOM → Excel lo abre directo) y la descarga. Cero costo en los
+// refrescos: todo el trabajo pasa recién al click.
+(function () {
+  function esc(v) {
+    v = (v == null ? '' : String(v)).replace(/\u00a0/g, ' ').trim();
+    return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+  function visible(el) { return !!(el.offsetParent !== null || el.getClientRects().length); }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-csv-of]');
+    if (!b) return;
+    e.preventDefault();
+    var t = document.querySelector(b.getAttribute('data-csv-of'));
+    if (!t) return;
+    var out = [], keep = [];
+    var head = t.tHead && t.tHead.rows.length ? t.tHead.rows[t.tHead.rows.length - 1] : null;
+    if (head) {
+      var hs = [];
+      for (var i = 0; i < head.cells.length; i++) {
+        if (!visible(head.cells[i])) continue;
+        keep.push(i); hs.push(esc(head.cells[i].innerText));
+      }
+      out.push(hs.join(';'));
+    }
+    for (var bI = 0; bI < t.tBodies.length; bI++) {
+      var rows = t.tBodies[bI].rows;
+      for (var r = 0; r < rows.length; r++) {
+        if (rows[r].style.display === 'none' || rows[r].hidden) continue;
+        var cs = rows[r].cells, line = [];
+        if (keep.length) {
+          for (var k = 0; k < keep.length; k++) line.push(esc(cs[keep[k]] ? cs[keep[k]].innerText : ''));
+        } else {
+          for (var c = 0; c < cs.length; c++) line.push(esc(cs[c].innerText));
+        }
+        out.push(line.join(';'));
+      }
+    }
+    var name = (t.id || 'tabla') + '_' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.csv';
+    var blob = new Blob(['\ufeff' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  });
+})();

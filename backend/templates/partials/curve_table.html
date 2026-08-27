@@ -7,6 +7,7 @@
   <div class="card-title">
     <span>{{ selected_def.label }}</span>
     <span class="card-title-aux">
+      <button type="button" class="lnk" data-csv-of="#curve-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · 
       {{ rows | length }} bonos · plazo {{ plazo }}
       {% if leg and leg != "native" %} · leg {{ leg }}{% endif %}
       {% if row_meta and row_meta.store_empty %}

@@ -103,6 +103,7 @@ async def tape(request: Request, plazo: str = "24hs") -> HTMLResponse:
 
 
 @router.get("/news/marquee", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def news_marquee(request: Request) -> HTMLResponse:
     """Marquesina de titulares (lee el cache del poller; costo ~0)."""
     from backend.services import news

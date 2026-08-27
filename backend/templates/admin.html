@@ -188,6 +188,50 @@
       </div>
     </div>
 
+    {# ── Salud de datos + errores recientes (on-demand, no toca el hot path) ── #}
+    <div class="card">
+      <div class="card-title"><span>🩺 Salud de datos</span>
+        <span class="card-title-aux">feed · store · caches · pollers · errores del proceso</span></div>
+      <div class="card-body">
+        <div id="admin-salud" hx-get="/admin/salud" hx-trigger="load, every 60s" hx-swap="innerHTML">
+          <p class="muted" style="font-size:12px">Cargando…</p>
+        </div>
+      </div>
+    </div>
+
+    {# ── Auditoría del OMS: visor + export CSV ── #}
+    <div class="card">
+      <div class="card-title"><span>🧾 Auditoría OMS</span>
+        <span class="card-title-aux">oms_audit.jsonl — quién, qué, cuándo</span></div>
+      <div class="card-body">
+        <form hx-get="/admin/auditoria" hx-target="#admin-aud" hx-swap="innerHTML"
+              style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <input type="text" name="q" placeholder="filtrar (especie, usuario, texto…)"
+                 autocomplete="off" style="width:220px">
+          <select name="evento">
+            <option value="">todos los eventos</option>
+            <option value="live">live_*</option>
+            <option value="paper">paper_*</option>
+            <option value="rechazada">rechazadas</option>
+            <option value="ticket">tickets</option>
+            <option value="kill">kill switch</option>
+            <option value="oms_live">switch LIVE</option>
+          </select>
+          <select name="n">
+            <option value="300">últimos 300</option>
+            <option value="1000">últimos 1.000</option>
+            <option value="5000">últimos 5.000</option>
+          </select>
+          <button type="submit" class="btn-primary" style="font-size:12px">Filtrar</button>
+          <a href="/admin/auditoria.csv" target="_blank" class="lnk" style="font-size:12px"
+             onclick="this.href='/admin/auditoria.csv?'+new URLSearchParams(new FormData(this.closest('form'))).toString()">⤓ CSV</a>
+        </form>
+        <div id="admin-aud" hx-get="/admin/auditoria" hx-trigger="load" hx-swap="innerHTML">
+          <p class="muted" style="font-size:12px">Cargando…</p>
+        </div>
+      </div>
+    </div>
+
     {# ── Add-in de Excel: instalación multi-máquina ── #}
     <div class="card">
       <div class="card-title"><span>Add-in de Excel · instalar en otra máquina</span>

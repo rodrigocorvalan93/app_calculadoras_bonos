@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.services import cauciones as cauc_svc, dolares as dx, mae as mae_svc
+from backend.cache_seq import seq_cached
 
 router = APIRouter(tags=["tasas"])
 
@@ -36,6 +37,7 @@ async def tasas_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/tasas/table", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def tasas_table(request: Request) -> HTMLResponse:
     """Partial htmx (auto-refresh): cauciones + repo."""
     return _render(request, "partials/tasas_table.html", **_ctx())

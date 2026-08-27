@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.services import cafci
+from backend.cache_seq import seq_cached
 
 router = APIRouter(tags=["cafci"])
 
@@ -47,6 +48,7 @@ async def cafci_table(request: Request, q: str = "", refresh: bool = False) -> H
 
 
 @router.get("/cafci/fondos", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def cafci_fondos(request: Request) -> HTMLResponse:
     """Panel VCP de fondos propios (API CAFCI) — SOLO SUPERUSER: la ruta está
     en _SUPERUSER_ONLY (main) y el div lazy sólo se renderiza para ese rol.

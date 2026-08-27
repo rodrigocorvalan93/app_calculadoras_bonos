@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse
 
 from backend.locale_ar import parse_ar_num
 from backend.services import alertas as alertas_svc, mailer
+from backend.cache_seq import seq_cached
 
 logger = logging.getLogger("backend.alertas")
 
@@ -67,6 +68,7 @@ async def alertas_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/tabla", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def alertas_tabla(request: Request) -> HTMLResponse:
     ctx = await asyncio.get_running_loop().run_in_executor(None, _tabla_ctx)
     return _render(request, "partials/alertas_table.html", **ctx)

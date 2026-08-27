@@ -1,0 +1,27 @@
+# CI del repo: suite completa + lint en cada PR y cada push a main.
+# Corre en GitHub (no toca la app ni sus tiempos). Sin red a BCRA/broker:
+# los servicios caen a sus backups/fixtures, igual que en los tests locales.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Instalar dependencias
+        run: python -m pip install -r backend/requirements.txt
+      - name: Lint (ruff F/E9)
+        run: python -m ruff check backend/ --select F,E9
+      - name: Suite de tests
+        run: python -m pytest -q

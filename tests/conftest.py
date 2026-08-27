@@ -22,3 +22,19 @@ os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bon
 os.environ.setdefault("APP_SUPERUSER_USER", "rodricor93")
 os.environ.setdefault("APP_SUPERUSER_PASSWORD", "Rc_874562")
 os.environ.setdefault("APP_SUPERUSER_EMAIL", "rodrigocorvalan93@gmail.com")
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _seq_fresca_por_test():
+    """Los paneles seq_cached comparten el render mientras la seq del store no
+    avance; en tests la seq está CONGELADA (sin feed) y una respuesta cacheada
+    en un test cruzaría al siguiente (TTL 2 s). Avanzar la seq por test aísla
+    el cache — mismo mecanismo que un tick real, sin tocar producción."""
+    from backend.services import marketdata_store
+    st = marketdata_store.get_store()
+    with st._lock:
+        st._updates += 1
+    yield

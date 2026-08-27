@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 from backend.config import settings
 from backend.locale_ar import parse_ar_num
 from backend.services import auth as auth_svc, bond_universe, curves as curves_svc, delta_especies, marketdata_store, positions, pricing, symbols as syms
+from backend.cache_seq import seq_cached
 
 router = APIRouter(prefix="/yas", tags=["yas"])
 
@@ -170,6 +171,7 @@ async def yas_tr(
 
 
 @router.get("/market", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)
 async def yas_market_card(
     request: Request,
     code: str = "",
