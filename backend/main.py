@@ -415,6 +415,11 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # Ring de errores para la tarjeta de /admin: engancha ANTES de todo para
+    # capturar también los warnings del arranque. Sólo paga al emitir un
+    # WARNING+ (raros) — cero costo en el hot path.
+    from backend.services import errores as _errores
+    _errores.install()
     app = FastAPI(
         title="Calculadora de Bonos — FastAPI rewrite",
         lifespan=lifespan,

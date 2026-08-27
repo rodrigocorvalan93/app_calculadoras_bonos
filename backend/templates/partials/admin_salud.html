@@ -1,0 +1,36 @@
+{# Tarjeta de salud de datos + ring de errores (superuser, on-demand). #}
+<div class="salud-grid">
+  {% for title, d in secs %}
+  <div class="salud-sec">
+    <div class="salud-t">{{ title }}</div>
+    <div class="salud-pills">
+      {% for k, v in d.items() %}
+        <span class="pill {% if k == 'error' %}pill-err{% elif v is true %}pill-ok{% elif v is false %}pill-off{% endif %}"><i>{{ k }}</i> {{ '✔' if v is true else ('✖' if v is false else v) }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="salud-t" style="margin-top:14px">Errores recientes
+  <span class="muted" style="font-weight:400">WARNING+ · en memoria del proceso · {{ errs | length }}</span></div>
+{% if errs %}
+<div class="table-scroll" style="max-height:280px">
+  <table class="cashflows" style="font-size:11px">
+    <thead><tr><th style="white-space:nowrap">ts</th><th>nivel</th><th>logger</th>
+      <th style="text-align:left">mensaje</th></tr></thead>
+    <tbody>
+      {% for e in errs %}
+      <tr>
+        <td style="white-space:nowrap">{{ e.ts }}</td>
+        <td><b style="color:{{ 'var(--red)' if e.level == 'ERROR' or e.level == 'CRITICAL' else '#f0883e' }}">{{ e.level }}</b></td>
+        <td class="muted" style="white-space:nowrap">{{ e.logger }}</td>
+        <td style="text-align:left;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word">{{ e.msg }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted" style="font-size:12px;margin:6px 0 0">Sin warnings ni errores desde el arranque.</p>
+{% endif %}

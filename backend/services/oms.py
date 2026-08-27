@@ -55,10 +55,10 @@ def is_live() -> bool:
     return settings.oms_live if _live_override["v"] is None else _live_override["v"]
 
 
-def set_live(on: Optional[bool]) -> bool:
+def set_live(on: Optional[bool], user: str = "") -> bool:
     """on True/False ⇒ override; None ⇒ vuelve a seguir la config."""
     _live_override["v"] = None if on is None else bool(on)
-    audit("oms_live_switch", {"on": is_live()})
+    audit("oms_live_switch", {"on": is_live(), "user": user})
     return is_live()
 
 # Tokens de confirmación: token → (payload, expira). Un solo uso.
@@ -67,10 +67,10 @@ _pending_lock = threading.Lock()
 _TOKEN_TTL = 90.0
 
 
-def kill_switch(on: Optional[bool] = None) -> bool:
+def kill_switch(on: Optional[bool] = None, user: str = "") -> bool:
     if on is not None:
         _kill["on"] = bool(on)
-        audit("kill_switch", {"on": _kill["on"]})
+        audit("kill_switch", {"on": _kill["on"], "user": user})
     return _kill["on"]
 
 
@@ -237,6 +237,17 @@ def new_token(payload: Dict[str, Any]) -> str:
         _pending[tok] = (payload, now + _TOKEN_TTL)
     audit("ticket", {**payload, "token": tok})
     return tok
+
+
+def peek_token(tok: str) -> Optional[Dict[str, Any]]:
+    """Payload del token SIN consumirlo — para validar la confirmación LIVE
+    antes de quemarlo (un error de tipeo no obliga a rearmar el ticket)."""
+    with _pending_lock:
+        item = _pending.get(tok)
+    if item is None:
+        return None
+    payload, exp = item
+    return None if exp < time.time() else payload
 
 
 def pop_token(tok: str) -> Optional[Dict[str, Any]]:

@@ -37,6 +37,11 @@ from fastapi.responses import HTMLResponse, Response
 
 _MAX_ENTRIES = 256          # paneles×queries reales son decenas; esto es un fusible
 
+# Contadores globales para la tarjeta de salud de /admin. Incrementos sin lock
+# a propósito: son diagnósticos (una carrera pierde una cuenta, no importa) y
+# el hot path no paga sincronización.
+stats: Dict[str, int] = {"hit": 0, "hit_304": 0, "miss": 0, "miss_304": 0}
+
 
 def _hdrs(etag: str, marker: str) -> Dict[str, str]:
     # `private`: que ningún proxy intermedio lo guarde (hay sesión). `no-cache`
@@ -68,7 +73,9 @@ def seq_cached(ttl: float = 2.0) -> Callable:
                 ent = cache.get(key)
             if ent is not None and ent["seq"] == seq and now < ent["until"]:
                 if inm == ent["etag"]:
+                    stats["hit_304"] += 1
                     return Response(status_code=304, headers=_hdrs(ent["etag"], "hit-304"))
+                stats["hit"] += 1
                 return HTMLResponse(ent["body"], headers=_hdrs(ent["etag"], "hit"))
 
             resp = await fn(*args, **kwargs)
@@ -87,7 +94,9 @@ def seq_cached(ttl: float = 2.0) -> Callable:
                 # tick de OTRO símbolo pero este panel quedó idéntico — el
                 # cliente ya lo tiene, no viaja de nuevo.
                 if inm == etag:
+                    stats["miss_304"] += 1
                     return Response(status_code=304, headers=_hdrs(etag, "miss-304"))
+                stats["miss"] += 1
                 resp.headers["ETag"] = etag
                 resp.headers["Cache-Control"] = "private, no-cache"
             return resp
