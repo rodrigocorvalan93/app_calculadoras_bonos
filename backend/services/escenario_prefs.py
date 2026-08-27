@@ -56,29 +56,48 @@ def _sane_cats(raw: Any) -> List[str]:
     return [c for c in (raw or []) if isinstance(c, str)]
 
 
-def load() -> Dict[str, Any]:
-    """{"senderos": {...}, "cats_off": [...], "presets": {nombre: {...}}} —
-    {} si no hay nada guardado."""
+# Multi-usuario (v2): el estado ACTIVO (senderos fijos + tildes) es POR
+# USUARIO — con el equipo compartiendo el server, el escenario de uno no
+# pisa el de otro. Los PRESETS nombrados quedan COMPARTIDOS a propósito:
+# son la biblioteca del equipo ("base", "estrés deva"), no estado personal.
+# El formato viejo (un solo estado global) migra solo: pasa a
+# users["_migrado"] y sirve de fallback para quien todavía no guardó nada
+# propio — nadie pierde sus senderos fijados al actualizar.
+_MIGRADO = "_migrado"
+
+
+def _sane_user_entry(raw: Any) -> Dict[str, Any]:
+    raw = raw if isinstance(raw, dict) else {}
+    return {"senderos": _sane_senderos(raw.get("senderos")),
+            "cats_off": _sane_cats(raw.get("cats_off"))}
+
+
+def _load_all() -> Dict[str, Any]:
+    """Estructura v2 completa: {"v": 2, "users": {u: {senderos, cats_off}},
+    "presets": {...}} — migrando el formato viejo si hace falta."""
     p = _path()
     if not p.is_file():
-        return {}
+        return {"v": 2, "users": {}, "presets": {}}
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return {}
-        presets = {}
-        for name, pr in (data.get("presets") or {}).items():
-            if isinstance(name, str) and isinstance(pr, dict):
-                presets[name[:40]] = {"senderos": _sane_senderos(pr.get("senderos")),
-                                      "cats_off": _sane_cats(pr.get("cats_off"))}
-        out = {"senderos": _sane_senderos(data.get("senderos")),
-               "cats_off": _sane_cats(data.get("cats_off"))}
-        if presets:
-            out["presets"] = presets
-        return out
+            return {"v": 2, "users": {}, "presets": {}}
     except (OSError, ValueError):
         logger.exception("[escenario_prefs] archivo ilegible; arranco de defaults")
-        return {}
+        return {"v": 2, "users": {}, "presets": {}}
+    presets = {}
+    for name, pr in (data.get("presets") or {}).items():
+        if isinstance(name, str) and isinstance(pr, dict):
+            presets[name[:40]] = {"senderos": _sane_senderos(pr.get("senderos")),
+                                  "cats_off": _sane_cats(pr.get("cats_off"))}
+    if data.get("v") == 2:
+        users = {u: _sane_user_entry(e) for u, e in (data.get("users") or {}).items()
+                 if isinstance(u, str)}
+        return {"v": 2, "users": users, "presets": presets}
+    # formato viejo (estado global único) → migra a users["_migrado"]
+    old = _sane_user_entry(data)
+    users = {_MIGRADO: old} if (old["senderos"] or old["cats_off"]) else {}
+    return {"v": 2, "users": users, "presets": presets}
 
 
 def _write(cur: Dict[str, Any]) -> None:
@@ -89,84 +108,92 @@ def _write(cur: Dict[str, Any]) -> None:
     os.replace(tmp, p)
 
 
+def load_user(user: str) -> Dict[str, Any]:
+    """Estado del usuario (mismo shape que el load() histórico):
+    {"senderos": {...}, "cats_off": [...], "presets": {...}} — presets
+    compartidos. Sin estado propio cae al migrado del formato viejo."""
+    all_ = _load_all()
+    ent = all_["users"].get(user) or all_["users"].get(_MIGRADO) or {}
+    out: Dict[str, Any] = {"senderos": dict(ent.get("senderos") or {}),
+                           "cats_off": list(ent.get("cats_off") or [])}
+    if all_["presets"]:
+        out["presets"] = all_["presets"]
+    return out
+
+
 def save(senderos: Optional[Dict[str, str]] = None,
-         cats_off: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Persiste (atómico). `senderos` REEMPLAZA el set guardado (el cliente
-    manda sólo las filas tocadas); `cats_off` reemplaza la lista. None = no
-    tocar esa parte. Los presets guardados siempre se preservan."""
+         cats_off: Optional[List[str]] = None, user: str = "_local") -> Dict[str, Any]:
+    """Persiste (atómico) el estado ACTIVO del usuario. `senderos` REEMPLAZA el
+    set guardado (el cliente manda sólo las filas tocadas); `cats_off`
+    reemplaza la lista. None = no tocar esa parte. Presets intactos."""
     with _lock:
-        cur = load()
+        all_ = _load_all()
+        ent = _sane_user_entry(all_["users"].get(user) or all_["users"].get(_MIGRADO))
         if senderos is not None:
-            cur["senderos"] = {k: str(v) for k, v in senderos.items() if k in SENDERO_KEYS}
+            ent["senderos"] = {k: str(v) for k, v in senderos.items() if k in SENDERO_KEYS}
         if cats_off is not None:
-            cur["cats_off"] = [str(c) for c in cats_off]
-        _write(cur)
-        return cur
+            ent["cats_off"] = [str(c) for c in cats_off]
+        all_["users"][user] = ent
+        _write(all_)
+        return load_user(user)
 
 
-def reset() -> None:
-    """Borra lo ACTIVO (senderos fijos + tildes) → defaults vivos. Los presets
-    nombrados sobreviven: son la biblioteca, no el estado."""
+def reset(user: str = "_local") -> None:
+    """Borra lo ACTIVO del usuario → defaults vivos. Los presets nombrados
+    sobreviven (biblioteca compartida), y el estado de los DEMÁS también."""
     with _lock:
-        cur = load()
-        presets = cur.get("presets")
-        if presets:
-            _write({"senderos": {}, "cats_off": [], "presets": presets})
-        else:
-            try:
-                _path().unlink(missing_ok=True)
-            except OSError:
-                logger.exception("[escenario_prefs] no pude borrar el archivo de prefs")
+        all_ = _load_all()
+        all_["users"].pop(user, None)
+        # el fallback migrado ya no aplica para quien pidió reset explícito
+        if user != _MIGRADO and _MIGRADO in all_["users"]:
+            all_["users"][user] = {"senderos": {}, "cats_off": []}
+        _write(all_)
 
 
-# ── presets nombrados ("base", "estrés deva", …) ───────────────────────────
-def preset_save(name: str) -> bool:
-    """Fotografía el estado ACTIVO (senderos fijos + tildes) bajo `name`."""
+# ── presets nombrados ("base", "estrés deva", …) — COMPARTIDOS ─────────────
+def preset_save(name: str, user: str = "_local") -> bool:
+    """Fotografía el estado ACTIVO del usuario bajo `name` (visible a todos)."""
     name = (name or "").strip()[:40]
     if not name:
         return False
     with _lock:
-        cur = load()
-        presets = cur.get("presets") or {}
+        all_ = _load_all()
+        presets = all_["presets"]
         if name not in presets and len(presets) >= _MAX_PRESETS:
             return False
-        presets[name] = {"senderos": dict(cur.get("senderos") or {}),
-                         "cats_off": list(cur.get("cats_off") or [])}
-        cur["presets"] = presets
-        _write(cur)
+        ent = load_user(user)
+        presets[name] = {"senderos": dict(ent.get("senderos") or {}),
+                         "cats_off": list(ent.get("cats_off") or [])}
+        _write(all_)
         return True
 
 
-def preset_apply(name: str) -> bool:
-    """Carga un preset como estado activo (lo que ve la pestaña al abrir)."""
+def preset_apply(name: str, user: str = "_local") -> bool:
+    """Carga un preset compartido como estado activo DEL USUARIO."""
     with _lock:
-        cur = load()
-        pr = (cur.get("presets") or {}).get((name or "").strip()[:40])
+        all_ = _load_all()
+        pr = all_["presets"].get((name or "").strip()[:40])
         if pr is None:
             return False
-        cur["senderos"] = dict(pr.get("senderos") or {})
-        cur["cats_off"] = list(pr.get("cats_off") or [])
-        _write(cur)
+        all_["users"][user] = {"senderos": dict(pr.get("senderos") or {}),
+                               "cats_off": list(pr.get("cats_off") or [])}
+        _write(all_)
         return True
 
 
 def preset_delete(name: str) -> bool:
     with _lock:
-        cur = load()
-        presets = cur.get("presets") or {}
-        if (name or "").strip()[:40] not in presets:
+        all_ = _load_all()
+        key = (name or "").strip()[:40]
+        if key not in all_["presets"]:
             return False
-        del presets[name.strip()[:40]]
-        if presets:
-            cur["presets"] = presets
-        else:
-            cur.pop("presets", None)
-        _write(cur)
+        del all_["presets"][key]
+        _write(all_)
         return True
 
 
 def preset_names() -> List[str]:
-    return sorted((load().get("presets") or {}).keys())
+    return sorted(_load_all()["presets"].keys())
 
 
 # ── defaults ────────────────────────────────────────────────────────────────

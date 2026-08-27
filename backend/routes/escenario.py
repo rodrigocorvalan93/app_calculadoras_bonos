@@ -172,7 +172,7 @@ async def escenario_page(request: Request, plazo: str = "24hs") -> HTMLResponse:
     # interpolada, CCL/MEP = oficial, TAMAR flat) + lo que el usuario dejó
     # FIJO en prefs (sólo las filas que tocó — el resto sigue vivo). Todo
     # lectura de memoria/archivo chico: el render no paga nada.
-    prefs = escenario_prefs.load()
+    prefs = escenario_prefs.load_user(_pref_user(request))
     saved = prefs.get("senderos") or {}
     defaults = escenario_prefs.defaults(_parse_d(settle) or hoy_ba(), n_months,
                                         tamar_now, deva_mens)
@@ -311,38 +311,55 @@ async def escenario_table(
                    months=months)
 
 
+def _pref_user(request: Request) -> str:
+    """Username para las prefs POR USUARIO del escenario. Con el muro apagado
+    (dev local) no hay sesión → un bucket único "_local"."""
+    u = getattr(request.state, "user", None) or {}
+    return str(u.get("username") or "_local")
+
+
 @router.post("/escenario/prefs")
-async def escenario_prefs_save(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+async def escenario_prefs_save(request: Request,
+                               payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     """Persiste las filas TOCADAS de los senderos (quedan fijas entre
-    reinicios y compartidas entre dispositivos) y/o las categorías
-    destildadas. El cliente manda sólo lo editado; lo no tocado sigue
-    siendo default vivo (ROFEX/inflación/TAMAR del día)."""
+    reinicios y compartidas entre dispositivos DEL MISMO USUARIO) y/o las
+    categorías destildadas. El cliente manda sólo lo editado; lo no tocado
+    sigue siendo default vivo (ROFEX/inflación/TAMAR del día)."""
     senderos = payload.get("senderos")
     cats_off = payload.get("cats_off")
     cur = escenario_prefs.save(
         senderos if isinstance(senderos, dict) else None,
         cats_off if isinstance(cats_off, list) else None,
+        user=_pref_user(request),
     )
     return JSONResponse({"ok": True, "saved_keys": sorted((cur.get("senderos") or {}).keys())})
 
 
 @router.post("/escenario/prefs/reset")
-async def escenario_prefs_reset() -> JSONResponse:
-    """Borra lo activo → defaults vivos (los presets nombrados sobreviven)."""
-    escenario_prefs.reset()
+async def escenario_prefs_reset(request: Request) -> JSONResponse:
+    """Borra lo activo DEL USUARIO → defaults vivos (los presets nombrados,
+    compartidos, sobreviven — y el estado de los demás también)."""
+    escenario_prefs.reset(user=_pref_user(request))
     return JSONResponse({"ok": True})
 
 
 @router.post("/escenario/prefs/preset")
-async def escenario_preset(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
-    """Presets nombrados del escenario ("base", "estrés deva", …):
-    save = fotografía el estado actual · apply = lo carga como activo ·
-    delete = lo borra. Archivo chico, cero costo de request."""
+async def escenario_preset(request: Request,
+                           payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """Presets nombrados del escenario ("base", "estrés deva", …) —
+    COMPARTIDOS entre el equipo (biblioteca): save = fotografía MI estado ·
+    apply = lo carga como MI activo · delete = lo borra para todos."""
     action = str(payload.get("action") or "")
     name = str(payload.get("name") or "")
-    ok = {"save": escenario_prefs.preset_save,
-          "apply": escenario_prefs.preset_apply,
-          "delete": escenario_prefs.preset_delete}.get(action, lambda _n: False)(name)
+    user = _pref_user(request)
+    if action == "save":
+        ok = escenario_prefs.preset_save(name, user=user)
+    elif action == "apply":
+        ok = escenario_prefs.preset_apply(name, user=user)
+    elif action == "delete":
+        ok = escenario_prefs.preset_delete(name)
+    else:
+        ok = False
     return JSONResponse({"ok": bool(ok), "presets": escenario_prefs.preset_names()})
 
 
