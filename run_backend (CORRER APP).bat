@@ -77,11 +77,28 @@ REM (certutil, sin admin).
 "%PY%" -m backend.tools.https_local
 echo.
 
-echo Iniciando FastAPI (uvicorn) en http://127.0.0.1:8000  ...
+REM --- Modo de ejecucion ---
+REM Default: ESTABLE, sin auto-reload. Con la carpeta compartida por OneDrive,
+REM cada git pull del equipo hace llegar archivos de a uno y el auto-reload
+REM reiniciaba la app (~1 min de arranque) una y otra vez, en plena rueda.
+REM Para DESARROLLAR (auto-reload al editar especies.py, backend\, etc.):
+REM   "run_backend (CORRER APP).bat" dev
+set "RELOAD="
+if /i "%~1"=="dev" set "RELOAD=--reload"
+if /i "%~1"=="reload" set "RELOAD=--reload"
+
+if defined RELOAD (
+  echo Iniciando FastAPI en http://127.0.0.1:8000 ... [modo DEV: auto-reload al tocar un .py]
+) else (
+  echo Iniciando FastAPI en http://127.0.0.1:8000 ... [estable: sin auto-reload]
+  echo   - un git pull / sync de OneDrive ya NO reinicia la app sola
+  echo   - tras actualizar el codigo o especies.py: cerrar con Ctrl+C y volver a abrir
+  echo   - para desarrollar con auto-reload: "run_backend ^(CORRER APP^).bat" dev
+)
 echo (el puente HTTPS del add-in arranca solo si hay certs)
 echo (Ctrl+C para detener)
 echo.
-"%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload --timeout-graceful-shutdown 10
+"%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 %RELOAD% --timeout-graceful-shutdown 10
 
 echo.
 echo Backend se cerro. Codigo de salida: %ERRORLEVEL%

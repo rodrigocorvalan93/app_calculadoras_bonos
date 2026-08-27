@@ -223,7 +223,7 @@ Diario, fuera de rueda. Todo es archivo — un robocopy/rsync alcanza:
 
 | | Desarrollo (PC del autor) | Producción (server) |
 |---|---|---|
-| Arranque | `run_backend (CORRER APP).bat` (con `--reload`) | Servicio NSSM/systemd (sin reload) |
+| Arranque | `run_backend (CORRER APP).bat` (estable; `… .bat dev` = auto-reload para desarrollar) | Servicio NSSM/systemd (sin reload) |
 | Carpeta | OneDrive (tolerado) | **Fuera de OneDrive** |
 | Cambios | Se editan en vivo | Sólo por `deploy.ps1` desde `main` |
 | Autosave 17:01 | Apagar si el server está corriendo | Prendido |
