@@ -26,6 +26,9 @@
 # Meta del repo
 !.gitignore
 !.gitattributes
+# CI (GitHub Actions)
+!.github/
+!.github/**
 
 # Documentación
 !README.md

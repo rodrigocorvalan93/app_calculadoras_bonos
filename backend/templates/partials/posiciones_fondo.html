@@ -6,6 +6,7 @@
     <div class="card-title">
       <span>{{ nombre }} · tenencias</span>
       <span class="card-title-aux">
+        <button type="button" class="lnk" data-csv-of="#pos-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · 
         {{ rows | length }} especies · Valor {{ total_valor | ar_int }}{% if pn %} · {{ (total_valor / pn * 100) | ar_pct_pp(1) }} del PN{% endif %}
         · <span id="pos-day-ret" class="pos-day-ret" title="Σ (peso por valor × retorno Last vs Px val). Editá un Last para simular.">Ret. día —</span>
       </span>

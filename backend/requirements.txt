@@ -37,6 +37,7 @@ cryptography>=41
 # the backend needs it on the path even though we don't render any plots.
 matplotlib>=3.8
 
-# Tests
+# Tests / lint (los usa también el CI de GitHub)
 pytest>=8.3
 pytest-asyncio>=0.24
+ruff>=0.6

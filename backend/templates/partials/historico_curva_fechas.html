@@ -71,7 +71,7 @@
   {% if tr and tr.rows %}
   <div class="card" style="margin-top:12px">
     <div class="card-title"><span>💰 TR realizado — {{ tr.curve_label }} · {{ tr.d1 }} → {{ tr.d2 }}</span>
-      <span class="card-title-aux">ΔP dirty + cupones cobrados (ventana real por bono)</span></div>
+      <span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#tr-realizado-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · ΔP dirty + cupones cobrados (ventana real por bono)</span></div>
     <div class="card-body table-scroll">
       <table class="cashflows curve-table mercado-table" data-sortable id="tr-realizado-tbl">
         <thead><tr>

@@ -7,6 +7,7 @@
   <div class="card-title">
     <span>{{ selected_def.label }} · Mercado</span>
     <span class="card-title-aux">
+      <button type="button" class="lnk" data-csv-of="#mercado-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · 
       {{ rows | length }} instrumentos · plazo {{ plazo }}
       {% if ym == 'margen' %} · <strong style="color:var(--cyan)">margen TNA s/TAMAR-BADLAR</strong> (— = sin benchmark){% endif %}
       {% if fuente == "mae" %} · <strong style="color:var(--cyan)">fuente MAE (OTC, sin libro)</strong>{% endif %}
