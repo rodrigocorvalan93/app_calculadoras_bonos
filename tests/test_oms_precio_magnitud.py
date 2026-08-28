@@ -13,6 +13,7 @@ Tres cierres, cada uno testeado acá:
 """
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -120,6 +121,7 @@ async def test_place_manda_order_qty_entero(monkeypatch) -> None:
         return {"status": "OK", "order": {"clientId": "1", "proprietary": "ISV"}}
     c.get_json_checked = fake_checked
     monkeypatch.setattr(primary_ws, "get_ws_client", lambda: c)
+    monkeypatch.setattr(oms, "_FOLLOWUP_DELAYS", (0.0,))
 
     try:
         oms.kill_switch(False)
@@ -128,8 +130,44 @@ async def test_place_manda_order_qty_entero(monkeypatch) -> None:
                                "side": "buy", "qty": 300000.0, "price": 141.75,
                                "account": "61123", "ordtype": "limit"})
         assert res["status"] == "OK"
-        _, params = c.calls[-1]
+        params = next(p for pa, p in c.calls if pa == "rest/order/newSingleOrder")
         assert params["orderQty"] == 300000 and isinstance(params["orderQty"], int)
         assert params["price"] == 141.75
+        await asyncio.sleep(0.05)                  # deja correr el seguimiento
+        assert any(pa == "rest/order/id" for pa, _ in c.calls)   # se disparó
     finally:
         oms.set_live(None)
+
+
+@pytest.mark.asyncio
+async def test_seguimiento_estado_broker(monkeypatch) -> None:
+    """Tras un envío aceptado, el seguimiento trae el estado REAL del broker y
+    el blotter lo muestra — el caso GN39O: 'OK' al enviar pero REJECTED (Saldo
+    insuficiente) al toque; antes el blotter quedaba en ENVIADA para siempre y
+    había que abrir la Matriz para enterarse."""
+    from backend.services import primary_ws
+
+    class _C:
+        authenticated = True
+
+        def __init__(self):
+            self.calls: list = []
+
+        async def get_json(self, path, params=None):
+            self.calls.append((path, dict(params or {})))
+            return {"status": "OK", "order": {"clientId": params["clientOrderId"],
+                                              "status": "Rejected",
+                                              "text": "Saldo insuficiente",
+                                              "cumQty": 0}}
+    c = _C()
+    monkeypatch.setattr(primary_ws, "get_ws_client", lambda: c)
+    monkeypatch.setattr(oms, "_FOLLOWUP_DELAYS", (0.0, 0.0))
+    rec = {"code": "GN39O", "side": "buy", "qty": 180_077.0, "price": 144_850.0,
+           "account": "72813", "client_order_id": "calc-test-seg"}
+    await oms._order_followup("526502342000080", "ISV_PBCP", rec)
+    assert len(c.calls) == 1                       # estado final → corta en el 1º intento
+    assert c.calls[0][1] == {"clientOrderId": "526502342000080", "proprietary": "ISV_PBCP"}
+    est = next(a for a in oms.audit_tail(5) if a.get("event") == "live_estado")
+    assert est["estado"] == "REJECTED" and "Saldo" in est["texto"]   # normaliza a upper
+    r = next(x for x in oms.blotter(10) if x["cid"] == "calc-test-seg")
+    assert r["status"] == "RECHAZADA (broker)" and "Saldo insuficiente" in r["motivo"]

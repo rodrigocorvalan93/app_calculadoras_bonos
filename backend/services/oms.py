@@ -129,22 +129,36 @@ _BLOTTER_STATUS = {
     "paper_cancelada": "CANCELADA", "live_cancel_respuesta": "CANCELADA",
 }
 
+# Estado REAL en el broker (evento live_estado, del seguimiento post-envío) →
+# etiqueta del blotter. El "OK" de newSingleOrder sólo significa "recibida":
+# el risk puede rechazarla al instante (Saldo insuficiente) y el blotter
+# quedaba en ENVIADA para siempre — había que abrir la Matriz para enterarse.
+_ESTADO_LABEL = {
+    "REJECTED": "RECHAZADA (broker)", "FILLED": "EJECUTADA",
+    "PARTIALLY_FILLED": "PARCIAL", "CANCELLED": "CANCELADA",
+    "NEW": "EN MERCADO", "PENDING_NEW": "EN MERCADO",
+}
+
 
 def blotter(n: int = 60) -> List[Dict[str, Any]]:
     """Estado de órdenes derivado del audit persistente (más nuevas primero).
     Funciona en paper y en live — es el registro de lo que pasó por el OMS."""
     rows: List[Dict[str, Any]] = []
     for a in audit_tail(400):                      # ya viene del más nuevo al más viejo
-        st = _BLOTTER_STATUS.get(a.get("event"))
-        if st is None:
-            continue
+        if a.get("event") == "live_estado":        # estado real del broker (seguimiento)
+            raw = str(a.get("estado") or "").upper()
+            st = _ESTADO_LABEL.get(raw, raw or "?")
+        else:
+            st = _BLOTTER_STATUS.get(a.get("event"))
+            if st is None:
+                continue
         rows.append({
             "ts": a.get("ts"), "status": st,
             "code": a.get("code"), "side": a.get("side"),
             "qty": a.get("qty"), "price": a.get("price"),
             "account": a.get("account"), "ordtype": a.get("ordtype") or "limit",
             "cid": a.get("client_order_id"),
-            "motivo": a.get("motivo") or a.get("error"),
+            "motivo": a.get("motivo") or a.get("texto") or a.get("error"),
         })
         if len(rows) >= n:
             break
@@ -408,6 +422,42 @@ async def live_orders(account: str) -> List[Dict[str, Any]]:
     return d.get("orders", []) if isinstance(d, dict) else []
 
 
+# Seguimiento post-envío: cuándo re-consultar el estado (seg tras el envío);
+# el 2º intento sólo corre si el 1º no encontró un estado final.
+_FOLLOWUP_DELAYS = (1.5, 4.0)
+_ESTADO_FINAL = {"REJECTED", "FILLED", "CANCELLED", "EXPIRED"}
+_followups: set = set()                 # refs vivas (create_task guarda débil)
+
+
+async def _order_followup(client_id: str, proprietary: str, rec: Dict[str, Any]) -> None:
+    """Persigue el estado REAL de la orden tras un envío aceptado: consulta
+    rest/order/id un par de veces y audita cada estado nuevo como `live_estado`
+    (el blotter lo muestra: "RECHAZADA (broker) · Saldo insuficiente",
+    EJECUTADA, EN MERCADO…). Best-effort en background — no demora la
+    respuesta del envío ni toca el hot path; cualquier error corta en
+    silencio (el estado siempre está en la Matriz como último recurso)."""
+    from backend.services.primary_ws import get_ws_client
+    ultimo = ""
+    for delay in _FOLLOWUP_DELAYS:
+        await asyncio.sleep(delay)
+        try:
+            d = await get_ws_client().get_json("rest/order/id", {
+                "clientOrderId": client_id, "proprietary": proprietary})
+        except Exception:  # noqa: BLE001 — best-effort
+            return
+        o = d.get("order") if isinstance(d, dict) else None
+        if not isinstance(o, dict):
+            continue
+        st = str(o.get("status") or "").upper()
+        if st and st != ultimo:
+            ultimo = st
+            await audit_async("live_estado", {**rec, "estado": st,
+                                              "texto": o.get("text") or "",
+                                              "cum_qty": o.get("cumQty")})
+        if st in _ESTADO_FINAL:
+            return
+
+
 async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Envía la orden (o la simula). El audit se escribe ANTES y DESPUÉS."""
     client_order_id = f"calc-{uuid.uuid4().hex[:12]}"
@@ -464,6 +514,12 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         d = await get_ws_client().get_json_checked("rest/order/newSingleOrder", params)
         await audit_async("live_respuesta", {**rec, "broker": d})
+        o = d.get("order") if isinstance(d, dict) else None
+        if isinstance(o, dict) and o.get("clientId"):
+            t = asyncio.get_running_loop().create_task(_order_followup(
+                str(o["clientId"]), str(o.get("proprietary") or "api"), rec))
+            _followups.add(t)
+            t.add_done_callback(_followups.discard)
         return {"status": d.get("status", "?"), "broker": d, **rec}
     except Exception as exc:  # noqa: BLE001
         await audit_async("live_error", {**rec, "error": str(exc)})
