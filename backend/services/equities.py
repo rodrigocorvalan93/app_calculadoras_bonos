@@ -69,6 +69,13 @@ def panel_tickers(panel: str) -> List[str]:
     from backend.services import byma_paneles
     dyn = byma_paneles.tickers(panel)
     if dyn:
+        if panel == "cedears":
+            # el vivo viene CAPEADO a los top por volumen (CEDEARS_VIVOS_MAX):
+            # los curados se suman siempre, así un ETF líquido no desaparece
+            # un finde sin volumen. Líder/General NO unionan: ahí la lista viva
+            # manda (una acción que BYMA rota de panel debe moverse de tabla).
+            extra = [c for c in CEDEARS if c not in set(dyn)]
+            return sorted(dyn + extra) if extra else dyn
         return dyn
     return {"cedears": CEDEARS, "general": GENERAL}.get(panel, LIDERES)
 

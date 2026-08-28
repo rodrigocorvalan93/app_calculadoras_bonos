@@ -90,3 +90,53 @@ async def test_http_panel_todas() -> None:
         assert ">L</span>" in r.text and ">G</span>" in r.text
         mp = await ac.get("/mercado")
         assert 'value="todas"' in mp.text
+
+
+def test_extract_symbols_top_por_volumen() -> None:
+    filas = [
+        {"symbol": "PEPE", "volume": 10},
+        {"symbol": "TSLA", "volume": 500},
+        {"symbol": "KO", "volumeAmount": "500"},      # string y otro campo: vale igual
+        {"symbol": "ZZZZ"},                           # sin volumen → 0
+        {"symbol": "MSFT", "montoOperado": 1000},
+    ]
+    # top=3 → MSFT (1000) + TSLA/KO (500 c/u; empate = orden BYMA); salida ordenada
+    assert bp._extract_symbols(filas, top=3) == ["KO", "MSFT", "TSLA"]
+    # sin top (default) o con top holgado no se recorta nada
+    assert len(bp._extract_symbols(filas)) == 5
+    assert len(bp._extract_symbols(filas, top=99)) == 5
+
+
+def test_fetch_panel_capea_solo_cedears() -> None:
+    filas = [{"symbol": f"C{i:04d}", "volume": i} for i in range(1, 1301)]
+
+    class _Resp:
+        def raise_for_status(self) -> None:  # noqa: D102
+            pass
+
+        def json(self):  # noqa: D102
+            return {"data": filas}
+
+    class _Sess:
+        def post(self, *a, **k):  # noqa: D102
+            return _Resp()
+
+    vivos = bp._fetch_panel(_Sess(), bp._EPS["cedears"])
+    assert len(vivos) == bp.CEDEARS_VIVOS_MAX
+    assert "C1300" in vivos and "C0001" not in vivos    # quedan los de mayor volumen
+    # el mismo shape en un panel de acciones NO se capea
+    assert len(bp._fetch_panel(_Sess(), bp._EPS["general"])) == 1300
+
+
+def test_cedears_vivos_union_curados() -> None:
+    # el cap por volumen puede dejar afuera un curado líquido (p. ej. finde sin
+    # volumen): la vista cedears suma SIEMPRE los curados, sin duplicar
+    with bp._lock:
+        bp._cache["cedears"] = ["NUEV1", "NUEV2", "SPY"]
+    got = equities.panel_tickers("cedears")
+    assert "NUEV1" in got and "SPY" in got and "EWZ" in got
+    assert len(got) == len(set(got))
+    # Líder/General siguen REEMPLAZANDO (la rotación de BYMA debe mover la acción)
+    with bp._lock:
+        bp._cache["general"] = ["MOLI"]
+    assert equities.panel_tickers("general") == ["MOLI"]

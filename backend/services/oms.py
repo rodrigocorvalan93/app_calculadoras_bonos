@@ -129,26 +129,95 @@ _BLOTTER_STATUS = {
     "paper_cancelada": "CANCELADA", "live_cancel_respuesta": "CANCELADA",
 }
 
+# Estado REAL en el broker (evento live_estado, del seguimiento post-envío) →
+# etiqueta del blotter. El "OK" de newSingleOrder sólo significa "recibida":
+# el risk puede rechazarla al instante (Saldo insuficiente) y el blotter
+# quedaba en ENVIADA para siempre — había que abrir la Matriz para enterarse.
+_ESTADO_LABEL = {
+    "REJECTED": "RECHAZADA (broker)", "FILLED": "EJECUTADA",
+    "PARTIALLY_FILLED": "PARCIAL", "CANCELLED": "CANCELADA",
+    "NEW": "EN MERCADO", "PENDING_NEW": "EN MERCADO",
+}
+
 
 def blotter(n: int = 60) -> List[Dict[str, Any]]:
     """Estado de órdenes derivado del audit persistente (más nuevas primero).
     Funciona en paper y en live — es el registro de lo que pasó por el OMS."""
     rows: List[Dict[str, Any]] = []
     for a in audit_tail(400):                      # ya viene del más nuevo al más viejo
-        st = _BLOTTER_STATUS.get(a.get("event"))
-        if st is None:
-            continue
+        if a.get("event") == "live_estado":        # estado real del broker (seguimiento)
+            raw = str(a.get("estado") or "").upper()
+            st = _ESTADO_LABEL.get(raw, raw or "?")
+        else:
+            st = _BLOTTER_STATUS.get(a.get("event"))
+            if st is None:
+                continue
         rows.append({
             "ts": a.get("ts"), "status": st,
             "code": a.get("code"), "side": a.get("side"),
             "qty": a.get("qty"), "price": a.get("price"),
             "account": a.get("account"), "ordtype": a.get("ordtype") or "limit",
             "cid": a.get("client_order_id"),
-            "motivo": a.get("motivo") or a.get("error"),
+            "motivo": a.get("motivo") or a.get("texto") or a.get("error"),
         })
         if len(rows) >= n:
             break
     return rows
+
+
+async def market_ref_rest(symbol: str) -> Optional[float]:
+    """Last/close del broker por REST para un símbolo SIN dato en el store
+    (ON ilíquido, especie fuera del universo WS). Cierra el agujero real del
+    fat-finger: sin referencia la banda no corría, y un precio tipeado con
+    punto decimal ("141.750", estilo Matriz) que el parser es-AR lee ×1000
+    (141.750,00) viajaba al broker — caso VSCMO. Si el broker puede aceptar la
+    orden, el broker TIENE el market data: con esto la banda casi siempre corre.
+    Una llamada por armado de ticket (no es hot path), best-effort: sin sesión
+    o sin dato → None y el flujo queda como siempre (valor técnico →
+    confirmación manual)."""
+    from backend.services.primary_ws import get_ws_client
+    c = get_ws_client()
+    if not c.authenticated:
+        return None
+    try:
+        d = await c.get_json("rest/marketdata/get", {
+            "marketId": "ROFX", "symbol": symbol, "entries": "LA,CL", "depth": 1})
+        if not isinstance(d, dict) or d.get("status") != "OK":
+            return None
+        md = d.get("marketData") or {}
+        for k in ("LA", "CL"):
+            v = md.get(k)
+            px = v.get("price") if isinstance(v, dict) else None
+            if px:
+                return float(px)
+    except Exception:  # noqa: BLE001 — best-effort: cualquier problema → sin ref
+        return None
+    return None
+
+
+def _hint_magnitud(price: float, ref: float, band: float) -> str:
+    """Detector del clásico error de formato: '141.750' tipeado con punto
+    decimal (estilo Matriz/en-US) se lee es-AR como 141.750,00 (×1000) — y al
+    revés, '204,600' pensado en-US como 204.600 se lee 204,60 (÷1000). Si el
+    precio rechazado ENCAJA en la banda al correrle la coma 3 lugares, el
+    rechazo lo dice explícito: el operador corrige al toque en vez de pelearse
+    con la banda. Sólo agrega texto al motivo — nunca reinterpreta el precio
+    en silencio (acá hay plata real)."""
+    from backend.locale_ar import fmt_num
+    causas = (
+        # ×/÷1000: formato ("141.750" con punto decimal se lee 141.750,00)
+        (0.001, "Ojo con el formato es-AR: el PUNTO es separador de miles y el decimal va con COMA"),
+        (1000.0, "Ojo con el formato es-AR: el PUNTO es separador de miles y el decimal va con COMA"),
+        # ×/÷100: precio por 1 VN en vez de por 100 VN (caso GN39O 1.448,50 vs 144.850)
+        (100.0, "Ojo: los bonos/ONs cotizan POR 100 VN, no por 1 VN"),
+        (0.01, "Ojo: los bonos/ONs cotizan POR 100 VN, no por 1 VN"),
+    )
+    for factor, causa in causas:
+        alt = price * factor
+        if ref and abs(alt / ref - 1.0) <= band:
+            return (f" ¿Quisiste decir {fmt_num(alt, 2)}? {causa} "
+                    f"(el precio ingresado se leyó como {fmt_num(price, 2)}).")
+    return ""
 
 
 def validate(code: str, side: str, qty: float, price: Optional[float],
@@ -197,13 +266,15 @@ def validate(code: str, side: str, qty: float, price: Optional[float],
             band = settings.oms_price_band_pct / 100.0
             if abs(price / last_ref - 1.0) > band:
                 return (f"Precio {price} fuera de la banda ±{settings.oms_price_band_pct:.0f}% "
-                        f"vs mercado {last_ref} (fat-finger guard).")
+                        f"vs mercado {last_ref} (fat-finger guard)."
+                        + _hint_magnitud(price, last_ref, band))
         elif theo_ref and theo_ref > 0:
             band = settings.oms_theo_band_pct / 100.0
             if abs(price / theo_ref - 1.0) > band:
                 return (f"Precio {price} fuera de la banda ±{settings.oms_theo_band_pct:.0f}% "
                         f"vs valor técnico {theo_ref:,.2f} (sin cotización de mercado; "
-                        f"revisalo o confirmá manualmente).")
+                        f"revisalo o confirmá manualmente)."
+                        + _hint_magnitud(price, theo_ref, band))
         elif settings.oms_require_ref_confirm and not confirmed:
             return ("Sin referencia de mercado ni valor técnico para validar el precio. "
                     "Confirmá manualmente (o usá Market) para enviar.")
@@ -358,6 +429,42 @@ async def live_orders(account: str) -> List[Dict[str, Any]]:
     return d.get("orders", []) if isinstance(d, dict) else []
 
 
+# Seguimiento post-envío: cuándo re-consultar el estado (seg tras el envío);
+# el 2º intento sólo corre si el 1º no encontró un estado final.
+_FOLLOWUP_DELAYS = (1.5, 4.0)
+_ESTADO_FINAL = {"REJECTED", "FILLED", "CANCELLED", "EXPIRED"}
+_followups: set = set()                 # refs vivas (create_task guarda débil)
+
+
+async def _order_followup(client_id: str, proprietary: str, rec: Dict[str, Any]) -> None:
+    """Persigue el estado REAL de la orden tras un envío aceptado: consulta
+    rest/order/id un par de veces y audita cada estado nuevo como `live_estado`
+    (el blotter lo muestra: "RECHAZADA (broker) · Saldo insuficiente",
+    EJECUTADA, EN MERCADO…). Best-effort en background — no demora la
+    respuesta del envío ni toca el hot path; cualquier error corta en
+    silencio (el estado siempre está en la Matriz como último recurso)."""
+    from backend.services.primary_ws import get_ws_client
+    ultimo = ""
+    for delay in _FOLLOWUP_DELAYS:
+        await asyncio.sleep(delay)
+        try:
+            d = await get_ws_client().get_json("rest/order/id", {
+                "clientOrderId": client_id, "proprietary": proprietary})
+        except Exception:  # noqa: BLE001 — best-effort
+            return
+        o = d.get("order") if isinstance(d, dict) else None
+        if not isinstance(o, dict):
+            continue
+        st = str(o.get("status") or "").upper()
+        if st and st != ultimo:
+            ultimo = st
+            await audit_async("live_estado", {**rec, "estado": st,
+                                              "texto": o.get("text") or "",
+                                              "cum_qty": o.get("cumQty")})
+        if st in _ESTADO_FINAL:
+            return
+
+
 async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Envía la orden (o la simula). El audit se escribe ANTES y DESPUÉS."""
     client_order_id = f"calc-{uuid.uuid4().hex[:12]}"
@@ -392,11 +499,19 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
             return {"status": "ERROR", "motivo": motivo, "candidatos": cands, **rec}
 
     ordtype = payload.get("ordtype", "limit")
+    qty = payload["qty"]
+    try:
+        # VN entero cuando lo es: un "300000.0" flotante en el query string es
+        # buscarse un parseo raro del lado del broker (campo entero en xOMS)
+        if float(qty).is_integer():
+            qty = int(qty)
+    except (TypeError, ValueError):
+        pass
     params = {
         "marketId": "ROFX",
         "symbol": payload["symbol"],
         "side": payload["side"],
-        "orderQty": payload["qty"],
+        "orderQty": qty,
         "ordType": ordtype,
         "timeInForce": "Day",
         "account": payload["account"],
@@ -406,6 +521,12 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         d = await get_ws_client().get_json_checked("rest/order/newSingleOrder", params)
         await audit_async("live_respuesta", {**rec, "broker": d})
+        o = d.get("order") if isinstance(d, dict) else None
+        if isinstance(o, dict) and o.get("clientId"):
+            t = asyncio.get_running_loop().create_task(_order_followup(
+                str(o["clientId"]), str(o.get("proprietary") or "api"), rec))
+            _followups.add(t)
+            t.add_done_callback(_followups.discard)
         return {"status": d.get("status", "?"), "broker": d, **rec}
     except Exception as exc:  # noqa: BLE001
         await audit_async("live_error", {**rec, "error": str(exc)})

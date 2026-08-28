@@ -37,11 +37,31 @@ class _RingHandler(logging.Handler):
             })
 
 
+class _FiltroProactor(logging.Filter):
+    """Silencia el ruido cosmético de asyncio en Windows (proactor): clientes
+    locales (navegador/add-in/AV corporativo) abortan conexiones keep-alive con
+    RST en vez de FIN y asyncio loguea un traceback ConnectionResetError
+    [WinError 10054] por CADA una — hasta 2 por segundo, tapando el log real y
+    llenando el ring de errores de basura. No rompe nada: la conexión ya estaba
+    muerta. Se filtra SOLO ese patrón exacto; cualquier otro error de asyncio
+    sigue pasando."""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D102
+        if record.exc_info and isinstance(record.exc_info[1],
+                                          (ConnectionResetError, ConnectionAbortedError)):
+            if "_call_connection_lost" in record.getMessage():
+                return False
+        return True
+
+
 def install() -> None:
-    """Engancha el handler al root logger (idempotente). WARNING para arriba."""
+    """Engancha el handler al root logger (idempotente). WARNING para arriba.
+    Además instala el filtro anti-ruido del proactor en el logger de asyncio
+    (antes de propagar → tampoco entra al ring ni al log del servicio)."""
     global _installed
     if _installed:
         return
+    logging.getLogger("asyncio").addFilter(_FiltroProactor())
     h = _RingHandler(level=logging.WARNING)
     h.setFormatter(logging.Formatter("%(message)s"))
     logging.getLogger().addHandler(h)
