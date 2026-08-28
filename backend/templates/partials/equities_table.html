@@ -1,10 +1,10 @@
 {% if not rows %}
-  <div class="alert">Sin cotizaciones de {{ "CEDEARs" if panel == "cedears" else "acciones" }} en este panel (¿broker offline o panel no suscripto?).</div>
+  <div class="alert">{% if buscado %}Ningún CEDEAR conocido matchea la búsqueda.{% else %}Sin cotizaciones de {{ "CEDEARs" if panel == "cedears" else "acciones" }} en este panel (¿broker offline o panel no suscripto?).{% endif %}</div>
 {% else %}
 <div class="card">
   <div class="card-title">
     <span>{{ {"cedears": "CEDEARs", "general": "Acciones · Panel general", "todas": "Acciones · Líder + General"}.get(panel, "Acciones · Panel líderes") }} · Mercado</span>
-    <span class="card-title-aux">{{ rows | length }} especies · plazo {{ plazo }} · sólo precios (sin TIR)</span>
+    <span class="card-title-aux">{{ rows | length }}{% if panel == "cedears" and total_univ %} de {{ total_univ }} conocidos{% endif %} especies · plazo {{ plazo }} · sólo precios (sin TIR)</span>
   </div>
   <div class="card-body" style="padding:0">
     <div class="table-scroll">

@@ -495,15 +495,39 @@ async def mercado_table_partial(
     fuente: str = "byma",
     ym: str = "tir",
     panel: str = "rf",
+    q: str = "",
+    mas: int = 0,
 ) -> HTMLResponse:
     """HTMX partial: blotter body for the requested curve."""
     # Panel Acciones / CEDEARs: precio puro desde el store (sin TIR ni
     # calculadora) — cada fila es un lookup en memoria, sin pasar por pricing.
     if panel in ("lideres", "cedears", "general", "todas"):
         from backend.services import equities
-        eq_rows = equities.panel_rows(panel, plazo)
+        ctx: Dict[str, Any] = {}
+        if panel == "cedears" and (q.strip() or mas > 0):
+            # Vista extendida: buscador global / "ver 150 más". Los códigos
+            # fuera del panel base se suscriben ON DEMAND (incremental — sólo
+            # la primera vez por símbolo; corre en el miss del seq-cache).
+            codes, nuevos = equities.cedears_view(q=q, mas=mas)
+            if nuevos:
+                from backend.services.primary_ws import get_ws_client
+                await get_ws_client().subscribe(
+                    [syms.md_symbol(c, p) for c in nuevos for p in ("24hs", "CI")])
+            eq_rows = equities.rows_for_codes(codes, plazo)
+            ctx["buscado"] = bool(q.strip())
+        else:
+            eq_rows = equities.panel_rows(panel, plazo)
+        if panel == "cedears":
+            ctx["total_univ"] = len(equities.cedears_universo())
+        if len(eq_rows) > 200:
+            # tandas grandes de "ver más" (450-750 filas): el render Jinja son
+            # ~30-70 ms — al threadpool, que no bloquee el event loop en rueda
+            # (el resultado igual queda en el seq-cache para los demás polls)
+            return await asyncio.get_running_loop().run_in_executor(
+                None, lambda: _render(request, "partials/equities_table.html",
+                                      rows=eq_rows, panel=panel, plazo=plazo, **ctx))
         return _render(request, "partials/equities_table.html",
-                       rows=eq_rows, panel=panel, plazo=plazo)
+                       rows=eq_rows, panel=panel, plazo=plazo, **ctx)
     rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
     return _render(
         request,

@@ -70,14 +70,48 @@ def panel_tickers(panel: str) -> List[str]:
     dyn = byma_paneles.tickers(panel)
     if dyn:
         if panel == "cedears":
-            # el vivo viene CAPEADO a los top por volumen (CEDEARS_VIVOS_MAX):
-            # los curados se suman siempre, así un ETF líquido no desaparece
-            # un finde sin volumen. Líder/General NO unionan: ahí la lista viva
-            # manda (una acción que BYMA rota de panel debe moverse de tabla).
-            extra = [c for c in CEDEARS if c not in set(dyn)]
-            return sorted(dyn + extra) if extra else dyn
+            # la lista viva viene COMPLETA en orden de volumen (~1.300): el
+            # panel default y el seed del WS se quedan con los top
+            # CEDEARS_VIVOS_MAX + los curados siempre (un ETF líquido no
+            # desaparece un finde sin volumen). El resto del universo queda
+            # accesible on-demand vía cedears_view (buscador / "ver más").
+            # Líder/General NO unionan: ahí la lista viva manda (una acción
+            # que BYMA rota de panel debe moverse de tabla).
+            vivos = dyn[:byma_paneles.CEDEARS_VIVOS_MAX]
+            extra = [c for c in CEDEARS if c not in set(vivos)]
+            return sorted(vivos + extra)
         return dyn
     return {"cedears": CEDEARS, "general": GENERAL}.get(panel, LIDERES)
+
+
+def cedears_universo() -> List[str]:
+    """TODOS los CEDEARs conocidos: la lista viva completa (orden de volumen
+    desc) + los curados que no estén en ella al final. Es una lista de NOMBRES
+    (acá no se suscribe ni se tabula nada): alimenta el buscador global y las
+    tandas de "ver más" del panel."""
+    from backend.services import byma_paneles
+    dyn = byma_paneles.tickers("cedears") or []
+    en_dyn = set(dyn)
+    return dyn + sorted(c for c in CEDEARS if c not in en_dyn)
+
+
+def cedears_view(q: str = "", mas: int = 0) -> "tuple[List[str], List[str]]":
+    """Vista extendida del panel CEDEARs: con `q` busca por substring en TODO
+    el universo conocido; con `mas` agrega las siguientes N especies por
+    volumen después del panel base. Devuelve (códigos a mostrar, códigos que
+    NO están en el panel base) — el caller suscribe los segundos on demand
+    (ws.subscribe es incremental: sólo la primera vez por símbolo)."""
+    base = panel_tickers("cedears")
+    en_base = set(base)
+    if q.strip():
+        qq = q.strip().upper()
+        codes = [c for c in cedears_universo() if qq in c]
+        return codes, [c for c in codes if c not in en_base]
+    n = max(0, int(mas or 0))
+    if n:
+        extra = [c for c in cedears_universo() if c not in en_base][:n]
+        return base + extra, extra
+    return base, []
 
 
 def all_symbols() -> List[str]:
@@ -126,6 +160,39 @@ def row_for(code: str, plazo: str = "24hs") -> Optional[Dict[str, Any]]:
     }
 
 
+def _finish_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Post-proceso común de las tablas de equities: fracción de volumen para
+    la barrita + orden por volumen efectivo desc (sin volumen al final,
+    alfabético)."""
+    vmax = max((r.get("volume") or 0.0) for r in rows) if rows else 0.0
+    for r in rows:
+        r["volume_frac"] = (r.get("volume") or 0.0) / vmax if vmax > 0 else 0.0
+    rows.sort(key=lambda r: (-(r["volume"] or 0.0), r["code"]))
+    return rows
+
+
+# Campos de una fila stub (código sin dato en el store todavía): los filtros
+# es-AR renderizan None como "—", así que la fila aparece al instante y se
+# llena sola cuando el feed contesta la suscripción (~1-2 s, md-update).
+_STUB_KEYS = ("open", "close", "low", "high", "bid", "bid_size", "offer",
+              "offer_size", "last", "vwap", "var_pct", "var_px", "volume",
+              "nominal", "last_ts", "range_pos")
+
+
+def rows_for_codes(codes: List[str], plazo: str = "24hs") -> List[Dict[str, Any]]:
+    """Filas para una lista EXPLÍCITA de códigos (buscador / "ver más" de
+    CEDEARs). Un código sin dato rinde una fila stub con guiones — el usuario
+    VE que la especie existe y quedó suscripta, en vez de una tabla que no
+    cambia."""
+    rows: List[Dict[str, Any]] = []
+    for c in codes:
+        r = row_for(c, plazo)
+        if r is None:
+            r = {"code": c, **{k: None for k in _STUB_KEYS}}
+        rows.append(r)
+    return _finish_rows(rows)
+
+
 def panel_rows(panel: str, plazo: str = "24hs") -> List[Dict[str, Any]]:
     if panel == "todas":
         # Líder + General en una tabla, con badge L/G por fila. Dedupe por si
@@ -142,12 +209,7 @@ def panel_rows(panel: str, plazo: str = "24hs") -> List[Dict[str, Any]]:
                     rows.append(r)
     else:
         rows = [r for c in panel_tickers(panel) if (r := row_for(c, plazo)) is not None]
-    vmax = max((r.get("volume") or 0.0) for r in rows) if rows else 0.0
-    for r in rows:
-        r["volume_frac"] = (r.get("volume") or 0.0) / vmax if vmax > 0 else 0.0
-    # Orden: volumen efectivo descendente; sin volumen al final, alfabético.
-    rows.sort(key=lambda r: (-(r["volume"] or 0.0), r["code"]))
-    return rows
+    return _finish_rows(rows)
 
 
 _merval_sym = None                      # símbolo MERVAL resuelto (memo)
