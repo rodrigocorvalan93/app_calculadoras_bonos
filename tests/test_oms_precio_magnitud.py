@@ -28,7 +28,10 @@ def test_hint_magnitud_en_banda_mercado() -> None:
     # ÷1000 (el sub-precio clásico, PSSXO): también sugiere
     m2 = oms.validate("PSSXO", "sell", 1_000, 204.6, "C1", 204_600.0)
     assert m2 and "banda" in m2 and "204.600,00" in m2 and "Quisiste" in m2
-    # fuera de banda SIN encaje ×/÷1000 → rechazo normal, sin hint confuso
+    # ×100 (precio por 1 VN en vez de por 100 VN — caso GN39O): sugiere el por-100
+    m100 = oms.validate("GN39O", "buy", 180_077, 1_448.5, "C1", 145_000.0)
+    assert m100 and "¿Quisiste decir 144.850,00?" in m100 and "POR 100 VN" in m100
+    # fuera de banda SIN encaje ×/÷1000 ni ×/÷100 → rechazo normal, sin hint confuso
     m3 = oms.validate("AL30", "buy", 100, 700.0, "C1", 941.0)
     assert m3 and "banda" in m3 and "Quisiste" not in m3
     # dentro de banda → pasa como siempre

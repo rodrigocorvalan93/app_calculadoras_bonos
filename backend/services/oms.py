@@ -204,11 +204,18 @@ def _hint_magnitud(price: float, ref: float, band: float) -> str:
     con la banda. Sólo agrega texto al motivo — nunca reinterpreta el precio
     en silencio (acá hay plata real)."""
     from backend.locale_ar import fmt_num
-    for factor in (0.001, 1000.0):
+    causas = (
+        # ×/÷1000: formato ("141.750" con punto decimal se lee 141.750,00)
+        (0.001, "Ojo con el formato es-AR: el PUNTO es separador de miles y el decimal va con COMA"),
+        (1000.0, "Ojo con el formato es-AR: el PUNTO es separador de miles y el decimal va con COMA"),
+        # ×/÷100: precio por 1 VN en vez de por 100 VN (caso GN39O 1.448,50 vs 144.850)
+        (100.0, "Ojo: los bonos/ONs cotizan POR 100 VN, no por 1 VN"),
+        (0.01, "Ojo: los bonos/ONs cotizan POR 100 VN, no por 1 VN"),
+    )
+    for factor, causa in causas:
         alt = price * factor
         if ref and abs(alt / ref - 1.0) <= band:
-            return (f" ¿Quisiste decir {fmt_num(alt, 2)}? Ojo con el formato es-AR: "
-                    f"el PUNTO es separador de miles y el decimal va con COMA "
+            return (f" ¿Quisiste decir {fmt_num(alt, 2)}? {causa} "
                     f"(el precio ingresado se leyó como {fmt_num(price, 2)}).")
     return ""
 
