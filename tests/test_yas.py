@@ -77,15 +77,16 @@ def test_dual_tamar_txmj9v_price_87_30() -> None:
     assert _isfin(m["margen_tna"]), "Margen TNA debería computarse para VARIABLE_CAP"
     assert _isfin(m["benchmark_pct"]), "Benchmark TAMAR debería estar disponible"
 
-    # Target del prompt: Margen TNA ≈ 8% sobre el TAMAR aplicable. La ventana
-    # de TNA va RELATIVA al benchmark vivo: la absoluta (27-34%, TAMAR ~23%)
-    # se vencía con cada actualización del backup BCRA (TAMAR 24,5% → TNA
-    # 34,7% y el test rompía sin bug alguno).
+    # A PRECIO FIJO (87,30) el margen sube mecánicamente con cada día que pasa
+    # (menos plazo, mismo descuento): cualquier banda de nivel rueda y rompe
+    # sin bug (pasó dos veces). Lo robusto es la IDENTIDAD estructural
+    # margen = TNA − benchmark, más bandas anchas de sanidad.
     bench = m["benchmark_pct"] / 100.0
     assert 0.10 <= bench <= 0.60, f"Benchmark TAMAR fuera de rango sano: {bench!r}"
-    assert bench + 0.04 <= m["tna"] <= bench + 0.12, \
-        f"TNA no ronda benchmark+margen(~8pp): tna={m['tna']!r} bench={bench!r}"
-    assert 0.05 <= m["margen_tna"] <= 0.11, f"Margen TNA fuera de target ~8%: {m['margen_tna']!r}"
+    assert abs(m["margen_tna"] - (m["tna"] - bench)) < 1e-9, \
+        f"margen != tna - bench: {m['margen_tna']!r} vs {m['tna']!r} - {bench!r}"
+    assert 0.02 <= m["margen_tna"] <= 0.20, \
+        f"Margen TNA fuera de sanidad [2%,20%]: {m['margen_tna']!r}"
 
     # La TNA cruda de rentafija (cnv 'plazo remanente') seguía dando
     # ~51% — la dejamos expuesta como `tna_raw` para diagnóstico.
