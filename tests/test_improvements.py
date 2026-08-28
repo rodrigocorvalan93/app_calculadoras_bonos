@@ -291,7 +291,7 @@ def test_forwards_matrix_caps_width() -> None:
     m = rc._matrix_from_rows(rows)
     assert m["truncated"] is True and m["total"] == n and m["n"] == rc.MAX_FWD
     kept = {r["code"] for r in m["rows"]}
-    assert f"B{n - 1}" in kept and f"B0" not in kept       # se quedan los de mayor volumen
+    assert f"B{n - 1}" in kept and "B0" not in kept       # se quedan los de mayor volumen
 
     wi_rows, wi_m = rc._whatif_from_rows(rows, None, {})
     assert len(wi_rows) == rc.MAX_FWD and wi_m["n"] == rc.MAX_FWD
