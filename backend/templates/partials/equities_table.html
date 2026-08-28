@@ -3,7 +3,7 @@
 {% else %}
 <div class="card">
   <div class="card-title">
-    <span>{{ {"cedears": "CEDEARs", "general": "Acciones · Panel general"}.get(panel, "Acciones · Panel líderes") }} · Mercado</span>
+    <span>{{ {"cedears": "CEDEARs", "general": "Acciones · Panel general", "todas": "Acciones · Líder + General"}.get(panel, "Acciones · Panel líderes") }} · Mercado</span>
     <span class="card-title-aux">{{ rows | length }} especies · plazo {{ plazo }} · sólo precios (sin TIR)</span>
   </div>
   <div class="card-body" style="padding:0">
@@ -12,6 +12,7 @@
       <thead>
         <tr>
           <th data-sort style="text-align:left">Código</th>
+          {% if panel == "todas" %}<th data-sort title="Panel BYMA: Líder / General">Panel</th>{% endif %}
           <th data-sort class="grp">Open</th>
           <th data-sort>Close</th>
           <th data-sort>Low</th>
@@ -37,6 +38,7 @@
               hx-get="/mercado/book/{{ r.code }}?plazo={{ plazo }}" hx-target="#mercado-book" hx-swap="innerHTML"
               title="Ver libro de {{ r.code }}">
             <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
+            {% if panel == "todas" %}<td><span class="pill" style="font-size:10px;{{ 'border-color:rgba(34,197,94,.5)' if r.panel == 'L' else '' }}">{{ r.panel }}</span></td>{% endif %}
             <td class="grp">{{ r.open | ar_num(2) }}</td>
             <td>{{ r.close | ar_num(2) }}</td>
             <td>{{ r.low | ar_num(2) }}</td>

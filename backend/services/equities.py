@@ -62,12 +62,30 @@ MERVAL_SYMBOLS = ("MERV - XMEV - I.MERVAL - 24hs", "MERV - XMEV - I.MERVAL - CI"
                   "MERV - XMEV - I.MERVAL", "I.MERVAL")
 
 
+def panel_tickers(panel: str) -> List[str]:
+    """Membresía VIVA del panel (BYMA Open Data, refresh diario desde el
+    lifespan) con fallback a la lista curada: sin red, la app queda igual
+    que siempre. Ver byma_paneles."""
+    from backend.services import byma_paneles
+    dyn = byma_paneles.tickers(panel)
+    if dyn:
+        return dyn
+    return {"cedears": CEDEARS, "general": GENERAL}.get(panel, LIDERES)
+
+
 def all_symbols() -> List[str]:
-    """Símbolos a suscribir en el WS al arranque (24hs + CI + Merval)."""
+    """Símbolos a suscribir en el WS (24hs + CI + Merval): la UNIÓN de las
+    listas curadas y la membresía viva ya conocida — el refresher del
+    lifespan re-llama esto tras cada refresh y suscribe la diferencia."""
     out: List[str] = []
-    for code in LIDERES + GENERAL + CEDEARS:
-        out.append(syms.md_symbol(code, "24hs"))
-        out.append(syms.md_symbol(code, "CI"))
+    vistos = set()
+    for panel, curada in (("lideres", LIDERES), ("general", GENERAL), ("cedears", CEDEARS)):
+        for code in set(curada) | set(panel_tickers(panel)):
+            if code in vistos:
+                continue
+            vistos.add(code)
+            out.append(syms.md_symbol(code, "24hs"))
+            out.append(syms.md_symbol(code, "CI"))
     out.extend(MERVAL_SYMBOLS)
     return out
 
@@ -102,8 +120,21 @@ def row_for(code: str, plazo: str = "24hs") -> Optional[Dict[str, Any]]:
 
 
 def panel_rows(panel: str, plazo: str = "24hs") -> List[Dict[str, Any]]:
-    codes = {"cedears": CEDEARS, "general": GENERAL}.get(panel, LIDERES)
-    rows = [r for c in codes if (r := row_for(c, plazo)) is not None]
+    if panel == "todas":
+        # Líder + General en una tabla, con badge L/G por fila. Dedupe por si
+        # las fuentes mixtas (viva + curada) solapan un ticker: gana Líder.
+        rows: List[Dict[str, Any]] = []
+        vistos: set = set()
+        for p, tag in (("lideres", "L"), ("general", "G")):
+            for c in panel_tickers(p):
+                if c in vistos:
+                    continue
+                vistos.add(c)
+                if (r := row_for(c, plazo)) is not None:
+                    r["panel"] = tag
+                    rows.append(r)
+    else:
+        rows = [r for c in panel_tickers(panel) if (r := row_for(c, plazo)) is not None]
     vmax = max((r.get("volume") or 0.0) for r in rows) if rows else 0.0
     for r in rows:
         r["volume_frac"] = (r.get("volume") or 0.0) / vmax if vmax > 0 else 0.0

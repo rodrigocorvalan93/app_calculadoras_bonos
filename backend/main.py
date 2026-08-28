@@ -339,6 +339,26 @@ async def lifespan(app: FastAPI):
 
     alertas_task = asyncio.create_task(_alertas_checker(), name="alertas-check")
 
+    # Paneles de equities VIVOS (BYMA Open Data): refresh 1×/día en el pool —
+    # BYMA rota la composición Líder/General ~1×/año y publica el universo de
+    # CEDEARs; si el refresh trae tickers nuevos, se suscriben al WS en
+    # caliente (ws.subscribe es incremental). Sin red → fallback a las listas
+    # curadas de equities.py, la app queda igual que siempre.
+    async def _paneles_refresher() -> None:
+        from backend.services import byma_paneles, equities
+        loop = asyncio.get_running_loop()
+        await asyncio.sleep(20)                # tras el boot, fuera del camino crítico
+        while True:
+            try:
+                got = await loop.run_in_executor(None, byma_paneles.refresh)
+                if got:
+                    await ws.subscribe(equities.all_symbols())
+            except Exception:  # noqa: BLE001
+                logger.exception("[main] refresh de paneles BYMA falló")
+            await asyncio.sleep(24 * 3600)
+
+    paneles_task = asyncio.create_task(_paneles_refresher(), name="byma-paneles")
+
     # Watchdog del feed: mail si el WS del broker cae >N min en horario de
     # rueda (y otro al recuperarse). Chequeo liviano cada 60 s; sólo lee flags.
     watchdog_task = None
@@ -380,6 +400,7 @@ async def lifespan(app: FastAPI):
         logger.exception("[main] tls bridge stop failed")
     snapshot_task.cancel()
     alertas_task.cancel()
+    paneles_task.cancel()
     if watchdog_task is not None:
         watchdog_task.cancel()
     if autosave is not None:
