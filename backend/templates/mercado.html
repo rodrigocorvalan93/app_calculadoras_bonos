@@ -16,13 +16,36 @@
           <span>Panel</span>
           <select name="panel"
                   hx-get="/mercado/table" hx-trigger="change" hx-target="#mercado-table" hx-swap="innerHTML"
-                  hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente]">
+                  hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=q], [name=mas]">
             <option value="rf" selected>Renta Fija</option>
             <option value="lideres">Acciones · Líder</option>
             <option value="general">Acciones · General</option>
             <option value="todas">Acciones · Todas</option>
             <option value="cedears">CEDEARs</option>
           </select>
+        </label>
+        {# Herramientas del panel CEDEARs (viven FUERA del swap del partial —
+           un input adentro perdería el foco con cada refresh de ~1 s).
+           Buscador: matchea en TODO el universo conocido (~1.300) y suscribe
+           on-demand lo que falte. +150: agrega la siguiente tanda por volumen
+           después del top vivo (se acumula hasta reiniciar la app). #}
+        <label class="field" id="ced-tools" hidden>
+          <span>Todos los CEDEARs</span>
+          <span style="display:flex;gap:6px;align-items:center">
+            <input type="text" name="q" id="ced-q" placeholder="buscar en todos…" autocomplete="off"
+                   style="width:130px"
+                   hx-get="/mercado/table" hx-trigger="keyup changed delay:400ms, search"
+                   hx-target="#mercado-table" hx-swap="innerHTML"
+                   hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=mas]"
+                   title="Busca por ticker en TODOS los CEDEARs que conoce BYMA (~1.300), no sólo los del panel. Si el que buscás no está suscripto, se suscribe al vuelo y el precio aparece en 1-2 s.">
+            <input type="hidden" name="mas" id="ced-mas-n" value="0">
+            <button type="button" id="ced-mas" class="btn-primary" style="font-size:11px;white-space:nowrap"
+                    hx-get="/mercado/table" hx-trigger="click"
+                    hx-target="#mercado-table" hx-swap="innerHTML"
+                    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=q], [name=mas]"
+                    onclick="var n=document.getElementById('ced-mas-n'); n.value=(+n.value||0)+150"
+                    title="Muestra (y suscribe) los siguientes 150 CEDEARs por volumen operado. Cada tanda queda suscripta hasta reiniciar la app.">+150</button>
+          </span>
         </label>
         <label class="field">
           <span>Curva</span>
@@ -32,7 +55,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym]"
+            hx-include="[name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=q], [name=mas]"
           >
             {% for c in all_curves %}
               {% set count = (table.get(c.key) or []) | length %}
@@ -50,7 +73,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym]"
+            hx-include="[name=curve], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=q], [name=mas]"
           >
             <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
@@ -64,7 +87,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=fuente], [name=panel], [name=ym]"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=fuente], [name=panel], [name=ym], [name=q], [name=mas]"
             title="Nativa: precio del ticker propio (fx-free). USD/USB: precio cable/MEP directo. ARS: precio pesos ÷ FX nativo."
           >
             <option value="native" {% if leg == "native" %}selected{% endif %}>Nativa</option>
@@ -81,7 +104,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=panel], [name=ym]"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=panel], [name=ym], [name=q], [name=mas]"
             title="BYMA: book en vivo del broker. MAE: precios OTC (último/cierre/var/mín-máx/volumen), sin libro; cae a BYMA si no hay dato MAE para el bono."
           >
             <option value="byma" {% if fuente != "mae" %}selected{% endif %}>BYMA (book)</option>
@@ -102,7 +125,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel]"
+            hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=q], [name=mas]"
             onchange="lsSet('m_ym', this.value)"
             title="TIREA clásica o margen TNA sobre el benchmark (TAMAR/BADLAR). El margen sólo aplica a tasa variable benchmarkeada; el resto muestra —."
           >
@@ -124,7 +147,7 @@
             hx-trigger="change"
             hx-target="#mercado-table"
             hx-swap="innerHTML"
-            hx-include="[name=curve], [name=plazo], [name=leg], [name=fuente], [name=panel], [name=only_quoting], [name=ym]"
+            hx-include="[name=curve], [name=plazo], [name=leg], [name=fuente], [name=panel], [name=only_quoting], [name=ym], [name=q], [name=mas]"
           >
           Solo con cotización
         </label>
@@ -162,7 +185,7 @@
     hx-get="/mercado/table"
     hx-trigger="md-update from:body, every 30s"
     hx-swap="innerHTML"
-    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym]"
+    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=q], [name=mas]"
   >
     {% include "partials/mercado_table.html" %}
   </div>
@@ -189,6 +212,25 @@
         sel.dispatchEvent(new Event('change', { bubbles: true }));
       }
     } catch (e) { /* queda el modo por defecto */ }
+  });
+  // Herramientas de CEDEARs (buscador global + "ver 150 más"): visibles sólo
+  // con ese panel; al salir se resetean para que no filtren de fondo la
+  // próxima vez ni ensucien los requests de los otros paneles.
+  function cedTools() {
+    var p = document.querySelector('[name=panel]');
+    var t = document.getElementById('ced-tools');
+    if (!p || !t) return;
+    var on = p.value === 'cedears';
+    t.hidden = !on;
+    if (!on) {
+      var q = document.getElementById('ced-q'), n = document.getElementById('ced-mas-n');
+      if (q) q.value = '';
+      if (n) n.value = '0';
+    }
+  }
+  window.addEventListener('load', cedTools);
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.name === 'panel') cedTools();
   });
 </script>
 {% endblock %}

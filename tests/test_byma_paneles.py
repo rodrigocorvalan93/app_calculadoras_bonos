@@ -92,22 +92,22 @@ async def test_http_panel_todas() -> None:
         assert 'value="todas"' in mp.text
 
 
-def test_extract_symbols_top_por_volumen() -> None:
+def test_extract_symbols_orden_volumen() -> None:
     filas = [
         {"symbol": "PEPE", "volume": 10},
         {"symbol": "TSLA", "volume": 500},
         {"symbol": "KO", "volumeAmount": "500"},      # string y otro campo: vale igual
-        {"symbol": "ZZZZ"},                           # sin volumen → 0
+        {"symbol": "ZZZZ"},                           # sin volumen → 0, al final
         {"symbol": "MSFT", "montoOperado": 1000},
     ]
-    # top=3 → MSFT (1000) + TSLA/KO (500 c/u; empate = orden BYMA); salida ordenada
-    assert bp._extract_symbols(filas, top=3) == ["KO", "MSFT", "TSLA"]
-    # sin top (default) o con top holgado no se recorta nada
-    assert len(bp._extract_symbols(filas)) == 5
-    assert len(bp._extract_symbols(filas, top=99)) == 5
+    # orden_volumen: desc por volumen, empates (TSLA/KO) en el orden de BYMA
+    assert bp._extract_symbols(filas, orden_volumen=True) == \
+        ["MSFT", "TSLA", "KO", "PEPE", "ZZZZ"]
+    # default: alfabético (paneles de acciones), completo
+    assert bp._extract_symbols(filas) == ["KO", "MSFT", "PEPE", "TSLA", "ZZZZ"]
 
 
-def test_fetch_panel_capea_solo_cedears() -> None:
+def test_fetch_panel_cedears_completo_en_orden_volumen() -> None:
     filas = [{"symbol": f"C{i:04d}", "volume": i} for i in range(1, 1301)]
 
     class _Resp:
@@ -122,21 +122,83 @@ def test_fetch_panel_capea_solo_cedears() -> None:
             return _Resp()
 
     vivos = bp._fetch_panel(_Sess(), bp._EPS["cedears"])
-    assert len(vivos) == bp.CEDEARS_VIVOS_MAX
-    assert "C1300" in vivos and "C0001" not in vivos    # quedan los de mayor volumen
-    # el mismo shape en un panel de acciones NO se capea
-    assert len(bp._fetch_panel(_Sess(), bp._EPS["general"])) == 1300
+    assert len(vivos) == 1300 and vivos[0] == "C1300"   # completo, mayor volumen 1º
+    # panel de acciones: completo alfabético
+    gen = bp._fetch_panel(_Sess(), bp._EPS["general"])
+    assert len(gen) == 1300 and gen[0] == "C0001"
 
 
-def test_cedears_vivos_union_curados() -> None:
-    # el cap por volumen puede dejar afuera un curado líquido (p. ej. finde sin
-    # volumen): la vista cedears suma SIEMPRE los curados, sin duplicar
+def test_cedears_cap_en_equities_y_union_curados() -> None:
+    # lista viva grande (orden de volumen desc): el panel default corta en
+    # CEDEARS_VIVOS_MAX y suma SIEMPRE los curados, sin duplicar
+    vivos = [f"C{i:04d}" for i in range(1300, 0, -1)]
     with bp._lock:
-        bp._cache["cedears"] = ["NUEV1", "NUEV2", "SPY"]
+        bp._cache["cedears"] = list(vivos)
     got = equities.panel_tickers("cedears")
-    assert "NUEV1" in got and "SPY" in got and "EWZ" in got
-    assert len(got) == len(set(got))
+    assert "C1300" in got and "C1001" in got and "C1000" not in got   # top 300
+    assert "SPY" in got and "EWZ" in got and len(got) == len(set(got))
+    # lista viva chica: entra entera + curados (un finde sin volumen no borra nada)
+    with bp._lock:
+        bp._cache["cedears"] = ["NUEV1", "SPY"]
+    got2 = equities.panel_tickers("cedears")
+    assert "NUEV1" in got2 and "SPY" in got2 and "EWZ" in got2
     # Líder/General siguen REEMPLAZANDO (la rotación de BYMA debe mover la acción)
     with bp._lock:
         bp._cache["general"] = ["MOLI"]
     assert equities.panel_tickers("general") == ["MOLI"]
+
+
+def test_cedears_universo_y_view() -> None:
+    vivos = [f"C{i:04d}" for i in range(1300, 0, -1)]     # C1300 = más operado
+    with bp._lock:
+        bp._cache["cedears"] = list(vivos)
+    univ = equities.cedears_universo()
+    assert univ[:2] == ["C1300", "C1299"] and "SPY" in univ
+    assert len(univ) == 1300 + len(equities.CEDEARS)      # sin solapamiento acá
+    # búsqueda global: matchea fuera del top-300 y lo reporta como "nuevo"
+    codes, nuevos = equities.cedears_view(q="c0250")
+    assert codes == ["C0250"] and nuevos == ["C0250"]
+    # un curado del panel base NO es nuevo
+    codes2, nuevos2 = equities.cedears_view(q="SPY")
+    assert "SPY" in codes2 and "SPY" not in nuevos2
+    # "ver 150 más": la siguiente tanda POR VOLUMEN después del panel base
+    base = equities.panel_tickers("cedears")
+    codes3, nuevos3 = equities.cedears_view(mas=150)
+    assert len(codes3) == len(base) + 150 and len(nuevos3) == 150
+    assert nuevos3[0] == "C1000"                          # el que sigue al top 300
+    # sin q ni mas → el panel base tal cual, nada para suscribir
+    codes4, nuevos4 = equities.cedears_view()
+    assert codes4 == base and nuevos4 == []
+
+
+@pytest.mark.asyncio
+async def test_http_cedears_buscador_y_mas(monkeypatch) -> None:
+    """El buscador y el +150 suscriben on-demand y muestran filas stub que se
+    llenan cuando el feed contesta (acá: guiones, sin datos sembrados)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.services import primary_ws
+
+    class _WS:
+        def __init__(self):
+            self.subs: list = []
+
+        async def subscribe(self, symbols):
+            self.subs.extend(symbols)
+    ws = _WS()
+    monkeypatch.setattr(primary_ws, "get_ws_client", lambda: ws)
+    with bp._lock:
+        bp._cache["cedears"] = [f"C{i:04d}" for i in range(1300, 0, -1)]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/mercado/table?panel=cedears&plazo=24hs&q=C0123")
+        assert r.status_code == 200 and "C0123" in r.text          # fila stub
+        assert any("C0123" in s for s in ws.subs)                  # suscripto al vuelo
+        assert any("CI" in s for s in ws.subs)                     # ambos plazos
+        r2 = await ac.get("/mercado/table?panel=cedears&plazo=24hs&mas=150")
+        assert r2.status_code == 200 and "C1000" in r2.text        # 1º de la tanda extra
+        assert "de 14" in r2.text                                  # "N de 14xx conocidos"
+        # sin q/mas: el panel default no suscribe nada nuevo
+        n_subs = len(ws.subs)
+        r3 = await ac.get("/mercado/table?panel=cedears&plazo=24hs")
+        assert r3.status_code == 200 and len(ws.subs) == n_subs
