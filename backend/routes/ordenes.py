@@ -186,6 +186,8 @@ async def ordenes_ticket(request: Request, code: str = Form(""), side: str = For
                        error="Cantidad/precio inválidos.", **_base_ctx())
     moneda = _moneda(code)
     ref = _last_ref(code, plazo)
+    if ref is None:                             # ON ilíquido sin dato en el store:
+        ref = await oms.market_ref_rest(syms.md_symbol(code, plazo))  # ref del broker
     theo = await _theo_ref_async(code)          # GIL-bound → threadpool
     motivo = oms.validate(code, side, fqty, fpx, account, ref, moneda, ordtype,
                           theo_ref=theo, confirmed=(confirm_no_ref == "1"))
@@ -253,6 +255,8 @@ async def ordenes_multi(request: Request, code: str = Form(""), side: str = Form
                        error="Precio inválido (Limit).", **_base_ctx())
     moneda = _moneda(code)
     ref = _last_ref(code, plazo)
+    if ref is None:                             # ON ilíquido sin dato en el store:
+        ref = await oms.market_ref_rest(syms.md_symbol(code, plazo))  # ref del broker
     theo = await _theo_ref_async(code)          # GIL-bound → threadpool
     confirmed = (confirm_no_ref == "1")
     est_px = fpx if ordtype != "market" else (ref or theo)

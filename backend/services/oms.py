@@ -151,6 +151,54 @@ def blotter(n: int = 60) -> List[Dict[str, Any]]:
     return rows
 
 
+async def market_ref_rest(symbol: str) -> Optional[float]:
+    """Last/close del broker por REST para un símbolo SIN dato en el store
+    (ON ilíquido, especie fuera del universo WS). Cierra el agujero real del
+    fat-finger: sin referencia la banda no corría, y un precio tipeado con
+    punto decimal ("141.750", estilo Matriz) que el parser es-AR lee ×1000
+    (141.750,00) viajaba al broker — caso VSCMO. Si el broker puede aceptar la
+    orden, el broker TIENE el market data: con esto la banda casi siempre corre.
+    Una llamada por armado de ticket (no es hot path), best-effort: sin sesión
+    o sin dato → None y el flujo queda como siempre (valor técnico →
+    confirmación manual)."""
+    from backend.services.primary_ws import get_ws_client
+    c = get_ws_client()
+    if not c.authenticated:
+        return None
+    try:
+        d = await c.get_json("rest/marketdata/get", {
+            "marketId": "ROFX", "symbol": symbol, "entries": "LA,CL", "depth": 1})
+        if not isinstance(d, dict) or d.get("status") != "OK":
+            return None
+        md = d.get("marketData") or {}
+        for k in ("LA", "CL"):
+            v = md.get(k)
+            px = v.get("price") if isinstance(v, dict) else None
+            if px:
+                return float(px)
+    except Exception:  # noqa: BLE001 — best-effort: cualquier problema → sin ref
+        return None
+    return None
+
+
+def _hint_magnitud(price: float, ref: float, band: float) -> str:
+    """Detector del clásico error de formato: '141.750' tipeado con punto
+    decimal (estilo Matriz/en-US) se lee es-AR como 141.750,00 (×1000) — y al
+    revés, '204,600' pensado en-US como 204.600 se lee 204,60 (÷1000). Si el
+    precio rechazado ENCAJA en la banda al correrle la coma 3 lugares, el
+    rechazo lo dice explícito: el operador corrige al toque en vez de pelearse
+    con la banda. Sólo agrega texto al motivo — nunca reinterpreta el precio
+    en silencio (acá hay plata real)."""
+    from backend.locale_ar import fmt_num
+    for factor in (0.001, 1000.0):
+        alt = price * factor
+        if ref and abs(alt / ref - 1.0) <= band:
+            return (f" ¿Quisiste decir {fmt_num(alt, 2)}? Ojo con el formato es-AR: "
+                    f"el PUNTO es separador de miles y el decimal va con COMA "
+                    f"(el precio ingresado se leyó como {fmt_num(price, 2)}).")
+    return ""
+
+
 def validate(code: str, side: str, qty: float, price: Optional[float],
              account: str, last_ref: Optional[float], moneda: str = "ARS",
              ordtype: str = "limit", theo_ref: Optional[float] = None,
@@ -197,13 +245,15 @@ def validate(code: str, side: str, qty: float, price: Optional[float],
             band = settings.oms_price_band_pct / 100.0
             if abs(price / last_ref - 1.0) > band:
                 return (f"Precio {price} fuera de la banda ±{settings.oms_price_band_pct:.0f}% "
-                        f"vs mercado {last_ref} (fat-finger guard).")
+                        f"vs mercado {last_ref} (fat-finger guard)."
+                        + _hint_magnitud(price, last_ref, band))
         elif theo_ref and theo_ref > 0:
             band = settings.oms_theo_band_pct / 100.0
             if abs(price / theo_ref - 1.0) > band:
                 return (f"Precio {price} fuera de la banda ±{settings.oms_theo_band_pct:.0f}% "
                         f"vs valor técnico {theo_ref:,.2f} (sin cotización de mercado; "
-                        f"revisalo o confirmá manualmente).")
+                        f"revisalo o confirmá manualmente)."
+                        + _hint_magnitud(price, theo_ref, band))
         elif settings.oms_require_ref_confirm and not confirmed:
             return ("Sin referencia de mercado ni valor técnico para validar el precio. "
                     "Confirmá manualmente (o usá Market) para enviar.")
@@ -392,11 +442,19 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
             return {"status": "ERROR", "motivo": motivo, "candidatos": cands, **rec}
 
     ordtype = payload.get("ordtype", "limit")
+    qty = payload["qty"]
+    try:
+        # VN entero cuando lo es: un "300000.0" flotante en el query string es
+        # buscarse un parseo raro del lado del broker (campo entero en xOMS)
+        if float(qty).is_integer():
+            qty = int(qty)
+    except (TypeError, ValueError):
+        pass
     params = {
         "marketId": "ROFX",
         "symbol": payload["symbol"],
         "side": payload["side"],
-        "orderQty": payload["qty"],
+        "orderQty": qty,
         "ordType": ordtype,
         "timeInForce": "Day",
         "account": payload["account"],
