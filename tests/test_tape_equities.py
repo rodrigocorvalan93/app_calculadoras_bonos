@@ -73,3 +73,33 @@ async def test_equities_tape_news_endpoints() -> None:
     assert tp.status_code == 200                    # con o sin items, nunca rompe
     assert nm.status_code == 200                    # sin red → vacío, no error
     assert mp.status_code == 200 and 'value="cedears"' in mp.text   # selector de panel
+
+
+def test_panel_general_y_cedears_ampliados() -> None:
+    """El panel General existe (antes sólo había Líder) y las listas curadas
+    no se pisan entre sí; un ticker sin cotización simplemente no aparece."""
+    assert len(equities.GENERAL) >= 30 and len(equities.CEDEARS) >= 60
+    assert not (set(equities.GENERAL) & set(equities.LIDERES))
+    assert len(set(equities.CEDEARS)) == len(equities.CEDEARS)   # sin duplicados
+    _seed("MOLI", 300.0, 290.0)
+    rows = equities.panel_rows("general")
+    assert any(x["code"] == "MOLI" for x in rows)
+    assert not any(x["code"] == "GGAL" for x in rows)            # líder no se mezcla
+    # el seed del WS suscribe los TRES paneles (24hs + CI)
+    subs = equities.all_symbols()
+    assert any("MOLI" in s for s in subs) and any("NFLX" in s for s in subs)
+
+
+@pytest.mark.asyncio
+async def test_http_panel_general() -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    _seed("MOLI", 300.0, 290.0)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/mercado/table?panel=general&plazo=24hs")
+        assert r.status_code == 200
+        assert "Panel general" in r.text and "MOLI" in r.text
+        mp = await ac.get("/mercado")
+        assert 'value="general"' in mp.text                      # opción en el selector

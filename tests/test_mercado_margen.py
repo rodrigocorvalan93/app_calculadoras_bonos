@@ -13,10 +13,20 @@ from backend.services import bond_universe, curves, pricing
 
 
 def _floater_code() -> str:
+    """Un TAMAR con vida >= 90 dias: el primero de la lista puede estar al
+    borde del vencimiento (settle 24hs cae en/tras su madurez -> sin TIR) y
+    el test rodaba con la fecha sin bug alguno."""
+    from datetime import date, timedelta
+
     bond_universe.ensure_loaded()
+    td = date.today() + timedelta(days=90)
     for c in curves.build_curve_codes().get("tamar") or []:
-        return c
-    pytest.skip("sin bonos TAMAR en el universo")
+        o = bond_universe.get(c)
+        v = getattr(o, "vencimiento", None)
+        vd = v.date() if hasattr(v, "date") else v
+        if vd and vd > td:
+            return c
+    pytest.skip("sin bonos TAMAR con vida suficiente en el universo")
 
 
 def test_margen_viene_del_mismo_calculo() -> None:

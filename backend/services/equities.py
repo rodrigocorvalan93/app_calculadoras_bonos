@@ -14,16 +14,48 @@ from typing import Any, Dict, List, Optional
 
 from backend.services import marketdata_store as mds, symbols as syms
 
+# Listas CURADAS y editables (BYMA rota la composición de los paneles ~1x/año;
+# ajustar acá). Un ticker que no cotiza — o ya no existe — simplemente no
+# aparece en la tabla: agregar de más es inocuo, faltar es invisible.
 # Panel líderes BYMA (ARS).
 LIDERES: List[str] = [
     "GGAL", "YPFD", "PAMP", "ALUA", "BBAR", "BMA", "BYMA", "CEPU", "COME",
     "CRES", "EDN", "IRSA", "LOMA", "METR", "MIRG", "SUPV", "TECO2", "TGNO4",
-    "TGSU2", "TRAN", "TXAR", "VALO",
+    "TGSU2", "TRAN", "TXAR", "VALO", "TEN", "AGRO",
 ]
-# CEDEARs líquidos (ARS; el subyacente cotiza en USD afuera).
+# Panel general BYMA (ARS) — el resto de las acciones locales con mercado.
+GENERAL: List[str] = [
+    "AUSO", "BHIP", "BOLT", "BPAT", "CADO", "CAPX", "CARC", "CECO2", "CELU",
+    "CGPA2", "CTIO", "DGCU2", "DOME", "DYCA", "FERR", "FIPL", "GAMI", "GARO",
+    "GBAN", "GCLA", "GRIM", "HARG", "HAVA", "INTR", "INVJ", "LEDE", "LONG",
+    "MOLA", "MOLI", "MORI", "OEST", "PATA", "POLL", "RIGO", "ROSE", "SAMI",
+    "SEMI", "GCDI",
+]
+# CEDEARs (ARS; el subyacente cotiza en USD afuera). Los ~80 más operados:
+# ETFs, tech, ADRs argentinos, Brasil, bancos, energía, consumo y salud.
 CEDEARS: List[str] = [
-    "SPY", "EWZ", "QQQ", "DIA", "AAPL", "MSFT", "NVDA", "TSLA", "GOOGL",
-    "AMZN", "META", "MELI", "KO", "DIS", "BRKB", "JPM", "XOM", "GOLD",
+    # ETFs
+    "SPY", "EWZ", "QQQ", "DIA", "IWM", "XLE", "XLF", "EEM", "ARKK",
+    # ADRs argentinos
+    "VIST", "GLOB", "ARCO", "DESP", "BIOX",
+    # Tech / growth
+    "AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META", "MELI", "AMD",
+    "NFLX", "INTC", "CSCO", "IBM", "ORCL", "CRM", "ADBE", "QCOM", "AVGO",
+    "MU", "PYPL", "UBER", "ABNB", "PLTR", "SNOW", "SHOP", "SPOT", "COIN",
+    "MSTR", "TSM", "BABA", "JD", "NIO",
+    # Brasil
+    "PBR", "VALE", "ITUB", "BBD", "ABEV",
+    # Financieras
+    "BRKB", "JPM", "V", "MA", "BAC", "C", "WFC", "GS", "MS", "AXP",
+    # Energía / materiales
+    "XOM", "CVX", "OXY", "SLB", "HAL", "FCX", "RIO", "BHP", "GOLD", "NEM",
+    "AA", "X",
+    # Industriales / autos
+    "GE", "CAT", "DE", "BA", "MMM", "F", "GM",
+    # Consumo
+    "KO", "DIS", "WMT", "COST", "MCD", "SBUX", "NKE", "HD", "PG", "PEP",
+    # Salud / telco
+    "PFE", "JNJ", "MRK", "ABBV", "LLY", "UNH", "GILD", "BMY", "T", "VZ",
 ]
 # Índice Merval (si el broker lo sirve; símbolo crudo, sin plazo).
 MERVAL_SYMBOLS = ("MERV - XMEV - I.MERVAL - 24hs", "MERV - XMEV - I.MERVAL - CI",
@@ -33,7 +65,7 @@ MERVAL_SYMBOLS = ("MERV - XMEV - I.MERVAL - 24hs", "MERV - XMEV - I.MERVAL - CI"
 def all_symbols() -> List[str]:
     """Símbolos a suscribir en el WS al arranque (24hs + CI + Merval)."""
     out: List[str] = []
-    for code in LIDERES + CEDEARS:
+    for code in LIDERES + GENERAL + CEDEARS:
         out.append(syms.md_symbol(code, "24hs"))
         out.append(syms.md_symbol(code, "CI"))
     out.extend(MERVAL_SYMBOLS)
@@ -70,7 +102,7 @@ def row_for(code: str, plazo: str = "24hs") -> Optional[Dict[str, Any]]:
 
 
 def panel_rows(panel: str, plazo: str = "24hs") -> List[Dict[str, Any]]:
-    codes = CEDEARS if panel == "cedears" else LIDERES
+    codes = {"cedears": CEDEARS, "general": GENERAL}.get(panel, LIDERES)
     rows = [r for c in codes if (r := row_for(c, plazo)) is not None]
     vmax = max((r.get("volume") or 0.0) for r in rows) if rows else 0.0
     for r in rows:
