@@ -20,6 +20,14 @@ from backend.services import auth, historico_byma, historico_writer as hw
 _TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
+@pytest.fixture(autouse=True)
+def _journal_aislado(tmp_path, monkeypatch):
+    """Cada test usa un journal local propio (save_today ahora SIEMPRE
+    journalea): sin esto escribirían en el journal real de la máquina y la
+    consolidación cruzaría días entre tests."""
+    monkeypatch.setenv("HISTORICO_JOURNAL_DIR", str(tmp_path / "journal_local"))
+
+
 def _ba(y, m, d, hh, mm) -> datetime:
     return datetime(y, m, d, hh, mm, tzinfo=_TZ)
 
@@ -164,6 +172,77 @@ def test_build_rows_desde_store_vivo() -> None:
     assert fila.iloc[0]["Price Source"] == "LA"
     assert fila.iloc[0]["TIREA"] == fila.iloc[0]["TIREA"]      # no NaN
     assert fila.iloc[0]["fecha_hoy"] == datetime.now(_TZ).date()
+
+
+# ── solidez: journal local + catch-up + reintentos + estado ────────────────
+def test_journal_y_catchup(hist_env, monkeypatch) -> None:
+    """El caso 25-28/08: la base quedó atrasada pero el journal local capturó
+    el cierre → consolidar_journal la repara sin filas nuevas."""
+    d1, d2 = date(2026, 8, 24), date(2026, 8, 25)
+    xlsx = str(hist_env / hw.HIST_FILENAME)
+    hw.append_and_save(_rows_df(d1), xlsx)                      # base llega hasta d1
+
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 8, 25, 17, 5))
+    hw.write_journal(_rows_df(d2))                              # el cierre d2, sólo local
+    assert list(hw._journal_days()) == [d2]
+
+    res = hw.consolidar_journal()                               # catch-up (p. ej. al boot)
+    assert res and res["consolidados"] == 1 and res["total_rows"] == 4
+    back = pd.read_excel(xlsx, parse_dates=["fecha_hoy"])
+    assert sorted(set(back["fecha_hoy"].dt.date.astype(str))) == \
+        ["2026-08-24", "2026-08-25"]
+    assert hw.consolidar_journal() is None                      # nada pendiente → no-op
+    # base_writer=0 → el catch-up tampoco toca la base compartida
+    monkeypatch.setattr(settings, "historico_base_writer", False)
+    hw.write_journal(_rows_df(d2))
+    assert hw.consolidar_journal() is None
+    historico_byma.refresh()   # cache global limpio para otros tests
+
+
+def test_append_reintenta_ante_lock(hist_env, monkeypatch) -> None:
+    """Un xlsx lockeado (OneDrive sincronizando / abierto en Excel) ya no
+    pierde el guardado: reintenta con backoff y sale bien."""
+    import os as _os
+    xlsx = str(hist_env / hw.HIST_FILENAME)
+    real_replace, fallos = _os.replace, {"n": 0}
+
+    def replace_flaky(src, dst):
+        if str(dst).endswith(".xlsx") and fallos["n"] < 2:
+            fallos["n"] += 1
+            raise PermissionError("[WinError 32] usado por otro proceso (OneDrive)")
+        return real_replace(src, dst)
+    monkeypatch.setattr(hw.os, "replace", replace_flaky)
+    monkeypatch.setattr(hw.time, "sleep", lambda s: None)       # sin esperar de verdad
+    res = hw.append_and_save(_rows_df(date(2026, 8, 26)), xlsx)
+    assert fallos["n"] == 2 and res["total_rows"] == 2
+    assert (hist_env / hw.HIST_FILENAME).exists()
+
+
+def test_save_today_journal_only_con_writer_apagado(hist_env, monkeypatch) -> None:
+    hoy = datetime.now(_TZ)
+    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date()))
+    monkeypatch.setattr(settings, "historico_autosave_min_operados", 1)
+    monkeypatch.setattr(settings, "historico_base_writer", False)
+    res = hw.save_today()
+    assert res["ok"] is True and "journal local" in (res["skipped"] or "")
+    assert res.get("journal") and not (hist_env / hw.HIST_FILENAME).exists()
+    # el botón manual (force) escribe la base aunque writer=0
+    res2 = hw.save_today(force=True)
+    assert res2["ok"] is True and (hist_env / hw.HIST_FILENAME).exists()
+    from backend.services import historico_byma
+    historico_byma.refresh()
+
+
+def test_estado_atraso_y_journal(hist_env, monkeypatch) -> None:
+    # base hasta el viernes 28/08; lunes 31 a las 18:00 → atraso = 1 hábil
+    hw.append_and_save(_rows_df(date(2026, 8, 28)), str(hist_env / hw.HIST_FILENAME))
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 8, 31, 18, 0))
+    e = hw.estado()
+    assert e["ultima_fecha"] == "2026-08-28" and e["esperado"] == "2026-08-31"
+    assert e["atraso_habiles"] == 1 and e["ok"] is False
+    # lunes ANTES del cierre → el esperado es el viernes → al día
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 8, 31, 10, 0))
+    assert hw.estado()["ok"] is True
 
 
 # ── endpoint manual: sólo superuser ─────────────────────────────────────────
