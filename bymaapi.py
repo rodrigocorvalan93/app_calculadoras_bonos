@@ -76,13 +76,31 @@ def _get_paced(session: requests.Session, url: str, params: dict | None = None) 
 # =============================================================================
 # Constantes
 # =============================================================================
-# Host del broker — dos vigentes: latinsecurities.matrizoms y lbo.xoms. Se
-# elige por secrets.txt (OMS_BASE_URL=https://api.lbo.xoms.com.ar/) sin tocar
-# código; sin la clave queda el default de siempre.
-BASE_URL = (os.getenv("OMS_BASE_URL", "").strip() or
-            "https://api.latinsecurities.matrizoms.com.ar/")
-if not BASE_URL.endswith("/"):
-    BASE_URL += "/"
+def _resolver_base_url() -> str:
+    """Host del broker. Prioridad: OMS_BASE_URL (override propio de bymaapi)
+    → PRIMARY_BASE_URL (el broker activo de la APP, mismo secrets.txt) → LBO
+    por default. Así bymaapi sigue solo al broker que usa la app sin tocar
+    código; latinsecurities queda disponible seteando OMS_BASE_URL."""
+    url = (os.getenv("OMS_BASE_URL", "").strip()
+           or os.getenv("PRIMARY_BASE_URL", "").strip()
+           or "https://api.lbo.xoms.com.ar/")
+    return url if url.endswith("/") else url + "/"
+
+
+BASE_URL = _resolver_base_url()
+
+
+def _resolver_credenciales() -> tuple:
+    """Credenciales PAREADAS con el host (las claves suelen ser distintas en
+    cada broker): en latinsecurities mandan OMS_USER/OMS_PASS (las históricas
+    de Latin); en cualquier otro host (LBO default) mandan PRIMARY_USER/
+    PRIMARY_PASS — las mismas que usa la app — con fallback cruzado por si
+    sólo hay un juego cargado en secrets.txt."""
+    if "latin" in BASE_URL:
+        return (os.getenv("OMS_USER") or os.getenv("PRIMARY_USER"),
+                os.getenv("OMS_PASS") or os.getenv("PRIMARY_PASS"))
+    return (os.getenv("PRIMARY_USER") or os.getenv("OMS_USER"),
+            os.getenv("PRIMARY_PASS") or os.getenv("OMS_PASS"))
 
 # =============================================================================
 # Conexión / Instrumentos
@@ -128,7 +146,7 @@ def login_xoms(username: str, password: str) -> requests.Session:
             "Login sin cookie de sesión: el server aceptó el POST pero no autenticó "
             "(credenciales incorrectas o el endpoint de login cambió)."
         )
-    print("Autenticación exitosa en Cocos")
+    print(f"Autenticación exitosa en {BASE_URL}")
     return session
 
 
@@ -816,8 +834,14 @@ def _sin_timezones(df: pd.DataFrame) -> pd.DataFrame:
 
 def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
     """
-    Guarda el DF en Excel, concatenando con datos existentes si existe.
-    Mantengo tu lógica, pero ojo: ahora TEM/TNA/TIREA vienen formateadas como % strings.
+    Guarda el DF en la base (Excel + espejo parquet), concatenando con lo
+    existente. El WRITE va por backend.services.historico_writer.append_and_save
+    — la MISMA rutina endurecida del autosave de la app: escritura atómica
+    (tmp+replace: un corte a mitad de guardado no corrompe la base),
+    reintentos si el xlsx está lockeado (OneDrive sincronizando / archivo
+    abierto en Excel) y consolidación automática de los días pendientes del
+    journal local de la app. Mismo esquema y dedup de siempre. Si el backend
+    no está importable en este entorno, cae al write directo legacy.
     """
     for col in ['TIREA', 'TNA', 'TEM', 'Variación %']:
         if col in df.columns:
@@ -826,6 +850,30 @@ def guardar_excel(df: pd.DataFrame, file_path: str) -> None:
                 errors='coerce'
             ) / 100
 
+    # openpyxl rechaza datetimes con timezone (Price Date viene tz-aware acá):
+    # normalizar ANTES de cualquier write.
+    df = _sin_timezones(df)
+
+    try:
+        from backend.services import historico_writer
+        res = historico_writer.append_and_save(df, file_path)
+        msg = f"Base guardada con éxito en '{file_path}' ({res['total_rows']} filas totales"
+        if res.get("consolidados"):
+            msg += f"; se consolidaron {res['consolidados']} día(s) pendientes del journal de la app"
+        msg += ")." if res.get("parquet") else "). ⚠ Espejo parquet NO actualizado — revisar."
+        print(msg)
+        return
+    except ImportError as exc:
+        print(f"[bymaapi] backend no importable ({exc}) — uso el write directo legacy.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠ El write endurecido falló ({type(exc).__name__}: {exc}) — "
+              "intento el write directo legacy.")
+    _guardar_excel_directo(df, file_path)
+
+
+def _guardar_excel_directo(df: pd.DataFrame, file_path: str) -> None:
+    """Write legacy (fallback): concat + dedup + to_excel directo. Sólo corre
+    si el write endurecido del backend no está disponible o falló."""
     try:
         if os.path.exists(file_path):
             df_existente = pd.read_excel(file_path, parse_dates=["fecha_hoy"])
@@ -878,21 +926,20 @@ def main():
     global dual_cer_24hs_prices_df, dual_cer_proyectado_24hs_prices_df
     global todos_24hs_df, session
 
-    # --- Credenciales por env (NO hardcode) ---
-    username = os.getenv("OMS_USER")
-    password = os.getenv("OMS_PASS")
+    # --- Credenciales por env (NO hardcode), pareadas con el host ---
+    username, password = _resolver_credenciales()
     if not username or not password:
         raise RuntimeError(
-            "Faltan OMS_USER / OMS_PASS. Definilas en secrets.txt (formato KEY=VALUE)."
+            f"Faltan credenciales para {BASE_URL}: definí PRIMARY_USER/PRIMARY_PASS "
+            "(o OMS_USER/OMS_PASS para latinsecurities) en secrets.txt (KEY=VALUE)."
         )
 
+    print(f"[bymaapi] broker: {BASE_URL}")
     session = login_xoms(username, password)
 
     # --- A3500 override (por env o por variable global preexistente) ---
     from indices import fx_status_text, refresh_a3500_in_rentafija
- 
-    session = login_xoms(username, password)
-    
+
     # Refrescar FX con session (ahora puede usar DLR/SPOT como fallback)
     a3500_override = refresh_a3500_in_rentafija(session=session)
     print(f"[FX] {fx_status_text()}")
