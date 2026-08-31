@@ -2,6 +2,8 @@
 vista "Acciones · Todas" con badge Líder/General. Sin red: todo mockeado."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from backend.services import byma_paneles as bp, equities, marketdata_store as mds, symbols as syms
@@ -193,12 +195,14 @@ async def test_http_cedears_buscador_y_mas(monkeypatch) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.get("/mercado/table?panel=cedears&plazo=24hs&q=C0123")
         assert r.status_code == 200 and "C0123" in r.text          # fila stub
+        await asyncio.sleep(0.05)          # el subscribe es fire-and-forget (task)
         assert any("C0123" in s for s in ws.subs)                  # suscripto al vuelo
         assert any("CI" in s for s in ws.subs)                     # ambos plazos
         r2 = await ac.get("/mercado/table?panel=cedears&plazo=24hs&mas=150")
         assert r2.status_code == 200 and "C1000" in r2.text        # 1º de la tanda extra
         assert "de 14" in r2.text                                  # "N de 14xx conocidos"
         # sin q/mas: el panel default no suscribe nada nuevo
+        await asyncio.sleep(0.05)          # drenar el task del subscribe de r2
         n_subs = len(ws.subs)
         r3 = await ac.get("/mercado/table?panel=cedears&plazo=24hs")
         assert r3.status_code == 200 and len(ws.subs) == n_subs

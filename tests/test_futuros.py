@@ -43,17 +43,24 @@ def test_symbols_meses_en_espanol() -> None:
 def test_rows_lee_data_bajo_alias_ingles() -> None:
     """Data llegada (o persistida de versiones viejas) bajo el código inglés
     alimenta la fila del contrato canónico; `code` expone el símbolo real con
-    data para que el click al book pegue en el store."""
+    data para que el click al book pegue en el store.
+
+    A prueba de calendario: se elige el primer contrato CON alias (ENE/ABR/
+    AGO/DIC) que venza en ≥5 días — hardcodear "AGO" rompía el día del
+    vencimiento (31/08: dias=0 ⇒ TNA None por diseño, anualizar sobre 0 días
+    no significa nada)."""
+    from backend.locale_ar import hoy_ba
     from backend.services import marketdata_store as mds
 
-    sym = next(s for s in fut.symbols("may") if "AGO" in s)
+    sym = next(s for s in fut.symbols("may")
+               if fut._alias(s) and (fut._parse_vto(s) - hoy_ba()).days >= 5)
     alias = fut._alias(sym)
     sp = fut.spot() or 1000.0
     mds.get_store().update_from_md(alias, {"LA": {"price": sp * 1.05},
                                            "OI": {"size": 4321.0}})
     r = next((x for x in fut.rows("may") if x["code"] == alias), None)
     assert r is not None and r["last"] == pytest.approx(sp * 1.05)
-    assert r["oi"] == 4321.0 and r["label"].startswith("Ago")
+    assert r["oi"] == 4321.0 and r["label"][:3].upper() in sym   # Ago-26 ↔ DLR/AGO26M
     assert r["tna"] is not None
 
 

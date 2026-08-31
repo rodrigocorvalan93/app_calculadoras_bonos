@@ -25,6 +25,7 @@ from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_s
 # hits keep the work small, but the first poll after a price tick still
 # benefits from fan-out across cores.
 _row_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="curve-rows")
+_bg_tasks: set = set()      # refs vivas de tasks fire-and-forget (create_task guarda débil)
 
 router = APIRouter(prefix="/curves", tags=["curves"])
 
@@ -511,8 +512,14 @@ async def mercado_table_partial(
             codes, nuevos = equities.cedears_view(q=q, mas=mas)
             if nuevos:
                 from backend.services.primary_ws import get_ws_client
-                await get_ws_client().subscribe(
-                    [syms.md_symbol(c, p) for c in nuevos for p in ("24hs", "CI")])
+                # Fire-and-forget: subscribe manda por el WS en lotes con
+                # pausas (~50 ms c/u) — un "+150" son 300 símbolos ≈ 300 ms
+                # que ESTE request no tiene por qué esperar (las filas salen
+                # como stub igual y se llenan cuando el feed contesta).
+                t = asyncio.get_running_loop().create_task(get_ws_client().subscribe(
+                    [syms.md_symbol(c, p) for c in nuevos for p in ("24hs", "CI")]))
+                _bg_tasks.add(t)
+                t.add_done_callback(_bg_tasks.discard)
             eq_rows = equities.rows_for_codes(codes, plazo)
             ctx["buscado"] = bool(q.strip())
         else:
