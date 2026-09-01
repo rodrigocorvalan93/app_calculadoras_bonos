@@ -258,7 +258,8 @@ async def admin_salud(request: Request) -> HTMLResponse:
 
         from backend import cache_seq
         from backend.services import (bond_universe, cafci_api, errores, historico,
-                                      mae as mae_svc, marketdata_store, oms)
+                                      historico_writer, mae as mae_svc,
+                                      marketdata_store, oms)
         from backend.services.primary_ws import get_ws_client
         from backend.services.warmup import get_daemon
 
@@ -308,6 +309,7 @@ async def admin_salud(request: Request) -> HTMLResponse:
             ("MAE (OTC)", _sec(mae_svc.status)),
             ("CAFCI API", _sec(cafci_api.status)),
             ("Macro BCRA", _sec(_bcra)),
+            ("Base histórica px/tasas", _sec(historico_writer.estado)),
             ("Universo + warmup", _sec(lambda: {"bonos": len(bond_universe.all_codes()),
                                                 **(get_daemon().stats() or {})})),
             ("OMS", _sec(_oms)),

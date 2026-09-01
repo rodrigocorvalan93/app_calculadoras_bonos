@@ -96,10 +96,18 @@ class Settings(BaseSettings):
     # ── Autoguardado del histórico px/tasas al cierre ─────────────────────
     # Si la app está corriendo a esa hora (BA, días hábiles), guarda las filas
     # del día en el Excel/Parquet de bymaapi (mismo esquema y dedup).
-    # HISTORICO_AUTOSAVE=0 lo apaga — dejalo prendido en UNA sola máquina si
-    # corrés la app en dos a la vez (evita escribir el archivo en paralelo).
+    # HISTORICO_AUTOSAVE=0 lo apaga. Dejalo PRENDIDO en todas las máquinas:
+    # cada una journalea el cierre en una carpeta LOCAL (red de seguridad,
+    # fuera de OneDrive). Para evitar que varias escriban la BASE compartida
+    # en paralelo (copias de conflicto de OneDrive), apagá el writer abajo
+    # en las máquinas secundarias.
     historico_autosave: bool = True
     historico_autosave_hhmm: str = "17:01"
+    # HISTORICO_BASE_WRITER=0 → esta máquina sólo journalea local; NO escribe
+    # el Excel/Parquet compartido (lo consolida la máquina writer o el botón
+    # manual, que siempre puede). Recomendado: writer=1 sólo en la PC que
+    # queda siempre prendida.
+    historico_base_writer: bool = True
     # Mínimo de bonos con operaciones DE HOY para autoguardar (guard de
     # feriado/sin rueda: los cierres pegajosos de ayer no cuentan).
     historico_autosave_min_operados: int = 30
