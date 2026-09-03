@@ -244,7 +244,7 @@
     {
       "id": "PRECIO",
       "name": "PRECIO",
-      "description": "Precio (clean, % del par) de un bono a una TIR dada (decimal) — inverso del YAS. Ej: =OMS.PRECIO(\"GD30\";0,14).",
+      "description": "Precio a una TIR dada (decimal), en la convención de mercado del bono (clean para GD/AL, dirty para CER/lecaps/DLK) — inverso exacto de OMS.TIREA. Ej: =OMS.PRECIO(\"GD30\";0,14).",
       "result": {
         "type": "number"
       },
@@ -349,7 +349,7 @@
     {
       "id": "CALC",
       "name": "CALC",
-      "description": "Cualquier métrica del YAS: tirea, tna, tem, duration, paridad, precio_pct, precio_clean_pct, intereses_corridos, valor_residual, valor_tecnico, dias_remanentes...",
+      "description": "Cualquier métrica del YAS: tirea, tna, tem, duration, paridad, precio_pct, precio_clean_pct, precio_mercado_pct, intereses_corridos, valor_residual, valor_tecnico, dias_remanentes...",
       "result": {
         "type": "any"
       },

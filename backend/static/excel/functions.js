@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v13 · 2026-08-19 (rebrand YieldVertex — las fórmulas siguen siendo =OMS.*)";
+var OMS_BUILD = "v14 · 2026-09-03 (OMS.PRECIO devuelve la convención de mercado — inverso exacto de OMS.TIREA)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -621,8 +621,12 @@ function tireaFn(especie, precio, plazo, fx) {
 }
 
 function precioFn(especie, tir, plazo, fx) {
-  // TIR decimal (0,1388 = 13,88 %) → precio clean % del par, como el YAS.
-  return calcField(calcItem(especie, "tir", tir, plazo, null, fx), "precio_clean_pct");
+  // TIR decimal (0,1388 = 13,88 %) → precio en la CONVENCIÓN DE MERCADO del
+  // bono (clean para GD/AL CLEAN-quoted; dirty para CER/lecaps/DLK…): el
+  // inverso exacto de OMS.TIREA. Antes devolvía precio_clean_pct siempre y en
+  // un DIRTY amortizado (TX26, VR 20%) daba el clean-por-residual (~5× el
+  // precio de pantalla).
+  return calcField(calcItem(especie, "tir", tir, plazo, null, fx), "precio_mercado_pct");
 }
 
 function tnaFn(especie, precio, plazo, fx) {

@@ -198,7 +198,10 @@ resultado queda memoizado.
     =OMS.TIREA("GD30")                   → TIR al LAST del mercado (puntual)
     =OMS.TICKET("TXMJ8")                 → ticket al last, 1.000.000 VN default
     =OMS.TIREA("GD30";78,5;"15/08/2026") (con fecha de liquidación custom)
-    =OMS.PRECIO("GD30";0,14)             → precio clean % del par a TIR 14%
+    =OMS.PRECIO("GD30";0,14)             → precio a TIR 14%, en la convención de
+                                           mercado del bono (clean para GD/AL,
+                                           dirty para CER/lecaps/DLK) — inverso
+                                           exacto de OMS.TIREA
     =OMS.TNA("TTM26";99,8)               → TNA bajo la convención del bono
     =OMS.TICKET("GD30";78,5;1000000)     → spill: VN, monto, principal, interés…
     =OMS.CALC("TX26";"duration";105)     → cualquier métrica del YAS
@@ -234,7 +237,7 @@ TIREA, TNA (con su convención), TEM, duration y fecha de liquidación.
 
 ### OMS.CALC(especie; campo; valor; [modo]; [plazo_o_fecha]; [fx])
 Escape general: cualquier métrica del YAS. `campo`: `tirea`, `tna`, `tna_raw`,
-`tem`, `duration`, `paridad`, `precio_pct`, `precio_clean_pct`,
+`tem`, `duration`, `paridad`, `precio_pct`, `precio_clean_pct`, `precio_mercado_pct`,
 `intereses_corridos`, `dias_corridos`, `dias_remanentes`, `valor_residual`,
 `valor_tecnico`, `settle`, `tna_convention_label`. `modo` dice qué es `valor`:
 `precio` (default) | `tir` | `tna` | `margen`.

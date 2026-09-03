@@ -183,7 +183,11 @@ def test_cer_bond_shows_cer_aplicable() -> None:
             break
     if cer_code is None:
         pytest.skip("No CER bond in especies.py")
-    m = pricing.compute_metrics(cer_code, "precio", 95.0)
+    # settle FIJO dentro del backup de BCRA: sin red (contenedor/CI aislado) el
+    # CER del backup queda viejo y el settle de "hoy" cae fuera del forward-fill
+    # → error de cálculo y KeyError, rodando con la fecha. Una fecha pasada
+    # nunca sale del backup (la serie sólo crece).
+    m = pricing.compute_metrics(cer_code, "precio", 95.0, settle="19/08/2026")
     idx = m["index_applied"]
     assert idx["kind"] == "CER"
     assert _isfin(idx["value"]), f"CER value should be loaded from rentafija.inputs: {idx}"
