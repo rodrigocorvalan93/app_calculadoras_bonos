@@ -168,3 +168,6 @@ scripts/__pycache__/
 # Auth store (usuarios + hashes) — NUNCA commitear
 auth_store.json
 auth_store.json.tmp
+
+# Bundle de Chart.js cacheado para embeber en el reporte del comité
+.cache/
