@@ -452,7 +452,8 @@ _CALC_MAX_ITEMS = 40
 _calc_cache = LockedTTLCache(maxsize=8192, ttl=600)
 _CALC_MODOS = ("precio", "tir", "tna", "margen")
 _CALC_NUM = ("tirea", "tna", "tna_raw", "tem", "duration", "paridad", "margen_tna",
-             "precio_pct", "precio_clean_pct", "precio", "precio_clean",
+             "precio_pct", "precio_clean_pct", "precio_mercado_pct",
+             "precio", "precio_clean",
              "intereses_corridos", "dias_corridos", "dias_remanentes",
              "valor_residual", "valor_tecnico")
 

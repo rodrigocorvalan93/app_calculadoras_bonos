@@ -63,6 +63,7 @@ NAN_METRICS: Dict[str, float] = {
     "margen_tna": float("nan"),
     "precio_pct": float("nan"),
     "precio_clean_pct": float("nan"),
+    "precio_mercado_pct": float("nan"),
     "precio": float("nan"),
     "precio_clean": float("nan"),
     "intereses_corridos": float("nan"),
@@ -622,6 +623,15 @@ def compute_metrics(
 
     precio_pct = precio * 100.0 if np.isfinite(precio) else float("nan")
     precio_clean_pct = precio_clean * 100.0 if np.isfinite(precio_clean) else float("nan")
+    # Precio en la CONVENCIÓN DE MERCADO del bono — exactamente lo que
+    # calcula_tirea acepta como input: clean %-del-residual para los
+    # CLEAN-quoted (GD30/AL30…), dirty %-del-nominal para los DIRTY (CER,
+    # lecaps, DLK…). Es el campo que hace INVERSO el round-trip
+    # precio→TIR→precio (=OMS.PRECIO): en un DIRTY amortizado (TX26, VR 20%)
+    # el clean-por-residual da ~5× el precio de pantalla y no sirve de inverso.
+    precio_mercado_pct = (precio_clean_pct
+                          if getattr(obj, "quote_price_cnv", None) == "CLEAN"
+                          else precio_pct)
 
     idx_info = index_applied(obj)
     cashflows = _cashflows_from_obj(obj) if include_cashflows else []
@@ -638,6 +648,7 @@ def compute_metrics(
             "margen_tna": margen_tna,
             "precio_pct": precio_pct,
             "precio_clean_pct": precio_clean_pct,
+            "precio_mercado_pct": precio_mercado_pct,
             "precio": precio,
             "precio_clean": precio_clean,
             "intereses_corridos": ic,
