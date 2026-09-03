@@ -26747,47 +26747,6 @@ TY40O = {
     "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/b0b8c321-34dc-4faf-a915-b542c80758ed",
     "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/e091c0d0-fca7-4cda-a0e6-4e745bb9fc12"
 }
-SXC7O = {
-    "Nombre Security": "ON Mercado Pago Servicios de Procesamiento S.R.L. Clase 7 Vto 24 11 2026",
-    "Código": "SXC7O",
-    "ISIN": "AR0056720565",
-    "Calificación": "A1+(arg)",
-    "País": "Argentina",
-    "Clasificación": "Corporativo Tasa Fija",
-    "Industria": "Financials",
-    "Moneda": "ARS",
-    "Plazo habitual de liquidación: t +": 1.,
-    "Emisión": "24/08/2026",
-    "Vencimiento": "24/11/2026",
-    "Fecha Primer Cupón": "24/11/2026",
-    "Cupón / Spread": 28.,
-    "Step-up": False,
-    "Frecuencia de pago de cupón anual": 4.,
-    "Convención fechas de pago": "Regular",
-    "Convención de devengamiento": "Actual",
-    "Convención Base": 365.,
-    "Tipo de Amortización": "BULLET",
-    "Tipo Tasa Interés": "FIJA",
-    "Index": None,
-    "Días Lag índice desde inc": 0,
-    "Días Lag índice hasta inc": 0,
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": None,
-    "Factor Capitalización": 1.,
-    "Días lag Ajuste base": None,
-    "Días lag Ajuste": None,
-    "Fechas de cupón": [
-        "24/11/2026",
-    ],
-    "Amortización": None,
-    "Callable": False,
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": None,
-    "Comentarios": "Tasa fija nominal anual 28,00% (TNA de corte). Intereses en un único pago en la Fecha de Vencimiento Clase 7. Amortización bullet 100% al vencimiento. 'Las Obligaciones Negociables no podrán ser rescatadas total o parcialmente a opción de la Emisora con anterioridad a su vencimiento.' Sólo rescate por razones impositivas (no se carga).",
-    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/bcfedf2b-ab15-4097-9643-00b338cf1c83",
-    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/1f99a4df-9a5f-46c1-b7e1-e1f15c546431"
-}
 
 # UVA
 TLCJO = {
