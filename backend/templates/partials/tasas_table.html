@@ -14,16 +14,23 @@
 {% endif %}
 
 <div class="dolar-tables">
+  {# Filas BYMA clickeables → libro completo abajo (#cauc-book, fuera de este
+     partial para que el auto-refresh de la tabla no lo pise). #}
+  {% for titulo, filas, mon, vacio in [
+        ("🔁 Cauciones BYMA $ · por plazo", byma_cauciones, "PESOS", "Sin caución BYMA en el store (¿broker offline?)."),
+        ("🔁 Cauciones BYMA US$ · por plazo", byma_cauciones_usd, "DOLAR", "Sin caución BYMA US$ en el store.")] %}
   <div class="dolar-tbl">
-    <div class="dolar-tbl-h">🔁 Cauciones BYMA $ · por plazo</div>
+    <div class="dolar-tbl-h">{{ titulo }}</div>
     <div class="table-scroll">
       <table class="cashflows curve-table mercado-table">
         <thead>
           <tr><th style="text-align:left">Plazo</th><th>Tasa</th><th>Bid</th><th>Offer</th><th>Var</th><th>Volumen</th></tr>
         </thead>
         <tbody>
-          {% for r in byma_cauciones %}
-            <tr>
+          {% for r in filas %}
+            <tr style="cursor:pointer" title="Ver libro completo"
+                hx-get="/tasas/caucion/book?moneda={{ mon }}&dias={{ r._n }}"
+                hx-target="#cauc-book" hx-swap="innerHTML">
               <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}</td>
               <td class="{{ fx.vcls(r.var) }}" style="font-weight:600">{{ r.tasa | ar_num(2) }}</td>
               <td>{{ r.bid | ar_num(2) }}</td>
@@ -33,37 +40,13 @@
               <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="muted" style="text-align:center">Sin caución BYMA en el store (¿broker offline?).</td></tr>
+            <tr><td colspan="6" class="muted" style="text-align:center">{{ vacio }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
-
-  <div class="dolar-tbl">
-    <div class="dolar-tbl-h">🔁 Cauciones BYMA US$ · por plazo</div>
-    <div class="table-scroll">
-      <table class="cashflows curve-table mercado-table">
-        <thead>
-          <tr><th style="text-align:left">Plazo</th><th>Tasa</th><th>Bid</th><th>Offer</th><th>Var</th><th>Volumen</th></tr>
-        </thead>
-        <tbody>
-          {% for r in byma_cauciones_usd %}
-            <tr>
-              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}</td>
-              <td class="{{ fx.vcls(r.var) }}" style="font-weight:600">{{ r.tasa | ar_num(2) }}</td>
-              <td>{{ r.bid | ar_num(2) }}</td>
-              <td>{{ r.offer | ar_num(2) }}</td>
-              <td class="{{ fx.vcls(r.var) }}" style="{{ fx.heat(r.var, cap=1.0) }}">{{ fx.arrow(r.var) }} {{ r.var | ar_num(2) }}</td>
-              <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
-            </tr>
-          {% else %}
-            <tr><td colspan="6" class="muted" style="text-align:center">Sin caución BYMA US$ en el store.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+  {% endfor %}
 
   <div class="dolar-tbl">
     <div class="dolar-tbl-h">🔁 Cauciones MAE · por plazo</div>

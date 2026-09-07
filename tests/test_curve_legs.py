@@ -72,6 +72,75 @@ def test_ars_leg_needs_fx() -> None:
     assert not np.isfinite(row_nofx["tirea"] if row_nofx["tirea"] is not None else float("nan"))
 
 
+def test_native_dollar_code_join_por_isin() -> None:
+    """La especie en pesos de un hard-dollar resuelve su ficha NATIVA por ISIN
+    (los tickers no siempre comparten raíz: BPOC7 ↔ BPC7D)."""
+    from backend.services import pricing
+
+    bond_universe.ensure_loaded()
+    assert pricing.native_dollar_code("AL30") == "AL30D"    # bonar → MEP
+    assert pricing.native_dollar_code("GD30") == "GD30C"    # global → cable
+    assert pricing.native_dollar_code("BPOC7") == "BPC7D"   # BOPREAL: raíz distinta
+    assert pricing.native_dollar_code("AL30D") is None      # la nativa no se toca
+    assert pricing.native_dollar_code("TX26") is None       # bono ARS no se toca
+
+
+def test_especie_pesos_hard_dollar_divide_por_fx_de_pago(monkeypatch) -> None:
+    """Caso de la captura del usuario: Libro · AL30 con TIR @ LAST -100% en
+    todo el book — el precio ARS crudo de la especie en pesos entraba a la
+    calculadora del bono en dólares. Ahora el precio se divide por el FX de la
+    MONEDA DE PAGO (AL30 paga MEP → ÷ MEP; GD30 paga cable → ÷ CCL) y la TIR
+    se calcula con la ficha nativa (AL30D / GD30C)."""
+    bond_universe.ensure_loaded()
+    # Store propio: otros tests asumen los símbolos AL30/GD30 pesos vacíos.
+    store = mds_.MarketDataStore()
+    monkeypatch.setattr(mds_, "_store", store)
+    fx = fx_svc.FxSnapshot(ccl=1480.0, usb=1465.0)
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx)
+
+    store.update_from_md(syms_.md_symbol("AL30", "24hs"), {"LA": {"price": 84000.0}})
+    row = curves_route._row_for_code("AL30", "24hs", leg="native", fx=None)
+    assert row is not None
+    assert row["last"] == 84000.0                                # se muestra el precio pesos
+    assert row["px_calc"] == pytest.approx(84000.0 / 1465.0)     # ÷ MEP (paga MEP)
+    assert row["tirea"] is not None and np.isfinite(row["tirea"])
+    assert row["tirea"] > -0.5                                   # nunca más el -100%
+
+    store.update_from_md(syms_.md_symbol("GD30", "24hs"), {"LA": {"price": 85000.0}})
+    row_gd = curves_route._row_for_code("GD30", "24hs", leg="native", fx=None)
+    assert row_gd["px_calc"] == pytest.approx(85000.0 / 1480.0)  # ÷ CCL (paga cable)
+
+    # Sin FX vivo → None honesto (el template pinta "—"), jamás una TIR mentirosa.
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx_svc.FxSnapshot())
+    row_nofx = curves_route._row_for_code("AL30", "24hs", leg="native", fx=None)
+    assert row_nofx["px_calc"] is None
+    assert row_nofx["tirea"] is None or not np.isfinite(row_nofx["tirea"])
+
+
+@pytest.mark.asyncio
+async def test_mercado_book_especie_pesos_sin_menos_cien(monkeypatch) -> None:
+    """El libro de la especie en pesos (AL30) computa TIRs por nivel con el
+    precio normalizado — la página no vuelve a mostrar -100,00%."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    fx = fx_svc.FxSnapshot(ccl=1480.0, usb=1465.0)
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx)
+    store = mds_.MarketDataStore()                     # aislado (ver test de arriba)
+    monkeypatch.setattr(mds_, "_store", store)
+    store.update_from_md(syms_.md_symbol("AL30", "24hs"), {
+        "LA": {"price": 84000.0}, "CL": {"price": 83500.0},
+        "BI": [{"price": 83900.0, "size": 1000}],
+        "OF": [{"price": 84100.0, "size": 500}],
+    })
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/mercado/book/AL30", params={"plazo": "24hs", "leg": "native"})
+    assert r.status_code == 200
+    assert "book-stats" in r.text
+    assert "-100,00" not in r.text
+
+
 @pytest.mark.asyncio
 async def test_curves_table_leg_param_http() -> None:
     from httpx import ASGITransport, AsyncClient

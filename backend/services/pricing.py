@@ -403,6 +403,93 @@ def tirea_from_tna(
 
 _meta_cache: Dict[str, Dict[str, Any]] = {}
 
+# Especies hermanas del mismo bono hard-dollar. Los tickers no siempre
+# comparten raíz (BPOC7 ↔ BPC7D), así que el join es por datos de la ficha:
+# ISIN + vencimiento + cupón — el ISIN solo NO alcanza porque especies.py
+# arrastra ISINs copy-pasteados entre series (GD29/GD30, BPOA8/BPOB8,
+# VISTAA 33/38 comparten ISIN en la data); vencimiento y cupón separan a las
+# series reales sin separar jamás a las especies del mismo bono. El único
+# grupo que sigue pegado (BPOA8/BPOB8: todo idéntico) se desempata por
+# similitud de ticker (BPOA8 ↔ BPA8D comparten el "A8").
+_siblings_map: Optional[Dict[tuple, List[str]]] = None
+_siblings_lock = threading.Lock()
+
+
+def _dollar_group_key(obj) -> Optional[tuple]:
+    isin = getattr(obj, "isin", None)
+    if not isin:
+        return None
+    return (str(isin), str(getattr(obj, "vencimiento", None)),
+            str(getattr(obj, "cupon_spread", None)))
+
+
+def _dollar_siblings_map() -> Dict[tuple, List[str]]:
+    """(isin, vto, cupón) → códigos de las especies hard-dollar (Moneda
+    USD/USB) de ese bono. Se arma una vez (el universo es estático)."""
+    global _siblings_map
+    if _siblings_map is not None:
+        return _siblings_map
+    with _siblings_lock:
+        if _siblings_map is not None:
+            return _siblings_map
+        bond_universe.ensure_loaded()
+        grupos: Dict[tuple, List[str]] = {}
+        for c in bond_universe.all_codes():
+            obj = bond_universe.get(c)
+            if obj is None or getattr(obj, "moneda", "") not in ("USD", "USB"):
+                continue
+            key = _dollar_group_key(obj)
+            if key is not None:
+                grupos.setdefault(key, []).append(c)
+        _siblings_map = grupos
+        return grupos
+
+
+def dollar_siblings(code: str) -> List[str]:
+    """Códigos de las OTRAS especies del mismo bono hard-dollar (join por
+    ISIN+vto+cupón); [] si no es hard-dollar o no tiene ISIN."""
+    obj = bond_universe.get(code)
+    key = _dollar_group_key(obj) if obj is not None else None
+    if key is None:
+        return []
+    return [c for c in _dollar_siblings_map().get(key, []) if c != code]
+
+
+def _mas_parecido(code: str, cands: List[str]) -> str:
+    """Entre especies candidatas, la de ticker más parecido a `code` (resuelve
+    BPOA8 → BPA8D vs BPB8D cuando la ficha no distingue). Determinístico."""
+    from difflib import SequenceMatcher
+    return max(cands, key=lambda c: (SequenceMatcher(None, code, c).ratio(), -len(c), c))
+
+
+def native_dollar_code(code: str) -> Optional[str]:
+    """Especie NATIVA en dólares (…D MEP / …C cable, ficha DIRTY) del mismo
+    bono, para la especie en pesos / referencia clean de un hard-dollar:
+    AL30 → AL30D, GD30 → GD30C, BPOC7 → BPC7D. La preferencia sigue la
+    moneda de pago de la ficha (USB → MEP primero, USD → cable primero).
+    None si `code` ya es la nativa, no es hard-dollar, o no hay hermana."""
+    meta = bond_meta(code)
+    if meta.get("moneda") not in ("USD", "USB") or code[-1:] in ("C", "D"):
+        return None
+    sib = dollar_siblings(code)
+    pref = ("D", "C") if meta.get("moneda") == "USB" else ("C", "D")
+    for suf in pref:
+        cands = [c for c in sib if c.endswith(suf)]
+        if cands:
+            return _mas_parecido(code, cands)
+    return None
+
+
+def pesos_sibling_code(code: str) -> Optional[str]:
+    """Especie en PESOS (sin sufijo C/D, ticker BYMA real — sin espacios) del
+    mismo bono hard-dollar: AL30D → AL30, BPC7D → BPOC7. Para resolver la
+    pata ARS cuando la raíz del ticker difiere. None si no hay."""
+    cands = [c for c in dollar_siblings(code)
+             if c[-1:] not in ("C", "D") and " " not in c]
+    if not cands:
+        return None
+    return _mas_parecido(code[:-1] if code[-1:] in ("C", "D") else code, cands)
+
 
 def bond_meta(code: str) -> Dict[str, Any]:
     """Metadata estática del bono (no cambia en runtime). Memoizada: en curvas

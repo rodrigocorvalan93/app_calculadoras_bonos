@@ -140,7 +140,9 @@ async def test_futuros_override_and_book() -> None:
         ov = await ac.get("/futuros/table?spot_override=1500")
         bk = await ac.get("/futuros/book", params={"code": sym})
     assert ov.status_code == 200 and "1.500,00" in ov.text       # usó el override
-    assert bk.status_code == 200 and "Profundidad" in bk.text and "Compras" in bk.text
+    # book a paridad del de Mercado: stats + DOM con TNA implícita por nivel
+    assert bk.status_code == 200 and "Libro ·" in bk.text
+    assert "Bid TNA" in bk.text and "TNA impl @ last" in bk.text
 
 
 @pytest.mark.asyncio
