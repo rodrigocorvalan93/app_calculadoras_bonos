@@ -250,8 +250,13 @@ def test_guardar_fx_diario(hist_env, monkeypatch) -> None:
     espejo parquet, dedup por fecha keep-last. Sin ningún dato → no escribe."""
     from types import SimpleNamespace
 
-    from backend.services import dolares, fx as fx_svc
+    from backend.services import cauciones, dolares, fx as fx_svc
 
+    # La caución del histórico se pinea en None: otros tests dejan caución
+    # viva en el store global y reviviría el caso "feed muerto" de abajo.
+    # (El camino caución→fila FX tiene su propio test en
+    # tests/test_books_tasas_futuros.py con store aislado.)
+    monkeypatch.setattr(cauciones, "hist_row", lambda moneda="PESOS": None)
     monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": SimpleNamespace(
         ccl=1520.5, usb=1490.0, canje=1520.5 / 1490.0 - 1.0, ccl_base="GD30"))
     monkeypatch.setattr(dolares, "official_fx", lambda: {"last": 1497.53})

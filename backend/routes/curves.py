@@ -48,21 +48,41 @@ def _def_or_mix(key: str | None):
 _LEG_SUFFIX = {"USD": "C", "USB": "D"}
 
 
+def _pesos_de_dolar(code: str, meta: dict | None) -> bool:
+    """¿`code` es la especie en PESOS (o la referencia clean) de un bono
+    hard-dollar? Ficha con Moneda USD/USB pero ticker sin sufijo C/D (AL30,
+    GD30, BPOC7): el store cotiza esa especie en ARS, así que el precio debe
+    dividirse por el FX de la moneda de pago (MEP si USB, cable si USD) antes
+    de cualquier cálculo. Crudo, el precio en pesos entraba a la calculadora
+    del bono en dólares y la TIR daba -100% en todo el libro."""
+    return bool(meta) and meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D")
+
+
 def _leg_symbol(code: str, plazo: str, leg: str, store) -> tuple[str, str]:
     """(BYMA symbol, leg_basis) for the requested `leg` of a bond whose
     native ficha is `code` (`…C` cable / `…D` MEP).
 
-    leg="native" (default) uses the code's own ticker — the FX-free path.
+    leg="native" (default) uses the code's own ticker — the FX-free path,
+    EXCEPT when `code` itself is the pesos species of a hard-dollar bond
+    (AL30 / GD30 / BPOC7): its ticker quotes in ARS → basis "ARS".
     "USD"/"USB" point at the cable/MEP ticker; "ARS" at the pesos ticker
-    (base+"O" for corps, base for globales — whichever the store knows).
+    (ISIN sibling when the root differs — BPC7D → BPOC7 — else base+"O"
+    for corps / base for globales, whichever the store knows).
     """
     base = code[:-1] if code[-1:] in ("C", "D") else code
     if leg in _LEG_SUFFIX:
         return syms.md_symbol(base + _LEG_SUFFIX[leg], plazo), leg
     if leg == "ARS":
+        sib = pricing.pesos_sibling_code(code)
+        if sib and sib != code:
+            sym_s = syms.md_symbol(sib, plazo)
+            if store.get(sym_s) is not None:
+                return sym_s, "ARS"
         sym_o = syms.md_symbol(base + "O", plazo)
         sym_b = syms.md_symbol(base, plazo)
         return (sym_o if store.get(sym_o) is not None else sym_b), "ARS"
+    if _pesos_de_dolar(code, pricing.bond_meta(code)):
+        return syms.md_symbol(code, plazo), "ARS"   # especie pesos de un hard-dollar
     return syms.md_symbol(code, plazo), ""  # native
 
 
@@ -153,6 +173,12 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     # native rate → its own basis). USD/USB/native price straight off the
     # ticker. `cp()` normalizes any price quoted on this leg before calc.
     native = (meta.get("moneda") or "USD")
+    # Especie pesos de un hard-dollar (AL30/GD30/BPOC7): la ficha propia es la
+    # referencia CLEAN — la TIR del precio de pantalla (DIRTY) sale de la ficha
+    # NATIVA hermana (…D/…C), la misma que pricea la curva (cache compartido).
+    calc = pricing.native_dollar_code(code) or code
+    if leg_basis == "ARS" and fx is None:
+        fx = fx_svc.get_fx(plazo)        # cacheado — cubre leg=native sobre especie pesos
 
     def cp(px):
         if px is None:
@@ -169,7 +195,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     else:
         ref_px, price_source, price_date = None, None, None
 
-    m = (pricing.metrics_for_market_price(code, cp(ref_px), settle) or {}) if ref_px is not None else {}
+    m = (pricing.metrics_for_market_price(calc, cp(ref_px), settle) or {}) if ref_px is not None else {}
 
     # VWAP = efectivo / nominales * 100 (misma escala que el precio cotizado).
     vwap = None
@@ -191,8 +217,8 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     # Δ yield (bps) = TIREA(last) − TIREA(close).
     delta_yield_bps = None
     if last is not None and close is not None and last != close:
-        ty_last = m.get("tirea") if price_source == "LA" else _tirea_at(code, cp(last), settle)
-        ty_close = _tirea_at(code, cp(close), settle)
+        ty_last = m.get("tirea") if price_source == "LA" else _tirea_at(calc, cp(last), settle)
+        ty_close = _tirea_at(calc, cp(close), settle)
         if ty_last is not None and ty_close is not None and ty_last == ty_last and ty_close == ty_close:
             delta_yield_bps = (ty_last - ty_close) * 10000.0
 
@@ -258,12 +284,12 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         }
     )
     if book:
-        row["tirea_bid"], row["margen_bid"] = _tirea_margen_at(code, cp(bid), settle)
-        row["tirea_offer"], row["margen_offer"] = _tirea_margen_at(code, cp(offer), settle)
+        row["tirea_bid"], row["margen_bid"] = _tirea_margen_at(calc, cp(bid), settle)
+        row["tirea_offer"], row["margen_offer"] = _tirea_margen_at(calc, cp(offer), settle)
         if price_source == "LA":
             row["tirea_last"], row["margen_last"] = m.get("tirea"), m.get("margen_tna")
         else:
-            row["tirea_last"], row["margen_last"] = _tirea_margen_at(code, cp(last), settle)
+            row["tirea_last"], row["margen_last"] = _tirea_margen_at(calc, cp(last), settle)
         # tirea_low/high/close son sólo para el panel del libro (un bono), NO
         # para cada fila de la tabla — se calculan en la route /mercado/book.
         # Cross-venue MAE (OTC): último/volumen del mismo bono en MAE (cache).
@@ -292,7 +318,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
                 "price_source": "MAE", "src": "MAE", "last_cls": _px_cls(mlast, mclose),
             })
             if book:
-                row["tirea_last"], row["margen_last"] = _tirea_margen_at(code, cp(mlast), settle)
+                row["tirea_last"], row["margen_last"] = _tirea_margen_at(calc, cp(mlast), settle)
                 row["tirea_bid"] = row["tirea_offer"] = None
                 row["margen_bid"] = row["margen_offer"] = None
         else:
@@ -566,7 +592,10 @@ async def mercado_book(
     snap = store.get(symbol)
     meta = pricing.bond_meta(code) or {}
     native = meta.get("moneda") or "USD"
-    fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+    # Especie pesos de un hard-dollar → basis ARS aunque leg sea native, y las
+    # TIRs se calculan con la ficha nativa (…D/…C) al precio ÷ FX de pago.
+    calc = pricing.native_dollar_code(code) or code
+    fx = fx_svc.get_fx(plazo) if (leg == "ARS" or leg_basis == "ARS") else None
     settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = t+1 (fecha BA)
 
     def cp(px):
@@ -580,7 +609,7 @@ async def mercado_book(
         for lvl in (levels or []):
             px, sz = lvl.get("price"), lvl.get("size")
             cum += (sz or 0.0)
-            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(code, cp(px), settle)})
+            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(calc, cp(px), settle)})
         # Fracción del acumulado (se normaliza después contra el máx de ambas
         # puntas) → degradé de profundidad estilo DOM en el template.
         return out
@@ -596,9 +625,9 @@ async def mercado_book(
     def _build_book():
         r = _row_for_code(code, plazo, leg, fx, book=True, fuente=fuente, settle=settle)   # fila (BYMA o MAE)
         if r:  # TIR de mín/máx/cierre — sólo para este bono; sobre la fuente activa
-            r["tirea_low"] = _tirea_at(code, cp(r.get("low")), settle)
-            r["tirea_high"] = _tirea_at(code, cp(r.get("high")), settle)
-            r["tirea_close"] = _tirea_at(code, cp(r.get("close")), settle)
+            r["tirea_low"] = _tirea_at(calc, cp(r.get("low")), settle)
+            r["tirea_high"] = _tirea_at(calc, cp(r.get("high")), settle)
+            r["tirea_close"] = _tirea_at(calc, cp(r.get("close")), settle)
         bids = _depth_frac(with_yield(snap.bids if snap else None))
         offers = _depth_frac(with_yield(snap.offers if snap else None))
         return r, bids, offers

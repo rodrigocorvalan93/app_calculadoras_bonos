@@ -41,3 +41,13 @@ async def tasas_page(request: Request) -> HTMLResponse:
 async def tasas_table(request: Request) -> HTMLResponse:
     """Partial htmx (auto-refresh): cauciones + repo."""
     return _render(request, "partials/tasas_table.html", **_ctx())
+
+
+@router.get("/tasas/caucion/book", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)          # se auto-refresca con md-update: 1 build por tick
+async def tasas_caucion_book(request: Request, moneda: str = "PESOS", dias: int = 1) -> HTMLResponse:
+    """Libro completo de una caución BYMA (stats del día + profundidad con
+    acumulado + VWAP de sesión) — se carga al clickear su fila en Tasas.
+    Lee sólo del store en memoria (sub-ms)."""
+    return _render(request, "partials/caucion_book.html",
+                   b=cauc_svc.book(moneda, dias), moneda=moneda, dias=dias)

@@ -1,0 +1,60 @@
+{% import "partials/_fx_macros.html" as fx %}
+{# Libro de una caución BYMA, estilo Libro de Mercado: stats del día + DOM con
+   acumulado/degradé — acá el "precio" ES la TNA y el size es monto en $.
+   Se auto-refresca con el motor live (md-update ~1s tras un tick real,
+   fallback 30s) reemplazándose a sí mismo. #}
+{% if not b %}
+  <div class="alert" style="margin-top:14px">Sin datos de esa caución en el store (¿broker offline?).</div>
+{% else %}
+<div class="card" style="margin-top:14px" data-flash-scope
+     hx-get="/tasas/caucion/book?moneda={{ moneda | urlencode }}&dias={{ dias }}"
+     hx-trigger="md-update from:body, every 30s" hx-target="this" hx-swap="outerHTML">
+  <div class="card-title">
+    <span>Libro · Caución {{ b.moneda }} {{ b.plazo }}</span>
+    <span class="card-title-aux">liquida en {{ b.dias }} día{{ "s" if b.dias != 1 else "" }} · vto {{ b.vencimiento }}{% if not b.es_hoy %} · <span style="color:var(--red)">datos de la última rueda</span>{% endif %}</span>
+  </div>
+  <div class="card-body">
+    <div class="book-stats">
+      <div><span>Tasa (TNA)</span><b style="color:var(--accent)">{{ b.tasa | ar_num(2) }}%</b></div>
+      <div><span>Var (pp)</span><b class="{{ fx.vcls(b.var) }}">{% if b.var is not none %}{{ fx.arrow(b.var) }} {{ b.var | ar_num(2) }}{% else %}—{% endif %}</b></div>
+      <div><span>VWAP sesión</span><b>{% if b.vwap is not none %}{{ b.vwap | ar_num(2) }}%{% else %}—{% endif %}</b></div>
+      <div><span>Cierre ant.</span><b>{{ b.close | ar_num(2) }}</b></div>
+      <div><span>Apertura</span><b>{{ b.open | ar_num(2) }}</b></div>
+      <div><span>Mín</span><b>{{ b.low | ar_num(2) }}</b></div>
+      <div><span>Máx</span><b>{{ b.high | ar_num(2) }}</b></div>
+      <div><span>Monto operado</span><b>{{ b.monto | ar_hum }}</b></div>
+      <div><span>Ops</span><b>{{ b.ops | ar_int }}</b></div>
+    </div>
+    {% if not b.bids and not b.offers %}
+      <div class="alert">Sin profundidad viva para este plazo (¿no operó hoy?).</div>
+    {% else %}
+    <div class="book-grid">
+      <table class="cashflows">
+        <thead><tr><th>Bid TNA</th><th>Acum $</th><th>Monto $</th></tr></thead>
+        <tbody>
+          {% for l in b.bids %}
+          <tr class="depth-bid" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
+            <td class="px-up" style="font-weight:600">{{ l.tasa | ar_num(2) }}%</td>
+            <td style="color:var(--text-muted)">{{ l.cum | ar_hum }}</td>
+            <td>{{ l.monto | ar_hum }}</td>
+          </tr>
+          {% else %}<tr><td colspan="3" style="color:var(--text-muted)">— sin bids —</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      <table class="cashflows">
+        <thead><tr><th>Monto $</th><th>Acum $</th><th>Offer TNA</th></tr></thead>
+        <tbody>
+          {% for l in b.offers %}
+          <tr class="depth-ask" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
+            <td>{{ l.monto | ar_hum }}</td>
+            <td style="color:var(--text-muted)">{{ l.cum | ar_hum }}</td>
+            <td class="px-down" style="font-weight:600">{{ l.tasa | ar_num(2) }}%</td>
+          </tr>
+          {% else %}<tr><td colspan="3" style="color:var(--text-muted)">— sin offers —</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

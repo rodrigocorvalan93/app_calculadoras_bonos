@@ -95,6 +95,7 @@ def byma_rows(moneda: str = "PESOS", *, include_close_only: bool = False) -> Lis
             "moneda": "ARS" if m == "PESOS" else "USD",
             "tasa": last, "bid": bid, "offer": offer, "close": close,
             "var": var, "volumen": snap.volume,
+            "vwap": vwap_sesion(snap),
         })
     return rows
 
@@ -153,3 +154,83 @@ def rail_picks() -> List[Dict[str, Any]]:
         if pick is not None:
             out.append(pick)
     return out
+
+
+def vwap_sesion(snap: Any) -> float | None:
+    """Tasa promedio ponderada de la SESIÓN, del acumulador de trades del
+    store (`marketdata_store._acum_vwap_caucion` — el feed no publica VWAP de
+    tasa). None si no hay acumulación de HOY, o si lo acumulado cubre <60% del
+    monto operado del día (app arrancada a mitad de rueda: un promedio parcial
+    sería engañoso — mejor sin dato que con uno mentiroso)."""
+    acc = getattr(snap, "vwap_acc", None) or {}
+    den = acc.get("den") or 0.0
+    if den <= 0 or acc.get("day") != hoy_ba().isoformat():
+        return None
+    vol = getattr(snap, "volume", None)
+    if vol and den < 0.6 * vol:
+        return None
+    try:
+        return float(acc.get("num", 0.0)) / float(den)
+    except (TypeError, ZeroDivisionError, ValueError):
+        return None
+
+
+def book(moneda: str = "PESOS", dias: int = 1) -> Dict[str, Any] | None:
+    """Detalle completo de UNA caución para el card del libro en Tasas:
+    stats del día + profundidad con acumulado (tasa por nivel, monto en $)
+    + VWAP de sesión. Todo del store en memoria (sub-ms). Las puntas y stats
+    restauradas de otra rueda no cuentan (mismos guards que byma_rows);
+    None si el store no conoce el símbolo."""
+    from datetime import timedelta
+
+    m = _moneda_tk(moneda)
+    n = int(dias)
+    snap = marketdata_store.get_store().get(f"MERV - XMEV - {m} - {n}D")
+    if snap is None:
+        return None
+    hoy = _snap_tocado_hoy(snap)
+    last_hoy = snap.last is not None and _last_es_de_hoy(snap)
+
+    def levels(raw):
+        out: List[Dict[str, Any]] = []
+        cum = 0.0
+        for lvl in (raw if hoy else None) or []:
+            tasa, monto = lvl.get("price"), lvl.get("size")
+            cum += (monto or 0.0)
+            out.append({"tasa": tasa, "monto": monto, "cum": cum})
+        for lvl in out:                    # fracción → degradé de profundidad
+            lvl["frac"] = lvl["cum"] / cum if cum > 0 else 0.0
+        return out
+
+    last = snap.last if last_hoy else None
+    close = snap.close if snap.close is not None else (None if last_hoy else snap.last)
+    var = (last - close) if (last is not None and close is not None) else None
+    return {
+        "plazo": f"{n}D", "dias": n,
+        "moneda": "ARS" if m == "PESOS" else "USD",
+        "tasa": last, "close": close, "var": var,
+        "open": snap.open if hoy else None,
+        "high": snap.high if hoy else None,
+        "low": snap.low if hoy else None,
+        "monto": snap.volume if hoy else None,      # EV — $ operado en el día
+        "ops": snap.trade_count if hoy else None,
+        "vwap": vwap_sesion(snap),
+        "vencimiento": (hoy_ba() + timedelta(days=n)).isoformat(),
+        "bids": levels(snap.bids), "offers": levels(snap.offers),
+        "es_hoy": hoy,
+    }
+
+
+def hist_row(moneda: str = "PESOS") -> Dict[str, Any] | None:
+    """Dato de caución overnight para el HISTÓRICO diario: el plazo o/n real
+    del día (rail_pick: mayor volumen entre 1D-4D → un viernes cae solo al 3D
+    y pre-feriado al 4D, así la serie no tiene huecos), con la tasa operada
+    HOY (jamás el cierre de otra rueda) y el VWAP de sesión si es confiable."""
+    pick = rail_pick(moneda)
+    if not pick or pick.get("es_cierre") or pick.get("tasa") is None:
+        return None
+    snap = marketdata_store.get_store().get(
+        f"MERV - XMEV - {_moneda_tk(moneda)} - {pick['_n']}D")
+    return {"plazo_d": pick["_n"], "tna": pick["tasa"],
+            "vwap": vwap_sesion(snap) if snap is not None else None,
+            "monto": pick.get("volumen")}

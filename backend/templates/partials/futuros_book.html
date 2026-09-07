@@ -1,36 +1,66 @@
+{% import "partials/_fx_macros.html" as fx %}
+{# Libro de un contrato DLR a paridad del de Mercado: stats del día + DOM con
+   acumulado/degradé y TNA implícita por nivel (donde en bonos va la TIR).
+   Se auto-refresca con el motor live (md-update ~1s tras un tick real,
+   fallback 30s) reemplazándose a sí mismo — el spot_override viaja en la URL
+   para que el refresh conserve el spot manual. #}
 {% if not snap %}
   <div class="alert" style="margin-top:14px">Sin profundidad para <strong>{{ code }}</strong> (¿no operó o broker offline?).</div>
 {% else %}
-<div class="card" style="margin-top:14px">
+<div class="card" style="margin-top:14px" data-flash-scope
+     hx-get="/futuros/book?code={{ code | urlencode }}&spot_override={{ spot_override | urlencode }}"
+     hx-trigger="md-update from:body, every 30s" hx-target="this" hx-swap="outerHTML">
   <div class="card-title">
-    <span>Profundidad · {{ label }} <span class="muted" style="font-size:11px">{{ code }}</span></span>
-    <span class="card-title-aux">
-      {% if dias %}{{ dias }}d · {% endif %}Last <b>{{ snap.last | ar_num(2) }}</b>{% if tna_last is not none %} · TNA impl {{ tna_last | ar_pct(2) }}{% endif %}{% if snap.volume %} · Vol {{ snap.volume | ar_hum }}{% endif %}{% if snap.open_interest %} · OI {{ snap.open_interest | ar_hum }}{% endif %} · spot {{ spot | ar_num(2) }}
-    </span>
+    <span>Libro · {{ label }} <span class="muted" style="font-size:11px">{{ code }}</span></span>
+    <span class="card-title-aux">{% if vto %}vto {{ vto }} · {% endif %}{% if dias is not none %}{{ dias }}d · {% endif %}spot {{ spot | ar_num(2) }}{% if spot_override %} (override){% endif %}</span>
   </div>
   <div class="card-body">
-    <div class="dolar-tables">
-      <div class="dolar-tbl">
-        <div class="dolar-tbl-h">Compras (bids)</div>
-        <div class="table-scroll"><table class="cashflows curve-table mercado-table">
-          <thead><tr><th>Precio</th><th>Size</th><th>TNA impl</th></tr></thead>
-          <tbody>
-            {% for l in bids %}<tr><td style="color:var(--accent);font-weight:600">{{ l.price | ar_num(2) }}</td><td>{{ l.size | ar_int }}</td><td>{{ l.tna | ar_pct(2) }}</td></tr>
-            {% else %}<tr><td colspan="3" class="muted" style="text-align:center">— sin puntas</td></tr>{% endfor %}
-          </tbody>
-        </table></div>
-      </div>
-      <div class="dolar-tbl">
-        <div class="dolar-tbl-h">Ventas (offers)</div>
-        <div class="table-scroll"><table class="cashflows curve-table mercado-table">
-          <thead><tr><th>Precio</th><th>Size</th><th>TNA impl</th></tr></thead>
-          <tbody>
-            {% for l in offers %}<tr><td style="color:var(--accent);font-weight:600">{{ l.price | ar_num(2) }}</td><td>{{ l.size | ar_int }}</td><td>{{ l.tna | ar_pct(2) }}</td></tr>
-            {% else %}<tr><td colspan="3" class="muted" style="text-align:center">— sin puntas</td></tr>{% endfor %}
-          </tbody>
-        </table></div>
-      </div>
+    <div class="book-stats">
+      <div><span>Last</span><b class="{{ fx.vcls(var_pct) }}">{{ snap.last | ar_num(2) }}</b></div>
+      <div><span>Var vs ajuste</span><b class="{{ fx.vcls(var_pct) }}">{% if var_pct is not none %}{{ var_pct | ar_num(2) }}%{% else %}—{% endif %}</b></div>
+      <div><span>TNA impl @ last</span><b style="color:var(--accent)">{{ tna_last | ar_pct(2) }}</b></div>
+      <div><span>TEM impl</span><b>{{ tem_last | ar_pct(2) }}</b></div>
+      <div><span>Deva al vto</span><b>{{ td_last | ar_pct(2) }}</b></div>
+      <div><span>Ajuste ant.</span><b>{{ snap.close | ar_num(2) }} <small class="muted">· {{ tna_close | ar_pct(2) }}</small></b></div>
+      <div><span>Open</span><b>{{ snap.open | ar_num(2) }}</b></div>
+      <div><span>Mín op.</span><b>{{ snap.low | ar_num(2) }} <small class="muted">· {{ tna_low | ar_pct(2) }}</small></b></div>
+      <div><span>Máx op.</span><b>{{ snap.high | ar_num(2) }} <small class="muted">· {{ tna_high | ar_pct(2) }}</small></b></div>
+      <div><span>Volumen</span><b>{{ volume | ar_hum }}</b></div>
+      <div><span>OI</span><b>{{ snap.open_interest | ar_hum }}</b></div>
+      <div><span>Ops</span><b>{{ snap.trade_count | ar_int }}</b></div>
     </div>
+    {% if not bids and not offers %}
+      <div class="alert">Sin profundidad en el store para este contrato (¿no operó hoy?).</div>
+    {% else %}
+    <div class="book-grid">
+      <table class="cashflows">
+        <thead><tr><th>Bid TNA</th><th>Acum</th><th>Cant</th><th>Bid</th></tr></thead>
+        <tbody>
+          {% for l in bids %}
+          <tr class="depth-bid" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
+            <td style="color:var(--cyan)">{{ l.tna | ar_pct(2) }}</td>
+            <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
+            <td>{{ l.size | ar_int }}</td>
+            <td class="px-up" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
+          </tr>
+          {% else %}<tr><td colspan="4" style="color:var(--text-muted)">— sin bids —</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      <table class="cashflows">
+        <thead><tr><th>Offer</th><th>Cant</th><th>Acum</th><th>Offer TNA</th></tr></thead>
+        <tbody>
+          {% for l in offers %}
+          <tr class="depth-ask" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
+            <td class="px-down" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
+            <td>{{ l.size | ar_int }}</td>
+            <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
+            <td style="color:var(--cyan)">{{ l.tna | ar_pct(2) }}</td>
+          </tr>
+          {% else %}<tr><td colspan="4" style="color:var(--text-muted)">— sin offers —</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endif %}

@@ -526,8 +526,10 @@ FX_FILENAME = "Delta - historico_fx.xlsx"
 
 def build_fx_row() -> Optional[Dict[str, Any]]:
     """Fila del día con los FX de referencia del proceso: CCL (cable) y MEP
-    implícitos del store (mismos que usa toda la app), canje = CCL/MEP − 1 y
-    el oficial A3500. None si no hay NINGÚN dato (feed muerto)."""
+    implícitos del store (mismos que usa toda la app), canje = CCL/MEP − 1,
+    el oficial A3500, y la caución BYMA overnight (plazo real del día por
+    volumen — viernes 3D, pre-feriado 4D — con TNA de cierre y VWAP de sesión
+    si es confiable). None si no hay NINGÚN dato (feed muerto)."""
     from backend.services import dolares, fx as fx_svc
     snap = fx_svc.get_fx("24hs")
     oficial = None
@@ -535,11 +537,23 @@ def build_fx_row() -> Optional[Dict[str, Any]]:
         oficial = (dolares.official_fx() or {}).get("last")
     except Exception:  # noqa: BLE001
         pass
-    if not (snap.ccl or snap.usb or oficial):
+    cauc = None
+    try:
+        from backend.services import cauciones
+        cauc = cauciones.hist_row("PESOS")
+    except Exception:  # noqa: BLE001 — la caución jamás frena el guardado del FX
+        logger.warning("[historico_writer] caución para el histórico falló", exc_info=True)
+    if not (snap.ccl or snap.usb or oficial or cauc):
         return None
     return {"fecha_hoy": _now().date(), "ccl": snap.ccl, "mep": snap.usb,
             "canje": snap.canje, "oficial_a3500": oficial,
-            "ccl_base": snap.ccl_base or ""}
+            "ccl_base": snap.ccl_base or "",
+            # Caución BYMA $ o/n (las claves van SIEMPRE para que las columnas
+            # existan aunque un día no haya dato — None = celda vacía).
+            "caucion_plazo_d": (cauc or {}).get("plazo_d"),
+            "caucion_tna": (cauc or {}).get("tna"),
+            "caucion_tna_vwap": (cauc or {}).get("vwap"),
+            "caucion_monto": (cauc or {}).get("monto")}
 
 
 def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:

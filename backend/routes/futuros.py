@@ -132,8 +132,12 @@ async def futuros_table(request: Request, spot_override: str = "") -> HTMLRespon
 
 
 @router.get("/futuros/book", response_class=HTMLResponse)
+@seq_cached(ttl=2.0)          # se auto-refresca con md-update: 1 build por tick
 async def futuros_book(request: Request, code: str = "", spot_override: str = "") -> HTMLResponse:
-    """Profundidad (book) de un contrato + su tasa implícita por punta."""
+    """Libro de un contrato a paridad del de Mercado: stats completas del día
+    (last / var vs ajuste / open / mín / máx / volumen / OI) + profundidad con
+    acumulado y la TNA IMPLÍCITA por nivel — la columna donde en bonos va la
+    TIR. Vive: el card se re-renderiza con el motor md-update."""
     store = marketdata_store.get_store()
     snap = store.get(code)
     sp = _parse_num(spot_override) or fut.spot()
@@ -141,15 +145,36 @@ async def futuros_book(request: Request, code: str = "", spot_override: str = ""
     dias = (vto - hoy_ba()).days if vto else None
 
     def impl(px):
-        return fut._impl(px, sp, dias)[1]   # TNA implícita
+        return fut._impl(px, sp, dias)      # (deva td, TNA, TEM)
 
-    bids, offers = [], []
-    if snap is not None:
-        for lvl in (snap.bids or []):
-            bids.append({"price": lvl.get("price"), "size": lvl.get("size"), "tna": impl(lvl.get("price"))})
-        for lvl in (snap.offers or []):
-            offers.append({"price": lvl.get("price"), "size": lvl.get("size"), "tna": impl(lvl.get("price"))})
+    def levels(raw):
+        out, cum = [], 0.0
+        for lvl in (raw or []):
+            px, sz = lvl.get("price"), lvl.get("size")
+            cum += (sz or 0.0)
+            out.append({"price": px, "size": sz, "cum": cum, "tna": impl(px)[1]})
+        total = cum
+        for lvl in out:                     # fracción → degradé de profundidad
+            lvl["frac"] = (lvl["cum"] / total) if total > 0 else 0.0
+        return out
+
+    last = snap.last if snap else None
+    close = snap.close if snap else None
+    var_pct = None
+    try:
+        if last is not None and close not in (None, 0):
+            var_pct = (last / close - 1.0) * 100.0
+    except (TypeError, ZeroDivisionError):
+        var_pct = None
+    td_last, tna_last, tem_last = impl(last)
     return _render(request, "partials/futuros_book.html",
                    code=code, label=fut._label(code), snap=snap, dias=dias, spot=sp,
-                   bids=bids, offers=offers,
-                   tna_last=(impl(snap.last) if snap else None))
+                   vto=vto.isoformat() if vto else None,
+                   spot_override=spot_override or "", var_pct=var_pct,
+                   bids=levels(snap.bids if snap else None),
+                   offers=levels(snap.offers if snap else None),
+                   td_last=td_last, tna_last=tna_last, tem_last=tem_last,
+                   tna_close=impl(close)[1],
+                   tna_low=impl(snap.low if snap else None)[1],
+                   tna_high=impl(snap.high if snap else None)[1],
+                   volume=(snap.volume if snap.volume is not None else snap.nominal) if snap else None)

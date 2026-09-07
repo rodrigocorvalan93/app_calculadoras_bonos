@@ -5,15 +5,17 @@
 {% block content %}
 <section class="curves">
   <header class="yas-header">
-    <h1>📊 Tasas · money-market (MAE)</h1>
+    <h1>📊 Tasas · money-market</h1>
     <p class="muted">
-      Cauciones y repo desde <strong>MAE Market Data</strong> (SIOPEL), ordenadas por plazo.
-      Tasas como las informa MAE. Snapshot en memoria (refresca cada 20 s); sin <code>MAE_API_KEY</code> no hay datos.
+      Cauciones BYMA (del mismo feed que los bonos) + cauciones y repo de <strong>MAE Market Data</strong> (SIOPEL), ordenadas por plazo.
+      <strong>Click en una caución BYMA</strong> para ver el libro completo abajo. Sin <code>MAE_API_KEY</code>, sólo BYMA.
     </p>
   </header>
 
   <div id="tasas-table" data-flash-scope hx-get="/tasas/table" hx-trigger="md-update from:body, every 20s" hx-swap="innerHTML">
     {% include "partials/tasas_table.html" %}
   </div>
+
+  <div id="cauc-book" class="mercado-book"></div>
 </section>
 {% endblock %}

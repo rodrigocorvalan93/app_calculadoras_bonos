@@ -38,6 +38,10 @@ class MarketSnapshot:
     open_interest: Optional[float] = None  # OI — interés abierto (futuros)
     bids: Optional[List[Dict[str, Any]]] = None    # profundidad BI (hasta 5 niveles)
     offers: Optional[List[Dict[str, Any]]] = None  # profundidad OF (hasta 5 niveles)
+    # VWAP de TASA de la sesión (sólo caución: el feed no publica el promedio
+    # ponderado de tasas y EV/NV no lo derivan). {"num","den","sig","day"} —
+    # ver _acum_vwap_caucion. Persiste/restaura como cualquier campo.
+    vwap_acc: Optional[Dict[str, Any]] = None
     updated_at: float = field(default_factory=time.time)
 
     def vwap(self) -> Optional[float]:
@@ -107,6 +111,43 @@ def _depth_levels(raw: Any) -> Optional[List[Dict[str, Any]]]:
     return out or None
 
 
+# Símbolos de caución BYMA: "MERV - XMEV - PESOS - 1D" / "… - DOLAR - 7D".
+_CAUCION_MARKS = (" - PESOS - ", " - DOLAR - ")
+
+
+def _es_caucion(symbol: str) -> bool:
+    return any(k in symbol for k in _CAUCION_MARKS)
+
+
+def _dia_ba_str(epoch: float) -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.fromtimestamp(epoch, ZoneInfo("America/Argentina/Buenos_Aires")).date().isoformat()
+
+
+def _acum_vwap_caucion(snap: MarketSnapshot, now: float) -> None:
+    """VWAP de TASA de la sesión para caución: Σ tasa×monto / Σ monto de los
+    trades vistos por el WS (el feed no lo publica y con EV/NV no se deriva —
+    en caución ambos son plata, no precio×cantidad). La firma (tasa|monto|ts)
+    evita double-contar el LA sticky que reenvía el snapshot inicial; el día
+    BA resetea la acumulación (una sesión = un día). Costo: unos pocos floats
+    por trade, sólo en los ~28 símbolos de caución."""
+    px, sz = snap.last, snap.last_size
+    if px is None or not sz:
+        return
+    sig = f"{px}|{sz}|{snap.last_ts or ''}"
+    day = _dia_ba_str(now)
+    acc = snap.vwap_acc
+    if not acc or acc.get("day") != day:
+        acc = {"num": 0.0, "den": 0.0, "sig": None, "day": day}
+    if acc.get("sig") == sig:
+        return
+    snap.vwap_acc = {"num": (acc.get("num") or 0.0) + float(px) * float(sz),
+                     "den": (acc.get("den") or 0.0) + float(sz),
+                     "sig": sig, "day": day}
+
+
 class MarketDataStore:
     def __init__(self) -> None:
         self._data: Dict[str, MarketSnapshot] = {}
@@ -146,6 +187,8 @@ class MarketDataStore:
                     ts = d.get("date") if isinstance(d, dict) else None
                     if ts:
                         snap.last_ts = str(ts)
+                    if _es_caucion(symbol):
+                        _acum_vwap_caucion(snap, now)
                 if entry == "BI":
                     levels = _depth_levels(raw)
                     if levels:
