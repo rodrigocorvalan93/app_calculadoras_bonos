@@ -245,6 +245,29 @@ def test_estado_atraso_y_journal(hist_env, monkeypatch) -> None:
     assert hw.estado()["ok"] is True
 
 
+def test_base_corrupta_se_recupera_del_espejo(hist_env) -> None:
+    """xlsx corrupto (OneDrive a mitad de sync / Excel que murió guardando) +
+    espejo parquet sano → el corrupto se aparta como .corrupto-<fecha> y la
+    base se regenera sola desde el espejo. Sin espejo sano → error claro con
+    la instrucción manual, sin pisar nada."""
+    xlsx = str(hist_env / hw.HIST_FILENAME)
+    hw.append_and_save(_rows_df(date(2026, 9, 1)), xlsx)       # base + espejo sanos
+    (hist_env / hw.HIST_FILENAME).write_bytes(b"NO SOY UN XLSX \x00\x01")
+    res = hw.append_and_save(_rows_df(date(2026, 9, 2)), xlsx)
+    assert res["total_rows"] == 4                              # d1 (del espejo) + d2
+    back = pd.read_excel(xlsx, parse_dates=["fecha_hoy"])
+    assert sorted(set(back["fecha_hoy"].dt.date.astype(str))) == \
+        ["2026-09-01", "2026-09-02"]
+    corruptos = [p.name for p in hist_env.iterdir() if ".corrupto-" in p.name]
+    assert len(corruptos) == 1                                 # evidencia apartada
+    # corrupto Y sin espejo → error claro y el archivo queda intacto
+    (hist_env / hw.HIST_FILENAME).write_bytes(b"basura")
+    (hist_env / hw.HIST_FILENAME.replace(".xlsx", ".parquet")).unlink()
+    with pytest.raises(Exception, match="Historial de versiones"):
+        hw.append_and_save(_rows_df(date(2026, 9, 3)), xlsx)
+    assert (hist_env / hw.HIST_FILENAME).read_bytes() == b"basura"
+
+
 # ── endpoint manual: sólo superuser ─────────────────────────────────────────
 @pytest.fixture()
 def auth_on(tmp_path, monkeypatch):

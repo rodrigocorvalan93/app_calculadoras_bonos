@@ -247,12 +247,49 @@ def append_and_save(df: "Any", xlsx_path: str, incluir_journal: bool = True) -> 
     raise RuntimeError("unreachable")            # pragma: no cover
 
 
+def _leer_base(xlsx_path: str, pd) -> "Any":
+    """Lee la base existente con AUTO-RECUPERACIÓN: si el xlsx está corrupto
+    (OneDrive a mitad de sync, Excel que murió guardando, write viejo no
+    atómico) pero el espejo parquet está sano, el corrupto se renombra a
+    .corrupto-<fecha> (evidencia, nunca se borra) y la base sigue desde el
+    espejo — el write de salida regenera un xlsx limpio. Sin espejo sano, el
+    error sube con la instrucción de recuperación manual."""
+    try:
+        prev = pd.read_excel(xlsx_path, parse_dates=["fecha_hoy"])
+        prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
+        return prev
+    except Exception as exc_xlsx:  # noqa: BLE001 — BadZipFile/ValueError/etc.
+        pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+        try:
+            import pandas as _pd
+            prev = _pd.read_parquet(pq)
+            prev["fecha_hoy"] = _pd.to_datetime(prev["fecha_hoy"]).dt.date
+        except Exception as exc_pq:  # noqa: BLE001
+            raise RuntimeError(
+                f"La base {xlsx_path} está ilegible ({exc_xlsx}) y el espejo "
+                f"parquet tampoco se pudo leer ({exc_pq}). Recuperación manual: "
+                "restaurar el xlsx desde el Historial de versiones de OneDrive."
+            ) from exc_xlsx
+        marca = _now().strftime("%Y%m%d-%H%M%S")
+        respaldo = f"{xlsx_path}.corrupto-{marca}"
+        try:
+            os.replace(xlsx_path, respaldo)
+        except OSError as exc_mv:
+            raise RuntimeError(
+                f"La base {xlsx_path} está corrupta pero no se pudo apartar "
+                f"({exc_mv}) — ¿archivo abierto en Excel? Cerralo y reintentá."
+            ) from exc_mv
+        logger.warning("[historico_writer] base xlsx CORRUPTA (%s) — apartada como %s; "
+                       "regenerando desde el espejo parquet (%d filas)",
+                       exc_xlsx, respaldo, len(prev))
+        return prev
+
+
 def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
                             incluir_journal: bool = True) -> Dict[str, Any]:
     prev = None
     if os.path.exists(xlsx_path):
-        prev = pd.read_excel(xlsx_path, parse_dates=["fecha_hoy"])
-        prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
+        prev = _leer_base(xlsx_path, pd)
 
     frames = [prev] if prev is not None else []
     consolidados = 0
