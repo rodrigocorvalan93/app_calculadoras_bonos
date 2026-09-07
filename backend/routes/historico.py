@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from backend.services import historico, historico_byma, nss
+from backend.services import fx_hist, historico, historico_byma, nss
 
 router = APIRouter(tags=["historicos"])
 
@@ -410,3 +410,146 @@ async def historicos_semanal(request: Request, dias: int = 7) -> HTMLResponse:
     for seg in res.get("segments", []):
         seg["curve"] = _segment_curve(seg.get("rows") or [])
     return _render(request, "partials/historico_semanal.html", w=res, dias=dias)
+
+
+# ── Series diarias FX + caución (archivo Delta - historico_fx) ───────────────
+_SD_VENTANAS = {"30": 30, "90": 90, "180": 180, "365": 365, "todo": 0}
+
+
+def _serie_diaria_chart(rows: list, unit: str, modo: str = "linea",
+                        width: int = 960, height: int = 380) -> Dict[str, Any]:
+    """Geometría SVG de UNA serie diaria: línea o barras (estilo GP/HP de BBG).
+    Barras: si la serie cruza el cero (canje), la base es la línea de 0 con
+    las negativas marcadas; si no, la base es el piso del rango visible (una
+    tasa 29-33% con base en 0 daría barras todas iguales — sin información)."""
+    m = len(rows)
+    if m < 2:
+        return {"n": m}
+    vals = [r["valor"] for r in rows]
+    ymin, ymax = min(vals), max(vals)
+    cruza_cero = ymin < 0.0 < ymax
+    if ymax == ymin:
+        ymax = ymin + 1.0
+    pad = (ymax - ymin) * 0.08
+    ymin -= pad
+    ymax += pad
+    ml, mr, mt, mb = 66, 16, 14, 40
+    pw, ph = width - ml - mr, height - mt - mb
+
+    def sx(i: int) -> float:
+        return round(ml + i / (m - 1) * pw, 1)
+
+    def sy(v: float) -> float:
+        return round(mt + (1 - (v - ymin) / (ymax - ymin)) * ph, 1)
+
+    out: Dict[str, Any] = {
+        "n": m, "width": width, "height": height, "unit": unit, "modo": modo,
+        "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph,
+        "yticks": [{"y": sy(ymin + (ymax - ymin) / 5 * i),
+                    "v": round(ymin + (ymax - ymin) / 5 * i, 4)} for i in range(6)],
+        "xticks": [{"x": sx(round(i / 5 * (m - 1))),
+                    "v": rows[round(i / 5 * (m - 1))]["fecha"]} for i in range(6)],
+    }
+    if modo == "barras":
+        base_v = 0.0 if cruza_cero else ymin
+        yb = sy(base_v)
+        bw = max(1.0, round(pw / m * 0.72, 1))
+        out["bars"] = [
+            {"x": round(sx(i) - bw / 2, 1), "y": min(sy(v), yb), "w": bw,
+             "h": max(0.5, round(abs(sy(v) - yb), 1)), "neg": v < 0.0,
+             "fecha": rows[i]["fecha"], "v": v}
+            for i, v in enumerate(vals)
+        ]
+    else:
+        out["path"] = "M " + " L ".join(f"{sx(i)},{sy(v)}" for i, v in enumerate(vals))
+        out["last_x"], out["last_y"] = sx(m - 1), sy(vals[-1])
+    return out
+
+
+def _sd_val(v, unit: str, dec: int) -> str:
+    from backend.locale_ar import fmt_hum, fmt_num
+    if v is None:
+        return "—"
+    if unit == "$":
+        return fmt_hum(v)
+    return fmt_num(v, dec) + ("%" if unit == "%" else "")
+
+
+def _sd_fmt_rows(rows_desc: list, meta: Dict[str, Any]) -> list:
+    """Celdas de la tabla HP pre-formateadas EN PYTHON (mismas clases/flechas
+    que _fx_macros): 400 filas × filtros Jinja por celda costaban 40-90 ms de
+    render — con f-strings el frío baja a ~10 ms y el cache por mtime hace que
+    el warm sea un lookup."""
+    from backend.locale_ar import fmt_num
+    unit, dec = meta["unit"], meta["dec"]
+    pp = " pp" if unit == "%" else ""
+
+    def cls(v):
+        if v is None:
+            return ""
+        return "var-up" if v > 0.00005 else ("var-down" if v < -0.00005 else "px-flat")
+
+    def arrow(v):
+        return "▲" if v > 0.00005 else ("▼" if v < -0.00005 else "■")
+
+    out = []
+    for r in rows_desc:
+        out.append({
+            "fecha": r["fecha"],
+            "plazo": (f"{r['plazo']}D" if r.get("plazo") is not None else "—"),
+            "valor_s": _sd_val(r["valor"], unit, dec),
+            "var_s": ("—" if r["var"] is None else f"{arrow(r['var'])} {fmt_num(r['var'], dec)}{pp}"),
+            "var_cls": cls(r["var"]),
+            "pct_s": ("—" if r["var_pct"] is None else fmt_num(r["var_pct"], 2) + "%"),
+            "pct_cls": cls(r["var_pct"]),
+        })
+    return out
+
+
+# HTML renderizado por (serie, modo, ventana, mtime del archivo): la data
+# cambia 1×/día → después del primer render de cada combo, servir es un lookup.
+_SD_CACHE: Dict[tuple, str] = {}
+
+
+@router.get("/historicos/series-diarias", response_class=HTMLResponse)
+async def historicos_series_diarias(
+    request: Request, serie: str = "", chart: str = "linea", dias: str = "90",
+) -> HTMLResponse:
+    """Pestaña 'Series diarias': las series del archivo FX/caución del cierre
+    (CCL/MEP/canje/A3500 + caución $ y US$ TNA/VWAP/monto) con toggle
+    línea/barras y tabla HP (fecha/valor/Δ/Δ%). Carga sólo al abrir el tab o
+    tocar el form; render cacheado por mtime (ver _SD_CACHE)."""
+    modo = "barras" if chart == "barras" else "linea"
+    dias_sel = dias if dias in _SD_VENTANAS else "90"
+    sig = fx_hist.signature()
+    key = (serie, modo, dias_sel, sig)
+    html = _SD_CACHE.get(key)
+    if html is not None:
+        return HTMLResponse(html)
+    loop = asyncio.get_running_loop()
+
+    def _build() -> Dict[str, Any]:
+        lst = fx_hist.series_list()
+        keys = [s["key"] for s in lst]
+        sel = serie if serie in keys else (keys[0] if keys else None)
+        data = fx_hist.series_rows(sel, _SD_VENTANAS[dias_sel]) if sel else None
+        ch = (_serie_diaria_chart(data["rows"], data["meta"]["unit"], modo)
+              if data and data["rows"] else {"n": 0})
+        rows_desc = list(reversed(data["rows"]))[:500] if data else []
+        con_plazo = any("plazo" in r for r in rows_desc)
+        if data:
+            for b in ch.get("bars") or []:      # tooltip por barra, pre-formateado
+                b["tip"] = _sd_val(b["v"], data["meta"]["unit"], data["meta"]["dec"])
+        return {"series_fx": lst, "serie_sel": sel, "chart_sel": modo,
+                "dias_sel": dias_sel, "data": data, "ch": ch,
+                "rows_fmt": _sd_fmt_rows(rows_desc, data["meta"]) if data else [],
+                "con_plazo": con_plazo, "n_tabla": len(rows_desc),
+                "archivo": fx_hist.status()}
+
+    ctx = await loop.run_in_executor(None, _build)
+    resp = _render(request, "partials/historico_series_diarias.html", **ctx)
+    if _SD_CACHE and next(iter(_SD_CACHE))[3] != sig:
+        _SD_CACHE.clear()                       # cambió el archivo → todo lo viejo afuera
+    if len(_SD_CACHE) < 64:
+        _SD_CACHE[key] = bytes(resp.body).decode("utf-8")
+    return resp

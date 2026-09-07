@@ -1,0 +1,110 @@
+{% import "partials/_fx_macros.html" as fx %}
+{# Series diarias del archivo FX/caución del cierre — estilo GP/HP de BBG:
+   gráfico (línea o barras) + tabla histórica fecha/valor/Δ/Δ%. Sin polling:
+   la data cambia 1×/día; se carga al abrir el tab o tocar el form. #}
+{% macro val(v, meta) -%}
+  {%- if v is none %}—{% elif meta.unit == "$" %}{{ v | ar_hum }}{% elif meta.unit == "%" %}{{ v | ar_num(meta.dec) }}%{% else %}{{ v | ar_num(meta.dec) }}{% endif -%}
+{%- endmacro %}
+{% if not archivo.loaded %}
+  <div class="alert">Todavía no hay filas en <code>Delta - historico_fx</code> — se llena solo con el
+    autosave del cierre (y guarda FX + caución $ y US$ desde hoy). Volvé mañana después de la rueda.</div>
+{% else %}
+  <div class="curve-picker card">
+    <div class="card-body">
+      <form hx-get="/historicos/series-diarias" hx-target="#hist-series" hx-swap="innerHTML">
+        <div class="row-fields">
+          <label class="field"><span>Serie</span>
+            <select name="serie">
+              {% for s in series_fx %}<option value="{{ s.key }}" {% if s.key == serie_sel %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+            </select></label>
+          <label class="field"><span>Gráfico</span>
+            <select name="chart">
+              {% for c, lbl in [("linea","Línea"),("barras","Barras")] %}<option value="{{ c }}" {% if c == chart_sel %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select></label>
+          <label class="field"><span>Ventana</span>
+            <select name="dias">
+              {% for d, lbl in [("30","30 días"),("90","90 días"),("180","180 días"),("365","1 año"),("todo","Todo")] %}<option value="{{ d }}" {% if d == dias_sel %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select></label>
+          <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
+        </div>
+      </form>
+      <p class="muted" style="font-size:11px;margin-top:6px">
+        Serie diaria del cierre ({{ archivo.dmin }} → {{ archivo.dmax }} · {{ archivo.n }} días guardados).
+        Las de caución usan el plazo o/n real de cada día (viernes 3D, pre-feriado 4D — columna Plazo).
+      </p>
+    </div>
+  </div>
+
+  {% if data and data.rows %}
+  {% set meta = data.meta %}
+  {% set last = data.rows[-1] %}
+  <div class="card" style="margin-top:12px">
+    <div class="card-title">
+      <span>📉 {{ meta.label }}</span>
+      <span class="card-title-aux">
+        Último <b>{{ val(last.valor, meta) }}</b> ({{ last.fecha }})
+        {% if last.var is not none %} · Δ <b class="{{ fx.vcls(last.var) }}">{{ fx.arrow(last.var) }} {{ last.var | ar_num(meta.dec) }}{{ " pp" if meta.unit == "%" else "" }}</b>{% endif %}
+        · {{ data.rows | length }} días en ventana
+      </span>
+    </div>
+    <div class="card-body table-scroll">
+      {% if ch.n >= 2 %}
+      <svg viewBox="0 0 {{ ch.width }} {{ ch.height }}" style="width:100%;max-width:{{ ch.width }}px" role="img">
+        {% for t in ch.yticks %}
+          <line x1="{{ ch.x0 }}" x2="{{ ch.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+          <text x="{{ ch.x0 - 8 }}" y="{{ t.y + 4 }}" text-anchor="end" font-size="11" fill="var(--text-muted)">{% if meta.unit == "$" %}{{ t.v | ar_hum }}{% else %}{{ t.v | ar_num(meta.dec) }}{{ meta.unit }}{% endif %}</text>
+        {% endfor %}
+        {% for t in ch.xticks %}
+          <text x="{{ t.x }}" y="{{ ch.y1 + 18 }}" text-anchor="middle" font-size="10.5" fill="var(--text-muted)">{{ t.v[5:] if ch.n > 40 else t.v }}</text>
+        {% endfor %}
+        {% if ch.modo == "barras" %}
+          {% for b in ch.bars %}
+          <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                fill="{{ 'var(--red)' if b.neg else 'var(--accent)' }}" opacity="0.78">
+            <title>{{ b.fecha }} · {{ b.tip }}</title>
+          </rect>
+          {% endfor %}
+        {% else %}
+          <path d="{{ ch.path }}" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+          <circle cx="{{ ch.last_x }}" cy="{{ ch.last_y }}" r="3.6" fill="var(--accent)">
+            <title>{{ last.fecha }} · {{ val(last.valor, meta) }}</title>
+          </circle>
+        {% endif %}
+      </svg>
+      {% else %}
+      <p class="muted" style="padding:6px">Con {{ data.rows | length }} día(s) todavía no hay gráfico — la tabla ya muestra lo guardado.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <div class="card-title"><span>🗒 Tabla histórica (HP)</span>
+      <span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#hp-series-tbl" title="Descargar la tabla como se ve (CSV es-AR)">⤓ CSV</button> · más reciente primero{% if n_tabla == 500 %} · recortada a 500 filas{% endif %}</span></div>
+    <div class="card-body table-scroll">
+      {# Celdas PRE-FORMATEADAS en la route (_sd_fmt_rows): filtros Jinja por
+         celda en 400 filas costaban 40-90 ms; strings listos + cache por
+         mtime dejan el render frío en ~10 ms y el warm en un lookup. #}
+      <table class="cashflows curve-table mercado-table" data-sortable id="hp-series-tbl">
+        <thead><tr>
+          <th style="text-align:left" data-sort>Fecha</th>
+          {% if con_plazo %}<th data-sort>Plazo</th>{% endif %}
+          <th data-sort>Valor</th><th data-sort>Δ</th><th data-sort>Δ%</th>
+        </tr></thead>
+        <tbody>
+          {% for r in rows_fmt %}
+          <tr>
+            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.fecha }}</td>
+            {% if con_plazo %}<td>{{ r.plazo }}</td>{% endif %}
+            <td style="font-weight:600">{{ r.valor_s }}</td>
+            <td class="{{ r.var_cls }}">{{ r.var_s }}</td>
+            <td class="{{ r.pct_cls }}">{{ r.pct_s }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="alert" style="margin-top:12px">La serie elegida no tiene datos todavía (se llena con el autosave del cierre).</div>
+  {% endif %}
+{% endif %}
