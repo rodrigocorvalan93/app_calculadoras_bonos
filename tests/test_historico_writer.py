@@ -245,6 +245,52 @@ def test_estado_atraso_y_journal(hist_env, monkeypatch) -> None:
     assert hw.estado()["ok"] is True
 
 
+def test_guardar_fx_diario(hist_env, monkeypatch) -> None:
+    """Historial FX del cierre: 1 fila por día (cable/MEP/canje/A3500), xlsx +
+    espejo parquet, dedup por fecha keep-last. Sin ningún dato → no escribe."""
+    from types import SimpleNamespace
+
+    from backend.services import dolares, fx as fx_svc
+
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": SimpleNamespace(
+        ccl=1520.5, usb=1490.0, canje=1520.5 / 1490.0 - 1.0, ccl_base="GD30"))
+    monkeypatch.setattr(dolares, "official_fx", lambda: {"last": 1497.53})
+    res1 = hw._guardar_fx(str(hist_env))
+    assert res1["filas"] == 1
+    fxq = hist_env / hw.FX_FILENAME.replace(".xlsx", ".parquet")
+    assert fxq.exists() and (hist_env / hw.FX_FILENAME).exists()
+    # mismo día con otro valor → REEMPLAZA (keep last), no duplica
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": SimpleNamespace(
+        ccl=1530.0, usb=1495.0, canje=1530.0 / 1495.0 - 1.0, ccl_base="GD30"))
+    assert hw._guardar_fx(str(hist_env))["filas"] == 1
+    back = pd.read_parquet(fxq)
+    assert len(back) == 1 and back.iloc[0]["ccl"] == 1530.0
+    assert abs(back.iloc[0]["canje"] - (1530.0 / 1495.0 - 1.0)) < 1e-9
+    assert back.iloc[0]["oficial_a3500"] == 1497.53
+    # feed muerto (sin CCL/MEP/A3500) → None, sin filas fantasma
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": SimpleNamespace(
+        ccl=None, usb=None, canje=None, ccl_base=None))
+    monkeypatch.setattr(dolares, "official_fx", lambda: {})
+    assert hw._guardar_fx(str(hist_env)) is None
+
+
+def test_save_today_guarda_fx_junto_al_cierre(hist_env, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from backend.services import dolares, fx as fx_svc
+
+    hoy = datetime.now(_TZ)
+    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date()))
+    monkeypatch.setattr(settings, "historico_autosave_min_operados", 1)
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": SimpleNamespace(
+        ccl=1520.0, usb=1490.0, canje=1520.0 / 1490.0 - 1.0, ccl_base="AL30"))
+    monkeypatch.setattr(dolares, "official_fx", lambda: {"last": 1497.5})
+    res = hw.save_today()
+    assert res["ok"] is True and res.get("fx_filas") == 1
+    assert (hist_env / hw.FX_FILENAME).exists()
+    historico_byma.refresh()   # cache global limpio para otros tests
+
+
 def test_base_corrupta_se_recupera_del_espejo(hist_env) -> None:
     """xlsx corrupto (OneDrive a mitad de sync / Excel que murió guardando) +
     espejo parquet sano → el corrupto se aparta como .corrupto-<fecha> y la

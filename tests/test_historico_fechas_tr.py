@@ -145,16 +145,41 @@ def test_scatter_chart_linea_es_curva_nss_no_serrucho() -> None:
     sc = {"loaded": True, "metric": "TIREA", "curve_label": "CER",
           "series": [{"fecha": "2026-08-13", "points": puntos}]}
     ch = _scatter_chart(sc)
-    s = ch["series"][0]
-    assert s["fit"] is True
-    assert len(s["points"]) == len(puntos)              # los puntos no se tocan
-    assert s["path"].count(" L ") + 1 >= 60             # muestreo suave (n=70)
+    assert ch["mixto"] is False                          # sin 'j' → un solo grupo
+    g = ch["series"][0]["grupos"][0]
+    assert g["proy"] is False and g["fit"] is True
+    assert len(g["points"]) == len(puntos)              # los puntos no se tocan
+    assert g["path"].count(" L ") + 1 >= 60             # muestreo suave (n=70)
     # la curva ajustada no se sale del área del gráfico (clamp al rango Y)
-    ys = [float(seg.split(",")[1]) for seg in s["path"][2:].split(" L ")]
+    ys = [float(seg.split(",")[1]) for seg in g["path"][2:].split(" L ")]
     assert min(ys) >= ch["y0"] - 0.6 and max(ys) <= ch["y1"] + 0.6
 
     # <4 puntos: sin fit → polilínea de los puntos tal cual, punteada
     sc2 = {"loaded": True, "metric": "TIREA", "curve_label": "CER",
            "series": [{"fecha": "2026-08-13", "points": puntos[:3]}]}
-    s2 = _scatter_chart(sc2)["series"][0]
-    assert s2["fit"] is False and s2["path"].count(" L ") == 2
+    g2 = _scatter_chart(sc2)["series"][0]["grupos"][0]
+    assert g2["fit"] is False and g2["path"].count(" L ") == 2
+
+
+def test_scatter_fit_por_grupo_real_y_proy() -> None:
+    """El caso de la captura del usuario: con Tipo=Todos, los reales (TEM
+    ~0,3-0,8%) y los proyectados 'j' (~2,1-2,5%) son DOS nubes — una sola NSS
+    por el medio no describía a ninguna. Ahora: un fit POR GRUPO por fecha,
+    proy con flag para marcador hueco/punteado, y el eje X nunca negativo."""
+    from backend.routes.historico import _scatter_chart
+
+    reales = [{"code": f"R{i}", "dur": 0.3 + i * 0.5, "v": 0.005 + 0.0004 * i}
+              for i in range(6)]
+    proys = [{"code": f"P{i}j", "dur": 0.3 + i * 0.5, "v": 0.021 + 0.0003 * i}
+             for i in range(6)]
+    sc = {"loaded": True, "metric": "TEM", "curve_label": "CER",
+          "series": [{"fecha": "2026-09-04", "points": reales + proys}]}
+    ch = _scatter_chart(sc)
+    s = ch["series"][0]
+    assert ch["mixto"] is True and len(s["grupos"]) == 2
+    g_real = next(g for g in s["grupos"] if not g["proy"])
+    g_proy = next(g for g in s["grupos"] if g["proy"])
+    assert len(g_real["points"]) == 6 and len(g_proy["points"]) == 6
+    assert g_real["path"] != g_proy["path"]              # dos curvas, no una promedio
+    assert all(str(p["code"]).endswith("j") for p in g_proy["points"])
+    assert ch["xticks"][0]["v"] >= 0                     # sin duration negativa

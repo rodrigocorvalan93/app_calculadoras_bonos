@@ -426,6 +426,14 @@ def estado() -> Dict[str, Any]:
     pend = sorted(d for d in dias_j if d not in fechas)
     if pend:
         out["journal_pendiente"] = ", ".join(str(d) for d in pend)
+    try:
+        import pandas as _pd
+        pq_fx = os.path.splitext(os.path.join(hist_dir, FX_FILENAME))[0] + ".parquet"
+        if os.path.isfile(pq_fx):
+            f = _pd.read_parquet(pq_fx, columns=["fecha_hoy"])["fecha_hoy"]
+            out["fx_ultima"] = str(_pd.to_datetime(f).max().date())
+    except Exception:  # noqa: BLE001
+        pass
     if _autosave is not None and _autosave.last_result:
         r = _autosave.last_result
         out["ultimo_autosave"] = (r.get("skipped") or r.get("error")
@@ -491,6 +499,14 @@ def save_today(force: bool = False) -> Dict[str, Any]:
         logger.exception("[historico_writer] guardado falló")
         res["error"] = str(exc)
         return res
+    # Historial FX del día (cable/MEP/canje/A3500): 1 fila, archivo propio.
+    # Best-effort: un FX caído jamás voltea el cierre de bonos ya guardado.
+    try:
+        fxres = _guardar_fx(hist_dir)
+        if fxres:
+            res["fx_filas"] = fxres["filas"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] historial FX falló: %s", exc)
     try:
         historico_byma.refresh()          # Qué pasó / Históricos ven el día nuevo ya
     except Exception:  # noqa: BLE001
@@ -498,6 +514,82 @@ def save_today(force: bool = False) -> Dict[str, Any]:
     logger.info("[historico_writer] base guardada: %d filas de hoy (%d operados) → %s",
                 res["rows"], res["operados"], xlsx)
     return res
+
+
+# ── Historial diario de FX (cable / MEP / canje) ───────────────────────────
+# Se guarda junto con el cierre de siempre: UNA fila por día (contra las ~500
+# de bonos es costo cero), en su propio archivo con espejo parquet, escritura
+# atómica y dedup por fecha. Lo escribe sólo la máquina writer (mismo gate que
+# la base) dentro del autosave / botón manual.
+FX_FILENAME = "Delta - historico_fx.xlsx"
+
+
+def build_fx_row() -> Optional[Dict[str, Any]]:
+    """Fila del día con los FX de referencia del proceso: CCL (cable) y MEP
+    implícitos del store (mismos que usa toda la app), canje = CCL/MEP − 1 y
+    el oficial A3500. None si no hay NINGÚN dato (feed muerto)."""
+    from backend.services import dolares, fx as fx_svc
+    snap = fx_svc.get_fx("24hs")
+    oficial = None
+    try:
+        oficial = (dolares.official_fx() or {}).get("last")
+    except Exception:  # noqa: BLE001
+        pass
+    if not (snap.ccl or snap.usb or oficial):
+        return None
+    return {"fecha_hoy": _now().date(), "ccl": snap.ccl, "mep": snap.usb,
+            "canje": snap.canje, "oficial_a3500": oficial,
+            "ccl_base": snap.ccl_base or ""}
+
+
+def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
+    """Appendea la fila FX del día a Delta - historico_fx (xlsx + espejo
+    parquet): dedup por fecha keep-last, escritura atómica y reintentos ante
+    lock — la misma solidez que la base grande, en miniatura."""
+    import pandas as pd
+
+    fila = build_fx_row()
+    if fila is None:
+        logger.info("[historico_writer] sin FX para guardar (feed sin CCL/MEP/A3500)")
+        return None
+    xlsx = os.path.join(hist_dir, FX_FILENAME)
+    pq = os.path.splitext(xlsx)[0] + ".parquet"
+    prev = None
+    for path, reader in ((pq, pd.read_parquet), (xlsx, pd.read_excel)):
+        if os.path.exists(path):
+            try:
+                prev = reader(path)
+                break
+            except Exception as exc:  # noqa: BLE001 — un FX ilegible no frena el cierre
+                logger.warning("[historico_writer] historial FX ilegible (%s): %s — "
+                               "pruebo la otra copia / re-arranco desde hoy", path, exc)
+    df = pd.DataFrame([fila])
+    if prev is not None and len(prev):
+        prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
+        df = pd.concat([prev, df], ignore_index=True)
+    df = (df.drop_duplicates(subset=["fecha_hoy"], keep="last")
+            .sort_values("fecha_hoy").reset_index(drop=True))
+    for i in range(len(_LOCK_ESPERAS) + 1):
+        try:
+            tmp = xlsx + ".tmp.xlsx"
+            df.to_excel(tmp, index=False)
+            os.replace(tmp, xlsx)
+            break
+        except (PermissionError, OSError) as exc:
+            if i == len(_LOCK_ESPERAS):
+                raise
+            logger.warning("[historico_writer] FX lockeado (%s) — reintento en %.0f s",
+                           exc, _LOCK_ESPERAS[i])
+            time.sleep(_LOCK_ESPERAS[i])
+    try:
+        mirror = df.copy()
+        mirror["ccl_base"] = mirror["ccl_base"].astype("string")
+        tmp_pq = pq + ".tmp"
+        mirror.to_parquet(tmp_pq, index=False)
+        os.replace(tmp_pq, pq)
+    except Exception as exc:  # noqa: BLE001 — el xlsx ya quedó bien
+        logger.warning("[historico_writer] espejo parquet FX no guardado: %s", exc)
+    return {"filas": len(df), "xlsx": xlsx}
 
 
 def next_fire(now: datetime, hhmm: str) -> datetime:

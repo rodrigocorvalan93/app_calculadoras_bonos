@@ -138,27 +138,41 @@ async def historicos_curva(request: Request, curve: str = "", metric: str = "TIR
 
 def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> Dict[str, Any]:
     """SVG scatter 'curva en varias fechas': X = Duration, Y = métrica (%),
-    una serie de puntos por fecha + la CURVA NSS AJUSTADA a esa nube (misma
-    nss.py que Gráficos/Curvas, robusta a outliers). Unir punto a punto era un
-    serrucho ilegible con los cortos dispersos; la polilínea queda sólo como
-    fallback cuando el fit no aplica (<4 puntos). Corre en el executor (el
-    curve_fit frío cuesta ~ms; después cachea por fingerprint)."""
+    una serie de puntos por fecha + la CURVA NSS AJUSTADA (misma nss.py que
+    Gráficos/Curvas, robusta a outliers); polilínea sólo como fallback (<4
+    puntos). Corre en el executor (curve_fit frío ~ms; después cachea).
+
+    Con Tipo=Todos los PROYECTADOS (código con sufijo 'j') son OTRA población
+    (tasa nominal-equivalente vs real: dos nubes separadas por ~1,5 pp): se
+    separan en GRUPOS y se fitea una NSS POR GRUPO por fecha — una sola curva
+    por el medio de las dos nubes no describía a ninguna. Proy se dibuja con
+    marcador hueco y fit punteado (mismo color de la fecha). El eje X arranca
+    en 0: una duration negativa no existe, era padding."""
     series = sc.get("series") or []
     if not series:
         return {"loaded": sc.get("loaded", False), "n": 0, "metric": sc.get("metric"),
                 "curve_label": sc.get("curve_label")}
-    # Fit por serie ANTES de fijar los ejes: el rango Y contempla los puntos Y
-    # la curva ajustada (sin esto, un valle de la NSS entre puntos quedaba
-    # planchado contra el piso del gráfico). Guardia anti-divergencia: valores
-    # del fit a más de 1,5 spans de la data no agrandan el eje (y el dibujo
-    # clampea al rango final igual).
-    fits = [nss.sample([p["dur"] for p in s["points"]],
-                       [p["v"] * 100.0 for p in s["points"]], n=70) for s in series]
+    # Separar por población y fitear POR GRUPO antes de fijar los ejes: el
+    # rango Y contempla los puntos Y las curvas ajustadas (sin esto, un valle
+    # de la NSS entre puntos quedaba planchado contra el piso). Guardia
+    # anti-divergencia: valores del fit a más de 1,5 spans de la data no
+    # agrandan el eje (y el dibujo clampea al rango final igual).
+    grupos_por_serie: list = []
+    for s in series:
+        reales = [p for p in s["points"] if not str(p["code"]).endswith("j")]
+        proys = [p for p in s["points"] if str(p["code"]).endswith("j")]
+        gs = [{"proy": es_proy, "raw": pts}
+              for es_proy, pts in ((False, reales), (True, proys)) if pts]
+        for g in gs:
+            g["fit_pts"] = nss.sample([p["dur"] for p in g["raw"]],
+                                      [p["v"] * 100.0 for p in g["raw"]], n=70)
+        grupos_por_serie.append(gs)
+
     xs = [p["dur"] for s in series for p in s["points"]]
     ys = [p["v"] * 100.0 for s in series for p in s["points"]]
     dlo, dhi = min(ys), max(ys)
     span = (dhi - dlo) or 1.0
-    ys += [v for fp in fits for _, v in (fp or [])
+    ys += [v for gs in grupos_por_serie for g in gs for _, v in (g["fit_pts"] or [])
            if dlo - 1.5 * span <= v <= dhi + 1.5 * span]
     xmin, xmax = min(xs), max(xs)
     ymin, ymax = min(ys), max(ys)
@@ -167,7 +181,8 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> D
     if ymax == ymin:
         ymax = ymin + 0.1
     padx, pady = (xmax - xmin) * 0.06, (ymax - ymin) * 0.10
-    xmin -= padx; xmax += padx; ymin -= pady; ymax += pady
+    xmin = max(0.0, xmin - padx)                # nunca duration negativa en el eje
+    xmax += padx; ymin -= pady; ymax += pady
     ml, mr, mt, mb = 62, 16, 14, 42
     pw, ph = width - ml - mr, height - mt - mb
 
@@ -175,23 +190,30 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> D
     def sy(v): return round(mt + (1 - (v - ymin) / (ymax - ymin)) * ph, 1)
 
     out = []
-    for i, s in enumerate(series):
-        pts = [{"x": sx(p["dur"]), "y": sy(p["v"] * 100.0), "code": p["code"],
-                "dur": p["dur"], "v": p["v"] * 100.0} for p in s["points"]]
-        fit_pts = fits[i]
-        if fit_pts:
-            path = "M " + " L ".join(f"{sx(d)},{sy(max(ymin, min(ymax, v)))}"
-                                     for d, v in fit_pts)
-        else:
-            path = "M " + " L ".join(f'{p["x"]},{p["y"]}' for p in pts)
-        out.append({"fecha": s["fecha"], "color": _PALETTE[i % len(_PALETTE)], "points": pts,
-                    "path": path, "fit": bool(fit_pts)})
+    mixto = False
+    for i, (s, gs) in enumerate(zip(series, grupos_por_serie)):
+        grupos = []
+        for g in gs:
+            pts = [{"x": sx(p["dur"]), "y": sy(p["v"] * 100.0), "code": p["code"],
+                    "dur": p["dur"], "v": p["v"] * 100.0} for p in g["raw"]]
+            if g["fit_pts"]:
+                path = "M " + " L ".join(f"{sx(d)},{sy(max(ymin, min(ymax, v)))}"
+                                         for d, v in g["fit_pts"])
+            else:
+                path = "M " + " L ".join(f'{p["x"]},{p["y"]}' for p in pts)
+            grupos.append({"proy": g["proy"], "points": pts, "path": path,
+                           "fit": bool(g["fit_pts"])})
+        if len(grupos) > 1:
+            mixto = True
+        out.append({"fecha": s["fecha"], "color": _PALETTE[i % len(_PALETTE)],
+                    "grupos": grupos})
     yticks = [{"y": sy(ymin + (ymax - ymin) / 5 * i), "v": round(ymin + (ymax - ymin) / 5 * i, 2)}
               for i in range(6)]
     xticks = [{"x": sx(xmin + (xmax - xmin) / 6 * i), "v": round(xmin + (xmax - xmin) / 6 * i, 1)}
               for i in range(7)]
-    return {"loaded": True, "n": len(out), "series": out, "metric": sc.get("metric"),
-            "curve_label": sc.get("curve_label"), "yticks": yticks, "xticks": xticks,
+    return {"loaded": True, "n": len(out), "series": out, "mixto": mixto,
+            "metric": sc.get("metric"), "curve_label": sc.get("curve_label"),
+            "yticks": yticks, "xticks": xticks,
             "width": width, "height": height, "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph}
 
 

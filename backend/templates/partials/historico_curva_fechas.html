@@ -40,7 +40,7 @@
   {% if scatter and scatter.n %}
   <div class="card" style="margin-top:12px">
     <div class="card-title"><span>📐 {{ scatter.curve_label }} — {{ scatter.metric }} vs Duration</span>
-      <span class="card-title-aux">{% for s in scatter.series %}<span style="color:{{ s.color }}">● {{ s.fecha }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</span></div>
+      <span class="card-title-aux">{% for s in scatter.series %}<span style="color:{{ s.color }}">● {{ s.fecha }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% if scatter.mixto %} · <span class="muted">○ proy (fit punteado)</span>{% endif %}</span></div>
     <div class="card-body table-scroll">
       <svg viewBox="0 0 {{ scatter.width }} {{ scatter.height }}" style="width:100%;max-width:{{ scatter.width }}px" role="img">
         {% for t in scatter.yticks %}
@@ -52,13 +52,22 @@
         {% endfor %}
         <text x="{{ (scatter.x0 + scatter.x1) / 2 }}" y="{{ scatter.height - 4 }}" text-anchor="middle" font-size="11" fill="var(--text-muted)">Duration</text>
         {% for s in scatter.series %}
-          {# Curva NSS ajustada a la nube (sólida); si no fiteó (<4 pts), polilínea punteada #}
-          <path d="{{ s.path }}" fill="none" stroke="{{ s.color }}" stroke-width="1.6"
-                {% if not s.fit %}stroke-dasharray="3 4"{% endif %} opacity="{{ '0.85' if s.fit else '0.7' }}"/>
-          {% for p in s.points %}
+          {# Un fit NSS POR POBLACIÓN (real / proyectado j): una sola curva por el
+             medio de las dos nubes no describía a ninguna. Proy = hueco + punteado;
+             si no fiteó (<4 pts), polilínea corta punteada como fallback. #}
+          {% for g in s.grupos %}
+          <path d="{{ g.path }}" fill="none" stroke="{{ s.color }}" stroke-width="1.6"
+                {% if g.proy or not g.fit %}stroke-dasharray="{{ '6 4' if g.proy else '3 4' }}"{% endif %}
+                opacity="{{ '0.85' if g.fit else '0.7' }}"/>
+          {% for p in g.points %}
+            {% if g.proy %}
+            <circle cx="{{ p.x }}" cy="{{ p.y }}" r="3.9" fill="none" stroke="{{ s.color }}" stroke-width="1.8" opacity="0.92">
+            {% else %}
             <circle cx="{{ p.x }}" cy="{{ p.y }}" r="4.2" fill="{{ s.color }}" opacity="0.92">
+            {% endif %}
               <title>{{ p.code }} · {{ s.fecha }} · dur {{ p.dur | ar_num(2) }} · {{ p.v | ar_num(2) }}%</title>
             </circle>
+          {% endfor %}
           {% endfor %}
         {% endfor %}
       </svg>
