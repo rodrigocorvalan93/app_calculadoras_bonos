@@ -128,15 +128,24 @@ def test_build_fx_row_incluye_caucion(monkeypatch, store_limpio) -> None:
                                 {"LA": {"price": 31.0, "size": 4e6, "date": "9"},
                                  "HI": 32.0, "LO": 30.0,
                                  "NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.31 * 2})
+    # …y la serie US$ del mismo día (caución DOLAR 1D al 5%)
+    store_limpio.update_from_md("MERV - XMEV - DOLAR - 1D",
+                                {"LA": {"price": 5.0, "size": 2e5, "date": "9"},
+                                 "HI": 5.5, "LO": 4.5,
+                                 "NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.05})
     row = hw.build_fx_row()
     assert row["caucion_plazo_d"] == 2 and row["caucion_tna"] == 31.0
     assert row["caucion_tna_vwap"] == pytest.approx(31.0)
     assert row["caucion_monto"] == 3.65e9 + 1e7 * 0.31 * 2
+    assert row["caucion_usd_plazo_d"] == 1 and row["caucion_usd_tna"] == 5.0
+    assert row["caucion_usd_tna_vwap"] == pytest.approx(5.0)
+    assert row["caucion_usd_monto"] == 3.65e9 + 1e7 * 0.05
 
     # sin caución el FX se guarda igual: las claves van en None (columnas estables)
     monkeypatch.setattr(mds, "_store", mds.MarketDataStore())
     row2 = hw.build_fx_row()
-    assert row2 is not None and row2["caucion_tna"] is None and row2["ccl"] == 1480.0
+    assert row2 is not None and row2["ccl"] == 1480.0
+    assert row2["caucion_tna"] is None and row2["caucion_usd_tna"] is None
 
 
 @pytest.mark.asyncio

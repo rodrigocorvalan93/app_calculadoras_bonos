@@ -527,9 +527,11 @@ FX_FILENAME = "Delta - historico_fx.xlsx"
 def build_fx_row() -> Optional[Dict[str, Any]]:
     """Fila del día con los FX de referencia del proceso: CCL (cable) y MEP
     implícitos del store (mismos que usa toda la app), canje = CCL/MEP − 1,
-    el oficial A3500, y la caución BYMA overnight (plazo real del día por
-    volumen — viernes 3D, pre-feriado 4D — con TNA de cierre y, si el feed lo
-    codifica en EV/NV, el VWAP del día). None si no hay NINGÚN dato."""
+    el oficial A3500, y la caución BYMA overnight EN PESOS Y EN DÓLARES
+    (plazo real del día por volumen — viernes 3D, feriado mid-week 2D,
+    feriado+finde 4D — con TNA de cierre y, si el feed lo codifica en EV/NV,
+    el VWAP del día). Serie diaria acumulada estilo A3500/TAMAR, en el mismo
+    archivo FX. None si no hay NINGÚN dato."""
     from backend.services import dolares, fx as fx_svc
     snap = fx_svc.get_fx("24hs")
     oficial = None
@@ -537,23 +539,28 @@ def build_fx_row() -> Optional[Dict[str, Any]]:
         oficial = (dolares.official_fx() or {}).get("last")
     except Exception:  # noqa: BLE001
         pass
-    cauc = None
+    cauc = cauc_usd = None
     try:
         from backend.services import cauciones
         cauc = cauciones.hist_row("PESOS")
+        cauc_usd = cauciones.hist_row("DOLAR")
     except Exception:  # noqa: BLE001 — la caución jamás frena el guardado del FX
         logger.warning("[historico_writer] caución para el histórico falló", exc_info=True)
-    if not (snap.ccl or snap.usb or oficial or cauc):
+    if not (snap.ccl or snap.usb or oficial or cauc or cauc_usd):
         return None
     return {"fecha_hoy": _now().date(), "ccl": snap.ccl, "mep": snap.usb,
             "canje": snap.canje, "oficial_a3500": oficial,
             "ccl_base": snap.ccl_base or "",
-            # Caución BYMA $ o/n (las claves van SIEMPRE para que las columnas
-            # existan aunque un día no haya dato — None = celda vacía).
+            # Caución BYMA o/n en $ y US$ (las claves van SIEMPRE para que las
+            # columnas existan aunque un día no haya dato — None = celda vacía).
             "caucion_plazo_d": (cauc or {}).get("plazo_d"),
             "caucion_tna": (cauc or {}).get("tna"),
             "caucion_tna_vwap": (cauc or {}).get("vwap"),
-            "caucion_monto": (cauc or {}).get("monto")}
+            "caucion_monto": (cauc or {}).get("monto"),
+            "caucion_usd_plazo_d": (cauc_usd or {}).get("plazo_d"),
+            "caucion_usd_tna": (cauc_usd or {}).get("tna"),
+            "caucion_usd_tna_vwap": (cauc_usd or {}).get("vwap"),
+            "caucion_usd_monto": (cauc_usd or {}).get("monto")}
 
 
 def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
