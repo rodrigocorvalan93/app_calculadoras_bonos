@@ -95,7 +95,6 @@ def byma_rows(moneda: str = "PESOS", *, include_close_only: bool = False) -> Lis
             "moneda": "ARS" if m == "PESOS" else "USD",
             "tasa": last, "bid": bid, "offer": offer, "close": close,
             "var": var, "volumen": snap.volume,
-            "vwap": vwap_sesion(snap),
         })
     return rows
 
@@ -156,31 +155,43 @@ def rail_picks() -> List[Dict[str, Any]]:
     return out
 
 
-def vwap_sesion(snap: Any) -> float | None:
-    """Tasa promedio ponderada de la SESIÓN, del acumulador de trades del
-    store (`marketdata_store._acum_vwap_caucion` — el feed no publica VWAP de
-    tasa). None si no hay acumulación de HOY, o si lo acumulado cubre <60% del
-    monto operado del día (app arrancada a mitad de rueda: un promedio parcial
-    sería engañoso — mejor sin dato que con uno mentiroso)."""
-    acc = getattr(snap, "vwap_acc", None) or {}
-    den = acc.get("den") or 0.0
-    if den <= 0 or acc.get("day") != hoy_ba().isoformat():
-        return None
-    vol = getattr(snap, "volume", None)
-    if vol and den < 0.6 * vol:
-        return None
+def vwap_evnv(snap: Any, dias: int) -> float | None:
+    """Tasa promedio ponderada del día SI viene codificada en los acumuladores
+    EV/NV del feed — dato del server en cada snapshot, NO una grabación local
+    (mismo espíritu que el VWAP de bonos = EV/NV×100 que ya usa Mercado). Si
+    para caución un acumulador es el contado y el otro el monto a vencimiento,
+    entonces (mayor/menor − 1) · 365/n es el VWAP de tasa.
+
+    AUTOVALIDADO contra el propio rango del día que publica la API: sólo se
+    devuelve si cae entre el mínimo y el máximo operados (±0,5 pp). Si el
+    broker manda EV = NV (una sola plata), da 0% fuera de rango → None: jamás
+    un número inventado. No hay endpoint alternativo: `rest/data/getTrades`
+    responde `{trades: []}` para caución (ver
+    proyecto_cauciones_ml/diagnostico_endpoints.py)."""
     try:
-        return float(acc.get("num", 0.0)) / float(den)
-    except (TypeError, ZeroDivisionError, ValueError):
+        ev, nv = getattr(snap, "volume", None), getattr(snap, "nominal", None)
+        lo, hi = getattr(snap, "low", None), getattr(snap, "high", None)
+        if not ev or not nv or ev <= 0 or nv <= 0 or dias <= 0:
+            return None
+        if lo is None or hi is None:
+            return None                      # sin rango del día no hay validación
+        r = float(ev) / float(nv)
+        if r < 1.0:                          # orientación desconocida: probar ambas
+            r = 1.0 / r
+        tasa = (r - 1.0) * 365.0 / float(dias) * 100.0
+        if not (float(lo) - 0.5 <= tasa <= float(hi) + 0.5):
+            return None
+        return tasa
+    except (TypeError, ValueError, ZeroDivisionError):
         return None
 
 
 def book(moneda: str = "PESOS", dias: int = 1) -> Dict[str, Any] | None:
     """Detalle completo de UNA caución para el card del libro en Tasas:
     stats del día + profundidad con acumulado (tasa por nivel, monto en $)
-    + VWAP de sesión. Todo del store en memoria (sub-ms). Las puntas y stats
-    restauradas de otra rueda no cuentan (mismos guards que byma_rows);
-    None si el store no conoce el símbolo."""
+    + VWAP del día si el feed lo codifica (vwap_evnv). Todo del store en
+    memoria (sub-ms). Las puntas y stats restauradas de otra rueda no cuentan
+    (mismos guards que byma_rows); None si el store no conoce el símbolo."""
     from datetime import timedelta
 
     m = _moneda_tk(moneda)
@@ -214,7 +225,7 @@ def book(moneda: str = "PESOS", dias: int = 1) -> Dict[str, Any] | None:
         "low": snap.low if hoy else None,
         "monto": snap.volume if hoy else None,      # EV — $ operado en el día
         "ops": snap.trade_count if hoy else None,
-        "vwap": vwap_sesion(snap),
+        "vwap": vwap_evnv(snap, n) if hoy else None,
         "vencimiento": (hoy_ba() + timedelta(days=n)).isoformat(),
         "bids": levels(snap.bids), "offers": levels(snap.offers),
         "es_hoy": hoy,
@@ -225,12 +236,13 @@ def hist_row(moneda: str = "PESOS") -> Dict[str, Any] | None:
     """Dato de caución overnight para el HISTÓRICO diario: el plazo o/n real
     del día (rail_pick: mayor volumen entre 1D-4D → un viernes cae solo al 3D
     y pre-feriado al 4D, así la serie no tiene huecos), con la tasa operada
-    HOY (jamás el cierre de otra rueda) y el VWAP de sesión si es confiable."""
+    HOY (jamás el cierre de otra rueda) y el VWAP del día si el feed lo
+    codifica en EV/NV (ver vwap_evnv — todo dato de API, nada grabado)."""
     pick = rail_pick(moneda)
     if not pick or pick.get("es_cierre") or pick.get("tasa") is None:
         return None
     snap = marketdata_store.get_store().get(
         f"MERV - XMEV - {_moneda_tk(moneda)} - {pick['_n']}D")
     return {"plazo_d": pick["_n"], "tna": pick["tasa"],
-            "vwap": vwap_sesion(snap) if snap is not None else None,
+            "vwap": vwap_evnv(snap, pick["_n"]) if snap is not None else None,
             "monto": pick.get("volumen")}

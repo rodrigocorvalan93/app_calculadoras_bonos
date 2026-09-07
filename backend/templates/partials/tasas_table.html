@@ -24,7 +24,7 @@
     <div class="table-scroll">
       <table class="cashflows curve-table mercado-table">
         <thead>
-          <tr><th style="text-align:left">Plazo</th><th>Tasa</th><th>Bid</th><th>Offer</th><th>Var</th><th>VWAP</th><th>Volumen</th></tr>
+          <tr><th style="text-align:left">Plazo</th><th>Tasa</th><th>Bid</th><th>Offer</th><th>Var</th><th>Volumen</th></tr>
         </thead>
         <tbody>
           {% for r in filas %}
@@ -37,11 +37,10 @@
               <td>{{ r.offer | ar_num(2) }}</td>
               {# var de caución viene en PUNTOS de TNA → cap 1 pp para el heatmap #}
               <td class="{{ fx.vcls(r.var) }}" style="{{ fx.heat(r.var, cap=1.0) }}">{{ fx.arrow(r.var) }} {{ r.var | ar_num(2) }}</td>
-              <td>{{ r.vwap | ar_num(2) }}</td>
               <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="7" class="muted" style="text-align:center">{{ vacio }}</td></tr>
+            <tr><td colspan="6" class="muted" style="text-align:center">{{ vacio }}</td></tr>
           {% endfor %}
         </tbody>
       </table>

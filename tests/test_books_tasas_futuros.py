@@ -1,7 +1,8 @@
 """Books de caución BYMA (pestaña Tasas) y de futuros (paridad Mercado), y el
-VWAP de caución: acumulador de trades en el store + guardado diario junto al
-histórico FX (plazo o/n real del día → viernes 3D / pre-feriado 4D, sin
-huecos en la serie)."""
+VWAP de caución 100% de API (derivado de los acumuladores EV/NV del feed,
+autovalidado contra el rango del día — nada grabado localmente) + guardado
+diario junto al histórico FX (plazo o/n real del día → viernes 3D /
+pre-feriado 4D, sin huecos en la serie)."""
 from __future__ import annotations
 
 import time
@@ -22,29 +23,35 @@ def store_limpio(monkeypatch):
     return st
 
 
-def test_vwap_caucion_acumula_dedup_y_guard(store_limpio) -> None:
-    """El feed no publica VWAP de tasa: lo acumula el store con los trades
-    (Σ tasa×monto / Σ monto), dedup del LA sticky, y el guard de sesión
-    parcial devuelve None antes que un promedio mentiroso."""
-    sym = "MERV - XMEV - PESOS - 7D"
+def test_vwap_evnv_derivacion_y_gates(store_limpio) -> None:
+    """VWAP de tasa 100% de API: si los acumuladores EV/NV del feed codifican
+    contado vs monto a vencimiento, (mayor/menor − 1)·365/n es el promedio
+    ponderado del día — validado contra el rango HI/LO que publica la misma
+    API. Nada acumulado localmente: si el broker manda EV=NV, None."""
+    sym = "MERV - XMEV - PESOS - 1D"
     st = store_limpio
-    st.update_from_md(sym, {"LA": {"price": 30.0, "size": 1_000_000.0, "date": "1"}})
-    st.update_from_md(sym, {"LA": {"price": 32.0, "size": 3_000_000.0, "date": "2"}})
-    acc = st.get(sym).vwap_acc
-    assert acc["den"] == 4_000_000.0
-    assert acc["num"] == pytest.approx(30.0 * 1e6 + 32.0 * 3e6)
-    # el mismo LA reenviado (snapshot inicial sticky) NO se double-cuenta
-    st.update_from_md(sym, {"LA": {"price": 32.0, "size": 3_000_000.0, "date": "2"}})
-    assert st.get(sym).vwap_acc["den"] == 4_000_000.0
-    # EV cubierto por lo acumulado → VWAP ponderado real
-    st.update_from_md(sym, {"EV": 4_000_000.0})
-    assert cauc_svc.vwap_sesion(st.get(sym)) == pytest.approx(31.5)
-    # EV mucho mayor que lo visto (app arrancada a mitad de rueda) → None
-    st.update_from_md(sym, {"EV": 40_000_000.0})
-    assert cauc_svc.vwap_sesion(st.get(sym)) is None
-    # un bono cualquiera no acumula (el costo queda scoped a caución)
-    st.update_from_md("MERV - XMEV - AL30D - 24hs", {"LA": {"price": 58.0, "size": 100.0}})
-    assert st.get("MERV - XMEV - AL30D - 24hs").vwap_acc is None
+    # NV = 3,65e9 (contado) y EV = NV·(1+31%·1/365) → VWAP 31,00 exacto
+    st.update_from_md(sym, {"LA": {"price": 31.2}, "HI": 33.0, "LO": 29.5,
+                            "NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.31})
+    assert cauc_svc.vwap_evnv(st.get(sym), 1) == pytest.approx(31.0)
+    # orientación invertida (EV contado, NV futuro) → mismo resultado
+    st2 = mds.MarketDataStore()
+    st2.update_from_md(sym, {"HI": 33.0, "LO": 29.5,
+                             "EV": 3.65e9, "NV": 3.65e9 + 1e7 * 0.31})
+    assert cauc_svc.vwap_evnv(st2.get(sym), 1) == pytest.approx(31.0)
+    # EV == NV (una sola plata) → 0% cae fuera del rango del día → None
+    st3 = mds.MarketDataStore()
+    st3.update_from_md(sym, {"HI": 33.0, "LO": 29.5, "EV": 3.65e9, "NV": 3.65e9})
+    assert cauc_svc.vwap_evnv(st3.get(sym), 1) is None
+    # derivación implausible (no matchea el rango operado) → None
+    st4 = mds.MarketDataStore()
+    st4.update_from_md(sym, {"HI": 33.0, "LO": 29.5,
+                             "NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.80})
+    assert cauc_svc.vwap_evnv(st4.get(sym), 1) is None
+    # sin rango del día publicado no hay autovalidación → None
+    st5 = mds.MarketDataStore()
+    st5.update_from_md(sym, {"NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.31})
+    assert cauc_svc.vwap_evnv(st5.get(sym), 1) is None
 
 
 def test_caucion_book_completo_y_stale(store_limpio) -> None:
@@ -52,17 +59,17 @@ def test_caucion_book_completo_y_stale(store_limpio) -> None:
     st.update_from_md("MERV - XMEV - PESOS - 1D", {
         "LA": {"price": 31.0, "size": 2e6, "date": "10"},
         "CL": 30.0, "OP": 32.0, "HI": 33.0, "LO": 29.5,
-        "EV": 2e6, "TV": 12.0,
+        "NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.31, "TV": 12.0,
         "BI": [{"price": 30.9, "size": 5e6}, {"price": 30.5, "size": 3e6}],
         "OF": [{"price": 31.2, "size": 4e6}],
     })
     b = cauc_svc.book("PESOS", 1)
     assert b["tasa"] == 31.0 and b["close"] == 30.0
     assert b["var"] == pytest.approx(1.0)               # puntos de TNA
-    assert b["monto"] == 2e6 and b["ops"] == 12.0 and b["es_hoy"] is True
+    assert b["monto"] == 3.65e9 + 1e7 * 0.31 and b["ops"] == 12.0 and b["es_hoy"] is True
     assert [lv["cum"] for lv in b["bids"]] == [5e6, 8e6]
     assert b["bids"][1]["frac"] == pytest.approx(1.0)   # degradé de profundidad
-    assert b["vwap"] == pytest.approx(31.0)
+    assert b["vwap"] == pytest.approx(31.0)             # derivado de EV/NV (API)
     assert b["vencimiento"]                             # hoy + 1 corrido
 
     # Snapshot restaurado de OTRA rueda (persistencia): ni puntas ni stats del
@@ -85,11 +92,15 @@ def test_hist_row_plazo_por_volumen(store_limpio) -> None:
     st = store_limpio
     st.update_from_md("MERV - XMEV - PESOS - 1D",
                       {"LA": {"price": 29.0, "size": 1e5, "date": "1"}, "EV": 1e5})
+    # 3D con EV/NV codificando 30,50% a 3 días: EV = NV·(1+0,305·3/365)
     st.update_from_md("MERV - XMEV - PESOS - 3D",
-                      {"LA": {"price": 30.5, "size": 9e6, "date": "2"}, "EV": 9e6})
+                      {"LA": {"price": 30.5, "size": 9e6, "date": "2"},
+                       "HI": 31.0, "LO": 29.8,
+                       "NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.305 * 3})
     r = cauc_svc.hist_row("PESOS")
     assert r["plazo_d"] == 3 and r["tna"] == 30.5
-    assert r["vwap"] == pytest.approx(30.5) and r["monto"] == 9e6
+    assert r["vwap"] == pytest.approx(30.5)             # de EV/NV, no grabado
+    assert r["monto"] == 3.65e9 + 1e7 * 0.305 * 3
 
 
 def test_hist_row_none_con_datos_de_otra_rueda(store_limpio) -> None:
@@ -114,11 +125,13 @@ def test_build_fx_row_incluye_caucion(monkeypatch, store_limpio) -> None:
     monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": snap)
     monkeypatch.setattr(dolares, "official_fx", lambda: {"last": 1350.0})
     store_limpio.update_from_md("MERV - XMEV - PESOS - 2D",
-                                {"LA": {"price": 31.0, "size": 4e6, "date": "9"}, "EV": 4e6})
+                                {"LA": {"price": 31.0, "size": 4e6, "date": "9"},
+                                 "HI": 32.0, "LO": 30.0,
+                                 "NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.31 * 2})
     row = hw.build_fx_row()
     assert row["caucion_plazo_d"] == 2 and row["caucion_tna"] == 31.0
     assert row["caucion_tna_vwap"] == pytest.approx(31.0)
-    assert row["caucion_monto"] == 4e6
+    assert row["caucion_monto"] == 3.65e9 + 1e7 * 0.31 * 2
 
     # sin caución el FX se guarda igual: las claves van en None (columnas estables)
     monkeypatch.setattr(mds, "_store", mds.MarketDataStore())
@@ -138,15 +151,14 @@ async def test_http_tasas_caucion_book_y_wiring(store_limpio) -> None:
         r = await ac.get("/tasas/caucion/book", params={"moneda": "PESOS", "dias": 1})
         assert r.status_code == 200
         assert "Libro · Caución ARS 1D" in r.text
-        assert "VWAP sesión" in r.text and "md-update" in r.text
+        assert "VWAP día" in r.text and "md-update" in r.text
         assert "depth-bid" in r.text and "31,00" in r.text
         # la página tiene el target del libro FUERA del área auto-refrescada…
         page = await ac.get("/tasas")
         assert 'id="cauc-book"' in page.text
-        # …y las filas BYMA son clickeables hacia el endpoint (con col. VWAP)
+        # …y las filas BYMA son clickeables hacia el endpoint
         tbl = await ac.get("/tasas/table")
         assert "/tasas/caucion/book?moneda=PESOS" in tbl.text
-        assert "<th>VWAP</th>" in tbl.text
 
 
 @pytest.mark.asyncio

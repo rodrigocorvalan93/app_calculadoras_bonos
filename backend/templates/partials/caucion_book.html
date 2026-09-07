@@ -17,7 +17,7 @@
     <div class="book-stats">
       <div><span>Tasa (TNA)</span><b style="color:var(--accent)">{{ b.tasa | ar_num(2) }}%</b></div>
       <div><span>Var (pp)</span><b class="{{ fx.vcls(b.var) }}">{% if b.var is not none %}{{ fx.arrow(b.var) }} {{ b.var | ar_num(2) }}{% else %}—{% endif %}</b></div>
-      <div><span>VWAP sesión</span><b>{% if b.vwap is not none %}{{ b.vwap | ar_num(2) }}%{% else %}—{% endif %}</b></div>
+      <div title="Derivado de los acumuladores EV/NV del feed y validado contra el rango del día — si el broker no lo codifica, queda vacío."><span>VWAP día</span><b>{% if b.vwap is not none %}{{ b.vwap | ar_num(2) }}%{% else %}—{% endif %}</b></div>
       <div><span>Cierre ant.</span><b>{{ b.close | ar_num(2) }}</b></div>
       <div><span>Apertura</span><b>{{ b.open | ar_num(2) }}</b></div>
       <div><span>Mín</span><b>{{ b.low | ar_num(2) }}</b></div>

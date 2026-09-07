@@ -528,8 +528,8 @@ def build_fx_row() -> Optional[Dict[str, Any]]:
     """Fila del día con los FX de referencia del proceso: CCL (cable) y MEP
     implícitos del store (mismos que usa toda la app), canje = CCL/MEP − 1,
     el oficial A3500, y la caución BYMA overnight (plazo real del día por
-    volumen — viernes 3D, pre-feriado 4D — con TNA de cierre y VWAP de sesión
-    si es confiable). None si no hay NINGÚN dato (feed muerto)."""
+    volumen — viernes 3D, pre-feriado 4D — con TNA de cierre y, si el feed lo
+    codifica en EV/NV, el VWAP del día). None si no hay NINGÚN dato."""
     from backend.services import dolares, fx as fx_svc
     snap = fx_svc.get_fx("24hs")
     oficial = None
