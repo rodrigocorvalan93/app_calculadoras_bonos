@@ -191,7 +191,7 @@ def test_cer_bond_shows_cer_aplicable() -> None:
     idx = m["index_applied"]
     assert idx["kind"] == "CER"
     assert _isfin(idx["value"]), f"CER value should be loaded from rentafija.inputs: {idx}"
-    assert m["tna_convention_label"] == "180/365"
+    assert m["tna_convention_label"] == "180/360"   # CER reexpresa TNA base 360
 
 
 def test_variable_uses_90_over_365() -> None:

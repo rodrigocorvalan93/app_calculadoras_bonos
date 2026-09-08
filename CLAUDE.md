@@ -51,8 +51,8 @@ wins:
 |---|---|---|
 | Dual TAMAR | 32/365 cap | `VARIABLE_CAP` + `index == TAMAR` |
 | Tasa variable pura (BADLAR / TAMAR) | 90/365 | `tipo_tasa_interes == VARIABLE` |
-| CER / CER PROY | 180/365 | `"CER" in ajuste_sobre_capital` |
-| UVA / UVA PROY | 180/365 | `"UVA" in ajuste_sobre_capital` |
+| CER / CER PROY | 180/360 | `"CER" in ajuste_sobre_capital` |
+| UVA / UVA PROY | 180/360 | `"UVA" in ajuste_sobre_capital` |
 | DLK corporativo (A3500) | 90/360 | `"A3500" in ajuste` + `"CORPORATIVO" in clasificacion` |
 | DLK soberano (A3500) | 90/365 | `"A3500" in ajuste_sobre_capital` |
 | Hard-dollar | 180/360 | `_is_hard_dollar(obj)` |
