@@ -199,6 +199,17 @@
       </div>
     </div>
 
+    {# ── Especies faltantes en la base (Delta + Galileo) — on-demand ── #}
+    <div class="card">
+      <div class="card-title"><span>🧩 Especies faltantes</span>
+        <span class="card-title-aux">carteras vs base de especies · Galileo sin normalizar</span></div>
+      <div class="card-body">
+        <div id="admin-especies" hx-get="/admin/especies-faltantes" hx-trigger="load" hx-swap="innerHTML">
+          <p class="muted" style="font-size:12px">Cargando…</p>
+        </div>
+      </div>
+    </div>
+
     {# ── Auditoría del OMS: visor + export CSV ── #}
     <div class="card">
       <div class="card-title"><span>🧾 Auditoría OMS</span>
