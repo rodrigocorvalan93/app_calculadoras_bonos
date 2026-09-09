@@ -51,8 +51,8 @@ wins:
 |---|---|---|
 | Dual TAMAR | 32/365 cap | `VARIABLE_CAP` + `index == TAMAR` |
 | Tasa variable pura (BADLAR / TAMAR) | 90/365 | `tipo_tasa_interes == VARIABLE` |
-| CER / CER PROY | 180/365 | `"CER" in ajuste_sobre_capital` |
-| UVA / UVA PROY | 180/365 | `"UVA" in ajuste_sobre_capital` |
+| CER / CER PROY | 180/360 | `"CER" in ajuste_sobre_capital` |
+| UVA / UVA PROY | 180/360 | `"UVA" in ajuste_sobre_capital` |
 | DLK corporativo (A3500) | 90/360 | `"A3500" in ajuste` + `"CORPORATIVO" in clasificacion` |
 | DLK soberano (A3500) | 90/365 | `"A3500" in ajuste_sobre_capital` |
 | Hard-dollar | 180/360 | `_is_hard_dollar(obj)` |
@@ -138,7 +138,10 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
 - **Fondos visibles por usuario** (`auth.visible_fondos` / campo `fondos` del
   store; editor en /admin): filtro fino ADENTRO de las pestañas con
   tenencias. None = todos (default); lista = allowlist de `cod_fondo` (un
-  fondo nuevo NO se muestra a un restringido hasta tildarlo). Se aplica
+  fondo nuevo NO se muestra a un restringido hasta tildarlo). Los fondos
+  GALILEO viven en el mismo pipeline con `cod_fondo + positions.GALILEO_OFFSET`
+  (10000) — numeración propia que colisiona con la de Delta — así las
+  allowlists/URLs siguen siendo ints y un restringido no los ve hasta tildar. Se aplica
   SERVER-SIDE en `services.positions` (param `visibles`) y entra por
   `auth.visible_fondos_for(request)` en Posiciones/Matriz (páginas y
   partials, robusto a `?fondo=` a mano) y en los desplegables de tenencia

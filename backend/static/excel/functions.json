@@ -276,7 +276,7 @@
     {
       "id": "TNA",
       "name": "TNA",
-      "description": "TNA bajo la convención del bono (dual TAMAR 32/365, CER 180/365, hard-dollar 180/360...) a un precio dado.",
+      "description": "TNA bajo la convención del bono (dual TAMAR 32/365, CER 180/360, hard-dollar 180/360...) a un precio dado.",
       "result": {
         "type": "number"
       },

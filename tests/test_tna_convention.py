@@ -60,5 +60,14 @@ def test_more_specific_branches_win_over_hard_dollar() -> None:
     # Ordering: a VARIABLE bond tagged USB is still 90/365 (the rate
     # convention runs before the hard-dollar check).
     assert _conv(moneda="USB", tipo_tasa_interes="VARIABLE") == ("90/365", 90, 365, "linear")
-    # CER adjustment wins too.
-    assert _conv(moneda="USD", ajuste_sobre_capital="CER") == ("180/365", 180, 365, "linear")
+    # CER adjustment wins too (y desde 08/09 la TNA CER se reexpresa 180/360).
+    assert _conv(moneda="USD", ajuste_sobre_capital="CER") == ("180/360", 180, 360, "linear")
+
+
+def test_cer_y_uva_reexpresan_tna_180_360() -> None:
+    # Pedido del desk (08/09): CER y UVA reexpresan TIR→TNA en base 360
+    # (el devengamiento del cashflow no cambia — sólo el label TNA).
+    assert _conv(moneda="ARS", ajuste_sobre_capital="CER") == ("180/360", 180, 360, "linear")
+    assert _conv(moneda="ARS", ajuste_sobre_capital="CER PROYECTADO") == ("180/360", 180, 360, "linear")
+    assert _conv(moneda="ARS", ajuste_sobre_capital="UVA") == ("180/360", 180, 360, "linear")
+    assert _conv(moneda="ARS", ajuste_sobre_capital="UVA PROYECTADO") == ("180/360", 180, 360, "linear")

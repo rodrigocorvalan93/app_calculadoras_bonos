@@ -26,7 +26,7 @@ typical of dual TAMAR; the others use the standard `tir_a_tna`.
 
   VARIABLE_CAP + TAMAR             → 32/365  (cap32)
   VARIABLE  (BADLAR, TAMAR puro)   → 90/365  (linear)   ← user-requested
-  ajuste contains "CER"            → 180/365 (linear)
+  ajuste contains "CER"            → 180/360 (linear)
   ajuste contains "A3500" (DLK)    → 90/360 corporativo · 90/365 soberano (linear)
   moneda == USD (hard-dollar)      → 180/360 (linear)
   default (LECAP / bullets ARS)    → días_remanentes/365 (linear)
@@ -326,10 +326,13 @@ def tna_convention(
         return "32/365 cap", 32, 365, "cap32"
     if tipo == "VARIABLE":
         return "90/365", 90, 365, "linear"
+    # Pedido del desk (08/09): la reexpresión TIR→TNA de CER y UVA va en
+    # base 360 (como los DLK corporativos y el hard-dollar). El devengamiento
+    # del cashflow del bono NO cambia — sólo la reexpresión/label de TNA.
     if "CER" in ajuste:
-        return "180/365", 180, 365, "linear"
+        return "180/360", 180, 360, "linear"
     if "UVA" in ajuste:
-        return "180/365", 180, 365, "linear"
+        return "180/360", 180, 360, "linear"
     if "A3500" in ajuste:
         # El mercado cotiza los DLK corporativos en 90/360 (aunque el cupón
         # devengue actual/360); los soberanos se mantienen en 90/365.
