@@ -79,6 +79,31 @@ NAN_METRICS: Dict[str, float] = {
 }
 
 
+def market_last_native(code: str, plazo: str = "24hs"):
+    """Last de pantalla convertido al basis PROPIO de la ficha `code`.
+
+    Para un bono común es el last tal cual. Para la especie en PESOS (o la
+    referencia clean) de un hard-dollar — Moneda USD/USB con ticker sin C/D:
+    AL30, GD30, BPOC7, los …O corporativos — el ticker cotiza en ARS y el
+    last crudo NO sirve como input de la ficha en dólares: se divide por el
+    FX de la moneda de pago (MEP si USB, cable si USD). Sin FX vivo → None
+    (mejor autofill vacío que un precio 1500× que el usuario no nota).
+    Único punto compartido por los autofills de YAS y Comparador; la vista
+    de Curvas hace la misma conversión por su lado (routes/curves.cp)."""
+    from backend.services import fx as fx_svc
+    from backend.services import marketdata_store
+    from backend.services import symbols as syms
+
+    snap = marketdata_store.get_store().get(syms.md_symbol(code, plazo))
+    last = getattr(snap, "last", None) if snap is not None else None
+    if last is None:
+        return None
+    meta = bond_meta(code) or {}
+    if meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
+        return fx_svc.normalize_price(last, "ARS", meta.get("moneda"), fx_svc.get_fx(plazo))
+    return float(last)
+
+
 def _bond_obj_copy(code: str):
     obj = bond_universe.get(code)
     if obj is None:
@@ -807,6 +832,14 @@ from backend.cache import LockedTTLCache  # noqa: E402  (avoid top circular)
 # warmup deja todo caliente de sobra y sólo el 1er cómputo de cada (precio,día)
 # paga; un cambio de índice o de bucket entra por la key, no por expiración.
 _curve_metrics_cache = LockedTTLCache(maxsize=16384, ttl=3600)
+# Cache APARTE para los bonos indexados (DLK/CER/UVA/floaters): su key lleva el
+# fingerprint del índice, y el del A3500 rota cada ~20 s con el SIOPEL intradía
+# → ~165 keys nuevas por rotación. Compartiendo cache, ese churn desbordaba el
+# maxsize y las evicciones (que sacan del FRENTE = las más viejas) se llevaban
+# las entradas CALIENTES y aún vigentes de LECAP/globales — que el warmup
+# recalentaba a ~20 ms por bono, en ciclo. Separado, el churn indexado sólo
+# evicta indexados y el cache estable no se toca.
+_curve_metrics_cache_idx = LockedTTLCache(maxsize=8192, ttl=3600)
 
 # Bonos ajustados (DLK/CER/UVA): su TIR a un precio dado depende del índice
 # (A3500/CER/UVA), no sólo del precio. Si la key del cache no lo incluye, al
@@ -924,7 +957,8 @@ def metrics_for_market_price(
     # La key incluye el valor del índice (DLK/CER/UVA/floater → un cambio del
     # A3500/CER/UVA/benchmark la invalida) y el día ordinal BA (rollover de fecha
     # con settle=None → recomputa con el settlement del día nuevo, no el de ayer).
-    key = (code, bucket, settle or "", _index_fingerprint(_bond_index_kind(code)),
+    kind = _bond_index_kind(code)
+    key = (code, bucket, settle or "", _index_fingerprint(kind),
            hoy_ba().toordinal())
 
     # ¿Falló hace <120 s con esta misma key? → guiones sin recomputar (evita
@@ -951,7 +985,8 @@ def metrics_for_market_price(
             return None
         return res
 
-    return _curve_metrics_cache.get_or_compute(key, _factory)
+    cache = _curve_metrics_cache_idx if kind else _curve_metrics_cache
+    return cache.get_or_compute(key, _factory)
 
 
 def ticket_rows(metrics: Dict[str, Any], nominales: float = 1_000_000.0) -> Dict[str, Any]:

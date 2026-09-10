@@ -149,7 +149,11 @@ async def total_return_table(
         return tr_svc.compute_rows(rows, terminal, settle, y1_map)
 
     loop = asyncio.get_running_loop()
-    tr_rows, dias = await loop.run_in_executor(
+    # Mismo pre-chequeo que Escenario: el hit no ocupa worker del pool (los
+    # misses concurrentes de una misma key dormían sobre el compute-lock
+    # ADENTRO de _row_pool y ahogaban los paneles live).
+    hit = tr_svc._cache.get(key)
+    tr_rows, dias = hit if hit is not None else await loop.run_in_executor(
         _row_pool, lambda: _cached_or(key, _compute))
 
     chart = tr_svc.chart_from_tr_rows(tr_rows)

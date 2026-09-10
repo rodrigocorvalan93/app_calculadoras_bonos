@@ -30,9 +30,22 @@ _MAX_PAGES = 25            # tope defensivo de paginación
 _TTL = 20.0                # frescura del snapshot (s)
 
 # Moneda MAE (anexo del doc) → leg de la app. X = Dólar Transferencia ≈ cable;
-# D = USD (MEP/local); $ y T = pesos. Es un hint para elegir la fila correcta
-# por bono; el match cae a "cualquier moneda" si no encuentra la preferida.
-_LEG_MONEDAS = {"USD": ("X", "D"), "USB": ("D", "X"), "ARS": ("$", "T"), "native": ()}
+# D = USD (MEP/local); $ y T = pesos. La preferencia es OBLIGATORIA para
+# pricing: una fila en otra moneda produce una TIR plausible pero corrida por
+# el canje entero (o -100% si es la pesos). Con leg=native la moneda de la
+# FICHA manda (USD=cable→X, USB=MEP→D, resto pesos); sin fila en la moneda
+# correcta el match devuelve None (el panel muestra "—"), nunca otra moneda.
+_LEG_MONEDAS = {"USD": ("X",), "USB": ("D",), "ARS": ("$", "T"), "native": ()}
+
+
+def _pref_monedas(code: str, leg: str) -> tuple:
+    pref = _LEG_MONEDAS.get(leg, ())
+    if pref:
+        return pref
+    from backend.services import pricing  # lazy: evita ciclo de import
+
+    mon = ((pricing.bond_meta(code) or {}).get("moneda") or "").upper()
+    return _LEG_MONEDAS.get(mon) or _LEG_MONEDAS["ARS"]
 
 _lock = threading.Lock()
 _snap: Dict[str, Any] = {"rentafija": [], "cauciones": [], "repo": [],
@@ -231,8 +244,13 @@ def match(code: str, leg: str = "native", plazo: Optional[str] = None) -> Option
         rows = [r for r in rows if _plazo_norm(r.get("plazo")) == target]
     if not rows:
         return None
-    pref = _LEG_MONEDAS.get(leg, ())
-    pool = [r for r in rows if str(r.get("moneda")) in pref] or rows
+    # Sólo filas de la moneda del leg/ficha — sin fallback cross-moneda: antes
+    # con leg=native (el default) ganaba la fila de MÁS VOLUMEN de cualquier
+    # moneda y un GD30C podía pricearse con la fila en pesos (TIR -100%) o la
+    # MEP (TIR corrida por el canje).
+    pool = [r for r in rows if str(r.get("moneda")) in _pref_monedas(code, leg)]
+    if not pool:
+        return None
     best = max(pool, key=lambda r: _num(r.get("volumenAcumulado")) or 0.0)
     return _row_out(best)
 
@@ -247,11 +265,13 @@ def match_por_plazo(code: str, leg: str = "native") -> Dict[str, Dict[str, Any]]
     for r in rows:
         grupos.setdefault(_plazo_norm(r.get("plazo")), []).append(r)
     out: Dict[str, Dict[str, Any]] = {}
-    pref = _LEG_MONEDAS.get(leg, ())
+    pref = _pref_monedas(code, leg)
     for pl, rs in grupos.items():
         if not pl:
             continue
-        pool = [r for r in rs if str(r.get("moneda")) in pref] or rs
+        pool = [r for r in rs if str(r.get("moneda")) in pref]
+        if not pool:   # sin fila en la moneda correcta → sin dato (no cross-moneda)
+            continue
         out[pl] = _row_out(max(pool, key=lambda r: _num(r.get("volumenAcumulado")) or 0.0))
     return out
 

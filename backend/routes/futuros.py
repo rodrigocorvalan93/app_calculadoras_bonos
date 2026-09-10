@@ -79,9 +79,13 @@ async def _ctx(spot_override: str = "") -> Dict[str, Any]:
         mm = _match(dur)
         if mm:
             m, tea_fut = mm
+            tir_sint = (1.0 + tirea) * (1.0 + tea_fut) - 1.0
+            # TNA del sintético = reexpresión 90/365 del TIR sintético EFECTIVO
+            # (una sola convención). Antes sumaba TNA_bono(90/365) + TNA_fut
+            # (lineal días-del-contrato/365): dos convenciones distintas y la
+            # tabla se contradecía con su propio tir_sint.
             b.update({"fut_label": m["label"], "fut_code": m["code"], "fut_tna": m["tna"], "fut_tea": tea_fut,
-                      "tir_sint": (1.0 + tirea) * (1.0 + tea_fut) - 1.0,
-                      "tna_sint": (_bond_tna(tirea) + m["tna"]) if m["tna"] is not None else None})
+                      "tir_sint": tir_sint, "tna_sint": _bond_tna(tir_sint)})
         dlk.append(b)
     dlk.sort(key=lambda x: (x["duration"] if x["duration"] is not None else 9999.0))
 
@@ -96,9 +100,14 @@ async def _ctx(spot_override: str = "") -> Dict[str, Any]:
         mm = _match(dur)
         if mm:
             m, tea_fut = mm
+            tir_sint = (1.0 + tirea) / (1.0 + tea_fut) - 1.0
+            # Mismo criterio que el panel DLK: la TNA sintética sale del TIR
+            # sintético efectivo en 90/365 (convención DLK, que es lo que el
+            # sintético emula). Antes restaba la TNA de la fila de curva —
+            # que según el bono viene en 180/360 (CER) o días/365 (LECAP) —
+            # menos la TNA lineal del futuro: convenciones mezcladas.
             a.update({"fut_label": m["label"], "fut_tna": m["tna"], "fut_tea": tea_fut,
-                      "tir_sint": (1.0 + tirea) / (1.0 + tea_fut) - 1.0,
-                      "tna_sint": (tna - m["tna"]) if (tna is not None and m["tna"] is not None) else None})
+                      "tir_sint": tir_sint, "tna_sint": _bond_tna(tir_sint)})
         ars.append(a)
     ars.sort(key=lambda x: x["duration"])
 

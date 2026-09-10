@@ -433,6 +433,18 @@ async def lifespan(app: FastAPI):
         store_persist.save()          # último vuelco: el próximo boot abre poblado
     except Exception:  # noqa: BLE001
         logger.exception("[main] final snapshot save failed")
+    # Los ThreadPoolExecutors módulo-level (warmup._pool, curvas._row_pool) NO
+    # son daemon: concurrent.futures registra un atexit que JOINEA sus threads,
+    # y el reloader de uvicorn espera al proceso viejo sin timeout — con la
+    # cola del warmup cargada, tocar un .py demoraba el auto-reload varios
+    # segundos. cancel_futures vacía lo encolado; lo que ya corre termina solo.
+    try:
+        from backend.routes.curves import _row_pool as _rp
+        from backend.services.warmup import _pool as _wp
+        _rp.shutdown(wait=False, cancel_futures=True)
+        _wp.shutdown(wait=False, cancel_futures=True)
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] executor pools shutdown failed")
 
 
 def create_app() -> FastAPI:
@@ -623,6 +635,14 @@ def create_app() -> FastAPI:
         if not settings.auth_enabled or _is_public(path):
             if not settings.auth_enabled:
                 # sin muro: mostrar todo (dev). Nav = todas las pestañas.
+                # state.user TAMBIÉN se puebla: el invariante documentado es
+                # "auth off ⇒ todo request = superuser", y los guards de /admin
+                # (y cualquier chequeo de rol) leen state.user — sin esto, el
+                # panel de control daba 403 en modo dev.
+                # "_local" = el mismo pseudo-usuario que ya usan prefs/órdenes
+                # sin sesión (escenario._user_key, ordenes) — así el modo dev
+                # sigue leyendo/escribiendo el mismo bucket de siempre.
+                request.state.user = {"username": "_local", "role": "superuser"}
                 request.state.nav_tabs = auth_svc.nav_for("superuser")
                 request.state.nav_active = auth_svc.active_tab(path)
                 request.state.is_superuser = True
@@ -772,9 +792,44 @@ def create_app() -> FastAPI:
                         {"error": "Origen cruzado no permitido."}, status_code=403)
                     await resp(scope, receive, send)
                     return
+            elif not is_excel and scope.get("method") == "GET":
+                # GETs que MUTAN estado (los `?refresh=…` que releen Excels /
+                # pegan a la API CAFCI, y /logout) quedaban fuera de la defensa
+                # CSRF (sólo mira métodos inseguros) y SameSite=Lax los deja
+                # pasar en navegación top-level. Cortamos el caso CROSS-SITE
+                # comprobable: Sec-Fetch-Site: cross-site (browsers modernos)
+                # u Origin/Referer de otro host. La navegación propia
+                # (botones ↻, logout de la topbar) es same-origin y pasa;
+                # clientes sin esos headers pasan (fail-open, sin regresión).
+                q = scope.get("query_string", b"") or b""
+                if _path == "/logout" or b"refresh=" in q:
+                    hdrs = {k.decode("latin-1").lower(): v.decode("latin-1")
+                            for k, v in scope.get("headers", ())}
+                    host = (hdrs.get("host") or "").lower()
+                    src = hdrs.get("origin") or hdrs.get("referer")
+                    cross = ((hdrs.get("sec-fetch-site") or "").lower() == "cross-site"
+                             or bool(src and host and _netloc_of(src) != host))
+                    if cross:
+                        resp = JSONResponse(
+                            {"error": "Origen cruzado no permitido."}, status_code=403)
+                        await resp(scope, receive, send)
+                        return
 
             if is_excel:
-                await self.app(scope, receive, send)
+                async def _send_excel(message):  # noqa: ANN001
+                    if message["type"] == "http.response.start":
+                        hh = message.setdefault("headers", [])
+                        have = {k.lower() for k, _ in hh}
+                        # SOLO Referrer-Policy (no afecta el framing de Office):
+                        # taskpane/functions llevan `?token=` en la URL y cargan
+                        # office.js del CDN — un webview legacy con default laxo
+                        # mandaría la URL completa (token incluido) en el
+                        # Referer del request al CDN.
+                        if b"referrer-policy" not in have:
+                            hh.append((b"referrer-policy", b"no-referrer"))
+                    await send(message)
+
+                await self.app(scope, receive, _send_excel)
                 return
 
             async def _send(message):  # noqa: ANN001

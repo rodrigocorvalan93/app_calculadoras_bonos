@@ -39,6 +39,8 @@ logger = logging.getLogger("backend.tls")
 _MAX_HEAD = 64 * 1024          # head más grande → conexión cerrada (nada legal mide eso)
 _HEAD_TIMEOUT = 15.0           # segundos para recibir el head completo
 _CHUNK = 65536
+_PIPE_TIMEOUT = 120.0          # techo TOTAL de una conexión (1 request por conexión)
+_MAX_CONNS = 64                # conexiones concurrentes (anti fuga de FDs/tasks)
 
 # Headers que el puente PISA (los del cliente se descartan): forwarded* para
 # que nadie inyecte scheme/ip, connection para forzar el modelo 1-request.
@@ -68,6 +70,13 @@ def _rewrite_head(head: bytes) -> Optional[bytes]:
     request_line, resto = head[:sep], head[sep + 2:]
     # request-line mínima: METHOD SP TARGET SP HTTP/…
     if b" HTTP/" not in request_line or request_line.count(b" ") < 2:
+        return None
+    # LF PELADO dentro de los headers → rechazo de plano: h11/uvicorn cortan
+    # líneas también en \n, así que "X-Junk: a\nX-Forwarded-For: 8.8.8.8"
+    # sobrevivía al strip como UNA línea inocua nuestra y llegaba como DOS
+    # headers al parser de la app — smuggling del X-Forwarded-* que este
+    # puente existe para pisar. Ningún cliente legítimo manda LF sin CR.
+    if b"\n" in resto.replace(b"\r\n", b""):
         return None
     keep = []
     for line in resto.split(b"\r\n"):
@@ -107,6 +116,11 @@ class TlsBridge:
         # tasks pendientes y asyncio ensuciaba el log con "Task was destroyed
         # but it is pending!" por cada add-in conectado.
         self._tasks: "set[asyncio.Task]" = set()
+        # Tope de conexiones concurrentes: sin él, un cliente que abre TLS y
+        # deja de leer retenía 2 sockets + 2 tasks por conexión PARA SIEMPRE
+        # (el pump no tenía timeout) — repetido, agotaba FDs del proceso que
+        # cursa órdenes. 64 sobra para una mesa (1 request por conexión).
+        self._sem = asyncio.Semaphore(_MAX_CONNS)
 
     async def start(self) -> None:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -150,6 +164,27 @@ class TlsBridge:
         if task is not None:
             self._tasks.add(task)
         tw: Optional[asyncio.StreamWriter] = None
+        if self._sem.locked():
+            # Lleno: rechazo inmediato en vez de encolar (el add-in reintenta
+            # solo al próximo poll; encolar sólo alargaría la degradación).
+            try:
+                cw.write(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n"
+                         b"Content-Length: 0\r\n\r\n")
+                await cw.drain()
+            except OSError:
+                pass
+            finally:
+                if task is not None:
+                    self._tasks.discard(task)
+                try:
+                    cw.close()
+                except (OSError, RuntimeError):
+                    pass
+            return
+        async with self._sem:
+            await self._handle_inner(cr, cw, tw, task)
+
+    async def _handle_inner(self, cr, cw, tw, task) -> None:  # noqa: ANN001
         try:
             try:
                 head = await asyncio.wait_for(cr.readuntil(b"\r\n\r\n"), _HEAD_TIMEOUT)
@@ -173,7 +208,12 @@ class TlsBridge:
             # EOF del lado app marca el final).
             c2t = asyncio.ensure_future(_pump(cr, tw))
             try:
-                await _pump(tr, cw)
+                # Timeout TOTAL del pipe: un cliente que deja de leer bloqueaba
+                # cw.drain() para siempre (socket + task retenidos). Los
+                # requests del add-in son cortos (1 por conexión); 120 s sobra.
+                await asyncio.wait_for(_pump(tr, cw), _PIPE_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.debug("[tls] conexión superó %.0fs; se cierra", _PIPE_TIMEOUT)
             finally:
                 c2t.cancel()
                 try:

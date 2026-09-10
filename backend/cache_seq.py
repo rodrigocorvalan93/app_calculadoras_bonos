@@ -50,8 +50,16 @@ def _hdrs(etag: str, marker: str) -> Dict[str, str]:
     return {"ETag": etag, "Cache-Control": "private, no-cache", "x-seq-cache": marker}
 
 
-def seq_cached(ttl: float = 2.0) -> Callable:
-    """Decorador para endpoints async que devuelven HTML y toman `request`."""
+def seq_cached(ttl: float = 2.0, per_user: bool = False) -> Callable:
+    """Decorador para endpoints async que devuelven HTML y toman `request`.
+
+    `per_user=True`: la key incluye el username de la sesión. OBLIGATORIO para
+    cualquier endpoint cuyo HTML dependa del usuario (tenencias filtradas por
+    `visible_fondos_for`, por ej.): sin esto el cache es compartido y el
+    render de un usuario puede servirse a otro con distinta visibilidad
+    (fuga cross-usuario — el caso `mercado_book`). El costo es un render por
+    usuario en vez de uno global; el 304 por ETag se conserva igual.
+    """
     def deco(fn: Callable) -> Callable:
         cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
         lock = threading.Lock()
@@ -67,6 +75,9 @@ def seq_cached(ttl: float = 2.0) -> Callable:
             from backend.services import marketdata_store
             seq = marketdata_store.get_store().seq()
             key = (request.url.path, str(request.query_params))
+            if per_user:
+                u = getattr(request.state, "user", None) or {}
+                key = key + (u.get("username"),)
             inm = request.headers.get("if-none-match")
             now = time.monotonic()
             with lock:
@@ -84,7 +95,14 @@ def seq_cached(ttl: float = 2.0) -> Callable:
                 etag = '"' + hashlib.md5(body).hexdigest() + '"'
                 with lock:
                     if len(cache) >= _MAX_ENTRIES:
-                        cache.clear()
+                        # Evictar el cuarto MÁS VIEJO (dicts = orden de
+                        # inserción), no vaciar todo: el fusible saltaba con
+                        # keys descartables (`?q=` del buscador de CEDEARs
+                        # crea una por texto tipeado) y tiraba de golpe los
+                        # renders calientes de TODOS los paneles/usuarios,
+                        # que volvían a construirse en frío a la vez.
+                        for k in list(cache)[: _MAX_ENTRIES // 4]:
+                            cache.pop(k, None)
                     # until se calcula AL GUARDAR, no con el `now` de la entrada
                     # del wrapper: si el handler tardó (stall de red en un
                     # refresh 2×/día, por ej.), la entrada nacería ya vencida.

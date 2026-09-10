@@ -664,6 +664,15 @@ def genera_ticket_global(bono, precio_ticket, nominales_ticket=1000000, settleme
           genera_ticket_global(AL30D, 0.6950, 2_000_000, "2026-07-01")
     """
     ticket = bono.genera_ticket(precio_ticket, nominales_ticket, settlement_date)
+    # Guarda: los spreads vs UST sólo tienen sentido con flujos en USD. Para un
+    # CER/DLK/pesos el número saldría "plausible" pero sin sentido — mejor
+    # decirlo que mentir. Mismo criterio de detección que pricing._is_hard_dollar.
+    moneda = (getattr(bono, "moneda", "") or "").upper()
+    clas = (getattr(bono, "clasificacion", "") or "").upper()
+    ind = (getattr(bono, "industria", "") or "").upper()
+    if not (moneda in ("USD", "USB") or "HARD DOLAR" in clas or "USD" in ind):
+        ticket.loc["Z-Spread", "Valores"] = "no aplica (bono sin flujos USD)"
+        return ticket
     try:
         from backend.services import ust  # repo root en sys.path (como corre el .bat)
 

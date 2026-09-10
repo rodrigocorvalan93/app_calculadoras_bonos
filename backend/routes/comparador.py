@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.services import auth as auth_svc, curves as curves_svc, bond_universe, delta_especies, marketdata_store, positions, pricing, symbols as syms
+from backend.services import auth as auth_svc, curves as curves_svc, bond_universe, delta_especies, fx as fx_svc, positions, pricing
 
 router = APIRouter(tags=["comparador"])
 
@@ -51,8 +51,11 @@ def _to_float(v: Any) -> Optional[float]:
 
 
 def _market_last(code: str, plazo: str) -> Optional[float]:
-    snap = marketdata_store.get_store().get(syms.md_symbol(code, plazo))
-    return snap.last if snap else None
+    # Convertido al basis de la ficha: la especie pesos de un hard-dollar
+    # (GD30/AL30/…O) divide por el FX de pago — el last ARS crudo entraba a
+    # la ficha en dólares y el "margen no aplica → valúo al last" o el
+    # autofill daban métricas 1500× corridas.
+    return pricing.market_last_native(code, plazo)
 
 
 def _is_num(x) -> bool:
@@ -178,15 +181,24 @@ async def comparador_result(
                 pass
 
         # VN equivalente a mismo efectivo: monto_A = VN_A × precio_A;
-        # VN_B equivalente = monto_A / precio_B (ej. 1mm de A ≈ 1,2mm de B).
+        # VN_B equivalente = monto_A→(moneda B) / precio_B. Con monedas
+        # DISTINTAS el efectivo se convierte con los FX implícitos
+        # (ARS↔USD↔USB) — antes se dividían montos en monedas diferentes y
+        # el VN salía corrido por el CCL/canje entero. Sin FX vivo (o moneda
+        # no mapeable, p. ej. DLK) → sin tarjeta, no un número mentiroso.
         pa, pb = ma.get("precio"), mb.get("precio")
         if _is_num(pa) and _is_num(pb) and float(pb) != 0:
             try:
                 monto_a = float(vn) * float(pa)
-                swap = {
+                mon_a, mon_b = ma.get("moneda"), mb.get("moneda")
+                monto_en_b = monto_a
+                if (mon_a or "") != (mon_b or ""):
+                    monto_en_b = fx_svc.normalize_price(
+                        monto_a, mon_a, mon_b, fx_svc.get_fx(plazo))
+                swap = None if monto_en_b is None else {
                     "vn_a": float(vn), "monto_a": monto_a,
-                    "vn_b": monto_a / float(pb), "monto_b": monto_a,
-                    "moneda_a": ma.get("moneda"), "moneda_b": mb.get("moneda"),
+                    "vn_b": monto_en_b / float(pb), "monto_b": monto_en_b,
+                    "moneda_a": mon_a, "moneda_b": mon_b,
                 }
             except (TypeError, ValueError, ZeroDivisionError):
                 swap = None

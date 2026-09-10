@@ -323,6 +323,14 @@ def _isin_a_ticker() -> Dict[str, str]:
         for key, items in grupos.items():
             if len({v for _, v in items}) > 1:
                 continue                    # ISIN compartido por bonos distintos
+            # Mismo ISIN y MISMO venc pero más de una especie BASE: papeles
+            # distintos que comparten ISIN en la ficha (BOPREAL IV Clase A
+            # BPOA8 y Clase B BPOB8, ambos 31/10/2028). Mapear elegiría uno
+            # arbitrario y sumaría la tenencia al bono equivocado — a "sin
+            # normalizar", que es donde se ve. Las familias legítimas tienen
+            # UNA base (AL30/AL30D/AL30C → AL30; BPOC7/BPC7D → BPOC7).
+            if len({c for c, _ in items if c[-1:] not in ("C", "D", "j", "v")}) > 1:
+                continue
             # preferencia: especie base (pesos) > C/D > variantes j/v; corto gana
             out[key] = min((c for c, _ in items),
                            key=lambda c: (c[-1:] in ("C", "D"), c[-1:] in ("j", "v"), len(c), c))
@@ -533,7 +541,15 @@ def _load() -> Dict[str, Any]:
 
 # ── API pública ────────────────────────────────────────────────────────────
 def ensure_loaded() -> Dict[str, Any]:
+    # Fast-path SIN lock (lectura de referencia atómica bajo el GIL): todos los
+    # accessors pasan por acá y antes tomaban _lock incondicionalmente — con
+    # un refresh() en vuelo (segundos de read_excel sobre OneDrive) CUALQUIER
+    # request que tocara posiciones quedaba bloqueado detrás, incluidos los 8
+    # workers del pool de curvas vía position_for. Mismo patrón que historico.
     global _cache, _generation
+    c = _cache
+    if c is not None:
+        return c
     with _lock:
         if _cache is None:
             _cache = _load()
@@ -550,12 +566,15 @@ def is_loaded() -> bool:
 
 
 def refresh() -> Dict[str, Any]:
-    """Fuerza relectura de los Excel (botón 'actualizar')."""
+    """Fuerza relectura de los Excel (botón 'actualizar'). La carga corre
+    FUERA del lock: los lectores siguen sirviendo el cache viejo mientras
+    tanto (segundos de I/O) y sólo el swap de referencia va bajo lock."""
     global _cache, _generation
+    nuevo = _load()
     with _lock:
-        _cache = _load()
+        _cache = nuevo
         _generation += 1
-        return _cache
+        return nuevo
 
 
 def status() -> Dict[str, Any]:

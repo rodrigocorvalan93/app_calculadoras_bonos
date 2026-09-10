@@ -432,9 +432,16 @@ async def posiciones_table(request: Request, fondo: Optional[str] = None, plazo:
     # `fondo` opcional: el poll live (md-update) puede llegar sin selección
     # (sin carteras cargadas) y no debe romper con 422.
     bond_universe.ensure_loaded()
-    ctx = await asyncio.get_running_loop().run_in_executor(
-        None, _fondo_ctx, _fondo_param(fondo), plazo, auth.visible_fondos_for(request))
-    return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **ctx)
+    fp, vis = _fondo_param(fondo), auth.visible_fondos_for(request)
+
+    def _build() -> HTMLResponse:
+        # ctx + render juntos en el executor: el partial tiene ~20 filtros
+        # Jinja por fila (~4-6 ms con 100-150 tenencias) que corrían en el
+        # event loop después del ctx.
+        ctx = _fondo_ctx(fp, plazo, vis)
+        return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **ctx)
+
+    return await asyncio.get_running_loop().run_in_executor(None, _build)
 
 
 @router.get("/posiciones/targets", response_class=HTMLResponse)
@@ -605,39 +612,54 @@ async def posiciones_vencimientos(request: Request, fondo: Optional[str] = None)
 
 
 # ── Matriz de tenencias (pestaña aparte) ───────────────────────────────────
-@router.get("/matriz", response_class=HTMLResponse)
-async def matriz_page(request: Request, view: str = "vn", familia: str = "todos",
-                      refresh: bool = False) -> HTMLResponse:
-    bond_universe.ensure_loaded()
-    if refresh:
-        await asyncio.get_running_loop().run_in_executor(None, positions.refresh)   # relee Excels (I/O)
-    return _render(request, "matriz.html", view=view, status=positions.status(),
-                   **_matriz_ctx(auth.visible_fondos_for(request), familia))
-
 
 # HTML de la matriz cacheado por (generación de carteras, familia, vista,
 # fondos visibles del usuario): la data cambia sólo con refresh() — típicamente
 # 1×/día — y el render de ~340 filas × ~50 fondos costaba 20-100 ms por
 # request. La key incluye la allowlist exacta → sin fugas entre usuarios.
+# La PÁGINA /matriz embebe estos mismos bytes (tabla ~800 KB): antes rendía la
+# tabla por su cuenta, sin cache y EN EL EVENT LOOP → p95 114 ms y /market/seq
+# de todos frenado mientras tanto. Ahora página y partial comparten cache y el
+# build frío corre en el executor.
 _MATRIZ_CACHE: Dict[tuple, bytes] = {}
 
 
-@router.get("/matriz/table", response_class=HTMLResponse)
-async def matriz_table(request: Request, view: str = "vn", familia: str = "todos") -> HTMLResponse:
-    visibles = auth.visible_fondos_for(request)
+def _matriz_table_bytes(request: Request, visibles: Optional[frozenset],
+                        familia: str, view: str) -> bytes:
+    """Bytes del partial de la matriz, cacheados. Sync — llamar en executor."""
     gen = positions.generation()
     key = (gen, familia, view, visibles)
     body = _MATRIZ_CACHE.get(key)
     if body is not None:
-        return HTMLResponse(body)
+        return body
     bond_universe.ensure_loaded()
     resp = _render(request, "partials/matriz_table.html", view=view,
                    **_matriz_ctx(visibles, familia))
+    body = bytes(resp.body)
     if _MATRIZ_CACHE and next(iter(_MATRIZ_CACHE))[0] != gen:
         _MATRIZ_CACHE.clear()               # carteras releídas → render viejo afuera
     if len(_MATRIZ_CACHE) < 64:
-        _MATRIZ_CACHE[key] = bytes(resp.body)
-    return resp
+        _MATRIZ_CACHE[key] = body
+    return body
+
+
+@router.get("/matriz", response_class=HTMLResponse)
+async def matriz_page(request: Request, view: str = "vn", familia: str = "todos",
+                      refresh: bool = False) -> HTMLResponse:
+    loop = asyncio.get_running_loop()
+    if refresh:
+        await loop.run_in_executor(None, positions.refresh)   # relee Excels (I/O)
+    body = await loop.run_in_executor(
+        None, _matriz_table_bytes, request, auth.visible_fondos_for(request), familia, view)
+    return _render(request, "matriz.html", view=view, familia=familia,
+                   status=positions.status(), table_html=body.decode("utf-8"))
+
+
+@router.get("/matriz/table", response_class=HTMLResponse)
+async def matriz_table(request: Request, view: str = "vn", familia: str = "todos") -> HTMLResponse:
+    body = await asyncio.get_running_loop().run_in_executor(
+        None, _matriz_table_bytes, request, auth.visible_fondos_for(request), familia, view)
+    return HTMLResponse(body)
 
 
 def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos") -> Dict[str, Any]:

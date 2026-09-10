@@ -104,41 +104,38 @@ def _reference(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
 def _canje_rows(plazo: str) -> List[Dict[str, Any]]:
     """Canje CCL/MEP − 1 por bono (convención de la barra: positivo = cable
-    más caro que el MEP). Last = CCL_last/MEP_last − 1 = D.last/C.last − 1.
+    más caro que el MEP). CCL/MEP = (a/c)/(a/d) = D/C: la pata en pesos se
+    cancela SIEMPRE, así que todo sale directo de los precios de las dos
+    especies dólar — mismo criterio que el legacy (OMSweb `_canje_rows_from_snap`)
+    y que `fx.canje_walk`.
 
-    Bid/offer cruzan el book como un round-trip real (vendo una pata al
-    bid, compro la otra al offer), igual que las puntas implícitas:
-      bid   = CCL.bid  / MEP.offer − 1   (peor caso al armar el canje)
-      offer = CCL.offer/ MEP.bid   − 1
+        last  = D.last / C.last − 1
+        bid   = D.bid  / C.offer − 1   (peor caso al armar el canje:
+        offer = D.offer/ C.bid  − 1     vendo una pata al bid, compro la otra al offer)
+
+    La versión anterior armaba bid/offer vía las puntas implícitas de CCL y
+    MEP: (a_bid/c_off)/(a_off/d_bid) − 1 = (a_bid/a_off)·(d_bid/c_off) − 1 —
+    el spread de la pata ARS NO se cancelaba y ensanchaba la banda ~su propio
+    spread (con 30 bps de spread en pesos y canje 1%, mostraba 0,7%/1,3%).
+    Tampoco hace falta que la especie pesos esté suscripta para tener fila.
     """
     store = marketdata_store.get_store()
     rows: List[Dict[str, Any]] = []
     for base in fx_svc.fx_bases():
-        a = store.get(syms.md_symbol(base, plazo))        # pata ARS (pesos)
         c = store.get(syms.md_symbol(base + "C", plazo))  # pata cable (USD)
         d = store.get(syms.md_symbol(base + "D", plazo))  # pata MEP (USB)
-        if a is None or c is None or d is None:
+        if c is None or d is None:
             continue
-        a_bid, a_off, a_last, a_close = _pos(a.bid), _pos(a.offer), _pos(a.last), _pos(a.close)
         c_bid, c_off, c_last, c_close, c_vol = _pos(c.bid), _pos(c.offer), _pos(c.last), _pos(c.close), _pos(c.volume)
         d_bid, d_off, d_last, d_close, d_vol = _pos(d.bid), _pos(d.offer), _pos(d.last), _pos(d.close), _pos(d.volume)
-
-        def _div(n: Optional[float], dd: Optional[float]) -> Optional[float]:
-            return (n / dd) if (n is not None and dd not in (None, 0)) else None
-
-        # CCL (pata C) y MEP (pata D) implícitos; el peso se cancela en el last.
-        ccl_last, mep_last = _div(a_last, c_last), _div(a_last, d_last)
-        ccl_close, mep_close = _div(a_close, c_close), _div(a_close, d_close)
-        ccl_bid, mep_off = _div(a_bid, c_off), _div(a_off, d_bid)
-        ccl_off, mep_bid = _div(a_off, c_bid), _div(a_bid, d_off)
 
         def _sp(num: Optional[float], den: Optional[float]) -> Optional[float]:
             return (num / den - 1.0) if (num is not None and den not in (None, 0)) else None
 
-        last = _sp(ccl_last, mep_last)
-        close = _sp(ccl_close, mep_close)
-        bid = _sp(ccl_bid, mep_off)
-        offer = _sp(ccl_off, mep_bid)
+        last = _sp(d_last, c_last)
+        close = _sp(d_close, c_close)
+        bid = _sp(d_bid, c_off)
+        offer = _sp(d_off, c_bid)
         if last is None and bid is None and offer is None:
             continue
         rows.append({

@@ -169,22 +169,25 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     last_ts = snap.last_ts if snap else None
     close_ts = snap.close_ts if snap else None
 
-    # The ARS leg is the only one that needs the FX (pesos ÷ the bond's
-    # native rate → its own basis). USD/USB/native price straight off the
-    # ticker. `cp()` normalizes any price quoted on this leg before calc.
+    # Cualquier leg cuyo basis difiera de la moneda nativa necesita conversión:
+    # ARS ÷ el FX nativo, y el CRUCE de dólares (ver un bonar MEP en leg=USD,
+    # o un global cable en leg=USB) vía leg → ARS → nativo (× MEP/CCL o
+    # × CCL/MEP — la matriz de CLAUDE.md). Antes cp() sólo convertía ARS y el
+    # precio de la otra pata dólar entraba CRUDO a la ficha nativa: TIR sesgada
+    # por el canje entero (~decenas de bps), plausible e invisible.
     native = (meta.get("moneda") or "USD")
     # Especie pesos de un hard-dollar (AL30/GD30/BPOC7): la ficha propia es la
     # referencia CLEAN — la TIR del precio de pantalla (DIRTY) sale de la ficha
     # NATIVA hermana (…D/…C), la misma que pricea la curva (cache compartido).
     calc = pricing.native_dollar_code(code) or code
-    if leg_basis == "ARS" and fx is None:
-        fx = fx_svc.get_fx(plazo)        # cacheado — cubre leg=native sobre especie pesos
+    if leg_basis and leg_basis != native and fx is None:
+        fx = fx_svc.get_fx(plazo)        # cacheado — cubre también leg=native sobre especie pesos
 
     def cp(px):
         if px is None:
             return None
-        if leg_basis == "ARS":
-            return fx_svc.normalize_price(px, "ARS", native, fx)
+        if leg_basis and leg_basis != native:
+            return fx_svc.normalize_price(px, leg_basis, native, fx)
         return px
 
     # Precio de referencia: last (LA) si operó hoy; si no, cierre previo (CL).
@@ -262,6 +265,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             "estreno": estreno,
             "range_pos": range_pos,
             "code": code,                # ticker BYMA = nombre de variable
+            "calc": calc,                # ficha NATIVA que valuó la fila (…D/…C)
             "symbol": symbol,
             "leg": leg,
             "last": last, "bid": bid, "offer": offer,
@@ -361,9 +365,10 @@ async def _rows_for(
     if not codes:
         return [], {"total": 0, "quoting": 0, "filtered": False, "store_empty": True}
 
-    # Only the ARS leg needs the FX reference (pesos → native basis); the
-    # native / USD / USB legs price straight off their own ticker.
-    fx = fx_svc.get_fx(plazo) if leg == "ARS" else None
+    # Todo leg NO nativo puede necesitar FX: ARS (pesos → basis nativo) y los
+    # cruces de dólar (leg USD sobre ficha MEP o viceversa, × canje). El leg
+    # native lo resuelve _row_for_code por fila (especies pesos de hard-dollar).
+    fx = fx_svc.get_fx(plazo) if leg != "native" else None
     # Fecha de liquidación del plazo (CI = hoy, 24hs = t+1, fecha BA). Se computa UNA
     # vez y se pasa a cada fila para que la TIR se descuente desde el settlement
     # correcto (antes CI se valuaba a t+1, con hasta ~200 bps de sesgo).
@@ -453,16 +458,19 @@ async def curve_table_partial(
 ) -> HTMLResponse:
     """HTMX partial: table body only for the requested curve."""
     rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg)
-    return _render(
-        request,
-        "partials/curve_table.html",
-        selected_def=_def_or_mix(curve),
-        rows=rows,
-        row_meta=row_meta,
-        plazo=plazo,
-        only_quoting=only_quoting,
-        leg=leg,
-    )
+    # Render Jinja de tabla ancha (5-8 ms @120-200 filas) al pool: en rueda esto
+    # corre en cada tick y bloqueaba el event loop (misma razón que equities).
+    return await asyncio.get_running_loop().run_in_executor(
+        None, lambda: _render(
+            request,
+            "partials/curve_table.html",
+            selected_def=_def_or_mix(curve),
+            rows=rows,
+            row_meta=row_meta,
+            plazo=plazo,
+            only_quoting=only_quoting,
+            leg=leg,
+        ))
 
 
 # ── Mercado (monitor de book / blotter) ───────────────────────────────────
@@ -562,22 +570,24 @@ async def mercado_table_partial(
         return _render(request, "partials/equities_table.html",
                        rows=eq_rows, panel=panel, plazo=plazo, **ctx)
     rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
-    return _render(
-        request,
-        "partials/mercado_table.html",
-        selected_def=curves.curve_def(curve),
-        rows=rows,
-        row_meta=row_meta,
-        plazo=plazo,
-        only_quoting=only_quoting,
-        leg=leg,
-        fuente=fuente,
-        ym="margen" if ym == "margen" else "tir",
-    )
+    # 7-12 ms de Jinja @120-200 filas × 25 filtros/fila: al pool, como equities.
+    return await asyncio.get_running_loop().run_in_executor(
+        None, lambda: _render(
+            request,
+            "partials/mercado_table.html",
+            selected_def=curves.curve_def(curve),
+            rows=rows,
+            row_meta=row_meta,
+            plazo=plazo,
+            only_quoting=only_quoting,
+            leg=leg,
+            fuente=fuente,
+            ym="margen" if ym == "margen" else "tir",
+        ))
 
 
 @mercado_router.get("/mercado/book/{code}", response_class=HTMLResponse)
-@seq_cached(ttl=2.0)
+@seq_cached(ttl=2.0, per_user=True)   # el book trae TENENCIA filtrada por usuario
 async def mercado_book(
     request: Request,
     code: str,
@@ -595,13 +605,17 @@ async def mercado_book(
     # Especie pesos de un hard-dollar → basis ARS aunque leg sea native, y las
     # TIRs se calculan con la ficha nativa (…D/…C) al precio ÷ FX de pago.
     calc = pricing.native_dollar_code(code) or code
-    fx = fx_svc.get_fx(plazo) if (leg == "ARS" or leg_basis == "ARS") else None
+    fx = fx_svc.get_fx(plazo) if (leg_basis and leg_basis != native) else None
     settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = t+1 (fecha BA)
 
     def cp(px):
+        # Mismo criterio que _row_for_code: convertir SIEMPRE que el basis de la
+        # leg difiera del nativo (ARS y también el cruce MEP↔cable, × canje).
         if px is None:
             return None
-        return fx_svc.normalize_price(px, "ARS", native, fx) if leg_basis == "ARS" else px
+        if leg_basis and leg_basis != native:
+            return fx_svc.normalize_price(px, leg_basis, native, fx)
+        return px
 
     def with_yield(levels):
         out = []
@@ -792,7 +806,10 @@ def _whatif_from_rows(rows: list[dict], include: set[str] | None,
         mkt = r.get("px_calc")            # precio nativo de mercado (el que valuó la fila)
         ov = overrides.get(code)
         if ov is not None:
-            m = pricing.metrics_for_market_price(code, ov, settle) or {}
+            # Pricear con la MISMA ficha que valuó la fila (calc = nativa …D/…C
+            # para especies pesos/clean de hard-dollar): antes el override iba
+            # a `code` y la fila editada se comparaba con otra ficha.
+            m = pricing.metrics_for_market_price(r.get("calc") or code, ov, settle) or {}
             tirea, duration, price = m.get("tirea"), m.get("duration"), ov
         else:                              # reusa lo ya calculado en la fila
             tirea, duration, price = r.get("tirea"), r.get("duration"), mkt

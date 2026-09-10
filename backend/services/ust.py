@@ -66,6 +66,7 @@ _lock = threading.Lock()
 # par/zero: listas de (t_años, tasa_%) ordenadas por t. fuente: "treasury.gov" | "backup".
 _state: Dict[str, Any] = {"fecha": None, "par": [], "zero": [], "fuente": None}
 _thread_started = False
+_backup_tried = False
 
 
 # ── fetch + parseo ───────────────────────────────────────────────────────
@@ -182,13 +183,18 @@ def _fetch_loop() -> None:
 
 def _ensure_loaded() -> None:
     """Backup sincrónico la primera vez (lectura local, sub-ms) + arranca el
-    thread daemon que intenta la curva viva. Nunca red en el caller."""
-    global _thread_started
+    thread daemon que intenta la curva viva. Nunca red en el caller.
+
+    `_backup_tried` garantiza UNA sola lectura del backup por proceso: sin el
+    flag, un backup ausente/corrupto hacía re-leer disco + loguear warning en
+    CADA llamada (y spreads_bono llama acá 3 veces por bono)."""
+    global _thread_started, _backup_tried
     with _lock:
-        empty = not _state["par"]
+        try_backup = not _state["par"] and not _backup_tried
+        _backup_tried = True
         start = not _thread_started
         _thread_started = True
-    if empty:
+    if try_backup:
         got = _load_backup()
         if got:
             _set_curve(got[0], got[1], "backup")

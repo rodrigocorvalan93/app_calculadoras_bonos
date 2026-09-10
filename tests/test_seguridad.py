@@ -149,3 +149,39 @@ async def test_paginas_del_addin_excel_sin_headers_restrictivos():
         # el front web sigue protegido
         r = await ac.get("/static/css/style.css")
         assert r.headers.get("x-frame-options") == "DENY"
+
+
+# ── seq_cached por usuario: el book (con tenencia) no cruza el cache ────────────
+@pytest.mark.asyncio
+async def test_mercado_book_cache_no_cruza_usuarios(auth_on):
+    """/mercado/book renderiza la tenencia filtrada por `visible_fondos_for`
+    ADENTRO de un endpoint seq_cached: la key debe separar por username
+    (per_user=True). Antes, el HTML del primer usuario (con SU vista de
+    fondos) se servía como hit a cualquier otro en la misma ventana seq/TTL."""
+    async with _client() as su:
+        await _login(su, "rodricor93", "Rc_874562")
+        await su.post("/admin/users", data={"username": "prem2", "password": "clave123",
+                                            "role": "premium"})
+        r1 = await su.get("/mercado/book/GD30")
+        assert r1.status_code == 200
+        r2 = await su.get("/mercado/book/GD30")
+        assert r2.headers.get("x-seq-cache", "").startswith("hit"), \
+            "mismo usuario: el cache debe seguir compartiendo el render"
+    async with _client() as ac:
+        await _login(ac, "prem2", "clave123")
+        r3 = await ac.get("/mercado/book/GD30")
+        assert r3.status_code == 200
+        assert not r3.headers.get("x-seq-cache", "").startswith("hit"), \
+            "usuario distinto: NO debe recibir el render cacheado de otro usuario"
+
+
+# ── auth off ⇒ todo request = superuser (invariante documentado) ────────────────
+@pytest.mark.asyncio
+async def test_admin_accesible_sin_muro():
+    """Con AUTH_ENABLED=0 (dev local) el invariante es 'todo request =
+    superuser': /admin tiene que abrir. Antes state.user quedaba en None y el
+    guard del panel devolvía 403 aun sin muro."""
+    async with _client() as ac:
+        r = await ac.get("/admin")
+    assert r.status_code == 200
+    assert "admin" in r.text.lower()

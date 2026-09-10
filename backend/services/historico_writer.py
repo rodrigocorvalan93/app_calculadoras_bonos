@@ -82,12 +82,17 @@ def build_rows(plazo: str = "24hs") -> "Any":
     import pandas as pd
 
     from backend.services import curves, marketdata_store, pricing
+    from backend.services import fx as fx_svc
     from backend.services import symbols as syms
 
     store = marketdata_store.get_store()
     seen: set = set()
     rows: List[Dict[str, Any]] = []
     hoy = _now().date()
+    # Mismo settle que la tabla de Curvas (CI = hoy, 24hs = t+1): comparte el
+    # cache de métricas y la TIR guardada coincide con la de pantalla.
+    settle = pricing.settlement_date_str(plazo)
+    fx = None   # lazy: sólo si aparece una especie pesos de un hard-dollar
     for codes in curves.build_curve_codes().values():
         for code in codes or []:
             if code in seen:
@@ -103,7 +108,22 @@ def build_rows(plazo: str = "24hs") -> "Any":
                 ref_px, source, ts = snap.close, "CL", snap.close_ts
             else:
                 continue
-            m = pricing.metrics_for_market_price(code, ref_px, None)
+            # Especie en PESOS (o referencia clean) de un bono hard-dollar
+            # (BPCVO/GYC5O/…): la base guardaba TIREA/paridad calculadas sobre
+            # el precio en ARS crudo (GYC5O a 150.000 → TIR -100%, paridad
+            # ~1500) y contaminaba el histórico todos los días. Mismo camino
+            # que Curvas: ficha NATIVA (…D/…C) + precio ÷ FX de la moneda de
+            # pago. El precio guardado sigue siendo el de pantalla (ARS).
+            meta = pricing.bond_meta(code) or {}
+            calc, px = code, ref_px
+            if meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
+                if fx is None:
+                    fx = fx_svc.get_fx(plazo)
+                calc = pricing.native_dollar_code(code) or code
+                px = fx_svc.normalize_price(ref_px, "ARS", meta.get("moneda"), fx)
+                if px is None:
+                    continue   # sin FX no hay TIR honesta — mejor sin fila hoy
+            m = pricing.metrics_for_market_price(calc, px, settle)
             if not m:
                 continue
             var = None

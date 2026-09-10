@@ -41,9 +41,9 @@
     </div>
   </div>
 
-  <div id="matriz-table">
-    {% include "partials/matriz_table.html" %}
-  </div>
+  {# La tabla llega pre-renderizada desde el cache compartido con /matriz/table
+     (bytes por (generación, familia, vista, visibles)) — no re-renderizar acá. #}
+  <div id="matriz-table">{{ table_html | safe }}</div>
 
   {# Detalle vertical de la especie buscada (fondo → tenencia), copiable a Excel #}
   <div id="matriz-detail" style="margin-top:14px"></div>

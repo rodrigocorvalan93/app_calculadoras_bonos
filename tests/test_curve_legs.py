@@ -1,8 +1,11 @@
 """Per-leg curve pricing (backend/routes/curves.py).
 
 A multi-leg bond (globales / cable / MEP) can be priced off any BYMA leg:
-  - native / USD (cable) / USB (MEP) feed the native ficha directly → fx-free.
-  - ARS (pesos) is the only leg that needs the FX (price ÷ native rate).
+  - native (y el leg que COINCIDE con la moneda nativa) → fx-free.
+  - ARS (pesos) ÷ el FX de la moneda de pago.
+  - el CRUCE de dólares (leg USB sobre ficha cable, o USD sobre ficha MEP)
+    convierte × canje (leg → ARS → nativo); sin FX vivo NO hay TIR (antes el
+    precio de la otra pata entraba crudo: TIR corrida por el canje entero).
 
 Exercised against the globales, which already follow the norm (`GD30C`
 DIRTY cable ficha exists today), with prices injected into the store.
@@ -31,25 +34,38 @@ def _globales_native() -> str:
     return code
 
 
-def test_usd_and_usb_legs_are_fx_free() -> None:
-    code = _globales_native()          # e.g. GD30C
+def test_native_y_usd_fx_free_pero_cruce_usb_convierte(monkeypatch) -> None:
+    code = _globales_native()          # e.g. GD30C (Moneda USD = cable)
     base = code[:-1]
-    store = mds_.get_store()
+    store = mds_.MarketDataStore()     # aislado: no ensuciar el store global
+    monkeypatch.setattr(mds_, "_store", store)
     store.update_from_md(syms_.md_symbol(code, "24hs"), {"LA": {"price": 70.0}})        # cable
     store.update_from_md(syms_.md_symbol(base + "D", "24hs"), {"LA": {"price": 71.0}})  # MEP
 
-    # No FX snapshot passed → still computes (fx-free) for native/USD/USB.
-    for leg, sym_price in (("native", 70.0), ("USD", 70.0), ("USB", 71.0)):
+    # native y USD (== moneda nativa) pricean fx-free.
+    for leg in ("native", "USD"):
         row = curves_route._row_for_code(code, "24hs", leg=leg, fx=None)
         assert row is not None, leg
         assert np.isfinite(row["tirea"]), f"{leg} should price fx-free"
         assert row["leg"] == leg
+        assert row["px_calc"] == pytest.approx(70.0)
 
-    # The USB leg used the GD30D price (71), the cable legs used 70 → the
-    # two yields differ (different venues), proving the leg actually routed.
-    usd = curves_route._row_for_code(code, "24hs", leg="USD", fx=None)
-    usb = curves_route._row_for_code(code, "24hs", leg="USB", fx=None)
-    assert usd["tirea"] != usb["tirea"]
+    # El CRUCE (leg USB sobre ficha cable) exige el canje: sin FX vivo no hay
+    # TIR (antes el precio MEP 71 entraba CRUDO a la ficha cable — el bug).
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx_svc.FxSnapshot())
+    row_nofx = curves_route._row_for_code(code, "24hs", leg="USB", fx=None)
+    assert row_nofx is not None
+    assert row_nofx["px_calc"] is None
+    assert row_nofx["tirea"] is None or not np.isfinite(row_nofx["tirea"])
+
+    # Con FX: precio MEP × MEP/CCL → basis cable (matriz de CLAUDE.md).
+    fx = fx_svc.FxSnapshot(ccl=1480.0, usb=1465.0)
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx)
+    row_fx = curves_route._row_for_code(code, "24hs", leg="USB", fx=fx)
+    assert row_fx["px_calc"] == pytest.approx(71.0 * 1465.0 / 1480.0)
+    assert np.isfinite(row_fx["tirea"])
+    usd = curves_route._row_for_code(code, "24hs", leg="USD", fx=fx)
+    assert usd["tirea"] != row_fx["tirea"]   # venues distintos → yields distintos
 
 
 def test_ars_leg_needs_fx() -> None:

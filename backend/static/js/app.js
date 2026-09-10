@@ -275,19 +275,37 @@ window.lsSet = function (k, v) {
     return map;
   }
 
+  // Flash en DOS fases para evitar layout thrashing: durante el diff sólo se
+  // ENCOLA (remove de clases, sin tocar layout); al final, UN único reflow
+  // forzado reinicia todas las animaciones y recién ahí se agregan las
+  // clases. Antes `void el.offsetWidth` corría POR CELDA flasheada: un tick
+  // normal de Mercado (~500-900 celdas) forzaba esa cantidad de reflows
+  // síncronos de una tabla de 3.000 celdas, cada uno invalidado por el
+  // classList de la celda anterior — jank de main thread a 1 swap/s.
+  var flashQ = [];
   function flash(el, cls) {
     el.classList.remove('tick-up', 'tick-down');
-    void el.offsetWidth; // reinicia la animación si ya estaba corriendo
-    el.classList.add(cls);
-    el.addEventListener('animationend', function h(e) {
-      // La clase corre DOS animaciones: el flash de color (tick-up/tick-down,
-      // 0,9s) y un tick-pop de escala (0,22s). Sin filtrar por animationName, el
-      // animationend del pop (que termina primero) removía la clase y cortaba el
-      // flash a 0,22s. Esperamos el fin de la animación de color (nombre = cls).
-      if (e.animationName !== cls) return;
-      el.classList.remove(cls);
-      el.removeEventListener('animationend', h);
-    });
+    flashQ.push(el, cls);
+  }
+  function flashFlush() {
+    if (!flashQ.length) return;
+    void document.body.offsetWidth; // 1 solo reflow: reinicia TODAS las animaciones
+    for (var i = 0; i < flashQ.length; i += 2) {
+      var el = flashQ[i], cls = flashQ[i + 1];
+      el.classList.add(cls);
+      (function (el, cls) {
+        el.addEventListener('animationend', function h(e) {
+          // La clase corre DOS animaciones: el flash de color (tick-up/tick-down,
+          // 0,9s) y un tick-pop de escala (0,22s). Sin filtrar por animationName,
+          // el animationend del pop (que termina primero) removía la clase y
+          // cortaba el flash a 0,22s. Esperamos la de color (nombre = cls).
+          if (e.animationName !== cls) return;
+          el.classList.remove(cls);
+          el.removeEventListener('animationend', h);
+        });
+      })(el, cls);
+    }
+    flashQ = [];
   }
 
   var pre = {};
@@ -314,7 +332,7 @@ window.lsSet = function (k, v) {
         var key = ti + '|' + (cells[0].textContent || '').trim();
         if (key === ti + '|') continue;
         for (var j = 1; j < cells.length; j++) {
-          if (++n > MAX_CELLS) return;
+          if (++n > MAX_CELLS) { flashFlush(); return; }
           var was = num(old[key + '|' + j]);
           var now = num((cells[j].textContent || '').trim());
           if (was === null || now === null || was === now) continue;
@@ -339,6 +357,7 @@ window.lsSet = function (k, v) {
       if (was3 === null || now3 === null || was3 === now3) continue;
       flash(fls[q], now3 > was3 ? 'tick-up' : 'tick-down');
     }
+    flashFlush();
   });
 })();
 
