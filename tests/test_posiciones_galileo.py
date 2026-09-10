@@ -26,7 +26,7 @@ def _delta_files(d) -> None:
         d / "Delta_PN.xlsx", sheet_name="Sheet1", index=False)
 
 
-def _galileo_files(d, isin_local: str) -> None:
+def _galileo_files(d, isin_local: str, venc_fantasma=None) -> None:
     filas = [
         # (cod, fondo, descripcion, isin, instrumento, clase, cant, valor)
         (5, "GALILEO AHORRO", "Bonar 2030 (local)", isin_local,
@@ -61,6 +61,9 @@ def _galileo_files(d, isin_local: str) -> None:
         "Clasifica_Ficha": [f[5] for f in filas],
         "cantidad": [f[6] for f in filas],
         "valor": [f[7] for f in filas],
+        # vencimiento sólo en la ON fantasma → el reporte sugiere candidatas
+        "vencimiento": [pd.Timestamp(venc_fantasma) if (venc_fantasma and f[2] == "ON Fantasma 2031") else pd.NaT
+                        for f in filas],
     }).to_excel(d / "Galileo_Composicion.xlsx", sheet_name="Sheet1", index=False)
     pd.DataFrame({"CodFondo": [5, 2, 8], "PN": [3.7e10, 2.8e8, 1.1e11]}).to_excel(
         d / "Galileo_PN.xlsx", sheet_name="Sheet1", index=False)
@@ -81,7 +84,9 @@ def carteras(tmp_path, monkeypatch):
                 "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH"):
         monkeypatch.delenv(env, raising=False)
     _delta_files(tmp_path)
-    _galileo_files(tmp_path, _isin_al30())
+    v = getattr(bond_universe.get("TX26"), "vencimiento", None)
+    _galileo_files(tmp_path, _isin_al30(),
+                   venc_fantasma=(v.date() if hasattr(v, "date") else v))
     positions.refresh()
     yield tmp_path
     with positions._lock:
@@ -195,6 +200,50 @@ def test_reporte_especies_faltantes(carteras) -> None:
     assert sin["ON Fantasma 2031"]["isin"] == "ARFAKE000012"
     # cheques/cash no ensucian el reporte
     assert not any(str(r["especie"]).startswith("*BIS") for r in rep["sin_map"])
+
+
+def test_matriz_sin_cheques_familias_y_delta_primero(carteras) -> None:
+    """La lentitud de la matriz: los cheques de Galileo metían ~1.100 filas
+    únicas. Afuera. Además: switch por familia y especies con presencia
+    Delta primero (prevalece el esquema Delta)."""
+    from backend.routes.posiciones import _matriz_ctx
+
+    ctx = _matriz_ctx(None, "todos")
+    especies = [r["especie"] for r in ctx["rows"]]
+    assert not any(str(e).startswith("*BIS") for e in especies)     # cheques afuera
+    assert "AL30" in especies and "BBAR" in especies
+    assert "BBAR AR / BBVA BANCO FRANCES SA" not in especies        # normalizada
+    solo_g = [r["solo_galileo"] for r in ctx["rows"]]
+    assert solo_g == sorted(solo_g)                                 # Delta primero
+    assert next(r for r in ctx["rows"] if r["especie"] == "AL30")["solo_galileo"] is False
+
+    d = _matriz_ctx(None, "delta")
+    assert all(not positions.es_galileo(f["cod"]) for f in d["fondos"])
+    assert "BBAR" not in [r["especie"] for r in d["rows"]]          # sólo-Galileo afuera
+    g = _matriz_ctx(None, "galileo")
+    assert all(positions.es_galileo(f["cod"]) for f in g["fondos"])
+    assert "TX26" not in [r["especie"] for r in g["rows"]]          # sólo-Delta afuera
+    assert "AL30" in [r["especie"] for r in g["rows"]]              # compartida queda
+
+
+def test_reporte_sugiere_candidatas_por_vencimiento(carteras) -> None:
+    """Las filas sin normalizar sugieren fichas con el MISMO vencimiento —
+    sugerencia, nunca mapeo automático (T15E7 y D15E7 vencen el mismo día)."""
+    rep = positions.especies_faltantes()
+    sin = {r["especie"]: r for r in rep["sin_map"]}
+    assert "TX26" in (sin["ON Fantasma 2031"]["candidatos"] or "")
+
+
+@pytest.mark.asyncio
+async def test_http_matriz_familia(carteras) -> None:
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/matriz/table", params={"familia": "galileo", "view": "vn"})
+        assert r.status_code == 200 and "GALILEO AHORRO" in r.text
+        assert "*BIS" not in r.text
+        page = await ac.get("/matriz", params={"familia": "delta"})
+        assert page.status_code == 200 and "Sólo Delta" in page.text
 
 
 @pytest.mark.asyncio

@@ -18,9 +18,17 @@
       <div class="row-fields">
         <label class="field">
           <span>Ver</span>
-          <select name="view" hx-get="/matriz/table" hx-trigger="change" hx-target="#matriz-table" hx-swap="innerHTML">
+          <select name="view" hx-get="/matriz/table" hx-trigger="change" hx-target="#matriz-table" hx-swap="innerHTML" hx-include="[name=familia]">
             <option value="vn"  {% if view == "vn"  %}selected{% endif %}>VN (nominales)</option>
             <option value="pct" {% if view == "pct" %}selected{% endif %}>% sobre PN</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Familia</span>
+          <select name="familia" hx-get="/matriz/table" hx-trigger="change" hx-target="#matriz-table" hx-swap="innerHTML" hx-include="[name=view]">
+            {% for k, lbl in [("todos","Delta + Galileo"),("delta","Sólo Delta"),("galileo","Sólo Galileo")] %}
+              <option value="{{ k }}" {% if familia == k %}selected{% endif %}>{{ lbl }}</option>
+            {% endfor %}
           </select>
         </label>
         <label class="field field-bond">
@@ -28,7 +36,7 @@
           <input id="matriz-q" type="search" placeholder="ej. TX26 — filtra al instante"
                  autocomplete="off" oninput="matrizFilter()">
         </label>
-        <a class="btn-primary" style="align-self:flex-end" href="/matriz?refresh=1&view={{ view }}">↻ Actualizar</a>
+        <a class="btn-primary" style="align-self:flex-end" href="/matriz?refresh=1&view={{ view }}&familia={{ familia }}">↻ Actualizar</a>
       </div>
     </div>
   </div>

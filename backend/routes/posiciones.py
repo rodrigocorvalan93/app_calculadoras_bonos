@@ -599,30 +599,63 @@ async def posiciones_vencimientos(request: Request, fondo: Optional[str] = None)
 
 # ── Matriz de tenencias (pestaña aparte) ───────────────────────────────────
 @router.get("/matriz", response_class=HTMLResponse)
-async def matriz_page(request: Request, view: str = "vn", refresh: bool = False) -> HTMLResponse:
+async def matriz_page(request: Request, view: str = "vn", familia: str = "todos",
+                      refresh: bool = False) -> HTMLResponse:
     bond_universe.ensure_loaded()
     if refresh:
         await asyncio.get_running_loop().run_in_executor(None, positions.refresh)   # relee Excels (I/O)
     return _render(request, "matriz.html", view=view, status=positions.status(),
-                   **_matriz_ctx(auth.visible_fondos_for(request)))
+                   **_matriz_ctx(auth.visible_fondos_for(request), familia))
+
+
+# HTML de la matriz cacheado por (generación de carteras, familia, vista,
+# fondos visibles del usuario): la data cambia sólo con refresh() — típicamente
+# 1×/día — y el render de ~340 filas × ~50 fondos costaba 20-100 ms por
+# request. La key incluye la allowlist exacta → sin fugas entre usuarios.
+_MATRIZ_CACHE: Dict[tuple, bytes] = {}
 
 
 @router.get("/matriz/table", response_class=HTMLResponse)
-async def matriz_table(request: Request, view: str = "vn") -> HTMLResponse:
+async def matriz_table(request: Request, view: str = "vn", familia: str = "todos") -> HTMLResponse:
+    visibles = auth.visible_fondos_for(request)
+    gen = positions.generation()
+    key = (gen, familia, view, visibles)
+    body = _MATRIZ_CACHE.get(key)
+    if body is not None:
+        return HTMLResponse(body)
     bond_universe.ensure_loaded()
-    return _render(request, "partials/matriz_table.html", view=view,
-                   **_matriz_ctx(auth.visible_fondos_for(request)))
+    resp = _render(request, "partials/matriz_table.html", view=view,
+                   **_matriz_ctx(visibles, familia))
+    if _MATRIZ_CACHE and next(iter(_MATRIZ_CACHE))[0] != gen:
+        _MATRIZ_CACHE.clear()               # carteras releídas → render viejo afuera
+    if len(_MATRIZ_CACHE) < 64:
+        _MATRIZ_CACHE[key] = bytes(resp.body)
+    return resp
 
 
-def _matriz_ctx(visibles: Optional[frozenset] = None) -> Dict[str, Any]:
+def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos") -> Dict[str, Any]:
+    """Matriz especies × fondos. SÓLO especies de mercado: los cheques
+    garantizados / cash / plazos fijos / FCI de Galileo no son filas — metían
+    ~1.100 filas únicas × todos los fondos ≈ 3 MB de HTML por render (la
+    lentitud reportada). `familia` filtra columnas Y filas (todos | delta |
+    galileo). El orden prioriza el esquema Delta: primero las especies con
+    presencia en fondos Delta (por valor), después las sólo-Galileo."""
     c = positions.ensure_loaded()
     fs = positions.fondos(visibles)
+    if familia == "delta":
+        fs = [f for f in fs if not positions.es_galileo(f["cod"])]
+    elif familia == "galileo":
+        fs = [f for f in fs if positions.es_galileo(f["cod"])]
+    # Un fondo oculto (o de otra familia) no aporta ni columna ni fila: una
+    # especie que SÓLO está en fondos no visibles no debe aparecer.
+    permitidos = {f["cod"] for f in fs}
     esps: Dict[str, Dict[int, Dict[str, float]]] = {}
+    con_delta: set = set()
     for h in c["holdings"]:
-        # Un fondo oculto no aporta ni columna ni fila: una especie que SÓLO
-        # está en fondos ocultos no debe aparecer (delataría la tenencia).
-        if visibles is not None and h["cod_fondo"] not in visibles:
+        if h["cod_fondo"] not in permitidos:
             continue
+        if not h.get("es_especie", h.get("cod_delta") is not None):
+            continue                    # cheques / cash / FCI: no son especies
         e = h.get("cod_delta") or h.get("especie")
         if not e:
             continue
@@ -630,13 +663,18 @@ def _matriz_ctx(visibles: Optional[frozenset] = None) -> Dict[str, Any]:
         cell = d.setdefault(h["cod_fondo"], {"vn": 0.0, "valor": 0.0})
         cell["vn"] += (h.get("cantidad") or 0.0)
         cell["valor"] += (h.get("valor") or 0.0)
+        if not positions.es_galileo(h["cod_fondo"]):
+            con_delta.add(e)
     rows = []
-    for e, byf in sorted(esps.items(), key=lambda kv: -sum(c2["valor"] for c2 in kv[1].values())):
+    orden = sorted(esps.items(),
+                   key=lambda kv: (kv[0] not in con_delta,
+                                   -sum(c2["valor"] for c2 in kv[1].values())))
+    for e, byf in orden:
         cells = []
         for f in fs:
             cell = byf.get(f["cod"])
             pct = (cell["valor"] / f["pn"]) if (cell and f.get("pn")) else None
             cells.append({"vn": cell["vn"] if cell else None,
                           "valor": cell["valor"] if cell else None, "pct": pct})
-        rows.append({"especie": e, "cells": cells})
-    return {"fondos": fs, "rows": rows}
+        rows.append({"especie": e, "cells": cells, "solo_galileo": e not in con_delta})
+    return {"fondos": fs, "rows": rows, "familia": familia}

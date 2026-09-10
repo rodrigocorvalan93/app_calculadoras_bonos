@@ -95,6 +95,14 @@ _FONDO_NOMBRES_FALLBACK: Dict[int, str] = {
 
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
+_generation = 0          # avanza en cada (re)carga — clave de caches derivados
+
+
+def generation() -> int:
+    """Token de versión de las carteras: cambia sólo cuando se (re)leyeron los
+    Excel. Los renders derivados (matriz) se cachean contra esto."""
+    ensure_loaded()
+    return _generation
 
 
 # ── paths ────────────────────────────────────────────────────────────────
@@ -381,6 +389,7 @@ def _cargar_galileo(pd, junto_a: Optional[str]) -> Dict[str, Any]:
                     m = _DESC_TICKER_PARENS.search(desc)
                     if m:
                         cod_delta = m.group(1)
+        venc = r.get("vencimiento")
         res["holdings"].append({
             "cod_fondo": cod,
             "cod_delta": cod_delta,
@@ -390,6 +399,8 @@ def _cargar_galileo(pd, junto_a: Optional[str]) -> Dict[str, Any]:
             "clase": _s(r.get("Clasifica_Ficha")) or instrumento,
             "es_especie": es_especie,
             "isin": isin,
+            # vencimiento ISO (para sugerir fichas candidatas en el reporte)
+            "venc": venc.date().isoformat() if hasattr(venc, "date") and venc == venc else None,
         })
         nom = _s(r.get("fondo"))
         if nom and cod not in res["nombres"]:
@@ -517,10 +528,11 @@ def _load() -> Dict[str, Any]:
 
 # ── API pública ────────────────────────────────────────────────────────────
 def ensure_loaded() -> Dict[str, Any]:
-    global _cache
+    global _cache, _generation
     with _lock:
         if _cache is None:
             _cache = _load()
+            _generation += 1
         return _cache
 
 
@@ -534,9 +546,10 @@ def is_loaded() -> bool:
 
 def refresh() -> Dict[str, Any]:
     """Fuerza relectura de los Excel (botón 'actualizar')."""
-    global _cache
+    global _cache, _generation
     with _lock:
         _cache = _load()
+        _generation += 1
         return _cache
 
 
@@ -621,10 +634,23 @@ def especies_faltantes() -> Dict[str, Any]:
     holdings + sets en memoria — O(n) lookups, sub-ms, sin I/O."""
     c = ensure_loaded()
     bonos: set = set()
+    venc_idx: Dict[str, List[str]] = {}
     try:
         from backend.services import bond_universe
         bond_universe.ensure_loaded()
-        bonos = {str(x).strip().upper() for x in bond_universe.all_codes()}
+        for x in bond_universe.all_codes():
+            bonos.add(str(x).strip().upper())
+            # índice vencimiento → fichas (para SUGERIR candidatas en las filas
+            # sin normalizar — nunca se mapea solo por vencimiento: dos letras
+            # distintas pueden vencer el mismo día, ej. T15E7 boncap y D15E7
+            # dual — la elección es del usuario, acá sólo se le acercan).
+            if " " in x or x[-1:] in ("j", "v"):
+                continue
+            obj = bond_universe.get(x)
+            v = getattr(obj, "vencimiento", None) if obj is not None else None
+            if v is not None:
+                key = (v.date() if hasattr(v, "date") else v).isoformat()
+                venc_idx.setdefault(key, []).append(x)
     except Exception:  # noqa: BLE001
         pass
     eq = _equity_tickers_conocidos()
@@ -644,7 +670,8 @@ def especies_faltantes() -> Dict[str, Any]:
         else:
             d = sin_map.setdefault(h["especie"], {
                 "especie": h["especie"], "isin": h.get("isin"),
-                "clase": h.get("clase"), "familias": set(), "n_filas": 0, "valor": 0.0})
+                "clase": h.get("clase"), "familias": set(), "n_filas": 0, "valor": 0.0,
+                "candidatos": ", ".join(venc_idx.get(h.get("venc") or "", [])[:4])})
         d["familias"].add(fam)
         d["n_filas"] += 1
         d["valor"] += (h["valor"] or 0.0)

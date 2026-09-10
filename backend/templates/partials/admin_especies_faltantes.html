@@ -38,13 +38,14 @@
   </p>
   <div class="table-scroll">
     <table class="cashflows curve-table mercado-table" data-sortable>
-      <thead><tr><th style="text-align:left" data-sort>Descripción</th><th data-sort>ISIN</th><th style="text-align:left" data-sort>Clase</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
+      <thead><tr><th style="text-align:left" data-sort>Descripción</th><th data-sort>ISIN</th><th style="text-align:left" data-sort>Clase</th><th data-sort title="Fichas del universo con el MISMO vencimiento — sugerencia para asignar el ISIN real; dos letras pueden vencer el mismo día, elegí vos">¿Ficha? (mismo vto)</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
       <tbody>
         {% for r in rep.sin_map[:40] %}
         <tr>
           <td style="text-align:left;font-size:11.5px">{{ r.especie }}</td>
           <td style="font-size:11px;color:var(--text-muted)">{{ r.isin or "—" }}</td>
           <td style="text-align:left;font-size:11px">{{ r.clase or "—" }}</td>
+          <td style="font-size:11px;color:var(--cyan)">{{ r.candidatos or "—" }}</td>
           <td>{{ r.n_filas }}</td>
           <td>{{ r.valor | ar_hum }}</td>
         </tr>
