@@ -80,4 +80,18 @@
   </div>
 </div>
 {% endif %}
+
+{# Spreads vs Treasuries — sólo hard-dollar (NaN en el resto ⇒ bloque oculto) #}
+{% if metrics.z_spread_bps == metrics.z_spread_bps or metrics.g_spread_bps == metrics.g_spread_bps %}
+<div class="metrics-grid metrics-margen">
+  <div class="metric metric-highlight">
+    <span class="metric-label">Z-spread vs UST{% if metrics.get("ust_fecha") %} <span class="conv">curva {{ metrics.ust_fecha | ar_date }}</span>{% endif %}</span>
+    <span class="metric-value">{% if metrics.z_spread_bps == metrics.z_spread_bps %}{{ metrics.z_spread_bps | ar_int }} bps{% else %}—{% endif %}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">G-spread <span class="conv">TIREA − UST(dur)</span></span>
+    <span class="metric-value">{% if metrics.g_spread_bps == metrics.g_spread_bps %}{{ metrics.g_spread_bps | ar_int }} bps{% else %}—{% endif %}</span>
+  </div>
+</div>
+{% endif %}
 {% endif %}

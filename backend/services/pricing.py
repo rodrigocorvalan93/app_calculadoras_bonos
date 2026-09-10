@@ -71,6 +71,11 @@ NAN_METRICS: Dict[str, float] = {
     "dias_remanentes": float("nan"),
     "valor_residual": float("nan"),
     "valor_tecnico": float("nan"),
+    # Spreads vs UST (sólo hard-dollar; NaN = no aplica / sin curva). Van acá
+    # para que TODA salida de compute_metrics tenga la key (el template testea
+    # NaN por x == x; una key ausente sería Undefined y "igual a sí misma").
+    "g_spread_bps": float("nan"),
+    "z_spread_bps": float("nan"),
 }
 
 
@@ -738,6 +743,21 @@ def compute_metrics(
     idx_info = index_applied(obj)
     cashflows = _cashflows_from_obj(obj) if include_cashflows else []
 
+    # Spreads vs Treasuries — sólo bonos de flujos USD (globales / bonares /
+    # ONs hard-dollar; los CER/DLK/ARS nunca entran). Costo ~µs por bono:
+    # bisección stdlib sobre LOS MISMOS flujos que usó la TIR. La curva la
+    # mantiene ust.py (1×/día en thread de fondo, backup commiteado sin red),
+    # así que acá no hay red ni I/O — y los callers cacheados (curvas, YAS
+    # warm) ni siquiera recomputan esto.
+    g_spread = z_spread = float("nan")
+    ust_fecha = None
+    if np.isfinite(tirea) and _is_hard_dollar(obj):
+        try:
+            from backend.services import ust
+            g_spread, z_spread, ust_fecha = ust.spreads_bono(obj, tirea, duration)
+        except Exception:  # noqa: BLE001
+            logger.debug("[pricing] spreads UST fallaron para %s", code, exc_info=True)
+
     base.update(
         {
             "tirea": tirea,
@@ -764,6 +784,9 @@ def compute_metrics(
             "benchmark_pct": bench_pct,
             "index_applied": idx_info,
             "cashflows": cashflows,
+            "g_spread_bps": g_spread,
+            "z_spread_bps": z_spread,
+            "ust_fecha": ust_fecha,
         }
     )
     return base

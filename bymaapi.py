@@ -647,6 +647,41 @@ def process_bond_dataframe(
     return df
 
 
+def genera_ticket_global(bono, precio_ticket, nominales_ticket=1000000, settlement_date=None):
+    """Ticket de un bono hard-dollar (global/bonar/ON USD) = el genera_ticket
+    de siempre + spreads contra la curva de Treasuries.
+
+    Agrega al final del DataFrame:
+      - 'UST interp. (dur)': UST efectiva anual interpolada a la duration
+      - 'G-Spread': TIREA − esa UST, en bps
+      - 'Z-Spread': shift sobre la curva CERO UST que reproduce el precio
+        dirty descontando los MISMOS flujos que usó la TIR, en bps
+      - 'Curva UST': fecha de la curva usada (treasury.gov 1×/día; sin red
+        cae al snapshot ust_backup.json del repo)
+
+    La matemática vive en backend/services/ust.py (stdlib, ~1 pantalla).
+    Uso:  genera_ticket_global(GD30C, 0.7030)
+          genera_ticket_global(AL30D, 0.6950, 2_000_000, "2026-07-01")
+    """
+    ticket = bono.genera_ticket(precio_ticket, nominales_ticket, settlement_date)
+    try:
+        from backend.services import ust  # repo root en sys.path (como corre el .bat)
+
+        # genera_ticket ya corrió calcula_tirea: el objeto trae tirea, precio
+        # dirty, fecha_settlement y el cashflow — mismos insumos que la TIR.
+        dur = float(bono.calcula_duration(bono.tirea, settlement_date))
+        g, z, fecha = ust.spreads_bono(bono, float(bono.tirea), dur)
+        u = ust.yield_at(dur)
+        fmt = lambda v: "s/d" if v != v else f"{v:,.0f}"  # noqa: E731
+        ticket.loc["UST interp. (dur)", "Valores"] = "s/d" if u != u else f"{u:.2f}%"
+        ticket.loc["G-Spread", "Valores"] = f"{fmt(g)} bps"
+        ticket.loc["Z-Spread", "Valores"] = f"{fmt(z)} bps"
+        ticket.loc["Curva UST", "Valores"] = fecha.strftime("%d-%m-%Y") if fecha else "s/d"
+    except Exception as e:
+        ticket.loc["Z-Spread", "Valores"] = f"s/d ({e})"
+    return ticket
+
+
 def create_bond_prices_df(
     full_symbols: list,
     last_prices_df: pd.DataFrame,
@@ -1233,6 +1268,7 @@ if __name__ == '__main__':
 # market data simple:   get_mktdata(session,"T30E6")
 # Ejemplo obtener BID/OFFER de un bono y su tasa: PARP.genera_ticket(get_mktdata(session,"PARP").get("OF")[0].get('price')/100)
 # Ejemplo last: PARP.genera_ticket(get_mktdata(session,"PARP").get("LA").get("price")/100)
+# Ticket de un global con G/Z-spread vs UST: genera_ticket_global(GD30C, get_mktdata(session,"GD30C").get("LA").get("price")/100)
 # Ejemplo de gráfico:
 # Gráfico sin zoom: graficar_duration_tir_nss(lecap_24hs_prices_df)
 # Gráfico filtrando filas 8 11 y 12: graficar_duration_tir_nss(lecap_24hs_prices_df.drop([8, 11, 12]).reset_index(drop=True),rango_x_min_plot=0.5, rango_x_max_plot=1.0)
