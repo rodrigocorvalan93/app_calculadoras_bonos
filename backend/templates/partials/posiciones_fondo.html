@@ -9,6 +9,7 @@
         <button type="button" class="lnk" data-csv-of="#pos-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · 
         {{ rows | length }} especies · Valor {{ total_valor | ar_int }}{% if pn %} · {{ (total_valor / pn * 100) | ar_pct_pp(1) }} del PN{% endif %}
         · <span id="pos-day-ret" class="pos-day-ret" title="Σ (peso por valor × retorno Last vs Px val). Editá un Last para simular.">Ret. día —</span>
+        · <span id="pos-fondo-tirdur" class="pos-day-ret" title="TIR y duration del FONDO ponderadas por valor de mercado. Entre paréntesis, la cobertura: % del valor del fondo que aporta dato. Las filas sin TIR/Dur (sin ficha o sin precio) tienen casillero editable — tipeá una a mano (TIR en %) y entra al ponderado.">TIR — · Dur —</span>
       </span>
     </div>
     <div class="card-body" style="padding:0">
@@ -56,9 +57,14 @@
             <td colspan="4"></td>
           </tr>
           {% for r in g.rows %}
+            {# data-tirea/data-dur crudos (decimal / años) alimentan la TIR y
+               Dur ponderadas del fondo en el navegador; NaN viaja vacío para
+               que la fila reciba el casillero manual. #}
             <tr data-esp="{{ r.especie }}"
                 data-pxval="{{ r.px_val if r.px_val is not none else '' }}"
-                data-valor="{{ r.valor if r.valor is not none else '' }}">
+                data-valor="{{ r.valor if r.valor is not none else '' }}"
+                data-tirea="{{ r.tirea if r.tirea is not none and r.tirea == r.tirea else '' }}"
+                data-dur="{{ r.duration if r.duration is not none and r.duration == r.duration else '' }}">
               <td style="text-align:left;color:var(--accent);font-weight:600">
                 {% if r.in_universe %}<a href="/yas?code={{ r.cod_delta }}" title="Abrir en YAS">{{ r.abrev }}</a>{% else %}{{ r.abrev }}{% endif %}
               </td>
@@ -78,12 +84,25 @@
               <td class="pos-last-cell"><input class="pos-last cell-edit" type="text" inputmode="decimal"
                      value="{{ r.last | ar_num(2) if r.last is not none else '' }}" placeholder="—"></td>
               <td class="pos-ret">—</td>
+              {# Sin TIR/Dur calculada (especie sin ficha o sin precio) → casillero
+                 editable estilo Last ✎: lo tipeado entra a la TIR/Dur ponderada
+                 del fondo (client-side; se re-aplica tras cada refresh). #}
+              {% if r.tirea is not none and r.tirea == r.tirea %}
               <td class="grp">{{ r.tirea | ar_pct(2) }}</td>
+              {% else %}
+              <td class="grp pos-tir-cell"><input class="pos-tir cell-edit" type="text" inputmode="decimal"
+                     placeholder="✎ %" title="TIR manual en % (ej. 12,5) — entra a la TIR ponderada del fondo"></td>
+              {% endif %}
               <td>
                 {{ r.tna | ar_pct(2) }}
                 {% if r.tna_convention_label and r.tirea is not none %}<span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ r.tna_convention_label }}</span>{% endif %}
               </td>
+              {% if r.duration is not none and r.duration == r.duration %}
               <td>{{ r.duration | ar_num(2) }}</td>
+              {% else %}
+              <td class="pos-dur-cell"><input class="pos-dur cell-edit" type="text" inputmode="decimal"
+                     placeholder="✎" title="Duration manual en años (ej. 2,35) — entra a la Dur ponderada del fondo"></td>
+              {% endif %}
               <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
             </tr>
           {% endfor %}
