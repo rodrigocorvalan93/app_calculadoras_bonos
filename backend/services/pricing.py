@@ -109,16 +109,28 @@ def refresh_floater_coupons() -> int:
 
 
 def _safe_settle(settle: Optional[str]) -> Optional[str]:
+    """Normaliza la fecha de liquidación a DD/MM/AAAA. Tolerante — doble red
+    del add-in v15: DD/MM/AAAA, ISO, guiones, año corto (26 → 2026) y el
+    SERIAL de Excel en texto ("46249": una celda con fecha real llega así
+    desde Office). None si no parsea (el caller lo hace error VISIBLE — jamás
+    valuar a otra fecha en silencio)."""
     if settle is None:
         return None
-    s = settle.strip()
+    s = str(settle).strip()
     if not s:
         return None
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
         try:
             return datetime.strptime(s, fmt).strftime("%d/%m/%Y")
         except ValueError:
             continue
+    try:                                    # serial de Excel (base 30/12/1899)
+        n = float(s.replace(",", "."))
+        if 20000 <= n <= 80000:             # ~1954 … ~2119
+            from datetime import timedelta
+            return (date(1899, 12, 30) + timedelta(days=int(n))).strftime("%d/%m/%Y")
+    except (TypeError, ValueError):
+        pass
     return None
 
 

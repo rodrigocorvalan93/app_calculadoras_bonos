@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v14 · 2026-09-03 (OMS.PRECIO devuelve la convención de mercado — inverso exacto de OMS.TIREA)";
+var OMS_BUILD = "v15 · 2026-09-10 (fechas de liquidación: celdas con fecha/serial + ISO + guiones; 3er argumento inválido = error visible, nunca settle de hoy en silencio)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -578,7 +578,41 @@ var OMSCalc = (function () {
   return { request: request };
 })();
 
-var FECHA_RE = /^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/;
+var FECHA_RE = /^\s*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\s*$/;
+var ISO_RE = /^\s*\d{4}-\d{1,2}-\d{1,2}\s*$/;
+var PLAZOS_OK = /^(|24|24hs|48|48hs|t1|t\+1|t2|t\+2|ci|0|t0|t\+0|contado)$/;
+
+function pad2(n) { return (n < 10 ? "0" : "") + n; }
+
+// Normaliza el 3er argumento a fecha DD/MM/AAAA, o null si no es una fecha.
+// CLAVE: una celda con FECHA REAL llega como el SERIAL de Excel en texto
+// ("46249") — antes caía al fallback de plazo y se calculaba con el settle de
+// HOY en silencio (una serie histórica de TIRs salía toda a la fecha de hoy).
+// Acepta además ISO (AAAA-MM-DD), guiones y año corto, y los normaliza al
+// DD/MM/AAAA que espera el server.
+function settleFromArg(p) {
+  var s = String(p == null ? "" : p).trim();
+  if (!s) { return null; }
+  if (/^\d+([.,]\d+)?$/.test(s)) {                 // serial de Excel (fecha[+hora])
+    var n = Number(s.replace(",", "."));
+    if (isFinite(n) && n >= 20000 && n <= 80000) {  // ~1954 … ~2119
+      var d = new Date(Math.round((n - 25569) * 86400000));   // 25569 = 01/01/1970
+      return pad2(d.getUTCDate()) + "/" + pad2(d.getUTCMonth() + 1) + "/" + d.getUTCFullYear();
+    }
+    return null;
+  }
+  if (ISO_RE.test(s)) {
+    var t = s.split("-");
+    return pad2(+t[2]) + "/" + pad2(+t[1]) + "/" + t[0];
+  }
+  if (FECHA_RE.test(s)) {
+    var q = s.split(/[\/\-]/);
+    var yy = +q[2];
+    if (yy < 100) { yy += 2000; }
+    return pad2(+q[0]) + "/" + pad2(+q[1]) + "/" + yy;
+  }
+  return null;
+}
 
 function calcItem(especie, modo, valor, plazo, nominales, fx) {
   var code = String(especie == null ? "" : especie).trim().toUpperCase();
@@ -593,11 +627,16 @@ function calcItem(especie, modo, valor, plazo, nominales, fx) {
     if (!isFinite(v)) { throw naError("Valor inválido: " + valor); }
     it.valor = v;
   }
-  // El 3er argumento admite plazo (CI/24hs) O una fecha de liquidación
-  // custom DD/MM/AAAA — mismo settle_custom que la ficha YAS.
+  // El 3er argumento admite plazo (CI/24hs) O una fecha de liquidación custom
+  // (DD/MM/AAAA, ISO, o una CELDA CON FECHA — llega como serial y se
+  // convierte) — mismo settle_custom que la ficha YAS. Un valor no reconocido
+  // es ERROR VISIBLE: el viejo fallback silencioso a 24hs calculaba con el
+  // settle de hoy y el usuario no se enteraba.
   var p = String(plazo == null ? "" : plazo).trim();
-  if (FECHA_RE.test(p)) { it.settle = p; it.plazo = "24hs"; }
-  else { it.plazo = normPlazo(plazo); }
+  var f = settleFromArg(p);
+  if (f) { it.settle = f; it.plazo = "24hs"; }
+  else if (PLAZOS_OK.test(p.toLowerCase())) { it.plazo = normPlazo(p); }
+  else { throw naError("3er argumento inválido: '" + p + "' — usá 24hs | CI | una fecha DD/MM/AAAA o una celda con fecha"); }
   if (nominales != null && nominales !== "") { it.nominales = Number(nominales); }
   if (fx != null && fx !== "") {
     var f = Number(fx);
@@ -649,8 +688,9 @@ function trFn(especie, precio, tirSalida, fechaSalida, nominales, plazo, fx) {
   if (tirSalida != null && tirSalida !== "") { it.tir_salida = Number(tirSalida); }
   var fs = String(fechaSalida == null ? "" : fechaSalida).trim();
   if (fs) {
-    if (!FECHA_RE.test(fs)) { throw naError("Fecha de salida inválida: " + fechaSalida + " (DD/MM/AAAA)"); }
-    it.fecha_salida = fs;
+    var fsn = settleFromArg(fs);           // acepta celda con fecha / ISO / serial
+    if (!fsn) { throw naError("Fecha de salida inválida: " + fechaSalida + " (DD/MM/AAAA o celda con fecha)"); }
+    it.fecha_salida = fsn;
   }
   return OMSCalc.request(it).then(function (m) {
     if (m.error) { throw naError(m.error); }
