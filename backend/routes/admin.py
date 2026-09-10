@@ -243,6 +243,24 @@ def _sec(fn) -> dict:
         return {"error": str(exc)[:140]}
 
 
+@router.get("/especies-faltantes", response_class=HTMLResponse)
+async def admin_especies_faltantes(request: Request) -> HTMLResponse:
+    """Reporte del panel de control: especies de las carteras (Delta +
+    Galileo) que FALTAN en la base — bonos sin ficha en especies.py, tickers
+    que la app no conoce — y filas de Galileo aún SIN normalizar a un ticker
+    (candidatas a cargar la ficha con el flujo de carga de bonos, o a un
+    alias en positions._GALILEO_ALIAS_ISIN). On-demand al abrir /admin: cero
+    costo en el hot path; el cómputo (sets en memoria) corre en el pool."""
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    from backend.services import positions as pos
+
+    loop = asyncio.get_running_loop()
+    rep = await loop.run_in_executor(None, pos.especies_faltantes)
+    return request.app.state.templates.TemplateResponse(
+        request, "partials/admin_especies_faltantes.html", {"rep": rep})
+
+
 @router.get("/salud", response_class=HTMLResponse)
 async def admin_salud(request: Request) -> HTMLResponse:
     """Salud de datos en una tarjeta: feed WS, store, seq-cache (ahorro 304),

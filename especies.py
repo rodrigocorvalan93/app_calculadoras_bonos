@@ -466,7 +466,7 @@ S30S6 = {
 S16O6 = {
     "Nombre Security": "Letra del Tesoro Nacional en Pesos Capitalizable Vto 16 10 2026",
     "Código": "S16O6",
-    "ISIN": "PENDIENTE", # CRYL / Aviso de Resultados 29/07/2026
+    "ISIN": "AR0183520128", # CRYL / Aviso de Resultados 29/07/2026
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -1194,7 +1194,7 @@ D15E7 = {
 TMVE8 = {
     "Nombre Security": "Bono del Tesoro en Moneda Dual TAMAR/Dolar Linked Vto 28 01 2028",
     "Código": "TMVE8",
-    "ISIN": "PENDIENTE", # CRYL / Aviso de Resultados 29/07/2026
+    "ISIN": "AR0821229090", # CRYL / Aviso de Resultados 29/07/2026
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -5550,7 +5550,7 @@ TXMJ9v = {
 TMVE8v = {
     "Nombre Security": "Bono del Tesoro en Moneda Dual TAMAR/Dolar Linked Vto 28 01 2028",
     "Código": "TMVE8v",
-    "ISIN": "PENDIENTE", # CRYL / Aviso de Resultados 29/07/2026
+    "ISIN": "AR0821229090", # CRYL / Aviso de Resultados 29/07/2026
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",

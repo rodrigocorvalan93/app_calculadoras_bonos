@@ -22,9 +22,12 @@ open a PR. Don't create the PR unless the user explicitly asks for one.
 
 ## Don't touch unless necessary
 
-- `rentafija.py`, `especies.py`, `utils.py`, `indices.py`, `OMSapi.py`,
+- `rentafija.py`, `utils.py`, `indices.py`, `OMSapi.py`,
   `OMSmktdata.py`, `OMSprices.py` — legacy but correct. Reuse, don't
   rewrite. Fix bugs in place when needed.
+- `especies.py` — **NO modificar sin permiso EXPLÍCITO del usuario**
+  (regla del 10/09/2026; antes se permitía fix-in-place). Vale también
+  para ISINs/fichas: proponer el cambio y esperar el OK.
 - `OMSweb_app.py` — Streamlit legacy. Read-only reference for porting
   business logic. Don't import from `backend/`.
 

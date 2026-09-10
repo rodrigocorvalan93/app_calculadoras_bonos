@@ -53,6 +53,32 @@ _GALILEO_PN_FILE = "Galileo_PN.xlsx"
 def es_galileo(cod: int) -> bool:
     return cod >= GALILEO_OFFSET
 
+
+# Instrumentos del reporte Galileo que NO son especies de mercado (cash,
+# cheques, plazos fijos, FCI…): no se normalizan a ticker ni cuentan como
+# "faltantes" en el panel de control — sólo viven en la vista del fondo.
+_GALILEO_NO_ESPECIE = {
+    "Cheques Garantizados", "Disponibilidades", "Otros Activos Netos",
+    "Plazo Fijo", "FCI", "FCI Cerrados", "Caución", "FUTUROS",
+    "Fideicomisos Financieros",
+}
+
+# Alias SEMIDEFINITIVOS por ISIN → ticker BYMA, para lo que ni el universo ni
+# las reglas de descripción resuelven (acciones cuya descripción no trae el
+# ticker). Editable a mano; el reporte "Especies faltantes" de /admin muestra
+# lo que siga sin mapear para ir completando esta tabla.
+_GALILEO_ALIAS_ISIN: Dict[str, str] = {
+    "ARBOLG010010": "BOLT",   # Boldt Gaming SA
+    "ARP577611352": "INTR",   # Compañía Introductora de Buenos Aires
+    "ARGASB010027": "GBAN",   # Gas Natural Ban
+}
+
+# Normalización al esquema Delta de las descripciones de Galileo:
+# "BBAR AR / BBVA BANCO FRANCES SA" → ticker local "BBAR AR" (lo que pidió el
+# desk: sólo la pata local); "CONSULTATIO (CTIO)" → ticker entre paréntesis.
+_DESC_TICKER_AR = re.compile(r"^([A-Z][A-Z0-9]{1,5}) AR\b")
+_DESC_TICKER_PARENS = re.compile(r"\(([A-Z][A-Z0-9]{1,5})\)\s*$")
+
 # Fallback CodFondo → Nombre (de OMSposiciones). Se usa si Delta_Fondos.txt
 # no está disponible / no parsea, así nunca se muestran sólo números.
 _FONDO_NOMBRES_FALLBACK: Dict[int, str] = {
@@ -69,6 +95,14 @@ _FONDO_NOMBRES_FALLBACK: Dict[int, str] = {
 
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
+_generation = 0          # avanza en cada (re)carga — clave de caches derivados
+
+
+def generation() -> int:
+    """Token de versión de las carteras: cambia sólo cuando se (re)leyeron los
+    Excel. Los renders derivados (matriz) se cachean contra esto."""
+    ensure_loaded()
+    return _generation
 
 
 # ── paths ────────────────────────────────────────────────────────────────
@@ -266,6 +300,14 @@ def _isin_a_ticker() -> Dict[str, str]:
     try:
         from backend.services import bond_universe
         bond_universe.ensure_loaded()
+        # Agrupar por ISIN reteniendo el vencimiento: especies.py arrastra
+        # ISINs copy-pasteados entre bonos DISTINTOS (GD29/GD30, RB65O/RB66O,
+        # el placeholder "PENDIENTE" compartido por 3 letras…). Mapear uno de
+        # esos sería agregar la posición al bono EQUIVOCADO en silencio, así
+        # que un ISIN cuyo grupo mezcla vencimientos queda AFUERA del mapa:
+        # esas filas caen a "sin normalizar" en el reporte de /admin, que es
+        # donde se ve y se corrige (ISIN real en la ficha → mapeo automático).
+        grupos: Dict[str, List[tuple]] = {}
         for c in bond_universe.all_codes():
             if " " in c:
                 continue                    # refs Bloomberg ("YPFDAR 27") afuera
@@ -274,11 +316,16 @@ def _isin_a_ticker() -> Dict[str, str]:
             if not isin:
                 continue
             key = str(isin).strip().upper()
-            prev = out.get(key)
+            if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}\d", key):
+                continue                    # "PENDIENTE" y placeholders afuera
+            grupos.setdefault(key, []).append(
+                (c, str(getattr(obj, "vencimiento", None))))
+        for key, items in grupos.items():
+            if len({v for _, v in items}) > 1:
+                continue                    # ISIN compartido por bonos distintos
             # preferencia: especie base (pesos) > C/D > variantes j/v; corto gana
-            score = (c[-1:] in ("C", "D"), c[-1:] in ("j", "v"), len(c), c)
-            if prev is None or score < (prev[-1:] in ("C", "D"), prev[-1:] in ("j", "v"), len(prev), prev):
-                out[key] = c
+            out[key] = min((c for c, _ in items),
+                           key=lambda c: (c[-1:] in ("C", "D"), c[-1:] in ("j", "v"), len(c), c))
     except Exception as exc:  # noqa: BLE001 — sin universo no hay mapeo, no error
         logger.warning("[positions] mapa ISIN→ticker no disponible: %s", exc)
     _isin_map_cache = out
@@ -319,16 +366,46 @@ def _cargar_galileo(pd, junto_a: Optional[str]) -> Dict[str, Any]:
 
     for _, r in dfc.iterrows():
         cod = GALILEO_OFFSET + int(r["CodFondo"])
+        instrumento = _s(r.get("instrumento"))
+        es_especie = instrumento not in _GALILEO_NO_ESPECIE
         isin = _s(r.get("isin"))
-        cod_delta = isin_map.get(isin.upper()) if isin else None
         desc = _s(r.get("descripcion"))
+        cod_delta = None
+        especie = desc
+        nombre_largo = None
+        if es_especie:
+            # Cascada de normalización al esquema Delta (semidefinitiva, en la
+            # carga — cero costo por request): 1) ISIN → ficha del universo,
+            # 2) alias fijo por ISIN, 3) "XXX AR / …" → pata local,
+            # 4) "(XXX)" al final de la descripción.
+            if isin:
+                iu = isin.upper()
+                cod_delta = isin_map.get(iu) or _GALILEO_ALIAS_ISIN.get(iu)
+            if not cod_delta and desc:
+                m = _DESC_TICKER_AR.match(desc)
+                if m:
+                    cod_delta = m.group(1)
+                    especie = f"{m.group(1)} AR"      # "sólo BBAR AR"
+                    if "/" in desc:                   # razón social → col. Nombre
+                        nombre_largo = desc.split("/", 1)[1].strip() or None
+                else:
+                    m = _DESC_TICKER_PARENS.search(desc)
+                    if m:
+                        cod_delta = m.group(1)
+                        nombre_largo = desc
+        venc = r.get("vencimiento")
         res["holdings"].append({
             "cod_fondo": cod,
             "cod_delta": cod_delta,
-            "especie": desc or cod_delta or isin or "—",
+            "especie": especie or cod_delta or isin or "—",
             "cantidad": _f(r.get("cantidad")),
             "valor": _f(r.get("valor")),
-            "clase": _s(r.get("Clasifica_Ficha")) or _s(r.get("instrumento")),
+            "clase": _s(r.get("Clasifica_Ficha")) or instrumento,
+            "es_especie": es_especie,
+            "isin": isin,
+            "nombre": nombre_largo,
+            # vencimiento ISO (para sugerir fichas candidatas en el reporte)
+            "venc": venc.date().isoformat() if hasattr(venc, "date") and venc == venc else None,
         })
         nom = _s(r.get("fondo"))
         if nom and cod not in res["nombres"]:
@@ -407,6 +484,8 @@ def _load() -> Dict[str, Any]:
             "cantidad": _f(r.get("Cantidad")),
             "valor": _f(r.get("Valor")),
             "clase": (str(r.get("Clase de Activo")).strip() if has_clase and r.get("Clase de Activo") == r.get("Clase de Activo") else None),
+            # En Delta, especie de mercado = fila con ticker (NC/None = cash).
+            "es_especie": cod_delta is not None,
         })
 
     pn: Dict[int, float] = {}
@@ -454,10 +533,11 @@ def _load() -> Dict[str, Any]:
 
 # ── API pública ────────────────────────────────────────────────────────────
 def ensure_loaded() -> Dict[str, Any]:
-    global _cache
+    global _cache, _generation
     with _lock:
         if _cache is None:
             _cache = _load()
+            _generation += 1
         return _cache
 
 
@@ -471,9 +551,10 @@ def is_loaded() -> bool:
 
 def refresh() -> Dict[str, Any]:
     """Fuerza relectura de los Excel (botón 'actualizar')."""
-    global _cache
+    global _cache, _generation
     with _lock:
         _cache = _load()
+        _generation += 1
         return _cache
 
 
@@ -526,6 +607,88 @@ def especies_universe() -> List[str]:
     """Cod_Delta únicos (para el warmup de la matriz especies×fondos)."""
     c = ensure_loaded()
     return sorted({h["cod_delta"] for h in c["holdings"] if h["cod_delta"]})
+
+
+def _equity_tickers_conocidos() -> set:
+    """Tickers de acciones/CEDEARs que la app conoce (paneles curados + vivos
+    + universo CEDEAR): para que el reporte de faltantes no marque una acción
+    mapeada como 'falta en especies.py' (las acciones no viven ahí)."""
+    out: set = set()
+    try:
+        from backend.services import equities
+        out |= set(equities.LIDERES) | set(equities.GENERAL) | set(equities.CEDEARS)
+        try:
+            out |= set(equities.cedears_universo() or [])
+        except Exception:  # noqa: BLE001
+            pass
+        for p in ("lideres", "general", "cedears"):
+            try:
+                out |= set(equities.panel_tickers(p) or [])
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+    return {str(t).strip().upper() for t in out if t}
+
+
+def especies_faltantes() -> Dict[str, Any]:
+    """Reporte para el panel de control: qué especies de las carteras NO
+    están en la base (especies.py para bonos; paneles/CEDEARs para acciones)
+    y qué filas de Galileo siguen SIN normalizar a un ticker (para cargar la
+    ficha o sumar un alias en _GALILEO_ALIAS_ISIN). Corre sobre el cache de
+    holdings + sets en memoria — O(n) lookups, sub-ms, sin I/O."""
+    c = ensure_loaded()
+    bonos: set = set()
+    venc_idx: Dict[str, List[str]] = {}
+    try:
+        from backend.services import bond_universe
+        bond_universe.ensure_loaded()
+        for x in bond_universe.all_codes():
+            bonos.add(str(x).strip().upper())
+            # índice vencimiento → fichas (para SUGERIR candidatas en las filas
+            # sin normalizar — nunca se mapea solo por vencimiento: dos letras
+            # distintas pueden vencer el mismo día, ej. T15E7 boncap y D15E7
+            # dual — la elección es del usuario, acá sólo se le acercan).
+            if " " in x or x[-1:] in ("j", "v"):
+                continue
+            obj = bond_universe.get(x)
+            v = getattr(obj, "vencimiento", None) if obj is not None else None
+            if v is not None:
+                key = (v.date() if hasattr(v, "date") else v).isoformat()
+                venc_idx.setdefault(key, []).append(x)
+    except Exception:  # noqa: BLE001
+        pass
+    eq = _equity_tickers_conocidos()
+    faltantes: Dict[str, Dict[str, Any]] = {}
+    sin_map: Dict[str, Dict[str, Any]] = {}
+    for h in c["holdings"]:
+        if not h.get("es_especie", h["cod_delta"] is not None):
+            continue                        # cash / cheques / FCI: no son especies
+        fam = "Galileo" if es_galileo(h["cod_fondo"]) else "Delta"
+        code = h["cod_delta"]
+        if code:
+            if code in bonos or code in eq:
+                continue
+            d = faltantes.setdefault(code, {
+                "code": code, "especie": h["especie"], "isin": h.get("isin"),
+                "familias": set(), "n_filas": 0, "valor": 0.0})
+        else:
+            d = sin_map.setdefault(h["especie"], {
+                "especie": h["especie"], "isin": h.get("isin"),
+                "clase": h.get("clase"), "familias": set(), "n_filas": 0, "valor": 0.0,
+                "candidatos": ", ".join(venc_idx.get(h.get("venc") or "", [])[:4])})
+        d["familias"].add(fam)
+        d["n_filas"] += 1
+        d["valor"] += (h["valor"] or 0.0)
+
+    def _fin(dd: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        rows = sorted(dd.values(), key=lambda x: -(x["valor"] or 0.0))
+        for r in rows:
+            r["familias"] = " + ".join(sorted(r["familias"]))
+        return rows
+
+    return {"faltantes": _fin(faltantes), "sin_map": _fin(sin_map),
+            "n_faltantes": len(faltantes), "n_sin_map": len(sin_map)}
 
 
 def position_for(code: Optional[str],
