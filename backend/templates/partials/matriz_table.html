@@ -12,17 +12,20 @@
       <thead>
         <tr>
           <th style="text-align:left">Especie</th>
+          <th style="text-align:left">Nombre</th>
           {% for f in fondos %}<th>{{ f.nombre }}</th>{% endfor %}
         </tr>
       </thead>
       <tbody>
         {% for r in rows %}
           <tr>
-            {# Descripciones largas (internacionales sin ticker) truncadas con
-               tooltip; ⊚ marca especie presente SÓLO en fondos Galileo. #}
-            <td style="text-align:left;color:var(--accent);font-weight:600"
-                {% if r.especie | length > 34 %}title="{{ r.especie }}"{% endif %}>
-              <span style="display:inline-block;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom">{{ r.especie }}</span>{% if r.solo_galileo and familia == "todos" %} <small class="muted" title="sólo en fondos Galileo">⊚G</small>{% endif %}
+            {# Abreviatura (el ticker del desk) + nombre completo aparte; los
+               sin ticker muestran "—" y su descripción como nombre. ⊚G marca
+               especie presente SÓLO en fondos Galileo. #}
+            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.abrev }}{% if r.solo_galileo and familia == "todos" %} <small class="muted" title="sólo en fondos Galileo">⊚G</small>{% endif %}</td>
+            <td style="text-align:left;font-size:11px;color:var(--text-muted)"
+                {% if r.nombre | length > 40 %}title="{{ r.nombre }}"{% endif %}>
+              <span style="display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom">{{ r.nombre }}</span>
             </td>
             {% for c in r.cells %}
               <td>

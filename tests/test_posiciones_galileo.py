@@ -213,6 +213,13 @@ def test_matriz_sin_cheques_familias_y_delta_primero(carteras) -> None:
     assert not any(str(e).startswith("*BIS") for e in especies)     # cheques afuera
     assert "AL30" in especies and "BBAR" in especies
     assert "BBAR AR / BBVA BANCO FRANCES SA" not in especies        # normalizada
+    # abreviatura + nombre completo en columnas separadas
+    bbar = next(r for r in ctx["rows"] if r["especie"] == "BBAR")
+    assert bbar["abrev"] == "BBAR" and bbar["nombre"] == "BBVA BANCO FRANCES SA"
+    al30 = next(r for r in ctx["rows"] if r["especie"] == "AL30")
+    assert al30["abrev"] == "AL30" and al30["nombre"] == "BONAR 2030"   # el de Delta prevalece
+    fantasma = next(r for r in ctx["rows"] if "Fantasma" in r["especie"])
+    assert fantasma["abrev"] == "—" and fantasma["nombre"] == "ON Fantasma 2031"
     solo_g = [r["solo_galileo"] for r in ctx["rows"]]
     assert solo_g == sorted(solo_g)                                 # Delta primero
     assert next(r for r in ctx["rows"] if r["especie"] == "AL30")["solo_galileo"] is False

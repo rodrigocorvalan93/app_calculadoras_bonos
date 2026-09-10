@@ -651,6 +651,8 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos") ->
     permitidos = {f["cod"] for f in fs}
     esps: Dict[str, Dict[int, Dict[str, float]]] = {}
     con_delta: set = set()
+    con_ticker: set = set()             # keys que son ABREVIATURA (cod_delta)
+    nombres: Dict[str, str] = {}        # key → nombre completo (Delta primero)
     for h in c["holdings"]:
         if h["cod_fondo"] not in permitidos:
             continue
@@ -663,6 +665,11 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos") ->
         cell = d.setdefault(h["cod_fondo"], {"vn": 0.0, "valor": 0.0})
         cell["vn"] += (h.get("cantidad") or 0.0)
         cell["valor"] += (h.get("valor") or 0.0)
+        if h.get("cod_delta"):
+            con_ticker.add(e)
+        nom = h.get("nombre") or h.get("especie")
+        if nom and nom != e and e not in nombres:   # Delta carga primero → prevalece
+            nombres[e] = nom
         if not positions.es_galileo(h["cod_fondo"]):
             con_delta.add(e)
     rows = []
@@ -676,5 +683,14 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos") ->
             pct = (cell["valor"] / f["pn"]) if (cell and f.get("pn")) else None
             cells.append({"vn": cell["vn"] if cell else None,
                           "valor": cell["valor"] if cell else None, "pct": pct})
-        rows.append({"especie": e, "cells": cells, "solo_galileo": e not in con_delta})
+        # Abreviatura (el ticker que usa el desk) + nombre completo aparte:
+        # el nombre sale de la cartera Delta si está, si no de la ficha, si no
+        # de la descripción Galileo. Sin ticker → sólo el nombre.
+        if e in con_ticker:
+            abrev = e
+            nombre = nombres.get(e) or (pricing.bond_meta(e) or {}).get("nombre") or ""
+        else:
+            abrev, nombre = "—", e
+        rows.append({"especie": e, "abrev": abrev, "nombre": nombre,
+                     "cells": cells, "solo_galileo": e not in con_delta})
     return {"fondos": fs, "rows": rows, "familia": familia}

@@ -372,6 +372,7 @@ def _cargar_galileo(pd, junto_a: Optional[str]) -> Dict[str, Any]:
         desc = _s(r.get("descripcion"))
         cod_delta = None
         especie = desc
+        nombre_largo = None
         if es_especie:
             # Cascada de normalización al esquema Delta (semidefinitiva, en la
             # carga — cero costo por request): 1) ISIN → ficha del universo,
@@ -385,10 +386,13 @@ def _cargar_galileo(pd, junto_a: Optional[str]) -> Dict[str, Any]:
                 if m:
                     cod_delta = m.group(1)
                     especie = f"{m.group(1)} AR"      # "sólo BBAR AR"
+                    if "/" in desc:                   # razón social → col. Nombre
+                        nombre_largo = desc.split("/", 1)[1].strip() or None
                 else:
                     m = _DESC_TICKER_PARENS.search(desc)
                     if m:
                         cod_delta = m.group(1)
+                        nombre_largo = desc
         venc = r.get("vencimiento")
         res["holdings"].append({
             "cod_fondo": cod,
@@ -399,6 +403,7 @@ def _cargar_galileo(pd, junto_a: Optional[str]) -> Dict[str, Any]:
             "clase": _s(r.get("Clasifica_Ficha")) or instrumento,
             "es_especie": es_especie,
             "isin": isin,
+            "nombre": nombre_largo,
             # vencimiento ISO (para sugerir fichas candidatas en el reporte)
             "venc": venc.date().isoformat() if hasattr(venc, "date") and venc == venc else None,
         })

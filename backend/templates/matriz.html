@@ -58,8 +58,10 @@
     var rows = document.querySelectorAll('#matriz-table tbody tr');
     var shown = 0;
     rows.forEach(function(tr){
-      var cell = tr.querySelector('td');
-      var name = cell ? cell.textContent.trim().toLowerCase() : '';
+      var tds = tr.querySelectorAll('td');
+      // matchea contra ABREVIATURA + NOMBRE (las dos primeras columnas)
+      var name = ((tds[0] ? tds[0].textContent : '') + ' ' +
+                  (tds[1] ? tds[1].textContent : '')).trim().toLowerCase();
       var ok = !q || name.indexOf(q) !== -1;
       tr.style.display = ok ? '' : 'none';
       if (ok) shown++;
@@ -76,7 +78,8 @@
     if (!box) return;
     if (!q){ box.innerHTML = ''; return; }
     // Sólo el nombre del fondo (sin el "1234 — " del label) para el copy/paste.
-    var heads = [].slice.call(document.querySelectorAll('#matriz-table thead th')).slice(1)
+    // Las 2 primeras columnas son Especie (abreviatura) + Nombre — se saltean.
+    var heads = [].slice.call(document.querySelectorAll('#matriz-table thead th')).slice(2)
                   .map(function(th){ return th.textContent.trim().replace(/^\s*\d+\s*[—–-]\s*/, ''); });
     var blocks = [];
     document.querySelectorAll('#matriz-table tbody tr').forEach(function(tr){
@@ -84,10 +87,13 @@
       var tds = tr.querySelectorAll('td');
       if (!tds.length) return;
       var esp = tds[0].textContent.trim();
+      var nom = tds[1] ? tds[1].textContent.trim() : '';
+      if (nom && esp !== '—') esp += ' — ' + nom;
+      else if (esp === '—' && nom) esp = nom;
       var lines = [];
-      for (var i = 1; i < tds.length; i++){
+      for (var i = 2; i < tds.length; i++){
         var v = tds[i].textContent.trim();
-        if (v && v !== '·') lines.push(heads[i - 1] + '\t' + v);
+        if (v && v !== '·') lines.push(heads[i - 2] + '\t' + v);
       }
       if (lines.length) blocks.push(esp + '\n' + lines.join('\n'));
     });
