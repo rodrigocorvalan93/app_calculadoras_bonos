@@ -18,6 +18,7 @@ es público (es el instalador del add-in, no expone datos).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import threading
@@ -200,7 +201,13 @@ async def ping(request: Request) -> Dict[str, Any]:
 @router.get("/v1/snapshot")
 async def snapshot(codes: str = Query("", description="Filtro opcional: ESPECIES separadas por coma")) -> Response:
     key = ",".join(sorted({c.strip().upper() for c in codes.split(",") if c.strip()}))
-    body = _snapshot_bytes(key)
+    # Al executor: el build de un cache-miss recorre ~2k símbolos del store +
+    # fx + futuros + cauciones + MAE y hace un json.dumps de cientos de KB
+    # (~40-120 ms GIL-bound). Corriendo inline en el handler async, cada
+    # libro con `?codes=` propio (throttle POR key) congelaba el event loop
+    # — y con él /market/seq y todos los paneles live de la web — hasta
+    # varias veces por segundo. El hit del cache sigue siendo sub-ms.
+    body = await asyncio.get_running_loop().run_in_executor(None, _snapshot_bytes, key)
     return Response(content=body, media_type="application/json",
                     headers={"Cache-Control": "no-store"})
 
@@ -631,20 +638,38 @@ async def excel_calc(request: Request) -> Response:
                     media_type="application/json")
 
 
+def _es_ip_literal(host: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address((host or "").strip("[]"))
+        return True
+    except ValueError:
+        return False
+
+
 def _allowed_manifest_hosts(request: Request) -> FrozenSet[str]:
     """Hosts (host[:port]) a los que se permite apuntar el manifest: loopback,
     la IP LAN del propio server, el host de app_base_url si está configurado, y
-    el host con el que se está bajando el manifest (el server actual). Es la
-    barrera contra que un `?base=` apunte el add-in de un colega a un host
-    atacante (que capturaría el token OMS que se pega en el taskpane)."""
+    el host con el que se está bajando el manifest SÓLO si es una IP literal.
+    Es la barrera contra que un `?base=` apunte el add-in de un colega a un
+    host atacante (que capturaría el token OMS que se pega en el taskpane).
+
+    El header Host lo elige el CLIENTE: aceptar cualquier nombre de dominio
+    que llegue ahí hacía que la allowlist se validara contra sí misma — un
+    dominio del atacante resolviendo HOY a este server entraba solo, el
+    manifest quedaba clavado a ese nombre, y mañana el DNS apunta a otro lado
+    con el token viajando en la URL. Una IP literal no se puede re-apuntar,
+    así que el flujo LAN sigue andando; nombres legítimos (DNS interno /
+    Tailscale) se declaran en app_base_url, que es config del server."""
     hosts = {"localhost", "127.0.0.1", "[::1]", "::1"}
     ip = lan_ip()
     if ip:
         hosts.add(ip)
-    if request.url.netloc:
-        hosts.add(request.url.netloc.lower())
-        if request.url.hostname:
-            hosts.add(request.url.hostname.lower())
+    h = (request.url.hostname or "").lower()
+    if h and (h == "localhost" or _es_ip_literal(h)):
+        hosts.add(h)
+        if request.url.netloc:
+            hosts.add(request.url.netloc.lower())
     if settings.app_base_url:
         from urllib.parse import urlsplit
         u = urlsplit(settings.app_base_url)
@@ -676,7 +701,17 @@ def _safe_manifest_base(base: str, request: Request) -> str:
         if u.scheme in ("http", "https") and u.hostname:
             netloc = u.hostname.lower() if u.port is None else f"{u.hostname.lower()}:{u.port}"
             return f"{u.scheme}://{netloc}"
-    return f"{request.url.scheme}://{request.url.netloc}"
+    # Último recurso: el host de descarga — con la MISMA regla que la
+    # allowlist (IP literal / localhost). Un NOMBRE acá tendría el mismo
+    # agujero de re-apuntado DNS que se cierra arriba; para servir el add-in
+    # por nombre, configurá app_base_url.
+    h = (request.url.hostname or "").lower()
+    if h and (h == "localhost" or _es_ip_literal(h)):
+        return f"{request.url.scheme}://{request.url.netloc}"
+    ip = lan_ip()
+    if ip:
+        return f"{request.url.scheme}://{ip}:{request.url.port or 8000}"
+    return f"{request.url.scheme}://127.0.0.1:{request.url.port or 8000}"
 
 
 def _safe_manifest_token(token: str) -> str:

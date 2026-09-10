@@ -199,10 +199,20 @@ async def warm_curves_once(plazo: str = "24hs") -> Dict[str, int]:
             continue
         touched_curves += 1
         total += len(codes)
-        results = await asyncio.gather(
-            *(loop.run_in_executor(_pool, _warm_code, c, plazo) for c in codes)
-        )
-        warmed += sum(1 for r in results if r)
+
+        # UNA task del pool por curva, no una por bono: el fan-out de ~550
+        # futures por sweep costaba 24-30 ms DE EVENT LOOP cada 8 s (creación
+        # + call_soon_threadsafe de cada completion) — el mismo anti-patrón
+        # que _rows_for documenta como medido-y-descartado. El trabajo es
+        # GIL-bound, así que el fan-out tampoco daba paralelismo real.
+        def _warm_lista(cs=tuple(codes)) -> int:
+            n = 0
+            for c in cs:
+                if _warm_code(c, plazo):
+                    n += 1
+            return n
+
+        warmed += await loop.run_in_executor(_pool, _warm_lista)
     return {"curves": touched_curves, "codes": total, "warmed": warmed}
 
 

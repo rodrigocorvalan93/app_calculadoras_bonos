@@ -298,7 +298,12 @@ def build_curve_codes() -> Dict[str, List[str]]:
     return out
 
 
-_rev_cache: Dict[str, str] | None = None
+# (cache_key del particionado, mapa code→curva). Atado a la MISMA key que
+# _codes_cache: cuando el rollover de fecha reparticiona (bonos vencidos
+# afuera), el reverso se reconstruye también — antes se armaba una sola vez
+# por proceso y un server de varios días seguía mapeando vencidos a su curva
+# vieja en YAS/Comparador.
+_rev_cache: Tuple[Tuple[int, int], Dict[str, str]] | None = None
 
 
 def curve_key_for(code: str) -> str | None:
@@ -306,15 +311,18 @@ def curve_key_for(code: str) -> str | None:
     None si no está en ninguna (acciones, etc.). Excluye agregados. Cacheado
     junto al particionado — lookup O(1) tras el primer uso."""
     global _rev_cache
-    if _rev_cache is None:
+    bond_universe.ensure_loaded()
+    cache_key = (len(bond_universe.all_codes()), _date.today().toordinal())
+    cached = _rev_cache
+    if cached is None or cached[0] != cache_key:
         rev: Dict[str, str] = {}
         for key, codes in build_curve_codes().items():
             if key in AGGREGATES:
                 continue
             for c in codes:
                 rev.setdefault(c, key)
-        _rev_cache = rev
-    return _rev_cache.get(code)
+        _rev_cache = cached = (cache_key, rev)
+    return cached[1].get(code)
 
 
 def curve_def(key: str) -> CurveDef | None:

@@ -109,6 +109,15 @@ def _eval_node(node: ast.AST) -> Any:
     if isinstance(node, ast.BinOp) and isinstance(node.op, _ALLOWED_BINOPS):
         left, right = _eval_node(node.left), _eval_node(node.right)
         if isinstance(node.op, ast.Add):
+            # La CONCATENACIÓN también respeta el tope: `[0]*90000 + [0]*90000
+            # + …` × N términos pasaba por acá y armaba listas de GB aunque
+            # cada Mult individual quedara bajo _MAX_SEQ_LEN (mismo DoS de
+            # memoria por la otra puerta).
+            if (isinstance(left, (list, tuple, str, bytes))
+                    and isinstance(right, (list, tuple, str, bytes))
+                    and len(left) + len(right) > _MAX_SEQ_LEN):
+                raise ValueError(
+                    f"secuencia demasiado grande en la ficha (máx {_MAX_SEQ_LEN} elementos).")
             return left + right
         if isinstance(node.op, ast.Sub):
             return left - right

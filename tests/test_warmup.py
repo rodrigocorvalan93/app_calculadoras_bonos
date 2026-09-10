@@ -66,10 +66,15 @@ async def test_warm_curves_once_fills_metrics_cache() -> None:
     # ordinal BA (invalidación por rollover de fecha).
     from backend.locale_ar import hoy_ba
     sentinel = object()
+    kind = pricing._bond_index_kind(code)
     key = (code, round(price, 2), pricing.settlement_date_str("24hs") or "",
-           pricing._index_fingerprint(pricing._bond_index_kind(code)),
+           pricing._index_fingerprint(kind),
            hoy_ba().toordinal())
-    cached = pricing._curve_metrics_cache.get_or_compute(key, lambda: sentinel)
+    # Los bonos INDEXADOS (DLK/CER/UVA/floaters) van a un cache separado: su
+    # fingerprint rota con el índice y el churn evictaba las entradas
+    # calientes de las curvas estables cuando compartían store.
+    cache = pricing._curve_metrics_cache_idx if kind else pricing._curve_metrics_cache
+    cached = cache.get_or_compute(key, lambda: sentinel)
     assert cached is not sentinel
 
 

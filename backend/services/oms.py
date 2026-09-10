@@ -111,13 +111,32 @@ def _tail_lines(n: int) -> List[str]:
         return []
 
 
+# Tail parseado cacheado por (mtime_ns, size, n): el blotter pollea cada 8 s
+# POR usuario y re-leía ~77 KB + 400 json.loads del archivo (en OneDrive) aunque
+# no hubiera cambiado. Carrera de asignación benigna (se recomputa, no corrompe).
+_tail_cache: Optional[tuple] = None
+
+
 def audit_tail(n: int = 30) -> List[Dict[str, Any]]:
+    global _tail_cache
+    import os
+
+    try:
+        st = os.stat(_AUDIT_PATH)
+        sig = (st.st_mtime_ns, st.st_size, n)
+    except OSError:
+        sig = None
+    c = _tail_cache
+    if sig is not None and c is not None and c[0] == sig:
+        return c[1]
     out = []
     for ln in reversed(_tail_lines(n)):
         try:
             out.append(json.loads(ln))
         except ValueError:
             continue
+    if sig is not None:
+        _tail_cache = (sig, out)
     return out
 
 
@@ -405,11 +424,25 @@ def _merge_comitentes(cfg: List[Dict[str, str]], broker: List[Dict[str, str]]) -
 
 
 # ── Broker REST (Etapa A: lectura · Etapa C: envío con OMS_LIVE=1) ─────────
+
+# Comitentes cacheados 60 s por host del broker: el panel de Órdenes pollea
+# cada 15 s POR usuario y la lista es estática dentro de la sesión — cada poll
+# era un round-trip REST al broker (decenas-cientos de ms) sin necesidad. El
+# host en la key invalida solo con el hot-swap de /conexion.
+_accounts_cache: Optional[tuple] = None
+_ACCOUNTS_TTL = 60.0
+
+
 async def accounts() -> List[Dict[str, Any]]:
     """Comitentes para el panel: MERGE de las configuradas (secret, por broker)
     con las que el broker expone por REST, deduplicadas por número. Si el broker
     falla pero hay configuradas, se muestran igual (no rompe el panel); sin
     configuradas, el error del broker se propaga como hasta ahora."""
+    global _accounts_cache
+    host = settings.primary_base_url
+    c = _accounts_cache
+    if c is not None and c[0] == host and (time.monotonic() - c[1]) < _ACCOUNTS_TTL:
+        return c[2]
     cfg = configured_comitentes()
     broker: List[Dict[str, str]] = []
     try:
@@ -420,7 +453,9 @@ async def accounts() -> List[Dict[str, Any]]:
     except Exception:  # noqa: BLE001 — best-effort: con cfg seguimos; sin cfg, propaga
         if not cfg:
             raise
-    return _merge_comitentes(cfg, broker)
+    out = _merge_comitentes(cfg, broker)
+    _accounts_cache = (host, time.monotonic(), out)
+    return out
 
 
 async def live_orders(account: str) -> List[Dict[str, Any]]:

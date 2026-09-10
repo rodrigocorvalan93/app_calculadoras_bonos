@@ -5,6 +5,7 @@ del feed. El auth store va a un tmp por test, igual que en test_alertas.
 """
 from __future__ import annotations
 
+import re
 import json
 
 import pytest
@@ -129,7 +130,11 @@ async def test_manifest_publico_y_hist(auth_on):
     async with _client() as ac:
         r = await ac.get("/excel/manifest.xml")
         assert r.status_code == 200 and "OfficeApp" in r.text
-        assert "http://t/static/excel/taskpane.html" in r.text
+        # El Host del request ("t") es un NOMBRE, no una IP: ya no puede
+        # fijar la base del manifest (re-apuntable por DNS = robo de token);
+        # la base cae a una IP (LAN o loopback).
+        assert "http://t/" not in r.text
+        assert re.search(r"http://(\d{1,3}(?:\.\d{1,3}){3}|localhost)(:\d+)?/static/excel/taskpane\.html", r.text)
         # hist requiere token
         assert (await ac.get("/excel/v1/hist/a3500")).status_code == 401
 
@@ -188,18 +193,26 @@ def test_snapshot_json_compacto(store_con_datos):
 async def test_manifest_base_override(auth_on):
     """`?base=` fija el host del manifest (la tarjeta de /admin lo usa para el
     manifest universal con localhost — cada notebook corre su propia app). Una
-    base que no es http(s) se ignora y cae al host del request."""
+    base que no es http(s) se ignora; el fallback ya NO usa el Host del
+    request cuando es un nombre (re-apuntable por DNS) — cae a una IP."""
     async with _client() as ac:
         r = await ac.get("/excel/manifest.xml",
                          params={"base": "http://localhost:8000/"})
         assert r.status_code == 200
         assert "http://localhost:8000/static/excel/functions.js" in r.text
         assert "http://t/" not in r.text
-        # base inválida (no-http) → fallback al host del request, sin colarse
+        # base inválida (no-http) → fallback SEGURO (IP/localhost), sin colarse
         r2 = await ac.get("/excel/manifest.xml", params={"base": "javascript:alert(1)"})
         assert r2.status_code == 200
         assert "javascript:" not in r2.text
-        assert "http://t/static/excel/taskpane.html" in r2.text
+        assert "http://t/" not in r2.text
+        assert re.search(r"http://(\d{1,3}(?:\.\d{1,3}){3}|localhost)(:\d+)?/static/excel/taskpane\.html", r2.text)
+        # un base= con nombre de dominio arbitrario tampoco entra (aunque el
+        # DNS de ese nombre apunte hoy a este server): sólo IP/localhost/
+        # app_base_url
+        r3 = await ac.get("/excel/manifest.xml", params={"base": "http://evil.example:8000"})
+        assert r3.status_code == 200
+        assert "evil.example" not in r3.text
 
 
 async def test_admin_tarjeta_instalacion_excel(auth_on):

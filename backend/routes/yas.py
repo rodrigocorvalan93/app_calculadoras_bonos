@@ -48,9 +48,11 @@ async def yas_page(request: Request, code: Optional[str] = None) -> HTMLResponse
         )
 
     selected = code if code in codes else codes[0]
-    # Autofill por defecto: último precio del activo seleccionado (modo precio).
-    snap = marketdata_store.get_store().get(syms.md_symbol(selected, settings.default_plazo))
-    last = snap.last if snap else None
+    # Autofill por defecto: último precio del activo seleccionado (modo precio),
+    # convertido al basis de la ficha (una especie pesos de hard-dollar — GD30,
+    # AL30, …O — divide por el FX de pago; antes el last ARS crudo entraba a la
+    # ficha en dólares y el autofill precargaba un precio 1500×).
+    last = pricing.market_last_native(selected, settings.default_plazo)
     default_value = "" if last is None else str(last).replace(".", ",")
     return _render(
         request,

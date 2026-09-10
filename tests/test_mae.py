@@ -52,6 +52,8 @@ def test_match_by_ticker_and_leg() -> None:
          "precioUltimo": 74250.0, "variacion": 0.2, "volumenAcumulado": 3.2e6, "montoAcumulado": 2.4e11},
         {"ticker": "AL30", "segmento": "Garantizado", "moneda": "X", "plazo": "002",
          "precioUltimo": 52.1, "variacion": -0.1, "volumenAcumulado": 9.9e6},
+        {"ticker": "AL30", "segmento": "Garantizado", "moneda": "D", "plazo": "002",
+         "precioUltimo": 51.4, "variacion": -0.1, "volumenAcumulado": 1.0e6},
     ])
     try:
         # leg=USD prefiere moneda X (cable) aunque tenga otro volumen
@@ -59,10 +61,24 @@ def test_match_by_ticker_and_leg() -> None:
         assert mx and mx["moneda"] == "X" and mx["last"] == pytest.approx(52.1)
         # …C/…D se normalizan al base
         assert mae.match("AL30C", "USD")["ticker"] == "AL30"
-        # leg native → sin preferencia de moneda, gana la de mayor volumen (X)
-        assert mae.match("AL30", "native")["moneda"] == "X"
+        # leg native → manda la MONEDA DE LA FICHA (AL30 es USB/MEP → fila D),
+        # aunque otra moneda tenga MÁS volumen: antes ganaba la de mayor
+        # volumen de cualquier moneda y la ficha MEP se priceaba con el precio
+        # cable (TIR corrida por el canje) o con la fila en pesos (-100%).
+        mn = mae.match("AL30", "native")
+        assert mn is not None and mn["moneda"] == "D" and mn["last"] == pytest.approx(51.4)
         assert mae.volume_for("AL30", "USD") == pytest.approx(9.9e6)
         assert mae.match("NOEXISTE") is None
+    finally:
+        _clear()
+    # Sin fila en la moneda correcta → None HONESTO (jamás fallback cross-moneda)
+    _inject(rentafija=[
+        {"ticker": "AL30", "segmento": "Garantizado", "moneda": "$", "plazo": "002",
+         "precioUltimo": 74250.0, "volumenAcumulado": 3.2e6},
+    ])
+    try:
+        assert mae.match("AL30", "native") is None
+        assert mae.match("AL30", "USD") is None
     finally:
         _clear()
 
@@ -145,10 +161,13 @@ def test_match_por_plazo_ci_vs_24hs() -> None:
     todo a la fila de mayor volumen. Ahora `plazo` filtra el segmento (000=CI,
     001=24hs) y devuelve None si no operó; match_por_plazo agrupa para que
     OMS.QUOTE(...; "CI"; "mae") elija segmento en el add-in."""
+    # moneda D = la nativa de AL30 (USB/MEP): lo que se testea acá es el
+    # filtro por PLAZO; la moneda tiene que ser la correcta para que el match
+    # no la descarte (el fallback cross-moneda ya no existe).
     _inject(rentafija=[
-        {"ticker": "AL30", "segmento": "Garantizado", "moneda": "$", "plazo": "001",
+        {"ticker": "AL30", "segmento": "Garantizado", "moneda": "D", "plazo": "001",
          "precioUltimo": 74900.0, "volumenAcumulado": 9e6},
-        {"ticker": "AL30", "segmento": "Garantizado", "moneda": "$", "plazo": "000",
+        {"ticker": "AL30", "segmento": "Garantizado", "moneda": "D", "plazo": "000",
          "precioUltimo": 74500.0, "volumenAcumulado": 2e6},
     ])
     try:

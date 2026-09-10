@@ -55,8 +55,14 @@ async def detail(symbol: str) -> Optional[Dict[str, Any]]:
     inst = (data or {}).get("instrument") if isinstance(data, dict) else None
     result = _extract(inst) if isinstance(inst, dict) else None
     with _lock:
-        if result is not None:           # NO cachear el fallo transitorio (broker offline /
-            _cache[symbol] = result      # pre-login): antes quedaba None fijo hasta reiniciar
+        # Cachear también el NEGATIVO cuando el broker RESPONDIÓ sin
+        # `instrument` (equities/CEDEARs, ONs fuera de ROFX): ese None es
+        # permanente para la sesión y antes se re-consultaba por REST en cada
+        # miss del seq-cache del book (~1/s con md-update) — un RTT de
+        # 20-80 ms por poll. El fallo de TRANSPORTE / pre-login (data None)
+        # sigue sin cachearse: reintenta al próximo request.
+        if result is not None or isinstance(data, dict):
+            _cache[symbol] = result
     return result
 
 

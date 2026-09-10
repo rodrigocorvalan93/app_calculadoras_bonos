@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v15 · 2026-09-10 (fechas de liquidación: celdas con fecha/serial + ISO + guiones; 3er argumento inválido = error visible, nunca settle de hoy en silencio)";
+var OMS_BUILD = "v16 · 2026-09-10 (memo con TTL 5 min + key estable cruzando medianoche; serial acotado a hoy±10 años; DD/MM validado con pivote de año corto)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -491,6 +491,11 @@ var OMSCalc = (function () {
   var BATCH_MS = 80;
   var CHUNK = 40;          // límite del server por batch
   var MEMO_MAX = 800;
+  // TTL del memo: el server re-keyea su cache por el fingerprint del índice
+  // (CER/TAMAR/A3500) y este memo local NO lo ve — sin TTL, un libro abierto
+  // desde la mañana seguía mostrando el valor pre-publicación del índice todo
+  // el día (y con TZ ≠ BA, el TIREA de ayer horas después del rollover).
+  var MEMO_TTL_MS = 5 * 60 * 1000;
   var memo = {}, memoN = 0;
   var noMemo = {};         // keys "a precio de mercado": re-resolver en cada recálculo
   var pending = {};        // key → [{resolve, reject}]
@@ -513,12 +518,21 @@ var OMSCalc = (function () {
     // Sin precio explícito el server resuelve el last del MOMENTO: no se
     // memoiza (cada F9 re-pide); el dedup en vuelo del mismo tick sí corre.
     var live = (it.valor == null);
-    if (!live && Object.prototype.hasOwnProperty.call(memo, k)) { return Promise.resolve(memo[k]); }
+    if (!live && Object.prototype.hasOwnProperty.call(memo, k)) {
+      var m = memo[k];
+      if ((Date.now() - m.t) < MEMO_TTL_MS) { return Promise.resolve(m.v); }
+      delete memo[k]; memoN--;
+    }
     return new Promise(function (resolve, reject) {
       if (pending[k]) { pending[k].push({ resolve: resolve, reject: reject }); return; }
       pending[k] = [{ resolve: resolve, reject: reject }];
       if (live) { noMemo[k] = 1; }
-      queue.push(it);
+      // La key viaja JUNTO al item: keyOf() lleva el día local adentro, y
+      // recalcularla al llegar la respuesta (como antes) hacía que un batch
+      // en vuelo cruzando la medianoche no encontrara pending[k] — NINGUNA
+      // celda del chunk se resolvía (#¡OCUPADO! permanente) y el resultado,
+      // calculado con el settle de AYER, se memoizaba bajo la key de HOY.
+      queue.push({ k: k, it: it });
       if (!flushTimer) { flushTimer = setTimeout(flush, BATCH_MS); }
     });
   }
@@ -532,7 +546,7 @@ var OMSCalc = (function () {
     // hasta recargar el add-in, aunque el server ya estuviera sano.
     if (val && !err && !val.error && !noMemo[k]) {
       if (memoN >= MEMO_MAX) { memo = {}; memoN = 0; }
-      memo[k] = val; memoN++;
+      memo[k] = { v: val, t: Date.now() }; memoN++;
     }
     delete noMemo[k];
     // Rechazar SIEMPRE con CustomFunctions.Error: un reject con Error pelado
@@ -547,7 +561,8 @@ var OMSCalc = (function () {
     }
   }
 
-  function sendChunk(items) {
+  function sendChunk(entries) {
+    var items = entries.map(function (e) { return e.it; });
     OMSFeed.loadToken().then(function (t) {
       return fetch("/excel/v1/calc", {
         method: "POST",
@@ -561,11 +576,11 @@ var OMSCalc = (function () {
       return r.json();
     }).then(function (data) {
       var res = (data && data.results) || [];
-      for (var i = 0; i < items.length; i++) {
-        settle(keyOf(items[i]), res[i] || { error: "sin resultado" }, null);
+      for (var i = 0; i < entries.length; i++) {
+        settle(entries[i].k, res[i] || { error: "sin resultado" }, null);
       }
     }).catch(function (e) {
-      for (var j = 0; j < items.length; j++) { settle(keyOf(items[j]), null, e); }
+      for (var j = 0; j < entries.length; j++) { settle(entries[j].k, null, e); }
     });
   }
 
@@ -595,7 +610,13 @@ function settleFromArg(p) {
   if (!s) { return null; }
   if (/^\d+([.,]\d+)?$/.test(s)) {                 // serial de Excel (fecha[+hora])
     var n = Number(s.replace(",", "."));
-    if (isFinite(n) && n >= 20000 && n <= 80000) {  // ~1954 … ~2119
+    // Ventana hoy±10 años (antes 20000..80000 ≈ 1954-2119): un número suelto
+    // (nominales/VN mal referenciado) fuera de ese rango ya no se disfraza de
+    // fecha — cae al naError visible de calcItem. Dentro de la ventana la
+    // ambigüedad número-vs-serial es irresoluble (las series históricas del
+    // desk usan settles de años atrás a propósito).
+    var hoySerial = Math.floor(Date.now() / 86400000) + 25569;
+    if (isFinite(n) && Math.abs(n - hoySerial) <= 3650) {
       var d = new Date(Math.round((n - 25569) * 86400000));   // 25569 = 01/01/1970
       return pad2(d.getUTCDate()) + "/" + pad2(d.getUTCMonth() + 1) + "/" + d.getUTCFullYear();
     }
@@ -607,9 +628,14 @@ function settleFromArg(p) {
   }
   if (FECHA_RE.test(s)) {
     var q = s.split(/[\/\-]/);
-    var yy = +q[2];
-    if (yy < 100) { yy += 2000; }
-    return pad2(+q[0]) + "/" + pad2(+q[1]) + "/" + yy;
+    var dd = +q[0], mm = +q[1], yy = +q[2];
+    // Rango DD/MM validado: "12/25/2026" (costumbre M/D) antes viajaba como
+    // día 12 / mes 25 y volvía un ValueError crudo del server — ahora cae al
+    // naError visible con el formato esperado. Año corto con pivote:
+    // 26→2026, 95→1995 (antes 95→2095).
+    if (dd < 1 || dd > 31 || mm < 1 || mm > 12) { return null; }
+    if (yy < 100) { yy += (yy < 70 ? 2000 : 1900); }
+    return pad2(dd) + "/" + pad2(mm) + "/" + yy;
   }
   return null;
 }

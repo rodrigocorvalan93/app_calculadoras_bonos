@@ -220,12 +220,17 @@ def book(moneda: str = "PESOS", dias: int = 1) -> Dict[str, Any] | None:
         "plazo": f"{n}D", "dias": n,
         "moneda": "ARS" if m == "PESOS" else "USD",
         "tasa": last, "close": close, "var": var,
-        "open": snap.open if hoy else None,
-        "high": snap.high if hoy else None,
-        "low": snap.low if hoy else None,
-        "monto": snap.volume if hoy else None,      # EV — $ operado en el día
-        "ops": snap.trade_count if hoy else None,
-        "vwap": vwap_evnv(snap, n) if hoy else None,
+        # Stats "del día" gateadas por OPERACIÓN de hoy (last_hoy), no por
+        # cualquier tick: con la caución cotizada pero sin operar (viernes,
+        # pre-apertura), un cambio de puntas prendía `hoy` y el card mostraba
+        # el OHLC/monto/ops/VWAP de AYER como si fueran de hoy. La profundidad
+        # (levels) sí usa `hoy`: las puntas vigentes son de esta rueda.
+        "open": snap.open if last_hoy else None,
+        "high": snap.high if last_hoy else None,
+        "low": snap.low if last_hoy else None,
+        "monto": snap.volume if last_hoy else None,  # EV — $ operado en el día
+        "ops": snap.trade_count if last_hoy else None,
+        "vwap": vwap_evnv(snap, n) if last_hoy else None,
         "vencimiento": (hoy_ba() + timedelta(days=n)).isoformat(),
         "bids": levels(snap.bids), "offers": levels(snap.offers),
         "es_hoy": hoy,
@@ -240,6 +245,12 @@ def hist_row(moneda: str = "PESOS") -> Dict[str, Any] | None:
     codifica en EV/NV (ver vwap_evnv — todo dato de API, nada grabado)."""
     pick = rail_pick(moneda)
     if not pick or pick.get("es_cierre") or pick.get("tasa") is None:
+        return None
+    # La serie es "caución o/n": si el fallback del riel cayó a un plazo
+    # fuera de 1D-4D (p. ej. sólo operó la 7D), NO se guarda — mezclar
+    # tenors haría las Δ día contra día incomparables. El riel sí puede
+    # mostrar ese fallback (el label trae el plazo); la base no.
+    if pick.get("_n") not in _RAIL_PLAZOS:
         return None
     snap = marketdata_store.get_store().get(
         f"MERV - XMEV - {_moneda_tk(moneda)} - {pick['_n']}D")

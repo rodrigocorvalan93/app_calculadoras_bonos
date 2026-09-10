@@ -408,6 +408,10 @@ async def admin_auditoria_csv(request: Request, q: str = "", evento: str = "",
 
     text = await asyncio.get_running_loop().run_in_executor(None, _csv)
     from datetime import date as _date
-    return _Resp("\ufeff" + text,   # BOM: Excel es-AR detecta UTF-8 media_type="text/csv; charset=utf-8",
+    # BOM: Excel es-AR detecta UTF-8. OJO: el media_type va como argumento REAL
+    # \u2014 una edici\u00f3n anterior lo dej\u00f3 pegado dentro de este comentario y el CSV
+    # sal\u00eda SIN Content-Type (con nosniff, algunos clientes lo bajaban opaco).
+    return _Resp("\ufeff" + text,
+                 media_type="text/csv; charset=utf-8",
                  headers={"Content-Disposition":
                           f'attachment; filename="oms_audit_{_date.today():%Y%m%d}.csv"'})

@@ -61,12 +61,15 @@ class LockedTTLCache:
                     self._store[key] = (value, now + self._ttl)
                     if len(self._store) > self._maxsize:
                         self._evict_locked(now)
-                    # `_compute_locks` crecía 1 entrada por clave única computada y
-                    # sólo se limpiaba en clear() → leak lineal en procesos de larga
-                    # vida (agravado por keys con día/índice en la clave). Lo podamos
-                    # a las claves aún cacheadas cuando pasa el umbral.
-                    if len(self._compute_locks) > self._maxsize:
-                        self._prune_compute_locks_locked()
+            # `_compute_locks` crecía 1 entrada por clave única computada y sólo
+            # se limpiaba en clear() → leak lineal en procesos de larga vida.
+            # La poda va FUERA de la rama `value is not None`: un factory que
+            # devuelve None seguido (bono roto re-pedido con precio nuevo en
+            # cada poll) también deja su lock huérfano y antes sólo una clave
+            # EXITOSA disparaba la limpieza.
+            if len(self._compute_locks) > self._maxsize:
+                with self._lock:
+                    self._prune_compute_locks_locked()
             return value
 
     def _prune_compute_locks_locked(self) -> None:

@@ -1,4 +1,5 @@
 #%%
+import threading as _threading
 import warnings
 
 import indices
@@ -31,6 +32,7 @@ class _LazyInputs(dict):
     """Dict que carga indices.main() en el primer acceso, no en import time."""
     _loaded = False
     _loading = False
+    _load_lock = _threading.RLock()
 
     def _ensure_loaded(self):
         # `_loading` corta la recursión (si indices.main() accediera a inputs)
@@ -39,9 +41,23 @@ class _LazyInputs(dict):
         # quedaba vacío y marcado como cargado PARA SIEMPRE → todo el proceso
         # priceaba sin índices. Ahora sólo marca `_loaded` si la carga trajo datos,
         # y un fallo transitorio se reintenta en el próximo acceso.
-        if self._loaded or self._loading:
+        #
+        # El RLock arregla la carrera multi-thread del arranque: antes, un thread
+        # que llegaba DURANTE la carga de otro (warmup en curso + primer request
+        # de curvas) veía `_loading=True`, retornaba sin esperar y pegaba
+        # KeyError sobre el dict vacío — que el cache de errores de pricing
+        # congelaba 120 s en guiones. Ahora los otros threads ESPERAN el lock y
+        # salen con el dict poblado; la reentrada del MISMO thread (recursión
+        # vía indices.main) pasa el RLock y la corta `_loading`, como siempre.
+        if self._loaded:
             return
-        self._loading = True
+        with self._load_lock:
+            if self._loaded or self._loading:
+                return
+            self._loading = True
+            return self._load_locked()
+
+    def _load_locked(self):
         try:
             data = indices.main()
             if isinstance(data, dict) and data:
