@@ -1,0 +1,58 @@
+{# Reporte de especies de las carteras que faltan en la base + filas Galileo
+   sin normalizar. Ordenado por valor (lo que más duele primero), cap 40 filas
+   por tabla — el resto se resume en el contador. #}
+{% if not rep or (rep.n_faltantes == 0 and rep.n_sin_map == 0) %}
+  <p class="muted" style="font-size:12px">✅ Todas las especies de las carteras están en la base
+    (bonos en <code>especies.py</code>, acciones/CEDEARs en los paneles) y Galileo quedó 100% normalizado.</p>
+{% else %}
+  {% if rep.n_faltantes %}
+  <p class="muted" style="font-size:12px;margin-bottom:6px">
+    <strong>{{ rep.n_faltantes }}</strong> ticker(s) en cartera que la app no conoce
+    (bonos sin ficha en <code>especies.py</code> — cargalos con el flujo de carga de bonos — o tickers a revisar):
+  </p>
+  <div class="table-scroll" style="margin-bottom:12px">
+    <table class="cashflows curve-table mercado-table" data-sortable>
+      <thead><tr><th style="text-align:left" data-sort>Ticker</th><th style="text-align:left" data-sort>Descripción</th><th data-sort>ISIN</th><th data-sort>Familia</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
+      <tbody>
+        {% for r in rep.faltantes[:40] %}
+        <tr>
+          <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
+          <td style="text-align:left;font-size:11.5px">{{ r.especie }}</td>
+          <td style="font-size:11px;color:var(--text-muted)">{{ r.isin or "—" }}</td>
+          <td>{{ r.familias }}</td>
+          <td>{{ r.n_filas }}</td>
+          <td>{{ r.valor | ar_hum }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if rep.n_faltantes > 40 %}<p class="muted" style="font-size:11px">… y {{ rep.n_faltantes - 40 }} más (ordenado por valor).</p>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if rep.n_sin_map %}
+  <p class="muted" style="font-size:12px;margin-bottom:6px">
+    <strong>{{ rep.n_sin_map }}</strong> especie(s) de Galileo SIN normalizar a un ticker
+    (internacionales sin ficha local, o acciones sin ticker en la descripción → sumar alias por ISIN
+    en <code>positions._GALILEO_ALIAS_ISIN</code>):
+  </p>
+  <div class="table-scroll">
+    <table class="cashflows curve-table mercado-table" data-sortable>
+      <thead><tr><th style="text-align:left" data-sort>Descripción</th><th data-sort>ISIN</th><th style="text-align:left" data-sort>Clase</th><th data-sort title="Fichas del universo con el MISMO vencimiento — sugerencia para asignar el ISIN real; dos letras pueden vencer el mismo día, elegí vos">¿Ficha? (mismo vto)</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
+      <tbody>
+        {% for r in rep.sin_map[:40] %}
+        <tr>
+          <td style="text-align:left;font-size:11.5px">{{ r.especie }}</td>
+          <td style="font-size:11px;color:var(--text-muted)">{{ r.isin or "—" }}</td>
+          <td style="text-align:left;font-size:11px">{{ r.clase or "—" }}</td>
+          <td style="font-size:11px;color:var(--cyan)">{{ r.candidatos or "—" }}</td>
+          <td>{{ r.n_filas }}</td>
+          <td>{{ r.valor | ar_hum }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if rep.n_sin_map > 40 %}<p class="muted" style="font-size:11px">… y {{ rep.n_sin_map - 40 }} más (ordenado por valor).</p>{% endif %}
+  </div>
+  {% endif %}
+{% endif %}
