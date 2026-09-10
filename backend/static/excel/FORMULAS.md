@@ -208,8 +208,12 @@ resultado queda memoizado.
     =OMS.TR("GD30";78,5;0,12;"30/12/2026";1000000)   → total return puntual (spill)
 
 En todas, el argumento `plazo` acepta `"24hs"` (default), `"CI"` **o una
-fecha de liquidación custom** `"DD/MM/AAAA"` (el settle custom del YAS), y el
-último argumento opcional es un **FX custom** (el de la ficha YAS).
+fecha de liquidación custom** (el settle custom del YAS): `"DD/MM/AAAA"`,
+ISO, o directamente **una celda con fecha** — podés armar una serie
+histórica de TIRs arrastrando `=OMS.TIREA("GD30";B2;A2)` con fechas en A y
+precios en B (desde v15; antes la celda-fecha caía en silencio al settle de
+hoy). Un 3er argumento no reconocido da `#N/A` con el motivo. El último
+argumento opcional es un **FX custom** (el de la ficha YAS).
 
 **Precio omitido = last del mercado.** Dejando el precio vacío, el server
 resuelve el último precio del store en ese momento (last → cierre) y calcula

@@ -289,3 +289,10 @@ async def test_http_posiciones_fondo_galileo(carteras) -> None:
         assert r.status_code == 200 and "GALILEO AHORRO" in r.text
         t = await ac.get("/posiciones/table", params={"fondo": G + 5})
         assert t.status_code == 200
+        # tabla de posiciones con Abreviatura + Nombre completo (como matriz)
+        t8 = await ac.get("/posiciones/table", params={"fondo": G + 8})
+        assert t8.status_code == 200
+        assert ">Nombre</th>" in t8.text
+        assert "BBVA BANCO FRANCES SA" in t8.text      # razón social en col. Nombre
+        import re as _re
+        assert _re.search(r">\s*BBAR\s*<", t8.text)    # celda Especie = abreviatura

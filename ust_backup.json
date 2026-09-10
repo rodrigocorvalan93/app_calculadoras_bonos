@@ -1,0 +1,20 @@
+{
+  "nota": "Fallback SIN RED de la curva par de Treasuries (backend/services/ust.py). Snapshot APROXIMADO a inicios de enero 2026 — con red, la app baja la curva del dia de home.treasury.gov (1x/dia, thread de fondo) y este archivo no se usa. La fecha de la curva aplicada se muestra junto a los spreads.",
+  "fecha": "2026-01-02",
+  "par": [
+    [0.0833, 3.95],
+    [0.125, 3.93],
+    [0.1667, 3.92],
+    [0.25, 3.88],
+    [0.3333, 3.83],
+    [0.5, 3.75],
+    [1.0, 3.55],
+    [2.0, 3.5],
+    [3.0, 3.55],
+    [5.0, 3.68],
+    [7.0, 3.85],
+    [10.0, 4.1],
+    [20.0, 4.6],
+    [30.0, 4.7]
+  ]
+}

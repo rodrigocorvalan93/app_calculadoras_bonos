@@ -310,8 +310,15 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
         # del día (vs Last, editable) se calcula EN EL NAVEGADOR — cero requests.
         px_val = (valor / cant) if (valor and cant) else None
         px_val = _px_val_like_last(px_val, last_val)
+        # Abreviatura (ticker del desk) + nombre completo aparte — igual que la
+        # matriz: prevalece el nombre de la cartera; sin él, el de la ficha.
+        nombre = h.get("nombre") or (h.get("especie") if h.get("especie") != code else None)
+        if not nombre and code:
+            nombre = (pricing.bond_meta(code) or {}).get("nombre") or None
         rows.append({
             **h,
+            "abrev": code or "—",
+            "nombre": nombre or "",
             "in_universe": m is not None,
             "pct_pn": (valor / denom) if (valor is not None and denom) else None,
             "emisor": _emisor_for(code, obj),

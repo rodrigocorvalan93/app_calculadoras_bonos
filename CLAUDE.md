@@ -70,6 +70,21 @@ true when `moneda in ("USD","USB")` **or** the classification/industria
 says hard-dollar — a MEP (USB) or pesos-quoted hard-dollar bond keeps
 180/360, not the días/365 default.
 
+## Spreads vs UST (hard-dollar)
+
+`backend/services/ust.py` — stdlib puro (lo importa también `bymaapi.py`
+fuera del server). Curva par diaria de home.treasury.gov, bajada 1×/día en
+un thread de fondo (NUNCA en un request); sin red cae a `ust_backup.json`
+commiteado en el root (refrescarlo cada tanto, como `bcra_data_backup.json`;
+la fecha de la curva usada viaja en `ust_fecha` y se muestra en la UI).
+Bootstrap de ceros semianual; tiempos ACT/365 = el day-count de la TIR de
+rentafija. `pricing.compute_metrics` agrega `g_spread_bps` / `z_spread_bps`
+/ `ust_fecha` SOLO detrás de `_is_hard_dollar`, con los MISMOS flujos que
+usó la TIR (`cashflow_cpn` con `Fechas > settlement`, col `Total`) —
+g = TIREA − UST *efectiva* a la duration; z por bisección contra la curva
+cero desplazada. rentafija.py NO se toca para esto. Ticket interactivo:
+`bymaapi.genera_ticket_global(bono, px)`.
+
 ## FX legs and native-dollar basis (corp + sovereign USD)
 
 A hard-dollar bond is **one ficha calculated on its native dollar**, with

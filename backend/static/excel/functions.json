@@ -31,7 +31,7 @@
         {
           "name": "plazo",
           "type": "string",
-          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
           "optional": true
         },
         {
@@ -230,7 +230,7 @@
         {
           "name": "plazo",
           "type": "string",
-          "description": "24hs (default) | CI | fecha de liquidación DD/MM/AAAA",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
           "optional": true
         },
         {
@@ -262,7 +262,7 @@
         {
           "name": "plazo",
           "type": "string",
-          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
           "optional": true
         },
         {
@@ -295,7 +295,7 @@
         {
           "name": "plazo",
           "type": "string",
-          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
           "optional": true
         },
         {
@@ -335,7 +335,7 @@
         {
           "name": "plazo",
           "type": "string",
-          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
           "optional": true
         },
         {
@@ -379,7 +379,7 @@
         {
           "name": "plazo",
           "type": "string",
-          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
           "optional": true
         },
         {
@@ -419,7 +419,7 @@
         {
           "name": "fecha_salida",
           "type": "string",
-          "description": "DD/MM/AAAA (vacío = settle+90d; ≥ vencimiento = hold to maturity)",
+          "description": "DD/MM/AAAA o celda con fecha (vacío = settle+90d; ≥ vencimiento = hold to maturity)",
           "optional": true
         },
         {
@@ -431,7 +431,7 @@
         {
           "name": "plazo",
           "type": "string",
-          "description": "24hs (default) | CI | fecha DD/MM/AAAA",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
           "optional": true
         },
         {

@@ -63,6 +63,8 @@ generar_fondos.py
 !cer_completo.csv
 # Snapshot de datos BCRA usado para fallback offline
 !bcra_data_backup.json
+# Snapshot de la curva par de Treasuries (fallback offline de services/ust.py)
+!ust_backup.json
 # Mapping de tickers / precios BYMA usado por bymaapi/especies
 !bymaprices.xlsx
 # Data por segmento / clasificación interna (no sensible)
