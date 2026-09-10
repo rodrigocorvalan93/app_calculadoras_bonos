@@ -647,6 +647,95 @@ window.lsSet = function (k, v) {
   else reapply();
 })();
 
+// ── Posiciones: TIR y Duration del FONDO ponderadas por valor ──────────────
+// Igual que Ret. día: 100% en el navegador, cero requests. TIR_f = Σ w·TIR/Σ w
+// y Dur_f = Σ w·Dur/Σ w con w = valor de mercado de la fila. Las filas SIN
+// dato (especie sin ficha o sin precio) traen un casillero .pos-tir/.pos-dur
+// (TIR en %, Dur en años): lo tipeado entra al ponderado al instante y se
+// re-aplica tras cada refresh (keyed por especie, como el Last ✎). El chip
+// #pos-fondo-tirdur muestra entre paréntesis la COBERTURA por métrica:
+// % del valor total del fondo que aporta dato — sube al completar casilleros.
+(function () {
+  var manual = {}; // especie -> {tir: str, dur: str} (texto tal cual se tipeó)
+
+  function parseAr(txt) {
+    if (!txt) return null;
+    var s = String(txt).replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+    if (s === '' || s === '—') return null;
+    var v = parseFloat(s);
+    return isNaN(v) ? null : v;
+  }
+  function fmt(x, dec) { return x.toFixed(dec).replace('.', ','); }
+
+  function recalc() {
+    var tbl = document.getElementById('pos-tbl');
+    var chip = document.getElementById('pos-fondo-tirdur');
+    if (!tbl || !tbl.tBodies[0] || !chip) return;
+    var rows = tbl.tBodies[0].rows;
+    var tot = 0, wT = 0, sT = 0, wD = 0, sD = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      if (tr.classList.contains('pos-grp')) continue;
+      var v = parseFloat(tr.dataset.valor);
+      if (!isFinite(v) || v <= 0) continue;   // sin valor no hay peso (mismo criterio que Ret. día)
+      tot += v;
+      var tir = parseFloat(tr.dataset.tirea);           // decimal del server
+      if (!isFinite(tir)) {
+        var it = tr.querySelector('.pos-tir');
+        var mt = it ? parseAr(it.value) : null;         // manual: en %
+        tir = mt === null ? NaN : mt / 100;
+      }
+      if (isFinite(tir)) { wT += v; sT += v * tir; }
+      var dur = parseFloat(tr.dataset.dur);             // años del server
+      if (!isFinite(dur)) {
+        var id = tr.querySelector('.pos-dur');
+        var md = id ? parseAr(id.value) : null;         // manual: en años
+        dur = md === null ? NaN : md;
+      }
+      if (isFinite(dur)) { wD += v; sD += v * dur; }
+    }
+    var cobT = tot > 0 ? ' (' + (wT / tot * 100).toFixed(0) + '%)' : '';
+    var cobD = tot > 0 ? ' (' + (wD / tot * 100).toFixed(0) + '%)' : '';
+    chip.textContent =
+      (wT > 0 ? 'TIR ' + fmt(sT / wT * 100, 2) + '%' + cobT : 'TIR —') + ' · ' +
+      (wD > 0 ? 'Dur ' + fmt(sD / wD, 2) + cobD : 'Dur —');
+  }
+
+  function reapply() {
+    var tbl = document.getElementById('pos-tbl');
+    if (!tbl || !tbl.tBodies[0]) return;
+    var rows = tbl.tBodies[0].rows;
+    for (var i = 0; i < rows.length; i++) {
+      var esp = rows[i].dataset.esp, m = esp && manual[esp];
+      if (!m) continue;
+      var it = rows[i].querySelector('.pos-tir');
+      var id = rows[i].querySelector('.pos-dur');
+      if (it && m.tir !== undefined) it.value = m.tir;
+      if (id && m.dur !== undefined) id.value = m.dur;
+    }
+    recalc();
+  }
+
+  document.body.addEventListener('input', function (evt) {
+    var el = evt.target;
+    if (!el.classList) return;
+    var esT = el.classList.contains('pos-tir'), esD = el.classList.contains('pos-dur');
+    if (!esT && !esD) return;
+    var tr = el.closest('tr');
+    if (tr && tr.dataset.esp) {
+      var m = manual[tr.dataset.esp] = manual[tr.dataset.esp] || {};
+      if (esT) m.tir = el.value; else m.dur = el.value;
+    }
+    recalc();
+  });
+  document.body.addEventListener('htmx:afterSwap', function (evt) {
+    var t = evt.detail.target;
+    if (t && (t.id === 'pos-fondo' || (t.querySelector && t.querySelector('#pos-tbl')))) reapply();
+  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', reapply);
+  else reapply();
+})();
+
 // ── Posiciones: ramas por Categoría plegables (estilo Excel de carteras) ───
 // Click en el encabezado de grupo pliega/despliega sus filas. El estado se
 // guarda por nombre de grupo y se re-aplica tras cada swap de htmx (igual que

@@ -296,3 +296,20 @@ async def test_http_posiciones_fondo_galileo(carteras) -> None:
         assert "BBVA BANCO FRANCES SA" in t8.text      # razón social en col. Nombre
         import re as _re
         assert _re.search(r">\s*BBAR\s*<", t8.text)    # celda Especie = abreviatura
+
+
+@pytest.mark.asyncio
+async def test_http_posiciones_tir_dur_fondo_manual(carteras) -> None:
+    """TIR y Duration ponderadas del FONDO (chip client-side, como Ret. día) +
+    casilleros manuales en las filas sin cálculo (especie sin ficha o sin
+    precio), estilo Last ✎ — lo tipeado entra al ponderado en el navegador."""
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        t = await ac.get("/posiciones/table", params={"fondo": G + 8})
+    assert t.status_code == 200
+    assert 'id="pos-fondo-tirdur"' in t.text           # chip TIR/Dur del fondo
+    assert "data-tirea=" in t.text                     # dato crudo por fila (JS)
+    assert "data-dur=" in t.text
+    assert 'class="pos-tir cell-edit"' in t.text       # casillero TIR manual
+    assert 'class="pos-dur cell-edit"' in t.text       # casillero Dur manual
