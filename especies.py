@@ -20569,6 +20569,51 @@ RB67O = {
     "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/07618116-d359-4b07-bda6-f3eca5e3fef5",
     "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/53a6a055-0bbd-4bb5-8c3c-5bc0dfd0479c"
 }
+RWS1L = {
+    "Nombre Security": "ON Bajo Impacto Garantizada Rowing S.A. Serie I Vto 21 07 2027",
+    "Código": "RWS1L",
+    "ISIN": "AR0489820149",
+    "Calificación": None,
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Industrials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "21/04/2026",
+    "Vencimiento": "21/07/2027",
+    "Fecha Primer Cupón": "21/07/2026",
+    "Cupón / Spread": 3.99,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "VARIABLE",
+    "Index": "TAMAR",
+    "Días Lag índice desde inc": -7,
+    "Días Lag índice hasta inc": -7,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "21/07/2026",
+        "21/10/2026",
+        "21/01/2027",
+        "21/04/2027",
+        "21/07/2027",
+    ],
+    "Amortización": [0, 0, 33., 33., 34.],
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "Emisión bajo el Régimen de Oferta Pública con Autorización Automática por su Bajo Impacto (Sección IX, Cap. V, Tít. II Normas CNV), totalmente garantizada (100% capital + intereses) conforme art. 74 por Banco de Galicia (35,71%), Banco Supervielle (28,58%) y BBVA Argentina (35,71%). Tasa de Referencia: TAMAR Privada (plazo fijo mayorista >$1.000 M, 30-35 días, bancos privados, BCRA), promedio desde el 7mo Día Hábil anterior al inicio del período hasta el 7mo Día Hábil anterior a su último día. Piso: si la Tasa de Interés diera negativa se considera 0,00%. Único rescate previsto: por cuestiones impositivas (tax call), total y no parcial, a capital pendiente más intereses devengados; no se carga. VN emitido $14.000.000.000. Ley argentina; listado BYMA y negociación A3 Mercados.",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": ""
+}
 ZPC1O = {
     "Nombre Security": "ON Plaza Logistica S.R.L. Clase 1 Vto. 02 12 2026",
     "Código": "ZPC1O",
@@ -29319,6 +29364,7 @@ TMG28 = rentafija.Bono(TMG28)
 # CORPORATIVOS TAMAR
 T661O = rentafija.Bono(T661O)
 T671O = rentafija.Bono(T671O)
+RWS1L = rentafija.Bono(RWS1L)
 COC3O = rentafija.Bono(COC3O)
 NZC1O = rentafija.Bono(NZC1O)
 NZC4O = rentafija.Bono(NZC4O)
@@ -30010,7 +30056,7 @@ todos_los_bonos = [
     RC3CO, RVS1O, PS35O, NZC1O, RC6CO, BF47O, ICC7O,
     LNS3P, VWCDO, RB64O, TY37O, SXC3O, FTN3O, VWCGO,
     RC4CO, HBCEO, BF38O, ICC4O, AFCNO, RB67O,
-    ICC5O, BF41O, VBC3O, T671O, WNCOO,
+    ICC5O, BF41O, VBC3O, T671O, WNCOO, RWS1L,
 
     # CORPORATIVOS UVA
 
