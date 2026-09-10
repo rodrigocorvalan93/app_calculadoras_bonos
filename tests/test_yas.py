@@ -165,6 +165,30 @@ def test_tna_convention_label_per_type() -> None:
         assert m["tna_convention_label"] == "32/365 cap"
 
 
+def test_settle_tolerante_series_historicas() -> None:
+    """El caso de las series históricas en Excel: la celda con fecha llega
+    como SERIAL ('46113') y también entran ISO/guiones/año corto — todos
+    deben dar EXACTAMENTE la misma valuación que DD/MM/AAAA. Y un settle
+    viejo cruzando un cupón incluye ese cupón (verificado con AL30D: el
+    09/07/2026 es primer flujo cuando el settle es anterior)."""
+    from datetime import date as _d
+
+    canon = pricing.compute_metrics("AL30D", "precio", 57.0, settle="01/07/2026",
+                                    include_cashflows=True)
+    assert canon.get("error") is None and canon["tirea"] == canon["tirea"]
+    # el cupón del 09/07/2026 está adentro (settle anterior al cupón)
+    assert canon["cashflows"][0]["fecha_cpn"] == _d(2026, 7, 9)
+    serial = str((_d(2026, 7, 1) - _d(1899, 12, 30)).days)     # celda con fecha
+    for s in ("2026-07-01", "01-07-2026", "1/7/26", serial):
+        m = pricing.compute_metrics("AL30D", "precio", 57.0, settle=s,
+                                    include_cashflows=False)
+        assert m.get("error") is None, (s, m.get("error"))
+        assert m["tirea"] == pytest.approx(canon["tirea"]), s
+    # basura sigue siendo ERROR VISIBLE (jamás valuar a otra fecha en silencio)
+    bad = pricing.compute_metrics("AL30D", "precio", 57.0, settle="banana")
+    assert bad.get("error") and "liquidación inválida" in bad["error"]
+
+
 def test_tna_convention_override() -> None:
     """When freq/base are passed, they win over auto-detection."""
     if "TXMJ9v" not in bond_universe.all_codes():

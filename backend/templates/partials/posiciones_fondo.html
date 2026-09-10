@@ -21,6 +21,7 @@
         <thead>
           <tr>
             <th data-sort style="text-align:left">Especie</th>
+            <th data-sort style="text-align:left">Nombre</th>
             <th data-sort style="text-align:left">Emisor</th>
             <th data-sort>Vto</th>
             <th data-sort style="text-align:left">Categoría</th>
@@ -44,9 +45,9 @@
              (app.js): se ordena/filtra DENTRO de cada grupo. #}
           {% for g in grupos %}
           <tr class="pos-grp" data-grp="{{ g.cat }}" title="Click para plegar/desplegar">
-            {# colspan 5 = Especie+Emisor+Vto+Categoría+Rating: los subtotales
-               tienen que caer bajo Valor / %PN #}
-            <td colspan="5" style="text-align:left"><span class="grp-caret">▾</span>{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
+            {# colspan 6 = Especie+Nombre+Emisor+Vto+Categoría+Rating: los
+               subtotales tienen que caer bajo Valor / %PN #}
+            <td colspan="6" style="text-align:left"><span class="grp-caret">▾</span>{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
             <td></td>
             <td>{{ g.valor | ar_int }}</td>
             <td>{{ (g.pct_pn * 100) | ar_pct_pp(2) if g.pct_pn is not none else "—" }}</td>
@@ -59,8 +60,9 @@
                 data-pxval="{{ r.px_val if r.px_val is not none else '' }}"
                 data-valor="{{ r.valor if r.valor is not none else '' }}">
               <td style="text-align:left;color:var(--accent);font-weight:600">
-                {% if r.in_universe %}<a href="/yas?code={{ r.cod_delta }}" title="Abrir en YAS">{{ r.especie }}</a>{% else %}{{ r.especie }}{% endif %}
+                {% if r.in_universe %}<a href="/yas?code={{ r.cod_delta }}" title="Abrir en YAS">{{ r.abrev }}</a>{% else %}{{ r.abrev }}{% endif %}
               </td>
+              <td style="text-align:left;font-size:11px;color:var(--text-muted);max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.nombre or '' }}">{{ r.nombre or "—" }}</td>
               <td style="text-align:left;font-size:11px;color:var(--text-soft);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.emisor or '' }}">{{ r.emisor or "—" }}</td>
               {# data-sort = ordinal del date → el sort es cronológico, no "por día del mes" #}
               <td style="font-size:11px" data-sort="{{ r.vencimiento.toordinal() if r.vencimiento else '' }}">{{ r.vencimiento | ar_date }}</td>

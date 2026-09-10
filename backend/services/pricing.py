@@ -71,6 +71,11 @@ NAN_METRICS: Dict[str, float] = {
     "dias_remanentes": float("nan"),
     "valor_residual": float("nan"),
     "valor_tecnico": float("nan"),
+    # Spreads vs UST (sólo hard-dollar; NaN = no aplica / sin curva). Van acá
+    # para que TODA salida de compute_metrics tenga la key (el template testea
+    # NaN por x == x; una key ausente sería Undefined y "igual a sí misma").
+    "g_spread_bps": float("nan"),
+    "z_spread_bps": float("nan"),
 }
 
 
@@ -109,16 +114,28 @@ def refresh_floater_coupons() -> int:
 
 
 def _safe_settle(settle: Optional[str]) -> Optional[str]:
+    """Normaliza la fecha de liquidación a DD/MM/AAAA. Tolerante — doble red
+    del add-in v15: DD/MM/AAAA, ISO, guiones, año corto (26 → 2026) y el
+    SERIAL de Excel en texto ("46249": una celda con fecha real llega así
+    desde Office). None si no parsea (el caller lo hace error VISIBLE — jamás
+    valuar a otra fecha en silencio)."""
     if settle is None:
         return None
-    s = settle.strip()
+    s = str(settle).strip()
     if not s:
         return None
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
         try:
             return datetime.strptime(s, fmt).strftime("%d/%m/%Y")
         except ValueError:
             continue
+    try:                                    # serial de Excel (base 30/12/1899)
+        n = float(s.replace(",", "."))
+        if 20000 <= n <= 80000:             # ~1954 … ~2119
+            from datetime import timedelta
+            return (date(1899, 12, 30) + timedelta(days=int(n))).strftime("%d/%m/%Y")
+    except (TypeError, ValueError):
+        pass
     return None
 
 
@@ -726,6 +743,21 @@ def compute_metrics(
     idx_info = index_applied(obj)
     cashflows = _cashflows_from_obj(obj) if include_cashflows else []
 
+    # Spreads vs Treasuries — sólo bonos de flujos USD (globales / bonares /
+    # ONs hard-dollar; los CER/DLK/ARS nunca entran). Costo ~µs por bono:
+    # bisección stdlib sobre LOS MISMOS flujos que usó la TIR. La curva la
+    # mantiene ust.py (1×/día en thread de fondo, backup commiteado sin red),
+    # así que acá no hay red ni I/O — y los callers cacheados (curvas, YAS
+    # warm) ni siquiera recomputan esto.
+    g_spread = z_spread = float("nan")
+    ust_fecha = None
+    if np.isfinite(tirea) and _is_hard_dollar(obj):
+        try:
+            from backend.services import ust
+            g_spread, z_spread, ust_fecha = ust.spreads_bono(obj, tirea, duration)
+        except Exception:  # noqa: BLE001
+            logger.debug("[pricing] spreads UST fallaron para %s", code, exc_info=True)
+
     base.update(
         {
             "tirea": tirea,
@@ -752,6 +784,9 @@ def compute_metrics(
             "benchmark_pct": bench_pct,
             "index_applied": idx_info,
             "cashflows": cashflows,
+            "g_spread_bps": g_spread,
+            "z_spread_bps": z_spread,
+            "ust_fecha": ust_fecha,
         }
     )
     return base
