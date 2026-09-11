@@ -411,11 +411,13 @@ async def posiciones_page(
     # _fondo_ctx valúa cada tenencia (pricing GIL-bound, cold ~200 ms–segundos):
     # fuera del event loop para no congelar todos los tabs live durante el refresh.
     ctx = await loop.run_in_executor(None, _fondo_ctx, selected, plazo, vis)
-    return _render(
+    # El render de la página (tabla de ~300 KB adentro) también al pool: 30 ms
+    # de Jinja en el loop frenaban /market/seq de todos mientras tanto.
+    return await loop.run_in_executor(None, lambda: _render(
         request, "posiciones.html",
         fondos=fs, selected=selected, plazo=plazo, status=positions.status(),
         **ctx,
-    )
+    ))
 
 
 def _agrupar_tenencias(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

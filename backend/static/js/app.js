@@ -119,19 +119,21 @@ window.lsSet = function (k, v) {
       .catch(function () { /* dejamos el estado previo del feed */ });
   }
 
-  // En el celular, re-renderizar todos los paneles en cada tick gasta batería
-  // del TELÉFONO al pedo (el server aguanta de sobra): coalescamos los
-  // md-update a uno cada MOBILE_MIN_MS, con disparo trailing — el último tick
-  // siempre llega a pantalla, sólo se espacian los intermedios. Desktop igual.
+  // Coalescencia de md-update con disparo trailing (el último tick siempre
+  // llega a pantalla, sólo se espacian los intermedios). Celular: 2,5 s (batería
+  // del teléfono). Desktop: 600 ms — el SSE del server puede empujar hasta 4
+  // seqs por segundo y cada una disparaba un refresh+swap de TODOS los paneles
+  // (300 KB de DOM por panel grande); a ≤ 0,6 s de latencia se ven los mismos
+  // precios con un cuarto de los requests/renders.
   var IS_MOBILE = !!(window.matchMedia &&
     window.matchMedia('(max-width: 980px), (pointer: coarse)').matches);
-  var MOBILE_MIN_MS = 2500;
+  var MOBILE_MIN_MS = 2500, DESKTOP_MIN_MS = 600;
+  var MIN_MS = IS_MOBILE ? MOBILE_MIN_MS : DESKTOP_MIN_MS;
   var lastDispatch = 0, pendingDispatch = null;
   function dispatchUpdate() {
     if (!window.htmx) return;
-    if (!IS_MOBILE) { window.htmx.trigger(document.body, 'md-update'); return; }
     var now = Date.now();
-    var wait = lastDispatch + MOBILE_MIN_MS - now;
+    var wait = lastDispatch + MIN_MS - now;
     if (wait <= 0) {
       lastDispatch = now;
       window.htmx.trigger(document.body, 'md-update');

@@ -428,6 +428,23 @@ _CONV_1816_PARSE: Dict[str, Tuple[int, int, str]] = {
 }
 
 
+def _duration_desde_cashflows(obj, tirea: float) -> float:
+    """Duration de Macaulay con `obj.cashflow_cpn` YA generado (por calcula_tirea
+    o calcula_precio, con el mismo settle): la fórmula de
+    rentafija.Bono.calcula_duration, bit a bit, sin volver a generar los flujos.
+    Deja `obj.duration` como lo dejaba el método."""
+    import rentafija
+
+    cf = obj.cashflow_cpn[obj.cashflow_cpn["Fechas"] > obj.fecha_settlement]
+    totals = cf["Total"].to_numpy(dtype=np.float64)
+    t_years = rentafija._cf_yearfracs(cf["Fechas"], obj.fecha_settlement)
+    pv = totals * np.power(1.0 + float(np.real(tirea)), -t_years)
+    precio = float(np.sum(pv))
+    duration = float(np.sum(pv * t_years)) / precio
+    obj.duration = duration
+    return duration
+
+
 def tna_bajo_conv_1816(obj, tirea: float, conv: Optional[str]) -> float:
     """TNA que 1816 reportaría para `obj` bajo su convención `conv` (string de
     su API: "180-360", "plazo-rem", …), reexpresando NUESTRA TIREA. NaN si no
@@ -779,9 +796,15 @@ def compute_metrics(
             conv_1816, tna_1816 = None, float("nan")
     tem = (1 + tirea) ** (30 / 360) - 1 if np.isfinite(tirea) else float("nan")
     try:
-        duration = float(obj.calcula_duration(tirea, canonical_settle)) if np.isfinite(tirea) else float("nan")
-    except Exception:  # noqa: BLE001
-        duration = float("nan")
+        # Duration con los flujos que calcula_tirea/calcula_precio acaban de
+        # generar para este mismo settle: misma fórmula que Bono.calcula_duration
+        # sin la 3ª generación de cashflows por cálculo (−27 % del costo frío).
+        duration = _duration_desde_cashflows(obj, tirea) if np.isfinite(tirea) else float("nan")
+    except Exception:  # noqa: BLE001 — ficha rara: el camino de siempre
+        try:
+            duration = float(obj.calcula_duration(tirea, canonical_settle)) if np.isfinite(tirea) else float("nan")
+        except Exception:  # noqa: BLE001
+            duration = float("nan")
     paridad = float(getattr(obj, "paridad", np.nan))
     precio = float(getattr(obj, "precio", np.nan))
     precio_clean = float(getattr(obj, "precio_clean", np.nan))

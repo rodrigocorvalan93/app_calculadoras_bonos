@@ -46,6 +46,12 @@ def _is_missing(x: Any) -> bool:
 
 
 def _is_nan(x: Any) -> bool:
+    # Fast path: los filtros de las tablas reciben floats/ints de Python (miles
+    # por render); np.isnan cuesta ~1 µs por celda, `x != x` ~50 ns.
+    if type(x) is float:
+        return x != x
+    if type(x) is int:
+        return False
     if _is_missing(x):
         return True
     if isinstance(x, str):

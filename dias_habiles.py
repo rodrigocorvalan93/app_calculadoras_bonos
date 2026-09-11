@@ -75,8 +75,20 @@ def siguiente_dia_habil_us(fecha):
 # Función para encontrar n días hábiles
 
 def n_dias_laborales(fecha, n):
+    """n días hábiles (AR) desde `fecha` (date/datetime/Timestamp/datetime64).
+    Memoizado por (date, n): rentafija la llama una vez por cupón en cada
+    generate_cashflows (×3 por cálculo) y cada iteración armaba un
+    pd.Timestamp + BDay — era el 59 % del tiempo de una TIR CER. Función pura
+    una vez cargado el calendario, así que el cache es exacto."""
+    return _n_dias_laborales_cached(convertir_a_date(fecha), int(n))
+
+
+from functools import lru_cache as _lru_cache
+
+
+@_lru_cache(maxsize=8192)
+def _n_dias_laborales_cached(fecha, n):
     _ensure_holidays()
-    fecha = convertir_a_date(fecha)
     if n > 0:
         while n > 0:
             fecha = (pd.Timestamp(fecha) + BDay(1)).date()  # Añade un día hábil

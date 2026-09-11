@@ -452,7 +452,9 @@ async def curves_page(
     is_mix = bool(curve and curve.startswith("mix:"))
     selected_key = curve if (curve and (curve in table or is_mix)) else default_key
     rows, row_meta = await _rows_for(selected_key, plazo, only_quoting, leg) if selected_key else ([], {})
-    return _render(
+    # Render de la página en el pool (la tabla ancha va adentro): ~30 ms de
+    # Jinja en el loop frenaban /market/seq de todos los clientes.
+    return await asyncio.get_running_loop().run_in_executor(None, lambda: _render(
         request,
         "curves.html",
         all_curves=all_curves,
@@ -464,7 +466,7 @@ async def curves_page(
         plazo=plazo,
         only_quoting=only_quoting,
         leg=leg,
-    )
+    ))
 
 
 @router.get("/table", response_class=HTMLResponse)
@@ -554,7 +556,7 @@ async def mercado_page(
     )
     if _es_corp(selected_key):
         rows, row_meta = _vista_corp(rows, row_meta)      # la página arranca sin q/mas
-    return _render(
+    return await asyncio.get_running_loop().run_in_executor(None, lambda: _render(
         request,
         "mercado.html",
         all_curves=all_curves,
@@ -569,7 +571,7 @@ async def mercado_page(
         fuente=fuente,
         ym=ym,
         book_open=book,
-    )
+    ))
 
 
 @mercado_router.get("/mercado/table", response_class=HTMLResponse)
@@ -1415,6 +1417,7 @@ async def graficos_nss(request: Request, curve: str = "", plazo: str = "24hs",
 
 
 @graficos_router.get("/graficos/data")
+@seq_cached(ttl=2.0)      # lo piden N clientes en cada md-update (6-34 ms por render)
 async def graficos_data(
     request: Request,
     curve: str = "",

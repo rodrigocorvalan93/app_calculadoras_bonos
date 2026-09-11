@@ -152,7 +152,7 @@ def prime_aux_loaders() -> None:
             logger.debug("[warmup] %s prime failed: %s", label, exc)
 
 
-def _warm_code(code: str, plazo: str) -> bool:
+def _warm_code(code: str, plazo: str, settle: Optional[str] = None) -> bool:
     """Populate the metrics cache for one code at its current live price.
 
     Mirrors the cached path of `routes.curves._row_for_code` exactly so
@@ -178,7 +178,9 @@ def _warm_code(code: str, plazo: str) -> bool:
     else:
         return False
     warmed = False
-    settle = pricing.settlement_date_str(plazo)
+    # settle una vez por sweep (el caller lo pasa): recomputarlo por código
+    # eran ~11 de los 28 ms de cada barrido.
+    settle = settle if settle is not None else pricing.settlement_date_str(plazo)
     for px in prices:
         if px is None:
             continue
@@ -211,8 +213,9 @@ async def warm_curves_once(plazo: str = "24hs") -> Dict[str, int]:
         # GIL-bound, así que el fan-out tampoco daba paralelismo real.
         def _warm_lista(cs=tuple(codes)) -> int:
             n = 0
+            settle = pricing.settlement_date_str(plazo)
             for c in cs:
-                if _warm_code(c, plazo):
+                if _warm_code(c, plazo, settle):
                     n += 1
             return n
 

@@ -15,12 +15,14 @@ import asyncio
 import gc
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Response
+from markupsafe import Markup
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -307,15 +309,28 @@ async def lifespan(app: FastAPI):
     try:
         gc.collect()
         gc.freeze()
+        # Umbrales del GC: con los defaults (700, 10, 10) una tabla ancha (miles
+        # de dicts por request) disparaba ~6 colecciones gen-0 por request y una
+        # gen-2 cada tanto que re-escaneaba el cache de métricas/snapshots
+        # (alocados DESPUÉS del freeze) → p99 de 120-200 ms en los misses.
+        # Medido en curves/table corp_hdmep: p99 130 → 31 ms, max 136 → 32.
+        # La basura cíclica que no se libera por refcount se junta en el
+        # gc.collect() periódico del saver de abajo (cada 5 min, en el pool).
+        gc.set_threshold(50_000, 20, 100)
     except Exception:  # noqa: BLE001
         logger.exception("[main] gc.freeze failed")
 
     # Saver periódico del snapshot (crash-safe): cada 5 min vuelca el store a
-    # disco en el threadpool (JSON ~1 MB, fuera del event loop).
+    # disco en el threadpool (JSON ~1 MB, fuera del event loop). De paso, la
+    # colección completa del GC (válvula de los umbrales altos de arriba).
     async def _snapshot_saver() -> None:
         loop = asyncio.get_running_loop()
         while True:
             await asyncio.sleep(store_persist.SAVE_EVERY_SECONDS)
+            try:
+                await loop.run_in_executor(None, gc.collect)
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 await loop.run_in_executor(None, store_persist.save)
             except Exception:  # noqa: BLE001
@@ -493,6 +508,15 @@ def create_app() -> FastAPI:
                        _mtime("js", "app.js"),
                        _mtime("js", "charts.js"))) or 1
     templates.env.globals["asset_v"] = _asset_v
+    # Filtro `compact`: saca la indentación entre tags de las tablas live
+    # ({% filter compact %} alrededor del loop de filas). Un 22-24 % de los
+    # bytes de Mercado/Curvas era whitespace de indentación = ~5.500 nodos de
+    # texto que el browser construía en CADA swap por tick. Dentro de un tag
+    # (atributos en varias líneas) el salto de línea pasa a UN espacio.
+    _re_tag_nl = re.compile(r">\s*\n\s*<")
+    _re_nl = re.compile(r"\s*\n\s*")
+    templates.env.filters["compact"] = lambda s: Markup(
+        _re_nl.sub(" ", _re_tag_nl.sub("><", str(s))))
     # Horarios de mercado para los relojes de la topbar (configurables por env).
     templates.env.globals["mkt_horarios"] = {"arg": settings.mkt_horario_arg,
                                              "ny": settings.mkt_horario_ny}

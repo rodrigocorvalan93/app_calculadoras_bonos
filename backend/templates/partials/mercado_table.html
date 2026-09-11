@@ -69,6 +69,9 @@
         </tr>
       </thead>
       <tbody>
+        {# `compact` (filtro de main.py) saca la indentación entre celdas: era
+           el 24 % de los bytes y ~5.500 nodos de texto por swap en cada tick. #}
+        {% filter compact %}
         {% for r in rows %}
           {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
           <tr style="cursor:pointer"
@@ -104,6 +107,7 @@
             <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_date | ar_ts }}</td>
           </tr>
         {% endfor %}
+        {% endfilter %}
       </tbody>
     </table>
     </div>
