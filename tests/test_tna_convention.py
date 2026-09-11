@@ -71,3 +71,42 @@ def test_cer_y_uva_reexpresan_tna_180_360() -> None:
     assert _conv(moneda="ARS", ajuste_sobre_capital="CER PROYECTADO") == ("180/360", 180, 360, "linear")
     assert _conv(moneda="ARS", ajuste_sobre_capital="UVA") == ("180/360", 180, 360, "linear")
     assert _conv(moneda="ARS", ajuste_sobre_capital="UVA PROYECTADO") == ("180/360", 180, 360, "linear")
+
+
+# ── Referencia 1816: reexpresión TNA bajo SU convención (no cambia el cálculo) ──
+
+def test_tna_bajo_conv_1816_reexpresa_por_convencion() -> None:
+    tirea = 0.15
+    # lineal freq/base
+    assert pricing.tna_bajo_conv_1816(_Stub(), tirea, "180-360") == \
+        ((1 + tirea) ** (180 / 360) - 1) * (360 / 180)
+    assert pricing.tna_bajo_conv_1816(_Stub(), tirea, "90-360") == \
+        ((1 + tirea) ** (90 / 360) - 1) * (360 / 90)
+    # 32-365 capitaliza cada 32 días (TAMAR/duales), no lineal
+    assert pricing.tna_bajo_conv_1816(_Stub(), tirea, "32-365") == \
+        ((1 + tirea) ** (32 / 365) - 1) * (365 / 32)
+    # plazo-rem usa días remanentes del bono
+    assert pricing.tna_bajo_conv_1816(_Stub(dias_remanentes=200), tirea, "plazo-rem") == \
+        ((1 + tirea) ** (200 / 365) - 1) * (365 / 200)
+
+
+def test_tna_bajo_conv_1816_bordes_nan() -> None:
+    import math
+    assert math.isnan(pricing.tna_bajo_conv_1816(_Stub(), 0.15, None))
+    assert math.isnan(pricing.tna_bajo_conv_1816(_Stub(), float("nan"), "180-360"))
+    assert math.isnan(pricing.tna_bajo_conv_1816(_Stub(), 0.15, "raro-999"))
+    # plazo-rem sin días remanentes → NaN (no inventa)
+    assert math.isnan(pricing.tna_bajo_conv_1816(_Stub(dias_remanentes=0), 0.15, "plazo-rem"))
+
+
+def test_conv_1816_por_curva() -> None:
+    from backend.services import bond_universe, curves
+    bond_universe.ensure_loaded()
+    # Diferencias reales vs nuestra tabla (donde 1816 diverge): TAMAR sob 32-365,
+    # DLK sob 180-360, corp inflación 90-360; y coincidencias: CER sob 180-360.
+    assert curves.CONV_1816["tamar"] == "32-365"
+    assert curves.CONV_1816["dolarlinked"] == "180-360"
+    assert curves.CONV_1816["corp_uva"] == "90-360"
+    assert curves.CONV_1816["cer"] == "180-360"
+    # Un ticker que no cae en ninguna curva → None (sin referencia inventada)
+    assert curves.conv_1816_for("NOEXISTE_XYZ") is None

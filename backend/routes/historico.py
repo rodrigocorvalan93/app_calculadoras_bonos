@@ -28,6 +28,18 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
 
 
+@router.get("/cierre/chip", response_class=HTMLResponse)
+async def cierre_chip(request: Request) -> HTMLResponse:
+    """Chip de la topbar (todas las pestañas, 1 req/min): ¿la base histórica
+    tiene el cierre de hoy? + banner oob para el superuser si falta. El estado
+    es stat + listdir (~µs; la lectura del parquet se cachea por mtime) — va al
+    executor igual, por el día en que el parquet cambió (decenas de ms)."""
+    from backend.services import historico_writer
+
+    e = await asyncio.get_running_loop().run_in_executor(None, historico_writer.estado_cierre)
+    return _render(request, "partials/cierre_chip.html", e=e)
+
+
 @router.post("/historicos/guardar-base", response_class=HTMLResponse)
 async def historicos_guardar_base(request: Request) -> HTMLResponse:
     """Guardado manual de la base px/tasas de HOY (Excel + Parquet), con la

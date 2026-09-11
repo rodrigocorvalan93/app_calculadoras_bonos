@@ -1112,14 +1112,23 @@ window.lsSet = function (k, v) {
     });
   }
 
-  function tsvOf(table) {
+  // Todas las <table> del contenedor, en orden: la Matriz parte cabecera y
+  // filas en varias tablas (trozos con content-visibility) — se copian como
+  // una sola. Filas ocultas por un filtro (display:none) no van; en un trozo
+  // no renderizado innerText puede venir vacío → cae a textContent.
+  function tsvOf(tables) {
     var out = [];
-    table.querySelectorAll('tr').forEach(function (tr) {
-      var row = [];
-      tr.querySelectorAll('th,td').forEach(function (c) {
-        row.push((c.innerText || '').replace(/\s+/g, ' ').trim());
+    tables.forEach(function (table) {
+      table.querySelectorAll('tr').forEach(function (tr) {
+        if (tr.style && tr.style.display === 'none') return;
+        var row = [];
+        tr.querySelectorAll('th,td').forEach(function (c) {
+          var t = c.innerText;
+          if (!t) t = c.textContent || '';
+          row.push(t.replace(/\s+/g, ' ').trim());
+        });
+        if (row.length) out.push(row.join('\t'));
       });
-      if (row.length) out.push(row.join('\t'));
     });
     return out.join('\n');
   }
@@ -1134,9 +1143,9 @@ window.lsSet = function (k, v) {
     var b = evt.target.closest && evt.target.closest('.tbl-copy');
     if (!b) return;
     var ts = b.nextElementSibling;
-    var table = ts && ts.querySelector && ts.querySelector('table');
-    if (!table) return;
-    var txt = tsvOf(table);
+    var tables = ts && ts.querySelectorAll ? ts.querySelectorAll('table') : [];
+    if (!tables.length) return;
+    var txt = tsvOf(tables);
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(txt).then(function () { feedback(b); }, function () { fallback(txt, b); });
     } else {

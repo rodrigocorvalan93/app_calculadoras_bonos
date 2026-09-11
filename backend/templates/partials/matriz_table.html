@@ -1,42 +1,42 @@
 {% if not rows %}
   <div class="alert">No hay posiciones para armar la matriz.</div>
 {% else %}
+{# Markup COMPACTO a propósito: ~340 filas × ~50 fondos = ~17k celdas y el
+   costo está en el BROWSER (style + layout ≈ 15 µs por celda), no en el
+   server (sirve estos bytes desde cache). Por eso:
+   - cero whitespace entre celdas, celda vacía = <td></td> (el "·" lo pone el
+     CSS), estilos en clases, anchos por <col> + table-layout: fixed (el
+     browser no re-mide todas las celdas en cada layout);
+   - las filas van en TROZOS de {{ CHUNK }} filas: cada uno un <div> con
+     `content-visibility: auto` (el browser sólo resuelve estilo/layout de
+     los trozos a la vista, ~3 de 17) que envuelve una <table> con el mismo
+     <colgroup> (quedan alineadas). El containment NO aplica a tablas ni a
+     <tr>/<tbody> — por eso el div, con ancho explícito (--w-total: un div
+     contenido no puede medir su contenido) y alto estimado por fila;
+   - cabecera en su propia <table> sticky arriba + Especie/Nombre sticky a
+     la izquierda: el panel scrollea como una planilla con paneles fijos.
+   Medido (Chromium headless, cartera 340 × 50): HTML 1,4 MB → 0,27 MB,
+   carga 1,4 s → ~0,2 s. Mantener así al tocarlo. #}
+{% set CHUNK = 20 %}
+{% set colgroup %}<colgroup><col style="width:{{ w_esp }}px"><col style="width:{{ w_nom }}px">{% for w in w_cols %}<col style="width:{{ w }}px">{% endfor %}</colgroup>{% endset %}
 <div class="card">
   <div class="card-title">
     <span>Matriz de tenencias</span>
     <span class="card-title-aux">{{ rows | length }} especies × {{ fondos | length }} fondos · {{ "VN" if view == "vn" else "% sobre PN" }}</span>
   </div>
   <div class="card-body" style="padding:0">
-    <div class="table-scroll">
-    <table class="cashflows curve-table mercado-table">
-      <thead>
-        <tr>
-          <th style="text-align:left">Especie</th>
-          <th style="text-align:left">Nombre</th>
-          {% for f in fondos %}<th>{{ f.nombre }}</th>{% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-          <tr>
-            {# Abreviatura (el ticker del desk) + nombre completo aparte; los
-               sin ticker muestran "—" y su descripción como nombre. ⊚G marca
-               especie presente SÓLO en fondos Galileo. #}
-            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.abrev }}{% if r.solo_galileo and familia == "todos" %} <small class="muted" title="sólo en fondos Galileo">⊚G</small>{% endif %}</td>
-            <td style="text-align:left;font-size:11px;color:var(--text-muted)"
-                {% if r.nombre | length > 40 %}title="{{ r.nombre }}"{% endif %}>
-              <span style="display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom">{{ r.nombre }}</span>
-            </td>
-            {% for c in r.cells %}
-              <td>
-                {% if view == "pct" %}{{ (c.pct * 100) | ar_pct_pp(1) if c.pct is not none else "·" }}
-                {% else %}{{ c.vn | ar_int if c.vn else "·" }}{% endif %}
-              </td>
-            {% endfor %}
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-scroll matriz-pane" style="--w-esp:{{ w_esp }}px;--w-total:{{ w_total }}px">
+    <table class="cashflows curve-table mercado-table matriz matriz-head">{{ colgroup }}<thead><tr><th class="m-esp">Especie</th><th class="m-nom">Nombre</th>{% for f in fondos %}<th>{{ f.nombre }}</th>{% endfor %}</tr></thead></table>
+    {#- Abreviatura (el ticker del desk) + nombre completo aparte; los sin
+        ticker muestran "—" y su descripción como nombre. ⊚G marca especie
+        presente SÓLO en fondos Galileo. -#}
+    {%- for chunk in rows | batch(CHUNK) %}
+<div class="matriz-chunk" style="contain-intrinsic-size:auto {{ chunk | length * 35 }}px"><table class="cashflows curve-table mercado-table matriz">{{ colgroup }}<tbody>
+{%- for r in chunk %}
+<tr><td class="m-esp">{{ r.abrev }}{% if r.solo_galileo and familia == "todos" %} <small class="muted" title="sólo en fondos Galileo">⊚G</small>{% endif %}</td><td class="m-nom"{% if r.nombre | length > 40 %} title="{{ r.nombre }}"{% endif %}>{{ r.nombre }}</td>{% for t in r.txt %}<td>{{ t }}</td>{% endfor %}</tr>
+{%- endfor %}
+</tbody></table></div>
+    {%- endfor %}
     </div>
   </div>
 </div>

@@ -67,7 +67,7 @@ class _QuietPolls(logging.Filter):
     y los partials live. Costo-0: menos I/O de log y consola legible; los
     endpoints 'reales' se siguen logueando igual."""
     _NOISY = ("/market/seq", "/tape", "/dolares/rail", "/news/marquee",
-              "/excel/v1/seq", "/excel/v1/snapshot", "/excel/v1/beacon")
+              "/excel/v1/seq", "/excel/v1/snapshot", "/excel/v1/beacon", "/cierre/chip")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()

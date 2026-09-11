@@ -254,6 +254,35 @@ async def test_http_matriz_familia(carteras) -> None:
 
 
 @pytest.mark.asyncio
+async def test_http_matriz_markup_compacto(carteras) -> None:
+    """La velocidad de la matriz vive en el markup (el server la sirve de
+    cache): celdas sin whitespace, vacías como <td></td>, filas en trozos con
+    content-visibility, anchos por <col> y la página la embebe en un
+    <template> (un solo layout). Regresión = la matriz vuelve a tardar 1 s."""
+    from backend.main import app
+    from backend.routes.posiciones import _matriz_ctx
+
+    ctx = _matriz_ctx(None, "todos", "pct")
+    assert len(ctx["w_cols"]) == len(ctx["fondos"]) and ctx["w_total"] >= sum(ctx["w_cols"])
+    for r in ctx["rows"]:
+        assert len(r["txt"]) == len(ctx["fondos"])
+        assert all(t == "" or t.endswith("%") for t in r["txt"])     # vista % ya formateada
+    vn = _matriz_ctx(None, "todos", "vn")
+    al30 = next(r for r in vn["rows"] if r["especie"] == "AL30")
+    assert "1.000.000" in al30["txt"] and "" in al30["txt"]          # es-AR + celda vacía
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/matriz/table", params={"view": "vn"})
+        assert r.status_code == 200
+        assert 'class="matriz-chunk"' in r.text and "content-visibility" not in r.text  # CSS, no inline
+        assert "<colgroup>" in r.text and "--w-total:" in r.text
+        assert "<td></td>" in r.text and "<td>\n" not in r.text and "\n<td" not in r.text
+        assert 'matriz matriz-head"' in r.text and r.text.count("<colgroup>") >= 2
+        page = await ac.get("/matriz")
+        assert '<template id="matriz-tpl">' in page.text and "matriz-chunk" in page.text
+
+
+@pytest.mark.asyncio
 async def test_http_admin_reporte_especies(carteras, tmp_path, monkeypatch) -> None:
     """El reporte vive en el panel de control: 403 sin sesión de superuser,
     200 con login (bootstrap) y muestra el ticker faltante."""

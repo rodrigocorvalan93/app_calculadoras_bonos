@@ -685,7 +685,7 @@ def _matriz_table_bytes(request: Request, visibles: Optional[frozenset],
         return body
     bond_universe.ensure_loaded()
     resp = _render(request, "partials/matriz_table.html", view=view,
-                   **_matriz_ctx(visibles, familia))
+                   **_matriz_ctx(visibles, familia, view))
     body = bytes(resp.body)
     if _MATRIZ_CACHE and next(iter(_MATRIZ_CACHE))[0] != gen:
         _MATRIZ_CACHE.clear()               # carteras releídas → render viejo afuera
@@ -713,13 +713,20 @@ async def matriz_table(request: Request, view: str = "vn", familia: str = "todos
     return HTMLResponse(body)
 
 
-def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos") -> Dict[str, Any]:
+def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos",
+                view: str = "vn") -> Dict[str, Any]:
     """Matriz especies × fondos. SÓLO especies de mercado: los cheques
     garantizados / cash / plazos fijos / FCI de Galileo no son filas — metían
     ~1.100 filas únicas × todos los fondos ≈ 3 MB de HTML por render (la
     lentitud reportada). `familia` filtra columnas Y filas (todos | delta |
     galileo). El orden prioriza el esquema Delta: primero las especies con
-    presencia en fondos Delta (por valor), después las sólo-Galileo."""
+    presencia en fondos Delta (por valor), después las sólo-Galileo.
+
+    Además de `cells` (crudo), cada fila trae `txt` — el texto ya formateado
+    de la vista pedida ("" = sin tenencia) — y el contexto trae los anchos de
+    columna (`w_esp`, `w_nom`, `w_cols`, px) calculados del contenido: el
+    template usa `table-layout: fixed` con esos anchos para que el browser no
+    tenga que medir las ~17k celdas en cada layout (ver matriz_table.html)."""
     c = positions.ensure_loaded()
     fs = positions.fondos(visibles)
     if familia == "delta":
@@ -773,4 +780,36 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos") ->
             abrev, nombre = "—", e
         rows.append({"especie": e, "abrev": abrev, "nombre": nombre,
                      "cells": cells, "solo_galileo": e not in con_delta})
-    return {"fondos": fs, "rows": rows, "familia": familia}
+
+    # Texto por celda + ancho por columna (px) a partir del texto más largo.
+    # ~7,6 px/carácter a 12,5 px sobrestima un 10-20 % los dígitos tabulares
+    # de las sans del sistema (SF/Segoe/Roboto ≈ 7 px) → nunca se pisa una
+    # cifra; + 28 px de padding. Nombre: 11 px con ellipsis, tope 288 px (el
+    # antiguo span de 260 px + padding).
+    from backend.locale_ar import fmt_int, fmt_pct_pp
+    if view == "pct":
+        def fmt(c: Dict[str, Any]) -> str:
+            return fmt_pct_pp(c["pct"] * 100, 1) if c["pct"] is not None else ""
+    else:
+        def fmt(c: Dict[str, Any]) -> str:
+            return fmt_int(c["vn"]) if c["vn"] else ""
+    maxlen = [0] * len(fs)
+    n_esp = n_nom = 0
+    for r in rows:
+        txt = [fmt(c) for c in r["cells"]]
+        r["txt"] = txt
+        for i, t in enumerate(txt):
+            if len(t) > maxlen[i]:
+                maxlen[i] = len(t)
+        n_esp = max(n_esp, len(r["abrev"]) + (3 if r["solo_galileo"] else 0))
+        n_nom = max(n_nom, len(r["nombre"]))
+    w_esp = max(80, 28 + int(7.6 * n_esp))
+    w_nom = max(80, min(288, 28 + int(6.6 * n_nom)))
+    # El título del fondo envuelve por palabras (11,5 px ≈ 6,6 px/carácter):
+    # la columna tiene que entrar la palabra más larga para no partirla.
+    w_cols = [max(72, 28 + int(7.6 * n),
+                  28 + int(6.6 * max((len(w) for w in str(f["nombre"]).split()), default=0)))
+              for n, f in zip(maxlen, fs)]
+    return {"fondos": fs, "rows": rows, "familia": familia,
+            "w_esp": w_esp, "w_nom": w_nom, "w_cols": w_cols,
+            "w_total": w_esp + w_nom + sum(w_cols)}

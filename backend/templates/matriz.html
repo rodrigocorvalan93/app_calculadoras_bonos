@@ -42,8 +42,20 @@
   </div>
 
   {# La tabla llega pre-renderizada desde el cache compartido con /matriz/table
-     (bytes por (generación, familia, vista, visibles)) — no re-renderizar acá. #}
-  <div id="matriz-table">{{ table_html | safe }}</div>
+     (bytes por (generación, familia, vista, visibles)) — no re-renderizar acá.
+     Viaja dentro de un <template> (inerte): si va inline, el parser la va
+     lay-outeando de a pedazos a medida que baja el HTML y cada pasada re-mide
+     las ~17k celdas (≈ 1 s en Chromium). Movida al DOM de una sola vez cuesta
+     UN layout. #}
+  <div id="matriz-table"></div>
+  <template id="matriz-tpl">{{ table_html | safe }}</template>
+  <script>
+    (function(){
+      var t = document.getElementById('matriz-tpl');
+      document.getElementById('matriz-table').appendChild(t.content);
+      t.remove();
+    })();
+  </script>
 
   {# Detalle vertical de la especie buscada (fondo → tenencia), copiable a Excel #}
   <div id="matriz-detail" style="margin-top:14px"></div>
@@ -57,6 +69,11 @@
     var q = (box ? box.value : '').trim().toLowerCase();
     var rows = document.querySelectorAll('#matriz-table tbody tr');
     var shown = 0;
+    // Las filas viven en trozos (<div class="matriz-chunk"> de ~20 filas con
+    // content-visibility: auto). Un trozo sin filas visibles se oculta entero:
+    // si no, el browser le reserva su alto estimado (contain-intrinsic-size) y
+    // el filtro dejaría huecos en blanco.
+    var chunks = new Map();
     rows.forEach(function(tr){
       var tds = tr.querySelectorAll('td');
       // matchea contra ABREVIATURA + NOMBRE (las dos primeras columnas)
@@ -65,7 +82,10 @@
       var ok = !q || name.indexOf(q) !== -1;
       tr.style.display = ok ? '' : 'none';
       if (ok) shown++;
+      var ch = tr.closest ? tr.closest('.matriz-chunk') : null;
+      if (ch) chunks.set(ch, (chunks.get(ch) || 0) + (ok ? 1 : 0));
     });
+    chunks.forEach(function(n, ch){ ch.style.display = n ? '' : 'none'; });
     var c = document.getElementById('matriz-count');
     if (c) c.textContent = q ? (shown + ' coincidencia' + (shown === 1 ? '' : 's')) : '';
     buildMatrizDetail(q);

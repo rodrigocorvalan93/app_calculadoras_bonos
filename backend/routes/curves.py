@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from backend.config import settings
 from backend.locale_ar import fmt_pct, hoy_ba, parse_ar_num
 from backend.cache_seq import seq_cached
-from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
+from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_svc, historico_byma, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
 # hits keep the work small, but the first poll after a price tick still
@@ -225,6 +225,23 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         if ty_last is not None and ty_close is not None and ty_last == ty_last and ty_close == ty_close:
             delta_yield_bps = (ty_last - ty_close) * 10000.0
 
+    # %5D: precio de referencia vs cierre de hace 5 ruedas. El feed no lo trae;
+    # sale de la base diaria propia (historico_byma.ref_5d: mapa 1×/día, acá
+    # un lookup ~ns). Mismo ticker → misma base de precio que `last`; si la
+    # base sólo tiene la ficha nativa (…C/…D) compara en esa base (px_calc).
+    ret_5d = ret_5d_fecha = None
+    if ref_px is not None:
+        r5 = historico_byma.ref_5d()
+        ref5, px5 = r5.get(code), ref_px
+        if ref5 is None and calc != code:
+            ref5, px5 = r5.get(calc), cp(ref_px)
+        if ref5 and px5:
+            try:
+                ret_5d = (px5 / ref5[0] - 1.0) * 100.0
+                ret_5d_fecha = ref5[1]
+            except (TypeError, ZeroDivisionError):
+                ret_5d = ret_5d_fecha = None
+
     # Color por punta (vs cierre) + fondo de la celda de variación (heatmap
     # cuya intensidad escala con |var%|, tope ±2%).
     last_cls = _px_cls(last, close)
@@ -273,6 +290,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             "bid_size": bid_size, "offer_size": offer_size, "last_size": last_size,
             "volume": volume, "nominal": nominal, "vwap": vwap,
             "var_pct": var_pct, "var_px": var_px, "var_bg": var_bg,
+            "ret_5d": ret_5d, "ret_5d_fecha": ret_5d_fecha,
             "last_cls": last_cls, "bid_cls": bid_cls, "offer_cls": offer_cls,
             "last_ts": last_ts, "close_ts": close_ts,
             "price_source": price_source, "price_date": price_date,
@@ -316,6 +334,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
                 mvar = mq.get("var_pct")
             row.update({
                 "last": mlast, "close": mclose, "var_pct": mvar, "var_px": None, "var_bg": "",
+                "ret_5d": None, "ret_5d_fecha": None,      # la base 5D es BYMA: no mezclar plazas
                 "low": mq.get("min"), "high": mq.get("max"),
                 "bid": None, "offer": None, "bid_size": None, "offer_size": None,
                 "nominal": mq.get("volumen"), "volume": mq.get("monto"), "vwap": None,
@@ -479,6 +498,37 @@ async def curve_table_partial(
 # para calcular las TIREA de bid/last/offer.
 mercado_router = APIRouter(tags=["mercado"])
 
+# Curvas corporativas en Mercado: como el panel CEDEARs. Por defecto sólo las
+# CORP_TOP ONs con más VN operado hoy; el resto entra por búsqueda (`q`, en
+# TODA la curva por ticker o nombre) o "ver todas" (`mas`). El costo por tick
+# es proporcional a las filas (server ~0,2 ms/fila, browser ~3 ms/fila):
+# corp_hdmep pasa de 166 filas / 285 KB / p95 152 ms a 30 filas.
+CORP_TOP = 30
+
+
+def _es_corp(curve_key: str | None) -> bool:
+    return bool(curve_key) and str(curve_key).startswith("corp_")
+
+
+def _vista_corp(rows: list[dict], meta: dict, q: str = "", mas: int = 0) -> tuple[list[dict], dict]:
+    """Recorta las filas de una curva corporativa a las CORP_TOP más operadas
+    (VN, después efectivo, después las que tienen punta). Las visibles conservan
+    el orden por duration de _rows_for. `q` busca en toda la curva y no recorta."""
+    meta = dict(meta, top_n=CORP_TOP, ocultas=0, buscado=False)
+    qq = (q or "").strip().upper()
+    if qq:
+        meta["buscado"] = True
+        return [r for r in rows
+                if qq in str(r.get("code") or "").upper() or qq in str(r.get("nombre") or "").upper()], meta
+    if mas or len(rows) <= CORP_TOP:
+        return rows, meta
+    top = sorted(rows, key=lambda r: (-(r.get("nominal") or 0.0), -(r.get("volume") or 0.0),
+                                      0 if _has_quote(r) else 1, str(r.get("code") or "")))[:CORP_TOP]
+    keep = {id(r) for r in top}
+    vis = [r for r in rows if id(r) in keep]
+    meta["ocultas"] = len(rows) - len(vis)
+    return vis, meta
+
 
 @mercado_router.get("/mercado", response_class=HTMLResponse)
 async def mercado_page(
@@ -501,6 +551,8 @@ async def mercado_page(
         await _rows_for(selected_key, plazo, only_quoting, leg, book=True, fuente=fuente)
         if selected_key else ([], {})
     )
+    if _es_corp(selected_key):
+        rows, row_meta = _vista_corp(rows, row_meta)      # la página arranca sin q/mas
     return _render(
         request,
         "mercado.html",
@@ -570,6 +622,8 @@ async def mercado_table_partial(
         return _render(request, "partials/equities_table.html",
                        rows=eq_rows, panel=panel, plazo=plazo, **ctx)
     rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
+    if _es_corp(curve):
+        rows, row_meta = _vista_corp(rows, row_meta, q, mas)
     # 7-12 ms de Jinja @120-200 filas × 25 filtros/fila: al pool, como equities.
     return await asyncio.get_running_loop().run_in_executor(
         None, lambda: _render(

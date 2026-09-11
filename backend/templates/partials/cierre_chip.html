@@ -1,0 +1,17 @@
+{# Chip "cierre" de la topbar + banner (oob) — historico_writer.estado_cierre.
+   Sin carpeta de bases (sin_base) el chip queda vacío (CSS lo oculta). #}
+{%- if e.estado != "sin_base" -%}
+<a class="cierre-chip" data-state="{{ e.estado }}" href="/historicos" title="{{ e.detalle }}">{{ e.texto }}</a>
+{%- endif -%}
+<div id="cierre-banner" hx-swap-oob="true">
+{%- if e.estado == "falta" and request.state.is_superuser %}
+  <div class="alert alert-error cierre-banner">
+    <span>⚠ <strong>La base histórica no tiene el cierre del {{ e.esperado_fmt }}</strong>{% if e.atraso and e.atraso > 1 %} (atraso {{ e.atraso }} ruedas){% endif %}.
+      {% if e.error %}Último intento: {{ e.error }}.{% else %}¿La app estaba cerrada a las {{ e.hhmm }}?{% endif %}
+      {% if e.esperado == e.hoy %}Si el feed sigue con los precios de hoy, guardala ahora:{% else %}Ese día ya no se reconstruye desde el feed — si otra máquina lo capturó, se consolida solo al abrir la app ahí. Para que no vuelva a pasar: captura programada (<code>python -m backend.tools.cierre</code>).{% endif %}
+    </span>
+    {% if e.esperado == e.hoy %}<button type="button" class="btn-primary" style="font-size:11px" hx-post="/historicos/guardar-base" hx-target="#cierre-banner-msg" hx-swap="innerHTML">Guardar ahora</button>{% endif %}
+    <span id="cierre-banner-msg"></span>
+  </div>
+{%- endif %}
+</div>

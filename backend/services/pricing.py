@@ -56,6 +56,7 @@ _bond_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
 NAN_METRICS: Dict[str, float] = {
     "tirea": float("nan"),
     "tna": float("nan"),
+    "tna_1816": float("nan"),
     "tna_raw": float("nan"),
     "tem": float("nan"),
     "duration": float("nan"),
@@ -415,6 +416,38 @@ def tna_from_tirea(
     return float(getattr(obj, "tna", np.nan)), label
 
 
+# Convención 1816 (string de su API) → (freq_días, base_días, fórmula). Es una
+# REEXPRESIÓN de la TEA/TIR (no recalcula el bono): la TEA es invariante a la
+# convención, sólo cambia cómo se anualiza linealmente. Se usa para mostrar,
+# al lado de NUESTRA TNA, la que reportaría 1816 — puro contraste, no toca
+# nada del cálculo ni del default del desk.
+_CONV_1816_PARSE: Dict[str, Tuple[int, int, str]] = {
+    "30-360": (30, 360, "linear"), "90-360": (90, 360, "linear"),
+    "180-360": (180, 360, "linear"), "90-365": (90, 365, "linear"),
+    "180-365": (180, 365, "linear"), "32-365": (32, 365, "cap32"),
+}
+
+
+def tna_bajo_conv_1816(obj, tirea: float, conv: Optional[str]) -> float:
+    """TNA que 1816 reportaría para `obj` bajo su convención `conv` (string de
+    su API: "180-360", "plazo-rem", …), reexpresando NUESTRA TIREA. NaN si no
+    hay convención o TIREA. No recalcula el bono — sólo anualiza."""
+    if not conv or not np.isfinite(tirea):
+        return float("nan")
+    if conv == "plazo-rem":                       # días remanentes / 365
+        d = getattr(obj, "dias_remanentes", None)
+        if not d or d <= 0:
+            return float("nan")
+        return ((1.0 + tirea) ** (d / 365.0) - 1.0) * (365.0 / d)
+    fb = _CONV_1816_PARSE.get(conv)
+    if not fb:
+        return float("nan")
+    freq, base, formula = fb
+    if formula == "cap32":                         # TAMAR/duales: capitalizada c/32d
+        return ((1.0 + tirea) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
+    return ((1.0 + tirea) ** (freq / base) - 1.0) * (base / freq)
+
+
 def tirea_from_tna(
     obj,
     tna: float,
@@ -725,6 +758,25 @@ def compute_metrics(
     tirea = float(getattr(obj, "tirea", np.nan))
     tna_raw = float(getattr(obj, "tna", np.nan))
     tna, tna_label = tna_from_tirea(obj, tirea, freq_override, base_override)
+    # TNA de REFERENCIA bajo la convención que publica 1816 para la curva del
+    # bono — para contrastar contra nuestra TNA sin cambiar nuestro default ni
+    # llamar a ninguna API. Sólo reexpresa la TIREA (arit., µs) y se cachea con
+    # el resto de las métricas. Un freq/base custom del usuario manda: en ese
+    # caso no mostramos la 1816 (comparás contra TU override, no contra ellos).
+    tna_1816 = float("nan")
+    conv_1816: Optional[str] = None
+    if not (freq_override and base_override) and np.isfinite(tirea):
+        try:
+            from backend.services import curves as _curves
+            conv_1816 = _curves.conv_1816_for(code)
+            # La especie pesos/clean de un hard-dollar (GD30/AL30 sin sufijo) no
+            # cae en la partición de curvas, pero 1816 usa 180-360 para TODO el
+            # hard-dollar (globales/bonares/corp/prov/BCRA USD) → fallback.
+            if conv_1816 is None and _is_hard_dollar(obj):
+                conv_1816 = "180-360"
+            tna_1816 = tna_bajo_conv_1816(obj, tirea, conv_1816)
+        except Exception:  # noqa: BLE001
+            conv_1816, tna_1816 = None, float("nan")
     tem = (1 + tirea) ** (30 / 360) - 1 if np.isfinite(tirea) else float("nan")
     try:
         duration = float(obj.calcula_duration(tirea, canonical_settle)) if np.isfinite(tirea) else float("nan")
@@ -789,6 +841,8 @@ def compute_metrics(
             "tna": tna,
             "tna_raw": tna_raw,
             "tna_convention_label": tna_label,
+            "tna_1816": tna_1816,
+            "conv_1816": conv_1816,
             "tem": tem,
             "duration": duration,
             "paridad": paridad,

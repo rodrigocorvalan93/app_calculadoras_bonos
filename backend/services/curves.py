@@ -325,6 +325,42 @@ def curve_key_for(code: str) -> str | None:
     return cached[1].get(code)
 
 
+# Convención TNA que publica 1816 por curva (referencia — de su
+# `/v1/mercado/curvas`, snapshot 2026-08). Mapea NUESTRAS curvas a la
+# convención de ELLOS para poder mostrar, al lado de nuestra TNA, cuánto daría
+# bajo su criterio — es una REFERENCIA de reexpresión (la TEA/TIR no cambia),
+# NO altera nuestro default (que el desk fijó a propósito). "plazo-rem" = días
+# remanentes. Nuestras curvas ya separan soberano vs `corp_*`, que es lo que
+# distingue varias convenciones de 1816 (p. ej. CER: sob. 180-360, corp 90-360).
+# Diferencias vs nuestra tabla (para tener presente al comparar): 1816 usa
+# 90-360 en BADLAR/corp-inflación (nosotros 90/365 y 180/360), 32-365 en TAMAR
+# soberana (nosotros 90/365) y 180-360 en DLK soberano (nosotros 90/365).
+# `lecap` mezcla letras (plazo-rem) y botes (1816: 180-360) — mapeamos a la
+# dominante; refinable si hace falta.
+CONV_1816: Dict[str, str] = {
+    "cer": "180-360", "cerproy": "180-360",       # Soberanos ARS CER
+    "lecap": "plazo-rem",                          # Soberanos ARS tasa fija / Letras CER
+    "tamar": "32-365",                             # Soberanos ARS Tamar
+    "dolarlinked": "180-360",                      # Soberanos USD Linked
+    "globales": "180-360", "bonares": "180-360",   # Soberanos USD Globales / Bonares
+    "bopreales": "180-360",                        # BCRA USD
+    "dualfija": "32-365", "dualtamar": "32-365",   # Soberanos Duales
+    "dualcer": "32-365", "dualdlk": "32-365",
+    "corp_tamar": "90-360", "corp_badlar": "90-360",   # Corporativos ARS Tamar / Badlar
+    "corp_tasafija": "90-360",                     # Corporativos ARS Fijo
+    "corp_uva": "90-360",                          # Corporativos ARS Inflación
+    "corp_dlk": "90-360",                          # Corporativos USD Linked
+    "corp_hdmep": "180-360", "corp_hdcable": "180-360",  # Corporativos USD
+}
+
+
+def conv_1816_for(code: str) -> str | None:
+    """Convención TNA que 1816 usa para la curva de `code` (o None si el bono
+    no cae en ninguna curva conocida)."""
+    k = curve_key_for(code)
+    return CONV_1816.get(k) if k else None
+
+
 def curve_def(key: str) -> CurveDef | None:
     for c in CURVES:
         if c.key == key:

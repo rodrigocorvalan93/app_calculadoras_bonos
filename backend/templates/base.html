@@ -76,6 +76,13 @@
       <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
       <span id="live-meta" class="live-meta muted"></span>
       {% if request.state.user %}
+      {# Chip del cierre histórico (todas las pestañas): ¿la base tiene el cierre
+         de hoy? 1 req/min, ~µs en el server (historico_writer.estado_cierre).
+         Vacío si la carpeta Delta Bases no está montada. El mismo request trae
+         el banner oob (#cierre-banner) para el superuser cuando falta. #}
+      <span id="cierre-chip" class="cierre-slot" hx-get="/cierre/chip" hx-trigger="load, every 60s" hx-swap="innerHTML"></span>
+      {% endif %}
+      {% if request.state.user %}
       {% if request.state.user.role == 'superuser' %}
       <a class="rail-toggle" href="/admin" title="Panel de administración (usuarios y permisos)" style="text-decoration:none">👤</a>
       {% endif %}
@@ -104,6 +111,9 @@
       </span>
     </div>
   </header>
+  {# Banner del cierre histórico faltante (superuser): lo llena por oob el
+     mismo request del chip (/cierre/chip); vacío = nada que avisar. #}
+  <div id="cierre-banner"></div>
 
   {# La animación corre en #tape-track (htmx sólo swapea su contenido → el
      deslizamiento NO se reinicia con cada refresh live). #}
