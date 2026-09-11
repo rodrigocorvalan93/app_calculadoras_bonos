@@ -38,6 +38,7 @@
           <th class="col-oclh" title="Posición del Last en el rango Low–High del día">Rango</th>
           <th data-sort class="grp">Var %</th>
           <th data-sort>Var px</th>
+          <th data-sort title="Retorno a 5 ruedas: precio de referencia vs el cierre de hace 5 ruedas (base diaria propia; precio dirty, sin cupones)">5D %</th>
           <th data-sort class="grp">Bid sz</th>
           <th data-sort>Bid</th>
           <th data-sort>Bid {{ 'Mgn' if ym == 'margen' else 'TIREA' }}</th>
@@ -73,6 +74,7 @@
             <td class="col-oclh">{% if r.range_pos is not none %}<div class="rango" title="Last en el {{ (r.range_pos*100)|round(0)|int }}% del rango del día"><i style="left:{{ (r.range_pos*100)|round(1) }}%"></i></div>{% else %}<span class="muted">·</span>{% endif %}</td>
             <td class="grp" style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td class="{{ vcls }}">{{ r.var_px | ar_num(2) }}</td>
+            <td class="{{ 'var-up' if (r.ret_5d is not none and r.ret_5d >= 0) else ('var-down' if r.ret_5d is not none else '') }}"{% if r.ret_5d_fecha %} title="vs cierre del {{ r.ret_5d_fecha | ar_date }}"{% endif %}>{{ r.ret_5d | ar_pct_pp(2) if r.ret_5d is not none else "·" }}</td>
             <td class="grp" style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
             <td class="{{ r.bid_cls }}">{{ r.bid | ar_num(2) }}</td>
             <td style="color:var(--cyan)">{{ (r.margen_bid if ym == 'margen' else r.tirea_bid) | ar_pct(2) }}</td>

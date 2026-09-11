@@ -128,18 +128,22 @@ def prime_aux_loaders() -> None:
 
       - `delta_especies` y `positions`: `pd.read_excel` bajo lock.
       - `credito`: lee `credit_scores.json` + scorea todos los emisores.
+      - `historico_byma`: la base diaria (parquet/Excel) que alimenta Históricos
+        y la columna 5D % de Mercado (`ref_5d` nunca la carga en un request:
+        sin esto la columna quedaba vacía hasta que alguien abriera Históricos).
 
     Cada uno es idempotente y auto-guardado; los llamamos en el pool de warmup
     al boot así la primera visita a YAS / Posiciones / Créditos ya los encuentra
     cargados. Defensivo: un fallo acá nunca debe tumbar el warmup."""
     # Import perezoso: estos módulos arrastran pandas/OMScredit, que no queremos
     # cargar al importar warmup.
-    from backend.services import credito, delta_especies, positions
+    from backend.services import credito, delta_especies, historico_byma, positions
 
     for label, loader in (
         ("delta_especies", delta_especies.ensure_loaded),
         ("positions", positions.ensure_loaded),
         ("credito", credito._ensure),
+        ("historico_byma", historico_byma.ensure_loaded),
     ):
         try:
             loader()

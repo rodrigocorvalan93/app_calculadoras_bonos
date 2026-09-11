@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from backend.config import settings
 from backend.locale_ar import fmt_pct, hoy_ba, parse_ar_num
 from backend.cache_seq import seq_cached
-from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_svc, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
+from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_svc, historico_byma, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
 # hits keep the work small, but the first poll after a price tick still
@@ -225,6 +225,23 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         if ty_last is not None and ty_close is not None and ty_last == ty_last and ty_close == ty_close:
             delta_yield_bps = (ty_last - ty_close) * 10000.0
 
+    # %5D: precio de referencia vs cierre de hace 5 ruedas. El feed no lo trae;
+    # sale de la base diaria propia (historico_byma.ref_5d: mapa 1×/día, acá
+    # un lookup ~ns). Mismo ticker → misma base de precio que `last`; si la
+    # base sólo tiene la ficha nativa (…C/…D) compara en esa base (px_calc).
+    ret_5d = ret_5d_fecha = None
+    if ref_px is not None:
+        r5 = historico_byma.ref_5d()
+        ref5, px5 = r5.get(code), ref_px
+        if ref5 is None and calc != code:
+            ref5, px5 = r5.get(calc), cp(ref_px)
+        if ref5 and px5:
+            try:
+                ret_5d = (px5 / ref5[0] - 1.0) * 100.0
+                ret_5d_fecha = ref5[1]
+            except (TypeError, ZeroDivisionError):
+                ret_5d = ret_5d_fecha = None
+
     # Color por punta (vs cierre) + fondo de la celda de variación (heatmap
     # cuya intensidad escala con |var%|, tope ±2%).
     last_cls = _px_cls(last, close)
@@ -273,6 +290,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             "bid_size": bid_size, "offer_size": offer_size, "last_size": last_size,
             "volume": volume, "nominal": nominal, "vwap": vwap,
             "var_pct": var_pct, "var_px": var_px, "var_bg": var_bg,
+            "ret_5d": ret_5d, "ret_5d_fecha": ret_5d_fecha,
             "last_cls": last_cls, "bid_cls": bid_cls, "offer_cls": offer_cls,
             "last_ts": last_ts, "close_ts": close_ts,
             "price_source": price_source, "price_date": price_date,
@@ -316,6 +334,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
                 mvar = mq.get("var_pct")
             row.update({
                 "last": mlast, "close": mclose, "var_pct": mvar, "var_px": None, "var_bg": "",
+                "ret_5d": None, "ret_5d_fecha": None,      # la base 5D es BYMA: no mezclar plazas
                 "low": mq.get("min"), "high": mq.get("max"),
                 "bid": None, "offer": None, "bid_size": None, "offer_size": None,
                 "nominal": mq.get("volumen"), "volume": mq.get("monto"), "vwap": None,

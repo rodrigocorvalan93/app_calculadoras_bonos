@@ -351,6 +351,54 @@ def _value_and_date_at(entry: Dict[str, Any], metric: str, target_iso: str
     return best_v, best_d
 
 
+# ── Referencia %5D (retorno a 5 ruedas) para Mercado ─────────────────────────
+# El feed de BYMA/Primary sólo trae last y cierre previo. Las 5 ruedas salen de
+# NUESTRA base diaria (autosave de historico_writer): por código, el precio de
+# pantalla de la 5ª rueda anterior a hoy con dato. Se arma UNA vez por (versión
+# de la base, día) — ~550 códigos, ~1 ms — y en cada fila de Mercado es un
+# dict lookup. Nunca dispara la carga del Excel en un request: si la base no
+# está en memoria devuelve {} (la carga la hace el warmup / Históricos).
+_ref5d_cache: Optional[Tuple[tuple, Dict[str, tuple]]] = None
+
+
+def ref_5d(hoy: Optional[date] = None, ruedas: int = 5) -> Dict[str, tuple]:
+    """{Código: (precio de pantalla, fecha)} de la `ruedas`-ésima fecha ANTERIOR a
+    hoy con precio en la base. Un código con menos ruedas no entra (no se
+    inventa). Los precios son los de pantalla del mismo ticker (misma base que
+    `last` en Mercado: sin conversión de pata)."""
+    global _ref5d_cache
+    data = _cache
+    if not data or not data.get("loaded"):
+        return {}
+    if hoy is None:
+        from backend.locale_ar import hoy_ba
+        hoy = hoy_ba()
+    hoy_iso = hoy.isoformat()
+    key = (data.get("ver") or id(data), hoy_iso, int(ruedas))
+    c = _ref5d_cache
+    if c is not None and c[0] == key:
+        return c[1]
+    out: Dict[str, tuple] = {}
+    for code, entry in data["by_code"].items():
+        vals = entry["vals"].get("Last Price")
+        if not vals:
+            continue
+        dates = entry["dates"]                  # ascendente (ver _build)
+        n = 0
+        for i in range(len(dates) - 1, -1, -1):
+            if dates[i] >= hoy_iso:
+                continue
+            v = vals[i]
+            if v is None or v <= 0:
+                continue
+            n += 1
+            if n == ruedas:
+                out[str(code)] = (float(v), date.fromisoformat(dates[i]))
+                break
+    _ref5d_cache = (key, out)
+    return out
+
+
 # ── Resumen semanal por segmento (Δprecio + ΔTIR) ────────────────────────────
 def _value_at(entry: Dict[str, Any], metric: str, target_iso: str) -> Optional[float]:
     """Último valor conocido de `metric` hasta `target_iso` (fecha ≤ target)."""
