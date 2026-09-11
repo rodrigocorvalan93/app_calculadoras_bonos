@@ -649,14 +649,19 @@ window.lsSet = function (k, v) {
 
 // ── Posiciones: TIR y Duration del FONDO ponderadas por valor ──────────────
 // Igual que Ret. día: 100% en el navegador, cero requests. TIR_f = Σ w·TIR/Σ w
-// y Dur_f = Σ w·Dur/Σ w con w = valor de mercado de la fila. Las filas SIN
-// dato (especie sin ficha o sin precio) traen un casillero .pos-tir/.pos-dur
-// (TIR en %, Dur en años): lo tipeado entra al ponderado al instante y se
-// re-aplica tras cada refresh (keyed por especie, como el Last ✎). El chip
-// #pos-fondo-tirdur muestra entre paréntesis la COBERTURA por métrica:
-// % del valor total del fondo que aporta dato — sube al completar casilleros.
+// y Dur_f = Σ w·Dur/Σ w con w = valor de mercado de la fila. TODAS las tasas
+// de la tabla son inputs (.pos-tir en %, .pos-dur en años) precargados con el
+// valor calculado del MODO activo:
+//   base  → data-tirea / data-dur (la TIR real/actual de cada ficha)
+//   proy. → data-tirea-proy / data-dur-proy (CER vía ficha hermana j, DLK
+//           compuesto con la deva implícita de ROFEX — para leer un fondo
+//           en PESOS; donde no aplica, igual a la base)
+// Editar un input alimenta SOLO el ponderado (jamás toca precios ni pega al
+// server); los overrides se guardan por (modo, especie) y sobreviven a los
+// refresh. El toggle #pos-proy se persiste por fondo en localStorage. El chip
+// muestra entre paréntesis la COBERTURA: % del valor del fondo con dato.
 (function () {
-  var manual = {}; // especie -> {tir: str, dur: str} (texto tal cual se tipeó)
+  var manual = { base: {}, proy: {} }; // modo -> especie -> {tir: str, dur: str}
 
   function parseAr(txt) {
     if (!txt) return null;
@@ -666,10 +671,50 @@ window.lsSet = function (k, v) {
     return isNaN(v) ? null : v;
   }
   function fmt(x, dec) { return x.toFixed(dec).replace('.', ','); }
+  function chipEl() { return document.getElementById('pos-fondo-tirdur'); }
+  function modo() {
+    var c = document.getElementById('pos-proy');
+    return c && c.checked ? 'proy' : 'base';
+  }
+  function lsKey() {
+    var ch = chipEl();
+    return 'pos-proy:' + ((ch && ch.getAttribute('data-fondo')) || '');
+  }
+  function defRaw(tr, m, esTir) {
+    // default crudo del modo: proy cae a base si el atributo proy vino vacío
+    var v = esTir
+      ? parseFloat(m === 'proy' ? (tr.dataset.tireaProy || tr.dataset.tirea) : tr.dataset.tirea)
+      : parseFloat(m === 'proy' ? (tr.dataset.durProy || tr.dataset.dur) : tr.dataset.dur);
+    return isFinite(v) ? v : null;
+  }
+
+  function fill() {
+    // Precarga cada input con el override del modo o el default calculado.
+    var tbl = document.getElementById('pos-tbl');
+    if (!tbl || !tbl.tBodies[0]) return;
+    var m = modo(), rows = tbl.tBodies[0].rows;
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      if (tr.classList.contains('pos-grp')) continue;
+      var ov = manual[m][tr.dataset.esp] || {};
+      var it = tr.querySelector('.pos-tir'), id = tr.querySelector('.pos-dur');
+      if (it) {
+        var dt = defRaw(tr, m, true);
+        it.value = ov.tir !== undefined ? ov.tir : (dt === null ? '' : fmt(dt * 100, 2));
+        it.classList.toggle('edited', ov.tir !== undefined);
+      }
+      if (id) {
+        var dd = defRaw(tr, m, false);
+        id.value = ov.dur !== undefined ? ov.dur : (dd === null ? '' : fmt(dd, 2));
+        id.classList.toggle('edited', ov.dur !== undefined);
+      }
+    }
+  }
 
   function recalc() {
+    // Fuente ÚNICA del ponderado: lo que dicen los inputs (default o tipeado).
     var tbl = document.getElementById('pos-tbl');
-    var chip = document.getElementById('pos-fondo-tirdur');
+    var chip = chipEl();
     if (!tbl || !tbl.tBodies[0] || !chip) return;
     var rows = tbl.tBodies[0].rows;
     var tot = 0, wT = 0, sT = 0, wD = 0, sD = 0;
@@ -679,40 +724,25 @@ window.lsSet = function (k, v) {
       var v = parseFloat(tr.dataset.valor);
       if (!isFinite(v) || v <= 0) continue;   // sin valor no hay peso (mismo criterio que Ret. día)
       tot += v;
-      var tir = parseFloat(tr.dataset.tirea);           // decimal del server
-      if (!isFinite(tir)) {
-        var it = tr.querySelector('.pos-tir');
-        var mt = it ? parseAr(it.value) : null;         // manual: en %
-        tir = mt === null ? NaN : mt / 100;
-      }
-      if (isFinite(tir)) { wT += v; sT += v * tir; }
-      var dur = parseFloat(tr.dataset.dur);             // años del server
-      if (!isFinite(dur)) {
-        var id = tr.querySelector('.pos-dur');
-        var md = id ? parseAr(id.value) : null;         // manual: en años
-        dur = md === null ? NaN : md;
-      }
-      if (isFinite(dur)) { wD += v; sD += v * dur; }
+      var it = tr.querySelector('.pos-tir');
+      var mt = it ? parseAr(it.value) : null;           // en %
+      if (mt !== null) { wT += v; sT += v * (mt / 100); }
+      var id = tr.querySelector('.pos-dur');
+      var md = id ? parseAr(id.value) : null;           // en años
+      if (md !== null) { wD += v; sD += v * md; }
     }
+    var pref = modo() === 'proy' ? 'TIR proy. ' : 'TIR ';
     var cobT = tot > 0 ? ' (' + (wT / tot * 100).toFixed(0) + '%)' : '';
     var cobD = tot > 0 ? ' (' + (wD / tot * 100).toFixed(0) + '%)' : '';
     chip.textContent =
-      (wT > 0 ? 'TIR ' + fmt(sT / wT * 100, 2) + '%' + cobT : 'TIR —') + ' · ' +
+      (wT > 0 ? pref + fmt(sT / wT * 100, 2) + '%' + cobT : pref + '—') + ' · ' +
       (wD > 0 ? 'Dur ' + fmt(sD / wD, 2) + cobD : 'Dur —');
   }
 
   function reapply() {
-    var tbl = document.getElementById('pos-tbl');
-    if (!tbl || !tbl.tBodies[0]) return;
-    var rows = tbl.tBodies[0].rows;
-    for (var i = 0; i < rows.length; i++) {
-      var esp = rows[i].dataset.esp, m = esp && manual[esp];
-      if (!m) continue;
-      var it = rows[i].querySelector('.pos-tir');
-      var id = rows[i].querySelector('.pos-dur');
-      if (it && m.tir !== undefined) it.value = m.tir;
-      if (id && m.dur !== undefined) id.value = m.dur;
-    }
+    var c = document.getElementById('pos-proy');
+    if (c) { try { c.checked = localStorage.getItem(lsKey()) === '1'; } catch (e) {} }
+    fill();
     recalc();
   }
 
@@ -723,9 +753,24 @@ window.lsSet = function (k, v) {
     if (!esT && !esD) return;
     var tr = el.closest('tr');
     if (tr && tr.dataset.esp) {
-      var m = manual[tr.dataset.esp] = manual[tr.dataset.esp] || {};
+      var m = manual[modo()][tr.dataset.esp] = manual[modo()][tr.dataset.esp] || {};
       if (esT) m.tir = el.value; else m.dur = el.value;
+      el.classList.add('edited');
     }
+    recalc();
+  });
+  document.body.addEventListener('change', function (evt) {
+    if (evt.target && evt.target.id === 'pos-proy') {
+      try { localStorage.setItem(lsKey(), evt.target.checked ? '1' : '0'); } catch (e) {}
+      fill();
+      recalc();
+    }
+  });
+  document.body.addEventListener('click', function (evt) {
+    var b = evt.target.closest && evt.target.closest('#pos-tirdur-reset');
+    if (!b) return;
+    manual[modo()] = {};
+    fill();
     recalc();
   });
   document.body.addEventListener('htmx:afterSwap', function (evt) {
@@ -1249,15 +1294,22 @@ window.lsSet = function (k, v) {
       }
       out.push(hs.join(';'));
     }
+    // Celda con input (Last ✎, TIR/Dur editables) → exporta el VALOR del
+    // input (innerText de un input es vacío y la columna salía en blanco).
+    function cellTxt(c) {
+      if (!c) return '';
+      var inp = c.querySelector && c.querySelector('input');
+      return inp ? inp.value : c.innerText;
+    }
     for (var bI = 0; bI < t.tBodies.length; bI++) {
       var rows = t.tBodies[bI].rows;
       for (var r = 0; r < rows.length; r++) {
         if (rows[r].style.display === 'none' || rows[r].hidden) continue;
         var cs = rows[r].cells, line = [];
         if (keep.length) {
-          for (var k = 0; k < keep.length; k++) line.push(esc(cs[keep[k]] ? cs[keep[k]].innerText : ''));
+          for (var k = 0; k < keep.length; k++) line.push(esc(cellTxt(cs[keep[k]])));
         } else {
-          for (var c = 0; c < cs.length; c++) line.push(esc(cs[c].innerText));
+          for (var c = 0; c < cs.length; c++) line.push(esc(cellTxt(cs[c])));
         }
         out.push(line.join(';'));
       }

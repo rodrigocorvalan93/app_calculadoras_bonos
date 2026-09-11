@@ -1045,6 +1045,10 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
   font-variant-numeric: tabular-nums;
 }
 .cell-edit:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+/* TIR/Dur editadas a mano (distintas del valor calculado) → se marcan */
+.cell-edit.edited { color: var(--accent); border-color: var(--accent); font-weight: 650; }
+/* Los inputs de TIR/Dur son más angostos que el Last (números cortos) */
+.pos-tir, .pos-dur { width: 58px; }
 .pos-day-ret { font-weight: 650; font-variant-numeric: tabular-nums; }
 
 /* Posiciones — ramas por Categoría (encabezados de grupo estilo Excel) */
