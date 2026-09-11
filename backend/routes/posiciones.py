@@ -286,6 +286,29 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
     denom = pn if (pn and pn > 0) else (total_valor if total_valor > 0 else None)
     settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = t+1 (fecha BA)
     rows: List[Dict[str, Any]] = []
+
+    # TEA implícita de ROFEX al plazo más cercano a la duration — el mismo
+    # matching que usan los sintéticos de Futuros. El store se lee UNA vez por
+    # render (lazy, en memoria, sub-ms); sin ROFEX → None y el proyectado del
+    # DLK cae a su TIR base.
+    fut_rows: Optional[List[Dict[str, Any]]] = None
+
+    def _tea_rofex(dur: Optional[float]) -> Optional[float]:
+        nonlocal fut_rows
+        if not dur or dur <= 0:
+            return None
+        if fut_rows is None:
+            try:
+                from backend.services import futuros as fut_svc
+                fut_rows = [r for r in fut_svc.rows("may")
+                            if r.get("dias") and r["dias"] > 0 and r.get("tea") is not None]
+            except Exception:  # noqa: BLE001
+                fut_rows = []
+        if not fut_rows:
+            return None
+        f = min(fut_rows, key=lambda r: abs(r["dias"] - dur * 365.0))
+        return f.get("tea")
+
     for h in hs:
         code = h.get("cod_delta")
         obj = _bono(code)
@@ -315,6 +338,32 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
         nombre = h.get("nombre") or (h.get("especie") if h.get("especie") != code else None)
         if not nombre and code:
             nombre = (pricing.bond_meta(code) or {}).get("nombre") or None
+        tirea = (m or {}).get("tirea")
+        duration = (m or {}).get("duration")
+        # Versión PROYECTADA (para el switch del chip TIR/Dur del fondo —
+        # leer un fondo en PESOS que tiene CER/DLK adentro). Por defecto es
+        # IGUAL a la base; sólo cambia donde una proyección aplica:
+        # - CER/UVA con ficha hermana "j": TIR/Dur nominales de la ficha
+        #   proyectada al MISMO precio de pantalla — es literalmente la fila
+        #   de la curva proyectada, mismo cache de métricas (el warmup ya
+        #   calienta cerproy/todos_ars_proyectado → hit, no cálculo nuevo).
+        # - DLK (A3500): TIR compuesta con la deva implícita de ROFEX a la
+        #   duration, (1+tir)·(1+tea_fut)−1 — la MISMA fórmula que los
+        #   sintéticos de Futuros. La duration del bono no cambia.
+        tirea_p, dur_p = tirea, duration
+        if code and m is not None:
+            if bond_universe.get(code + "j") is not None:
+                mj = _row_for_code(code + "j", plazo, settle=settle)
+                if mj is not None:
+                    if mj.get("tirea") is not None:
+                        tirea_p = mj["tirea"]
+                    if mj.get("duration") is not None:
+                        dur_p = mj["duration"]
+            elif (pricing._bond_index_kind(code) == "a3500"
+                  and tirea is not None and tirea == tirea):
+                tea = _tea_rofex(duration)
+                if tea is not None:
+                    tirea_p = (1.0 + tirea) * (1.0 + tea) - 1.0
         rows.append({
             **h,
             "abrev": code or "—",
@@ -325,10 +374,12 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             "categoria": _cat_for(h, obj),
             "rating": _calif(obj) if obj is not None else "—",
             "px_val": px_val,
-            "tirea": (m or {}).get("tirea"),
+            "tirea": tirea,
             "tna": (m or {}).get("tna"),
             "tna_convention_label": (m or {}).get("tna_convention_label"),
-            "duration": (m or {}).get("duration"),
+            "duration": duration,
+            "tirea_proy": tirea_p,
+            "duration_proy": dur_p,
             # Vto: si el código no tiene ficha propia (pata FX como GD46D),
             # cae a la ficha nativa del mismo papel — antes quedaba "—".
             "vencimiento": _venc_date(obj if obj is not None else _ficha_leg(code)),

@@ -300,16 +300,67 @@ async def test_http_posiciones_fondo_galileo(carteras) -> None:
 
 @pytest.mark.asyncio
 async def test_http_posiciones_tir_dur_fondo_manual(carteras) -> None:
-    """TIR y Duration ponderadas del FONDO (chip client-side, como Ret. día) +
-    casilleros manuales en las filas sin cálculo (especie sin ficha o sin
-    precio), estilo Last ✎ — lo tipeado entra al ponderado en el navegador."""
+    """TIR y Duration ponderadas del FONDO (chip client-side, como Ret. día):
+    TODAS las tasas son inputs editables precargados con el valor calculado,
+    lo tipeado entra al ponderado sin tocar precios, y el switch 'proy.'
+    cambia los defaults a la versión proyectada (ficha j / ROFEX)."""
     from backend.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         t = await ac.get("/posiciones/table", params={"fondo": G + 8})
     assert t.status_code == 200
     assert 'id="pos-fondo-tirdur"' in t.text           # chip TIR/Dur del fondo
-    assert "data-tirea=" in t.text                     # dato crudo por fila (JS)
-    assert "data-dur=" in t.text
-    assert 'class="pos-tir cell-edit"' in t.text       # casillero TIR manual
-    assert 'class="pos-dur cell-edit"' in t.text       # casillero Dur manual
+    assert 'id="pos-proy"' in t.text                   # switch proyectado
+    assert 'id="pos-tirdur-reset"' in t.text           # restaurar calculados
+    assert "data-tirea=" in t.text and "data-tirea-proy=" in t.text
+    assert "data-dur=" in t.text and "data-dur-proy=" in t.text
+    assert 'class="pos-tir cell-edit"' in t.text       # tasa editable por fila
+    assert 'class="pos-dur cell-edit"' in t.text       # duration editable
+
+
+def test_enrich_version_proyectada(monkeypatch) -> None:
+    """Defaults del modo 'proy.': un CER con ficha hermana j toma la TIR/Dur
+    NOMINALES de la j (mismo precio de pantalla, cache de la curva proyectada);
+    un DLK compone (1+tir)·(1+tea_ROFEX a la duration)−1 sin cambiar su
+    duration; el resto queda igual a la base."""
+    from backend.routes import posiciones as pos
+    from backend.services import futuros as fut_svc
+
+    filas = {
+        "TX99": {"tirea": 0.05, "duration": 1.5, "last": 100.0, "tna": 0.05,
+                 "tna_convention_label": "180/360", "price_source": "LA"},
+        "TX99j": {"tirea": 0.32, "duration": 1.4, "last": 100.0, "tna": 0.30,
+                  "tna_convention_label": "180/360", "price_source": "LA"},
+        "TVDLK": {"tirea": 0.08, "duration": 2.0, "last": 100.0, "tna": 0.08,
+                  "tna_convention_label": "90/365", "price_source": "LA"},
+        "S9999": {"tirea": 0.40, "duration": 0.5, "last": 100.0, "tna": 0.38,
+                  "tna_convention_label": "182/365", "price_source": "LA"},
+    }
+    monkeypatch.setattr(pos, "_row_for_code", lambda c, p, settle=None: filas.get(c))
+    monkeypatch.setattr(pos.bond_universe, "get",
+                        lambda c: object() if c in filas else None)
+    monkeypatch.setattr(pos.pricing, "_bond_index_kind",
+                        lambda c: {"TX99": "cer", "TVDLK": "a3500"}.get(c, ""))
+    monkeypatch.setattr(fut_svc, "rows",
+                        lambda canal="may", spot_v=None: [
+                            {"dias": 365, "tea": 0.30}, {"dias": 730, "tea": 0.25}])
+
+    rows = pos._enrich(
+        [{"cod_delta": "TX99", "especie": "TX99", "valor": 100.0, "cantidad": 1.0,
+          "cod_fondo": 1, "clase": ""},
+         {"cod_delta": "TVDLK", "especie": "TVDLK", "valor": 100.0, "cantidad": 1.0,
+          "cod_fondo": 1, "clase": ""},
+         {"cod_delta": "S9999", "especie": "S9999", "valor": 100.0, "cantidad": 1.0,
+          "cod_fondo": 1, "clase": ""}],
+        pn=300.0, plazo="24hs")
+    by = {r["abrev"]: r for r in rows}
+    # CER → ficha j (TIR nominal + SU duration)
+    assert by["TX99"]["tirea"] == pytest.approx(0.05)
+    assert by["TX99"]["tirea_proy"] == pytest.approx(0.32)
+    assert by["TX99"]["duration_proy"] == pytest.approx(1.4)
+    # DLK → compuesta con la TEA del contrato a ~2 años (0.25); duration intacta
+    assert by["TVDLK"]["tirea_proy"] == pytest.approx(1.08 * 1.25 - 1.0)
+    assert by["TVDLK"]["duration_proy"] == pytest.approx(2.0)
+    # LECAP: proyectado == base (el switch no la toca)
+    assert by["S9999"]["tirea_proy"] == pytest.approx(0.40)
+    assert by["S9999"]["duration_proy"] == pytest.approx(0.5)
