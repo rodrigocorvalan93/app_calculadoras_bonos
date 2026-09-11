@@ -143,6 +143,29 @@ def build_rows(plazo: str = "24hs") -> "Any":
     return pd.DataFrame(rows)
 
 
+def operados_en_store() -> int:
+    """Bonos de las curvas con una OPERACIÓN de hoy en el store (last_ts de
+    hoy). El mismo guard de `save_today` pero sin armar filas ni TIRs (~ms):
+    la captura headless lo sondea para saber cuándo el feed ya mandó los
+    snapshots del día."""
+    from backend.services import curves, marketdata_store
+    from backend.services import symbols as syms
+
+    store = marketdata_store.get_store()
+    hoy = _now().date()
+    vistos: set = set()
+    n = 0
+    for codes in curves.build_curve_codes().values():
+        for code in codes or []:
+            if code in vistos:
+                continue
+            vistos.add(code)
+            snap = store.get(syms.md_symbol(code, "24hs"))
+            if snap is not None and snap.last is not None and _fecha_dato(snap.last_ts) == hoy:
+                n += 1
+    return n
+
+
 def operados_hoy(df: "Any") -> int:
     """Cuántas filas tienen una OPERACIÓN de hoy (Price Source LA con fecha de
     hoy). Los cierres pegajosos de ayer no cuentan → un feriado da ~0."""
@@ -213,6 +236,12 @@ def _prune_journal(max_dias: int = 90) -> None:
                 os.remove(path)
             except OSError:
                 pass
+    for dia in _sin_rueda_days():
+        if dia < limite:
+            try:
+                os.remove(_sin_rueda_path(dia))
+            except OSError:
+                pass
 
 
 def _fechas_base(xlsx_path: str) -> set:
@@ -227,6 +256,189 @@ def _fechas_base(xlsx_path: str) -> set:
         return set(pd.to_datetime(f).dt.date)
     except Exception:  # noqa: BLE001
         return set()
+
+
+_fechas_cache: tuple = ()      # (parquet, mtime_ns, size, fechas)
+
+
+def _fechas_base_cached(xlsx_path: str) -> set:
+    """Como _fechas_base pero cacheado por (mtime, size) del espejo parquet:
+    os.stat por llamada (~µs) y la lectura real UNA vez por cambio del archivo.
+    Es lo que sondea el chip de la topbar (1 req/min por pestaña)."""
+    global _fechas_cache
+    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+    try:
+        st = os.stat(pq)
+    except OSError:
+        return set()
+    key = (pq, st.st_mtime_ns, st.st_size)
+    c = _fechas_cache
+    if c and c[:3] == key:
+        return c[3]
+    fechas = _fechas_base(xlsx_path)
+    _fechas_cache = key + (fechas,)
+    return fechas
+
+
+def _hora_archivo(xlsx_path: str) -> Optional[str]:
+    """HH:MM (BA) del último write del espejo parquet — la hora a la que se
+    guardó el cierre, válida también en las máquinas que sólo leen la base."""
+    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(pq), _TZ).strftime("%H:%M")
+    except OSError:
+        return None
+
+
+# ── Calendario hábil (feriados AR vía dias_habiles; sin el módulo, sólo finde) ─
+def _es_habil(d: date) -> bool:
+    if d.weekday() >= 5:
+        return False
+    try:
+        import dias_habiles
+        return d not in dias_habiles.ar_holidays
+    except Exception:  # noqa: BLE001 — sin calendario: aproximación lun-vie
+        return True
+
+
+def _hhmm(s: str) -> tuple:
+    try:
+        hh, mm = (int(x) for x in str(s).split(":", 1))
+        return hh, mm
+    except ValueError:
+        return 17, 1
+
+
+def _ultimo_cierre_esperado(ahora: datetime, hhmm: str, excluir: Optional[set] = None) -> date:
+    """Último día hábil cuyo cierre YA debería estar en la base: hoy si pasó la
+    hora del autosave, si no el hábil anterior. Feriados y días marcados
+    'sin rueda' por el autosave no cuentan."""
+    hh, mm = _hhmm(hhmm)
+    d = ahora.date()
+    if (ahora.hour, ahora.minute) < (hh, mm):
+        d -= timedelta(days=1)
+    while not _es_habil(d) or (excluir and d in excluir):
+        d -= timedelta(days=1)
+    return d
+
+
+def _atraso_habiles(ultima: Optional[date], esperado: date, excluir: Optional[set] = None) -> Optional[int]:
+    """Ruedas que le faltan a la base entre su última fecha y el cierre esperado."""
+    if ultima is None:
+        return None
+    n, d = 0, ultima
+    while d < esperado:
+        d += timedelta(days=1)
+        if _es_habil(d) and not (excluir and d in excluir):
+            n += 1
+    return n
+
+
+# ── Marcas locales "sin rueda" ──────────────────────────────────────────────
+# Cuando el autosave encuentra un día hábil sin operaciones (feriado que el
+# calendario no tiene / mercado cerrado) lo marca en el journal local: el
+# estado del cierre no reclama ese día como faltante en esta máquina.
+def _sin_rueda_path(d: date) -> str:
+    return os.path.join(journal_dir(), f"sin_rueda_{d:%Y%m%d}")
+
+
+def _marcar_sin_rueda(d: date) -> None:
+    try:
+        with open(_sin_rueda_path(d), "w", encoding="utf-8") as f:
+            f.write("sin rueda\n")
+    except OSError:
+        pass
+
+
+def _sin_rueda_days() -> set:
+    out: set = set()
+    try:
+        nombres = os.listdir(journal_dir())
+    except OSError:
+        return out
+    for fn in nombres:
+        m = re.fullmatch(r"sin_rueda_(\d{8})", fn)
+        if m:
+            try:
+                out.add(datetime.strptime(m.group(1), "%Y%m%d").date())
+            except ValueError:
+                continue
+    return out
+
+
+def estado_cierre() -> Dict[str, Any]:
+    """Estado del cierre para el chip de la topbar, el banner y /admin/salud.
+    Costo ~50 µs (stat + listdir + fechas); nunca abre el Excel.
+
+    estado: ok | pendiente | capturado | falta | sin_base
+      ok        → el último cierre esperado está en la base compartida
+      pendiente → pasó la hora del autosave, hoy no está, ventana de reintentos
+      capturado → esta máquina lo journaleó pero la base compartida no lo tiene
+      falta     → el cierre esperado no está (¿app cerrada a las 17:01?)
+      sin_base  → carpeta Delta Bases no montada (chip oculto)"""
+    from backend.config import settings
+    from backend.services import deltapaths
+
+    ahora = _now()
+    hoy = ahora.date()
+    hh, mm = _hhmm(settings.historico_autosave_hhmm)
+    out: Dict[str, Any] = {"estado": "sin_base", "texto": "", "detalle": "",
+                           "writer": bool(settings.historico_base_writer),
+                           "autosave": bool(settings.historico_autosave),
+                           "hhmm": f"{hh:02d}:{mm:02d}", "hoy": hoy.isoformat()}
+    hist_dir = deltapaths.historico_dir()
+    if not hist_dir:
+        return out
+    xlsx = os.path.join(hist_dir, HIST_FILENAME)
+    fechas = _fechas_base_cached(xlsx)
+    ultima = max(fechas) if fechas else None
+    sin_rueda = _sin_rueda_days()
+    esperado = _ultimo_cierre_esperado(ahora, settings.historico_autosave_hhmm, sin_rueda)
+    journal = _journal_days()
+    atraso = _atraso_habiles(ultima, esperado, sin_rueda)
+    r = (_autosave.last_result or {}) if _autosave is not None else {}
+    out.update({"ultima": ultima.isoformat() if ultima else None,
+                "esperado": esperado.isoformat(), "esperado_fmt": esperado.strftime("%d/%m/%Y"),
+                "atraso": atraso, "hoy_en_base": hoy in fechas, "hoy_en_journal": hoy in journal,
+                "error": r.get("error")})
+    dm = esperado.strftime("%d/%m")
+    if esperado in fechas:
+        out["estado"] = "ok"
+        if esperado == hoy:
+            hora = _hora_archivo(xlsx) or r.get("hora")
+            out["texto"] = "✓ cierre hoy" + (f" {hora}" if hora else "")
+            out["detalle"] = ("Base histórica con el cierre de hoy"
+                              + (f" (guardado {hora})" if hora else "")
+                              + (f" · {r['rows']} filas" if r.get("rows") else ""))
+        else:
+            out["texto"] = f"✓ cierre {dm}"
+            quien = (f"hoy se guarda solo a las {hh:02d}:{mm:02d} — dejá la app abierta (o la captura programada)"
+                     if out["autosave"] and out["writer"] else f"hoy lo guarda la PC writer a las {hh:02d}:{mm:02d}")
+            out["detalle"] = f"Base histórica al día (último cierre {dm}); {quien}"
+        return out
+    if esperado in journal:
+        out["estado"] = "capturado"
+        out["texto"] = f"⏳ cierre {dm} capturado"
+        out["detalle"] = ("Esta máquina guardó el journal local pero la base compartida todavía no lo "
+                          "tiene (se consolida en el próximo guardado / al arrancar la app writer)")
+        return out
+    if esperado == hoy:
+        mins = (ahora - ahora.replace(hour=hh, minute=mm, second=0, microsecond=0)).total_seconds() / 60.0
+        if mins <= 95 and out["autosave"]:
+            out["estado"] = "pendiente"
+            out["texto"] = "⏳ cierre pendiente"
+            out["detalle"] = (f"El autosave de las {hh:02d}:{mm:02d} todavía no guardó "
+                              "(reintenta cada 10 min hasta ~90 min)"
+                              + (f" · último intento: {r['error']}" if r.get("error") else ""))
+            return out
+    out["estado"] = "falta"
+    out["texto"] = f"⚠ falta cierre {dm}" + (f" (+{atraso - 1})" if atraso and atraso > 1 else "")
+    out["detalle"] = (f"La base histórica no tiene el cierre del {dm}"
+                      + (f" — atraso {atraso} ruedas" if atraso and atraso > 1 else "")
+                      + (f" · último error: {r['error']}" if r.get("error")
+                         else f" · ¿la app estaba cerrada a las {hh:02d}:{mm:02d}? "
+                              "Programá la captura headless (python -m backend.tools.cierre)"))
+    return out
 
 
 # El read→concat→write de la base NO es reentrante: dos guardados a la vez
@@ -408,39 +620,22 @@ def consolidar_journal() -> Optional[Dict[str, Any]]:
 
 def estado() -> Dict[str, Any]:
     """Estado de la base para /admin/salud: última fecha guardada, atraso en
-    días hábiles vs el último cierre esperado (feriados cuentan como atraso —
-    no conocemos el calendario), journal local y el último autosave."""
-    from backend.config import settings
+    ruedas vs el último cierre esperado (calendario de feriados AR + días
+    marcados 'sin rueda'), journal local, chip y el último autosave."""
     from backend.services import deltapaths
-    out: Dict[str, Any] = {"writer": settings.historico_base_writer}
+    e = estado_cierre()
+    out: Dict[str, Any] = {"writer": e["writer"], "cierre": e["texto"] or "—"}
     hist_dir = deltapaths.historico_dir()
     if not hist_dir:
         out["error"] = "carpeta Delta Bases no montada en esta máquina"
         return out
     xlsx = os.path.join(hist_dir, HIST_FILENAME)
-    fechas = _fechas_base(xlsx)
-    ultima = max(fechas) if fechas else None
-    out["ultima_fecha"] = ultima.isoformat() if ultima else "—"
-    ahora = _now()
-    try:
-        hh, mm = (int(x) for x in settings.historico_autosave_hhmm.split(":", 1))
-    except ValueError:
-        hh, mm = 17, 1
-    esperado = ahora.date()
-    if (ahora.hour, ahora.minute) < (hh, mm):
-        esperado -= timedelta(days=1)
-    while esperado.weekday() >= 5:
-        esperado -= timedelta(days=1)
-    atraso = None
-    if ultima:
-        atraso, d = 0, ultima
-        while d < esperado:
-            d += timedelta(days=1)
-            if d.weekday() < 5:
-                atraso += 1
-    out["esperado"] = esperado.isoformat()
-    out["atraso_habiles"] = atraso
-    out["ok"] = atraso == 0
+    fechas = _fechas_base_cached(xlsx)
+    out["ultima_fecha"] = e["ultima"] or "—"
+    out["esperado"] = e["esperado"]
+    out["atraso_habiles"] = e["atraso"]
+    out["ok"] = e["estado"] == "ok"
+    out["detalle"] = e["detalle"]
     dias_j = _journal_days()
     out["journal_dias"] = len(dias_j)
     pend = sorted(d for d in dias_j if d not in fechas)
@@ -496,6 +691,7 @@ def save_today(force: bool = False) -> Dict[str, Any]:
     if not force and res["operados"] < settings.historico_autosave_min_operados:
         res["skipped"] = (f"sólo {res['operados']} bonos operaron hoy "
                           f"(mínimo {settings.historico_autosave_min_operados}: ¿feriado?)")
+        _marcar_sin_rueda(_now().date())      # el chip no reclama este día
         return res
 
     # 1) JOURNAL LOCAL primero: el día queda capturado aunque la base falle.
@@ -514,6 +710,7 @@ def save_today(force: bool = False) -> Dict[str, Any]:
         saved = append_and_save(df, xlsx)
         res.update(saved)
         res["ok"] = True
+        res["hora"] = _now().strftime("%H:%M")
         _prune_journal()
     except Exception as exc:  # noqa: BLE001
         logger.exception("[historico_writer] guardado falló")
