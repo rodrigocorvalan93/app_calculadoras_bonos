@@ -1064,7 +1064,7 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .table-tools label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
 
 /* ── Tablas ordenables (th clickeable) ──────────────────────────────── */
-th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
+th[data-sort] { cursor: pointer; -webkit-user-select: none; user-select: none; white-space: nowrap; }
 th[data-sort]:hover { color: var(--accent); }
 th[data-sort]::after { content: " ↕"; opacity: 0.35; font-size: 9px; }
 th[data-sort].sort-asc::after  { content: " ▲"; opacity: 0.9; color: var(--accent); }

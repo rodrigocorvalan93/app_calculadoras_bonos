@@ -295,7 +295,7 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
 
     def _tea_rofex(dur: Optional[float]) -> Optional[float]:
         nonlocal fut_rows
-        if not dur or dur <= 0:
+        if not dur or dur != dur or dur <= 0:      # None / 0 / NaN → sin contrato
             return None
         if fut_rows is None:
             try:

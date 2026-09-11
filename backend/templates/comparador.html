@@ -48,7 +48,9 @@
         </label>
         <label class="field">
           <span>Valor A <small class="muted">(precio %VN · TIR/TNA/margen en decimal)</small></span>
-          <span id="valfield-a"><input type="number" name="val_a" step="0.0001" placeholder="vacío = last de mercado" autocomplete="off"></span>
+          {# type=text + inputmode=decimal: Safari/Firefox rechazan la coma decimal
+             en type=number y mandaban "" → se pisaba con el last de mercado. #}
+          <span id="valfield-a"><input type="text" inputmode="decimal" name="val_a" placeholder="vacío = last de mercado" autocomplete="off"></span>
         </label>
         <label class="field">
           <span>Bono B</span>
@@ -59,7 +61,7 @@
         </label>
         <label class="field">
           <span>Valor B <small class="muted">(precio %VN · TIR/TNA/margen en decimal)</small></span>
-          <span id="valfield-b"><input type="number" name="val_b" step="0.0001" placeholder="vacío = last de mercado" autocomplete="off"></span>
+          <span id="valfield-b"><input type="text" inputmode="decimal" name="val_b" placeholder="vacío = last de mercado" autocomplete="off"></span>
         </label>
         <button
           class="btn-primary"

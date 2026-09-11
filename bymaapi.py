@@ -1234,6 +1234,13 @@ def main():
                 file_path = os.path.join(hist_dir, "Delta - historico_byma_px_tasas.xlsx")
         except Exception as exc:  # noqa: BLE001 — nunca romper el guardado por esto
             print(f"[bymaapi] resolvedor multiplataforma no disponible ({exc}); sigo con la ruta clásica.")
+    if not os.path.isdir(os.path.dirname(file_path)):
+        # Mac sin secrets.txt configurado (USERPROFILE vacío → ruta relativa):
+        # avisar claro y no guardar, en vez de un FileNotFoundError críptico.
+        print("\n⚠ No encuentro la carpeta 'Delta Bases' del OneDrive: en Mac definí "
+              "DELTA_HISTORICO_DIR (o DELTA_BASES_DIR) en secrets.txt. No se guarda la base.")
+        print("\nEjecución de main() finalizada.\n")
+        return
 
     # Salvaguarda anti-dedo: si casi nada OPERÓ HOY, los precios que estás por
     # guardar son de una rueda anterior (finde / feriado / corrida a las 23 h

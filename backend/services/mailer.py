@@ -58,7 +58,13 @@ def send(to: str, subject: str, body: str,
         msg.add_attachment(data, maintype=maintype or "application",
                            subtype=subtype or "octet-stream", filename=fname)
     try:
-        ctx = ssl.create_default_context()
+        # certifi: el Python de python.org en macOS no trae CAs → STARTTLS moría
+        # con CERTIFICATE_VERIFY_FAILED (mismo patrón que primary_ws).
+        try:
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
+        except Exception:  # noqa: BLE001
+            ctx = ssl.create_default_context()
         port = int(settings.app_smtp_port or 587)
         if port == 465:
             with smtplib.SMTP_SSL(settings.app_smtp_host, port, timeout=15, context=ctx) as s:

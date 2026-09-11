@@ -105,8 +105,20 @@ def test_feriados_y_sin_rueda_no_cuentan(env, monkeypatch) -> None:
         {"symbol": ["s"], "Código": ["X"], "Last Price": [1.0], "Price Source": ["CL"],
          "Price Date": [None], "fecha_hoy": [date(2026, 9, 1)]}))
     monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 1, 17, 1))
+    # …pero SÓLO con el feed vivo (evidencia positiva de que nadie operó). Con
+    # el feed caído a las 17:01 los cierres pegajosos también dan 0 operados:
+    # ahí no se marca y el autosave reintenta (antes el día perdido quedaba verde).
+    monkeypatch.setattr(hw, "_feed_vivo", lambda: False)
     res = hw.save_today()
-    assert "feriado" in (res["skipped"] or "") and date(2026, 9, 1) in hw._sin_rueda_days()
+    assert "feriado" in (res["skipped"] or "") and res.get("retry") is True
+    assert date(2026, 9, 1) not in hw._sin_rueda_days()
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 1, 19, 0))
+    assert hw.estado_cierre()["estado"] == "falta"     # se reclama: no hay evidencia de feriado
+    monkeypatch.setattr(hw, "_feed_vivo", lambda: True)
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 1, 17, 1))
+    res = hw.save_today()
+    assert res.get("sin_rueda") is True and not res.get("retry")
+    assert date(2026, 9, 1) in hw._sin_rueda_days()
     monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 1, 19, 0))
     assert hw.estado_cierre()["estado"] == "ok"        # el 1/9 no se reclama
 
@@ -178,8 +190,12 @@ def test_captura_headless_precheck_y_operados(env, monkeypatch) -> None:
     st = marketdata_store.get_store()
     hoy_ms = str(int(_ba(2026, 8, 31, 15, 0).timestamp() * 1000))
     ayer_ms = str(int(_ba(2026, 8, 28, 15, 0).timestamp() * 1000))
+    for c in codes:
+        st.update_from_md(syms.md_symbol(c, "24hs"), {"LA": {"price": 100.0, "date": ayer_ms}})
+    antes = hw.operados_en_store()
     st.update_from_md(syms.md_symbol(codes[0], "24hs"), {"LA": {"price": 100.0, "date": hoy_ms}})
     st.update_from_md(syms.md_symbol(codes[1], "24hs"), {"LA": {"price": 100.0, "date": hoy_ms}})
-    st.update_from_md(syms.md_symbol(codes[2], "24hs"), {"LA": {"price": 100.0, "date": ayer_ms}})
-    assert hw.operados_en_store() >= 2
+    assert hw.operados_en_store() == antes + 2          # sólo los dos con last_ts de HOY
+    st.update_from_md(syms.md_symbol(codes[1], "24hs"), {"LA": {"price": 100.0, "date": ayer_ms}})
+    assert hw.operados_en_store() == antes + 1
     assert os.path.basename(cierre.__file__) == "cierre.py"

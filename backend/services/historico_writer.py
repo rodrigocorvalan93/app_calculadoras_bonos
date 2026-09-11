@@ -350,6 +350,15 @@ def _marcar_sin_rueda(d: date) -> None:
         pass
 
 
+def _feed_vivo() -> bool:
+    """WS del broker conectado y con market data reciente (feed_alive)."""
+    try:
+        from backend.services.primary_ws import get_ws_client
+        return bool(get_ws_client().feed_alive)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _sin_rueda_days() -> set:
     out: set = set()
     try:
@@ -428,16 +437,17 @@ def estado_cierre() -> Dict[str, Any]:
             out["estado"] = "pendiente"
             out["texto"] = "⏳ cierre pendiente"
             out["detalle"] = (f"El autosave de las {hh:02d}:{mm:02d} todavía no guardó "
-                              "(reintenta cada 10 min hasta ~90 min)"
-                              + (f" · último intento: {r['error']}" if r.get("error") else ""))
+                              "(reintenta cada 10 min hasta ~90 min)")
             return out
+    # El texto del error (paths de OneDrive, etc.) NO va al tooltip que ven todos
+    # los roles: viaja en `error` y lo muestra sólo el banner del superuser.
     out["estado"] = "falta"
     out["texto"] = f"⚠ falta cierre {dm}" + (f" (+{atraso - 1})" if atraso and atraso > 1 else "")
     out["detalle"] = (f"La base histórica no tiene el cierre del {dm}"
                       + (f" — atraso {atraso} ruedas" if atraso and atraso > 1 else "")
-                      + (f" · último error: {r['error']}" if r.get("error")
+                      + (" · el último intento de guardado falló (detalle en el panel)" if r.get("error")
                          else f" · ¿la app estaba cerrada a las {hh:02d}:{mm:02d}? "
-                              "Programá la captura headless (python -m backend.tools.cierre)"))
+                              "Programá la captura headless (backend/tools/cierre.py)"))
     return out
 
 
@@ -691,7 +701,16 @@ def save_today(force: bool = False) -> Dict[str, Any]:
     if not force and res["operados"] < settings.historico_autosave_min_operados:
         res["skipped"] = (f"sólo {res['operados']} bonos operaron hoy "
                           f"(mínimo {settings.historico_autosave_min_operados}: ¿feriado?)")
-        _marcar_sin_rueda(_now().date())      # el chip no reclama este día
+        # "Sin rueda" sólo con evidencia POSITIVA: el feed está vivo (WS conectado
+        # y recibiendo) y aun así nadie operó → feriado no listado; el chip no
+        # reclama el día. Con el feed caído a las 17:01 los cierres pegajosos de
+        # ayer también dan 0 operados: ahí NO se marca y el autosave reintenta
+        # (antes marcaba igual y el día perdido quedaba en verde para siempre).
+        res["sin_rueda"] = _feed_vivo()
+        if res["sin_rueda"]:
+            _marcar_sin_rueda(_now().date())
+        else:
+            res["retry"] = True
         return res
 
     # 1) JOURNAL LOCAL primero: el día queda capturado aunque la base falle.
@@ -910,11 +929,14 @@ class HistoricoAutosave:
                     except Exception:  # noqa: BLE001
                         logger.exception("[historico_writer] mail de cierre falló")
                     break
-                if r.get("skipped"):
+                if r.get("skipped") and not r.get("retry"):
                     logger.info("[historico_writer] autosave salteado: %s", r["skipped"])
                     break
-                logger.warning("[historico_writer] autosave falló (%s) — reintento en "
-                               "10 min", r.get("error"))
+                # skipped+retry = 0 operados con el feed caído: puede ser el WS
+                # reconectando a las 17:01, no un feriado → reintentar igual.
+                logger.warning("[historico_writer] autosave %s (%s) — reintento en 10 min",
+                               "sin datos frescos" if r.get("skipped") else "falló",
+                               r.get("skipped") or r.get("error"))
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=600.0)
                     return                             # shutdown durante la espera

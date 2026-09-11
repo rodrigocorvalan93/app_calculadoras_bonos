@@ -27,6 +27,17 @@ def _find_excel() -> str:
         Path(user_profile) / "DELTA ASSET MANAGEMENT S.A" / "Inversiones - Documentos"
         / "Equipo RV" / "9 - Otros" / "Corporativos Argentina - USD - Valores.xlsm",
     ]
+    # macOS: el OneDrive del equipo vive en ~/Library/CloudStorage/... — el
+    # mismo resolvedor multiplataforma que usa la app para las bases.
+    try:
+        from backend.services import deltapaths
+        mac = deltapaths.expand(
+            r"%USERPROFILE%\DELTA ASSET MANAGEMENT S.A\Inversiones - Documentos\Equipo RV\9 - Otros"
+            r"\Corporativos Argentina - USD - Valores.xlsm", want="file")
+        if mac:
+            candidates.append(Path(mac))
+    except Exception:  # noqa: BLE001 — sin backend a mano: sólo la ruta clásica
+        pass
     for p in candidates:
         if p.exists():
             return str(p)

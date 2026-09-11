@@ -227,17 +227,18 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
 
     # %5D: precio de referencia vs cierre de hace 5 ruedas. El feed no lo trae;
     # sale de la base diaria propia (historico_byma.ref_5d: mapa 1×/día, acá
-    # un lookup ~ns). Mismo ticker → misma base de precio que `last`; si la
-    # base sólo tiene la ficha nativa (…C/…D) compara en esa base (px_calc).
+    # un lookup ~ns). SÓLO en la pata nativa (leg_basis vacío): la base guarda
+    # el precio de pantalla del ticker propio de cada código (build_rows), así
+    # que en las vistas ARS/USD/USB se compararían monedas distintas (GD30C en
+    # leg=ARS vs su cierre en cable → +130.000 %). Las 5 ruedas las cuenta
+    # ref_5d desde el último día hábil (sábado/feriado: desde el viernes).
     ret_5d = ret_5d_fecha = None
-    if ref_px is not None:
+    if ref_px is not None and not leg_basis:
         r5 = historico_byma.ref_5d()
-        ref5, px5 = r5.get(code), ref_px
-        if ref5 is None and calc != code:
-            ref5, px5 = r5.get(calc), cp(ref_px)
-        if ref5 and px5:
+        ref5 = r5.get(code) or (r5.get(calc) if calc != code else None)
+        if ref5:
             try:
-                ret_5d = (px5 / ref5[0] - 1.0) * 100.0
+                ret_5d = (ref_px / ref5[0] - 1.0) * 100.0
                 ret_5d_fecha = ref5[1]
             except (TypeError, ZeroDivisionError):
                 ret_5d = ret_5d_fecha = None
@@ -883,12 +884,12 @@ async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str
 def _price_overrides(request: Request) -> dict[str, float]:
     """Lee los `price_<CODE>` del query (what-if): precio nativo % VN > 0.
 
-    Los inputs del what-if son <input type="number">, que SIEMPRE serializan en
-    formato inglés (punto = decimal, sin separador de miles) sin importar el
-    locale del browser. Por eso NO se parsean con parse_ar_num: su heurística
-    es-AR trata '1.234' como mil-doscientos-treinta-y-cuatro → precio 1000×.
-    float() es el parser correcto para un type=number; parse_ar_num queda de
-    fallback defensivo por si el valor llega manipulado o el input cambia a text.
+    Los inputs del what-if son <input type="text" inputmode="decimal"> en es-AR
+    (antes type=number: Safari/Firefox rechazan la coma decimal y mandaban ""),
+    con value/placeholder formateados por ar_num. Se parsean con parse_ar_num,
+    el único parser de entrada de la app: "1.250,5" → 1250,5 · "98,5" → 98,5 ·
+    "1.250" → 1250 (un precio % VN de 1,25 no existe; una LECAP a 1.250 sí) ·
+    "98.5" → 98,5. float() queda de fallback.
     """
     out: dict[str, float] = {}
     for k, v in request.query_params.multi_items():
@@ -897,13 +898,13 @@ def _price_overrides(request: Request) -> dict[str, float]:
         s = (v or "").strip()
         if not s:
             continue
-        try:
-            f = float(s)                       # type=number → formato inglés
-            if not math.isfinite(f):
+        f = parse_ar_num(s)
+        if f is None:
+            try:
+                f = float(s)
+            except ValueError:
                 continue
-        except ValueError:
-            f = parse_ar_num(v)                # fallback (input no-number / manipulado)
-        if f is not None and f > 0:
+        if f is not None and math.isfinite(f) and f > 0:
             out[k[len("price_"):]] = f
     return out
 

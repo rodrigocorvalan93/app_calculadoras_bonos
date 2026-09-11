@@ -82,7 +82,15 @@ if ! cmp -s backend/requirements.txt "$VENVDIR/requirements.instalado"; then
 fi
 echo "Usando Python: $("$PY" --version)"
 echo
-# (el puente HTTPS del add-in de Excel es de Windows — aca no se genera nada)
+# --- Certificado HTTPS local para el add-in de Excel (puente TLS :8443) ---
+# Mismo generador que en Windows (cryptography puro). La primera vez pide la
+# clave del usuario para confiar la CA en el keychain de login (Safari,
+# Chrome y Excel para Mac la leen); si se cancela, la app arranca igual sin
+# el puente (las funciones =OMS.* de Excel no van a andar hasta confiarla).
+"$PY" -m backend.tools.https_local --quiet || echo "(sin HTTPS local: el add-in de Excel no va a cargar; el resto sigue igual)"
+# El Python de python.org no trae CAs: usar el bundle de certifi para
+# treasury.gov / RSS / SMTP (el feed del broker ya lo hace por su cuenta).
+export SSL_CERT_FILE="${SSL_CERT_FILE:-$("$PY" -c 'import certifi,sys;sys.stdout.write(certifi.where())' 2>/dev/null)}"
 
 # --- Modo de ejecucion: ESTABLE por default; "dev" -> auto-reload ---
 # Con la carpeta compartida por OneDrive, cada git pull del equipo hace

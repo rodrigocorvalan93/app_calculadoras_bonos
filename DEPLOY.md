@@ -149,7 +149,8 @@ Office exige HTTPS para las funciones `=OMS.*`; de eso se ocupa el puente TLS
 3. **Confiar la CA en cada PC cliente** (una vez por máquina, sin admin):
    descargar `http://<server>:8000/excel/ca.crt` y
    `certutil -addstore -user Root ca.crt` — o distribuirla por **GPO**
-   (Trusted Root, ámbito usuario) si son muchas PCs.
+   (Trusted Root, ámbito usuario) si son muchas PCs. En una Mac:
+   `security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db ca.crt`.
 4. Instalar el add-in desde `https://<server>:8443/excel/manifest.xml`
    (carpeta compartida de manifiestos o "cargar manifiesto" en Excel).
 5. Cada usuario pega su **token** (lo genera el superuser en `/admin`) en el
