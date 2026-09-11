@@ -498,6 +498,37 @@ async def curve_table_partial(
 # para calcular las TIREA de bid/last/offer.
 mercado_router = APIRouter(tags=["mercado"])
 
+# Curvas corporativas en Mercado: como el panel CEDEARs. Por defecto sólo las
+# CORP_TOP ONs con más VN operado hoy; el resto entra por búsqueda (`q`, en
+# TODA la curva por ticker o nombre) o "ver todas" (`mas`). El costo por tick
+# es proporcional a las filas (server ~0,2 ms/fila, browser ~3 ms/fila):
+# corp_hdmep pasa de 166 filas / 285 KB / p95 152 ms a 30 filas.
+CORP_TOP = 30
+
+
+def _es_corp(curve_key: str | None) -> bool:
+    return bool(curve_key) and str(curve_key).startswith("corp_")
+
+
+def _vista_corp(rows: list[dict], meta: dict, q: str = "", mas: int = 0) -> tuple[list[dict], dict]:
+    """Recorta las filas de una curva corporativa a las CORP_TOP más operadas
+    (VN, después efectivo, después las que tienen punta). Las visibles conservan
+    el orden por duration de _rows_for. `q` busca en toda la curva y no recorta."""
+    meta = dict(meta, top_n=CORP_TOP, ocultas=0, buscado=False)
+    qq = (q or "").strip().upper()
+    if qq:
+        meta["buscado"] = True
+        return [r for r in rows
+                if qq in str(r.get("code") or "").upper() or qq in str(r.get("nombre") or "").upper()], meta
+    if mas or len(rows) <= CORP_TOP:
+        return rows, meta
+    top = sorted(rows, key=lambda r: (-(r.get("nominal") or 0.0), -(r.get("volume") or 0.0),
+                                      0 if _has_quote(r) else 1, str(r.get("code") or "")))[:CORP_TOP]
+    keep = {id(r) for r in top}
+    vis = [r for r in rows if id(r) in keep]
+    meta["ocultas"] = len(rows) - len(vis)
+    return vis, meta
+
 
 @mercado_router.get("/mercado", response_class=HTMLResponse)
 async def mercado_page(
@@ -520,6 +551,8 @@ async def mercado_page(
         await _rows_for(selected_key, plazo, only_quoting, leg, book=True, fuente=fuente)
         if selected_key else ([], {})
     )
+    if _es_corp(selected_key):
+        rows, row_meta = _vista_corp(rows, row_meta)      # la página arranca sin q/mas
     return _render(
         request,
         "mercado.html",
@@ -589,6 +622,8 @@ async def mercado_table_partial(
         return _render(request, "partials/equities_table.html",
                        rows=eq_rows, panel=panel, plazo=plazo, **ctx)
     rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
+    if _es_corp(curve):
+        rows, row_meta = _vista_corp(rows, row_meta, q, mas)
     # 7-12 ms de Jinja @120-200 filas × 25 filtros/fila: al pool, como equities.
     return await asyncio.get_running_loop().run_in_executor(
         None, lambda: _render(

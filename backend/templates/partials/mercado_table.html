@@ -9,6 +9,17 @@
     <span class="card-title-aux">
       <button type="button" class="lnk" data-csv-of="#mercado-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · 
       {{ rows | length }} instrumentos · plazo {{ plazo }}
+      {# Curvas corporativas: como el panel CEDEARs, por defecto sólo las top-N
+         por VN operado hoy; el resto entra por búsqueda o "ver todas". #}
+      {% if row_meta and row_meta.get("ocultas") %}
+        · <strong style="color:var(--cyan)">top {{ row_meta.top_n }} por VN operado hoy</strong>
+        · <button type="button" class="lnk" hx-get="/mercado/table" hx-target="#mercado-table" hx-swap="innerHTML"
+                  hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=q], [name=mas]"
+                  onclick="var n=document.getElementById('ced-mas-n'); if (n) n.value='1'"
+                  title="Mostrar también las {{ row_meta.ocultas }} ONs con menos volumen (más filas = panel más pesado por tick)">ver las {{ row_meta.ocultas }} restantes</button>
+      {% elif row_meta and row_meta.get("buscado") %}
+        · <strong style="color:var(--cyan)">búsqueda en toda la curva</strong>
+      {% endif %}
       {% if ym == 'margen' %} · <strong style="color:var(--cyan)">margen TNA s/TAMAR-BADLAR</strong> (— = sin benchmark){% endif %}
       {% if fuente == "mae" %} · <strong style="color:var(--cyan)">fuente MAE (OTC, sin libro)</strong>{% endif %}
       {% if leg and leg != "native" %} · leg {{ leg }}{% endif %}
