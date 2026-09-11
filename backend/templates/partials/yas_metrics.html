@@ -14,6 +14,15 @@
   <div class="metric">
     <span class="metric-label">TNA <span class="conv">{{ metrics.tna_convention_label }}</span></span>
     <span class="metric-value">{{ metrics.tna | ar_pct(4) }}</span>
+    {# Referencia 1816: la TNA bajo SU convención de curva (la TIREA/TEA es la
+       misma; sólo cambia la reexpresión). Se muestra SÓLO cuando difiere
+       numéricamente de la nuestra (>1 bp) — donde coincidimos no hay ruido; y
+       nunca con override manual de freq/base (ahí comparás contra TU override). #}
+    {% if metrics.get("conv_1816") and metrics.tna_1816 == metrics.tna_1816
+          and metrics.tna == metrics.tna
+          and ((metrics.tna - metrics.tna_1816) | abs) > 0.0001 %}
+    <span class="conv" style="color:var(--cyan)" title="TNA que reportaría 1816 para esta curva ({{ metrics.conv_1816 }}) — referencia, no cambia nuestro cálculo ni la TIREA">1816 {{ metrics.conv_1816 }}: {{ metrics.tna_1816 | ar_pct(2) }}</span>
+    {% endif %}
   </div>
   <div class="metric">
     <span class="metric-label">TEM</span>
