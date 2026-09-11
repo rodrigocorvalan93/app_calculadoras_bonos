@@ -39,6 +39,52 @@
 
     var cmpSel = [];   // [{key,label}] curvas de comparación elegidas (chips)
 
+    // ── Nuevas emisiones / cortes de licitación (★) ─────────────────────────
+    // El usuario tipea "ticker; tasa; duration [; nota]" (una por línea, tal cual
+    // sale del aviso de resultados) y los puntos se dibujan como estrellas sobre
+    // la curva, con la distancia a la NSS y al bono más cercano. 100 % client-
+    // side: no hay requests ni cálculos nuevos (la NSS ya viene en el payload);
+    // sólo se insertan x extra en el eje y se interpola la línea ahí. Persiste
+    // en localStorage.
+    var emisBox = document.getElementById("graf-emis");
+    var emisN = document.getElementById("graf-emis-n");
+    var STAR = "#ffd166";
+    var emisCodes = null, emisInfo = {};   // codes alineados a xs · info por ticker
+    var lastJ = null;                       // último payload (re-render sin re-fetch)
+    // "27,5" / "27,5%" / "1.234,5" (es-AR) o "27.5" → número; null si no parsea.
+    function num(s) {
+      s = String(s == null ? "" : s).trim().replace(/%/g, "");
+      if (s.indexOf(",") !== -1) s = s.replace(/\./g, "").replace(",", ".");
+      var v = parseFloat(s);
+      return isNaN(v) ? null : v;
+    }
+    function parseEmis() {
+      if (!emisBox) return [];
+      var out = [];
+      emisBox.value.split(/\n/).forEach(function (line) {
+        var f = line.split(/[;|\t]/).map(function (x) { return x.trim(); });
+        if (f.length < 3 || !f[0]) return;
+        var t = num(f[1]), d = num(f[2]);
+        if (t == null || d == null || d < 0) return;
+        out.push({ c: f[0].toUpperCase(), t: t, d: d, note: f.slice(3).join(" ").trim() });
+      });
+      out.sort(function (a, b) { return a.d - b.d; });
+      if (emisN) emisN.textContent = out.length ? (out.length + " punto" + (out.length > 1 ? "s" : "")) : "";
+      return out;
+    }
+    // Interpola lineal la curva (xs, ys) en x (clamp a los bordes; null si no hay curva).
+    function interp(xs, ys, x) {
+      if (!ys || ys.length !== xs.length || xs.length < 2) return null;
+      var xq = Math.min(Math.max(x, xs[0]), xs[xs.length - 1]), k = 0;
+      while (k < xs.length - 1 && xs[k + 1] < xq) k++;
+      var k1 = Math.min(k + 1, xs.length - 1), y0 = ys[k], y1 = ys[k1];
+      if (y0 == null && y1 != null) y0 = y1;
+      if (y1 == null && y0 != null) y1 = y0;
+      if (y0 == null || y1 == null) return null;
+      return (xs[k1] > xs[k]) ? y0 + (y1 - y0) * (xq - xs[k]) / (xs[k1] - xs[k]) : y0;
+    }
+    function fmtPP(v) { return (v >= 0 ? "+" : "") + v.toFixed(2).replace(".", ",") + " pp"; }
+
     function params() {
       var p = {};
       form.querySelectorAll("[name]").forEach(function (el) {
@@ -65,12 +111,24 @@
 
     // codes del rol (main = array `codes`; comparación = cmps[ci].codes). Se lee
     // en cada draw/hover, así el auto-refresh (setData) no usa un array viejo.
-    function codesOf(e) { return e.ci < 0 ? codes : (cmps[e.ci] ? cmps[e.ci].codes : null); }
+    function codesOf(e) {
+      if (e.kind === "emis") return emisCodes;
+      return e.ci < 0 ? codes : (cmps[e.ci] ? cmps[e.ci].codes : null);
+    }
 
     // Tooltip chico (≤4 líneas, 11px): código · moneda / precio · tipo · fecha /
     // TIR · TNA / TEM · Dur. Para bid/offer muestra la punta y su TIR.
     function tipHTML(code, m, kind) {
       var head = "<b>" + code + "</b>";
+      if (kind === "emis") {
+        var em = emisInfo[code];
+        if (!em) return head + " · licitación";
+        var o = head + " · licitación" + (em.note ? " · " + em.note : "");
+        o += "<br>tasa " + fmtPct(em.t) + " · Dur " + fmtNum(em.d);
+        if (em.nss != null) o += "<br>vs curva NSS " + fmtPct(em.nss) + " → " + fmtPP(em.t - em.nss);
+        if (em.near) o += "<br>vs " + em.near.code + " (dur " + fmtNum(em.near.x) + ") " + fmtPct(em.near.y) + " → " + fmtPP(em.t - em.near.y);
+        return o;
+      }
       if (!m) return head;
       if (m.mon) head += " · " + m.mon;
       if (kind === "bid" && m.bp != null)
@@ -125,6 +183,14 @@
                         points: { show: false }, value: function (uu, v) { return fmtPct(v); } });
             si++;
           }
+          if (emisCodes) {
+            // Los puntos NO los dibuja uPlot (points.show=false): el hook draw
+            // pinta las ★ y la distancia a la curva. La serie sigue existiendo
+            // para leyenda, cursor/tooltip y escala.
+            base.push({ label: "Licitación ★", stroke: STAR, paths: function () { return null; },
+                        points: { show: false }, value: function (uu, v) { return fmtPct(v); } });
+            SCAT.push({ si: si, kind: "emis", ci: -2 }); si++;
+          }
           return base;
         })(),
         cursor: { points: { size: 9 }, focus: { prox: 24 } },
@@ -158,6 +224,41 @@
                 if (!ok) continue;
                 drawn.push([X, Y]);
                 ctx.fillText(cds[i], X + 5, Y - 3);
+              }
+            }
+            // ★ de las nuevas emisiones + distancia a la curva NSS (línea
+            // punteada hasta la curva y "+0,40 pp" / "−0,40 pp" al costado,
+            // como el "premio vs secundario" de los research).
+            var es = null;
+            for (var q = 0; q < SCAT.length; q++) { if (SCAT[q].kind === "emis") { es = SCAT[q]; break; } }
+            if (es && emisCodes && uu.series[es.si] && uu.series[es.si].show) {
+              var ev = uu.data[es.si];
+              for (var j = 0; j < X0.length; j++) {
+                if (ev[j] == null || !emisCodes[j]) continue;
+                var SX = uu.valToPos(X0[j], "x", true), SY = uu.valToPos(ev[j], "y", true);
+                var info = emisInfo[emisCodes[j]];
+                if (info && info.nss != null) {
+                  var CY = uu.valToPos(info.nss, "y", true), dif = info.t - info.nss;
+                  ctx.strokeStyle = dif >= 0 ? GREEN : "#fb923c"; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]);
+                  ctx.beginPath(); ctx.moveTo(SX, SY); ctx.lineTo(SX, CY); ctx.stroke(); ctx.setLineDash([]);
+                  // uPlot deja textAlign="right" tras los ejes: fijarlo para que el
+                  // "+0,40 pp" quede a la DERECHA de la ★ (el ticker va arriba).
+                  ctx.fillStyle = dif >= 0 ? GREEN : "#fb923c"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+                  ctx.font = "bold 10.5px system-ui,-apple-system,sans-serif";
+                  ctx.fillText(fmtPP(dif), SX + 11, (SY + CY) / 2);
+                  ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.textBaseline = "bottom";
+                }
+                // estrella de 5 puntas
+                var R = 7, r = 3, ang = -Math.PI / 2;
+                ctx.beginPath();
+                for (var p = 0; p < 10; p++) {
+                  var rr = (p % 2 === 0) ? R : r;
+                  ctx.lineTo(SX + rr * Math.cos(ang), SY + rr * Math.sin(ang));
+                  ang += Math.PI / 5;
+                }
+                ctx.closePath();
+                ctx.fillStyle = STAR; ctx.fill();
+                ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 1; ctx.stroke();
               }
             }
             ctx.restore();
@@ -197,51 +298,111 @@
       Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert,p")).forEach(function (n) { n.remove(); });
     }
 
+    function render(j, recreate) {
+      if (!j || !j.n) {
+        if (u) { u.destroy(); u = null; }
+        clear();
+        var e = document.createElement("div"); e.className = "alert";
+        e.textContent = "Sin bonos con TIREA y Duration (¿hay cotización?).";
+        box.appendChild(e); return;
+      }
+      var xs = j.xs.slice();
+      var vac = xs.map(function () { return null; });
+      var nss = (j.nss && j.nss.length === xs.length) ? j.nss.slice() : vac.slice();
+      var scat = [j.ars.slice(), j.usd.slice(), (j.bid || vac).slice(), (j.off || vac).slice()];
+      var newCmps = (j.cmps || []).map(function (c) {
+        return { label: c.label, codes: (c.codes || []).slice(),
+                 vals: (c.vals || vac).slice(),
+                 nss: (c.nss && c.nss.length === xs.length) ? c.nss.slice() : vac.slice() };
+      });
+      var newCodes = (j.codes || []).slice();
+      // Nuevas emisiones: insertar sus durations en el eje x (null en los
+      // scatters, NSS interpolada para que la línea no se corte) + distancias
+      // sobre el payload ORIGINAL (curva sin las inserciones).
+      var em = parseEmis();
+      var emisVals = null;
+      emisCodes = null; emisInfo = {};
+      if (em.length) {
+        emisVals = vac.slice(); emisCodes = vac.slice();
+        em.forEach(function (p) {
+          var k = 0;
+          while (k < xs.length && xs[k] < p.d) k++;
+          if (k < xs.length && xs[k] === p.d && emisCodes[k] == null) {
+            emisVals[k] = p.t; emisCodes[k] = p.c;
+          } else {
+            xs.splice(k, 0, p.d);
+            scat.forEach(function (a) { a.splice(k, 0, null); });
+            nss.splice(k, 0, interp(j.xs, j.nss, p.d));
+            newCmps.forEach(function (c, ci) {
+              c.vals.splice(k, 0, null); c.codes.splice(k, 0, null);
+              c.nss.splice(k, 0, interp(j.xs, (j.cmps && j.cmps[ci]) ? j.cmps[ci].nss : null, p.d));
+            });
+            newCodes.splice(k, 0, null);
+            emisVals.splice(k, 0, p.t); emisCodes.splice(k, 0, p.c);
+          }
+          // bono más cercano por duration (con valor en la curva principal)
+          var near = null, bd = Infinity;
+          for (var i = 0; i < j.xs.length; i++) {
+            var y = (j.ars[i] != null) ? j.ars[i] : j.usd[i];
+            if (y == null || !j.codes || !j.codes[i]) continue;
+            var dd = Math.abs(j.xs[i] - p.d);
+            if (dd < bd) { bd = dd; near = { code: j.codes[i], x: j.xs[i], y: y }; }
+          }
+          emisInfo[p.c] = { c: p.c, t: p.t, d: p.d, note: p.note, nss: interp(j.xs, j.nss, p.d), near: near };
+        });
+      }
+      var data = [xs].concat(scat, [nss]);
+      for (var ci = 0; ci < newCmps.length; ci++) data.push(newCmps[ci].vals, newCmps[ci].nss);
+      if (emisVals) data.push(emisVals);
+      // Firma estructural = labels de las comparaciones + si hay ★. Si cambió el
+      // set de series (cantidad/orden/nombre), hay que recrear el chart; si
+      // sólo cambian los datos, setData preserva el zoom.
+      var newSig = newCmps.map(function (c) { return c.label; }).join("|") + (emisVals ? "|★" : "");
+      if (newSig !== sig) { sig = newSig; recreate = true; }
+      cmps = newCmps;
+      meta = j.meta || {};
+      codes = newCodes;
+      if (j.ylabel) yLabel = j.ylabel + " (%)";   // TIREA/TEM según la métrica
+      if (recreate || !u) {
+        if (u) u.destroy();
+        clear();
+        selfSet = true;                 // la construcción dispara setScale: no es zoom del usuario
+        u = new uPlot(opts(), data, box);
+        selfSet = false;
+        userZoomed = false;             // chart nuevo → arranca siguiendo los datos
+      } else {
+        // Si el usuario hizo zoom, refrescamos los datos SIN re-encuadrar
+        // (resetScales=false) para no pisarle la vista.
+        selfSet = true;
+        u.setData(data, !userZoomed);
+        selfSet = false;
+      }
+    }
+
     function load(recreate) {
       fetch("/graficos/data?" + params())
         .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (!j || !j.n) {
-            if (u) { u.destroy(); u = null; }
-            clear();
-            var e = document.createElement("div"); e.className = "alert";
-            e.textContent = "Sin bonos con TIREA y Duration (¿hay cotización?).";
-            box.appendChild(e); return;
-          }
-          var vac = j.xs.map(function () { return null; });
-          var nss = (j.nss && j.nss.length === j.xs.length) ? j.nss : vac;
-          var data = [j.xs, j.ars, j.usd, j.bid || vac, j.off || vac, nss];
-          var newCmps = j.cmps || [];
-          for (var ci = 0; ci < newCmps.length; ci++) {
-            var c = newCmps[ci];
-            var cn = (c.nss && c.nss.length === j.xs.length) ? c.nss : vac;
-            data.push(c.vals || vac, cn);
-          }
-          // Firma estructural = labels de las comparaciones. Si cambió el set de
-          // series (cantidad/orden/nombre), hay que recrear el chart; si sólo
-          // cambian los datos, setData preserva el zoom.
-          var newSig = newCmps.map(function (c) { return c.label; }).join("|");
-          if (newSig !== sig) { sig = newSig; recreate = true; }
-          cmps = newCmps;
-          meta = j.meta || {};
-          codes = j.codes || [];
-          if (j.ylabel) yLabel = j.ylabel + " (%)";   // TIREA/TEM según la métrica
-          if (recreate || !u) {
-            if (u) u.destroy();
-            clear();
-            selfSet = true;                 // la construcción dispara setScale: no es zoom del usuario
-            u = new uPlot(opts(), data, box);
-            selfSet = false;
-            userZoomed = false;             // chart nuevo → arranca siguiendo los datos
-          } else {
-            // Si el usuario hizo zoom, refrescamos los datos SIN re-encuadrar
-            // (resetScales=false) para no pisarle la vista.
-            selfSet = true;
-            u.setData(data, !userZoomed);
-            selfSet = false;
-          }
-        })
+        .then(function (j) { lastJ = j; render(j, recreate); })
         .catch(function () { /* sin red → mantiene el último chart */ });
+    }
+
+    // Textarea de emisiones: re-dibuja con el ÚLTIMO payload (sin re-fetch),
+    // debounced; persiste en localStorage.
+    if (emisBox) {
+      try { emisBox.value = localStorage.getItem("graf_emis") || ""; } catch (e) { /* sin storage */ }
+      var emisT = null;
+      emisBox.addEventListener("input", function () {
+        clearTimeout(emisT);
+        emisT = setTimeout(function () {
+          try { localStorage.setItem("graf_emis", emisBox.value); } catch (e) { /* noop */ }
+          if (lastJ) render(lastJ, false);
+        }, 300);
+      });
+      var emisClear = document.getElementById("graf-emis-clear");
+      if (emisClear) emisClear.addEventListener("click", function () {
+        emisBox.value = "";
+        emisBox.dispatchEvent(new Event("input"));
+      });
     }
 
     // Doble-click resetea el zoom (default de uPlot): volvemos a auto-encuadrar.
