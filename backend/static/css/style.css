@@ -792,6 +792,28 @@ td[data-fwc] { cursor: pointer; }
 td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .mercado-table th, .mercado-table td { white-space: nowrap; }
 .mercado-table tbody tr:hover { background: var(--accent-soft); }
+/* Matriz de tenencias (~17k celdas) — ver partials/matriz_table.html.
+   Panel tipo planilla: scrollea en las dos direcciones con cabecera y
+   Especie/Nombre fijas. Cabecera y trozos de filas son <table>s separadas
+   con el mismo <colgroup> (table-layout fixed → alineadas); cada trozo lleva
+   content-visibility: auto → el browser sólo resuelve estilo/layout de lo
+   que está a la vista. Celda vacía = <td></td>; el "·" lo pone el CSS. Los
+   títulos de fondo envuelven (columna angosta = más fondos a la vista). */
+.matriz-pane { max-height: calc(100vh - 215px); overflow: auto; }
+.matriz { table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+/* El div contenido no puede medir su tabla: ancho explícito (suma de <col>,
+   o el panel si es más ancho — así cabecera y trozos reparten igual). */
+.matriz-chunk { content-visibility: auto; width: max(var(--w-total, 100%), 100%); }
+.matriz-head { position: sticky; top: 0; z-index: 2; }
+.matriz th { white-space: normal; overflow-wrap: anywhere; vertical-align: bottom; }
+.matriz th.m-esp, .matriz th.m-nom { text-align: left; position: sticky; z-index: 3; }
+.matriz td:empty::before { content: "·"; }
+.matriz td.m-esp, .matriz td.m-nom { position: sticky; z-index: 1; background: var(--panel); }
+.matriz .m-esp { left: 0; }
+.matriz .m-nom { left: var(--w-esp, 80px); }
+.matriz td.m-esp { text-align: left; color: var(--accent); font-weight: 600; }
+.matriz td.m-nom { text-align: left; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.matriz tbody tr:hover td.m-esp, .matriz tbody tr:hover td.m-nom { background: var(--panel-2); }
 /* Libro (profundidad) en Mercado */
 .book-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 8px; }
 .mercado-book { margin-top: 4px; }
