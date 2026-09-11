@@ -120,6 +120,23 @@
     </div>
   </div>
 
+  {# Nuevas emisiones / cortes de licitación: puntos que el usuario tipea
+     (ticker; tasa; duration [; nota]) y se dibujan como ★ sobre la curva, con
+     la distancia a la NSS y al bono más cercano. 100 % client-side (charts.js):
+     sin requests ni cálculos en el server; persiste en localStorage. El
+     textarea NO tiene `name` → no viaja en los requests de estimación/NSS. #}
+  <div class="card graf-emis-card" style="margin-top:12px">
+    <div class="card-title">
+      <span>Nuevas emisiones · cortes de licitación <small class="muted">(se dibujan como ★, sin recalcular nada)</small></span>
+      <span class="card-title-aux"><span id="graf-emis-n"></span> <button type="button" class="lnk" id="graf-emis-clear" title="Vaciar la lista">borrar</button></span>
+    </div>
+    <div class="card-body graf-emis-body">
+      <textarea id="graf-emis" rows="3" spellcheck="false" autocomplete="off"
+                placeholder="TMF27; 27,5; 0,5&#10;TML27; 29; 0,9"></textarea>
+      <p class="muted">Una por línea: <code>ticker; tasa; duration</code> (opcional <code>; nota</code>, p. ej. el precio de corte). La tasa va en la métrica del gráfico (TIREA / TEM / margen), tal cual sale del aviso de resultados — acá no se calcula nada. Cada corte aparece como ★ con la distancia a la curva NSS ("premio vs secundario") y, en el hover, al bono más cercano por duration.</p>
+    </div>
+  </div>
+
   {# Chart interactivo (uPlot, client-side). charts.js lee #graf-controls y lo dibuja. #}
   <div id="grafico-uplot" style="min-height:300px">
     <p class="muted" style="padding:10px">Cargando gráfico…</p>
