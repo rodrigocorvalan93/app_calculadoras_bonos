@@ -50,6 +50,10 @@ async def test_macro_custom_range() -> None:
         page = await ac.get("/historicos")
         data = await ac.get(f"/historicos/data?serie={key}&desde=2025-01-01&hasta=2025-06-01")
     assert page.status_code == 200 and 'id="hist-macro-uplot"' in page.text
+    # línea/barras (sólo dibujo, sin `name` → no viaja al server) + "Ver datos"
+    # lazy (la tabla la arma charts.js al abrir el <details>, con el JSON en memoria)
+    assert 'id="hm-tipo"' in page.text and 'name="hm-tipo"' not in page.text
+    assert '<details id="hm-datos"' in page.text and 'class="hm-datos-body"' in page.text
     assert data.status_code == 200
     j = data.json()
     assert "x" in j and "y" in j and len(j["x"]) == len(j["y"])

@@ -159,10 +159,13 @@ async def test_http_chip_y_banner(env, monkeypatch) -> None:
         _base(env, date(2026, 8, 28), date(2026, 8, 31))
         r = await ac.get("/cierre/chip")
         assert 'data-state="ok"' in r.text and "Guardar ahora" not in r.text
-        # la página lo lleva en la topbar (slot htmx) y el banner vacío
+        # la página lleva el slot htmx en el PIE de página (no en la topbar, que
+        # queda libre) y el banner vacío arriba
         page = await ac.get("/yas")
         assert 'id="cierre-chip"' in page.text and 'hx-get="/cierre/chip"' in page.text
         assert 'id="cierre-banner"' in page.text
+        assert 'id="cierre-chip"' not in page.text.split("</header>", 1)[0]
+        assert page.text.index('id="cierre-chip"') > page.text.index("<footer")
         # sin carpeta de bases: chip vacío, sin banner
         monkeypatch.delenv("DELTA_HISTORICO_DIR")
         r = await ac.get("/cierre/chip")

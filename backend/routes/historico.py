@@ -523,18 +523,33 @@ def _sd_fmt_rows(rows_desc: list, meta: Dict[str, Any]) -> list:
 _SD_CACHE: Dict[tuple, str] = {}
 
 
+def _iso_o_none(s: Optional[str]) -> Optional[str]:
+    """'AAAA-MM-DD' válido → tal cual; cualquier otra cosa → None."""
+    from datetime import date as _date
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        return _date.fromisoformat(s).isoformat()
+    except ValueError:
+        return None
+
+
 @router.get("/historicos/series-diarias", response_class=HTMLResponse)
 async def historicos_series_diarias(
     request: Request, serie: str = "", chart: str = "linea", dias: str = "90",
+    desde: Optional[str] = None, hasta: Optional[str] = None,
 ) -> HTMLResponse:
     """Pestaña 'Series diarias': las series del archivo FX/caución del cierre
     (CCL/MEP/canje/A3500 + caución $ y US$ TNA/VWAP/monto) con toggle
     línea/barras y tabla HP (fecha/valor/Δ/Δ%). Carga sólo al abrir el tab o
-    tocar el form; render cacheado por mtime (ver _SD_CACHE)."""
+    tocar el form; render cacheado por mtime (ver _SD_CACHE). `desde`/`hasta`
+    (ISO) tienen prioridad sobre la ventana, como en Macro."""
     modo = "barras" if chart == "barras" else "linea"
     dias_sel = dias if dias in _SD_VENTANAS else "90"
+    desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
     sig = fx_hist.signature()
-    key = (serie, modo, dias_sel, sig)
+    key = (serie, modo, dias_sel, desde, hasta, sig)
     html = _SD_CACHE.get(key)
     if html is not None:
         return HTMLResponse(html)
@@ -544,7 +559,7 @@ async def historicos_series_diarias(
         lst = fx_hist.series_list()
         keys = [s["key"] for s in lst]
         sel = serie if serie in keys else (keys[0] if keys else None)
-        data = fx_hist.series_rows(sel, _SD_VENTANAS[dias_sel]) if sel else None
+        data = fx_hist.series_rows(sel, _SD_VENTANAS[dias_sel], desde, hasta) if sel else None
         ch = (_serie_diaria_chart(data["rows"], data["meta"]["unit"], modo)
               if data and data["rows"] else {"n": 0})
         rows_desc = list(reversed(data["rows"]))[:500] if data else []
@@ -553,14 +568,14 @@ async def historicos_series_diarias(
             for b in ch.get("bars") or []:      # tooltip por barra, pre-formateado
                 b["tip"] = _sd_val(b["v"], data["meta"]["unit"], data["meta"]["dec"])
         return {"series_fx": lst, "serie_sel": sel, "chart_sel": modo,
-                "dias_sel": dias_sel, "data": data, "ch": ch,
+                "dias_sel": dias_sel, "desde": desde, "hasta": hasta, "data": data, "ch": ch,
                 "rows_fmt": _sd_fmt_rows(rows_desc, data["meta"]) if data else [],
                 "con_plazo": con_plazo, "n_tabla": len(rows_desc),
                 "archivo": fx_hist.status()}
 
     ctx = await loop.run_in_executor(None, _build)
     resp = _render(request, "partials/historico_series_diarias.html", **ctx)
-    if _SD_CACHE and next(iter(_SD_CACHE))[3] != sig:
+    if _SD_CACHE and next(iter(_SD_CACHE))[-1] != sig:
         _SD_CACHE.clear()                       # cambió el archivo → todo lo viejo afuera
     if len(_SD_CACHE) < 64:
         _SD_CACHE[key] = bytes(resp.body).decode("utf-8")

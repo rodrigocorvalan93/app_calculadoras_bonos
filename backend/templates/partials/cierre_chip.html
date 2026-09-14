@@ -1,4 +1,4 @@
-{# Chip "cierre" de la topbar + banner (oob) — historico_writer.estado_cierre.
+{# Chip "cierre" del pie de página + banner (oob) — historico_writer.estado_cierre.
    Sin carpeta de bases (sin_base) el chip queda vacío (CSS lo oculta). #}
 {%- if e.estado != "sin_base" -%}
 <a class="cierre-chip" data-state="{{ e.estado }}" href="/historicos" title="{{ e.detalle }}">{{ e.texto }}</a>

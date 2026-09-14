@@ -1097,20 +1097,34 @@ window.lsSet = function (k, v) {
 
 // ── Copiar tabla al portapapeles (TSV → pega como celdas en Excel) ──────────
 // Un botoncito ⧉ re sutil inyectado como hermano ANTES de cada .table-scroll
-// (margen negativo: cero corrimiento). Delegación global: sobrevive a todos
-// los swaps de htmx sin re-bindear nada.
+// — y de cada <table> suelta (sin .table-scroll) — (margen negativo: cero
+// corrimiento). Delegación global: sobrevive a todos los swaps de htmx sin
+// re-bindear nada.
 (function () {
+  function mkBtn() {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tbl-copy';
+    b.title = 'Copiar tabla (pegar en Excel)';
+    b.textContent = '⧉';
+    return b;
+  }
   function inject(root) {
     if (!root || !root.querySelectorAll) return;
     root.querySelectorAll('.table-scroll').forEach(function (ts) {
       var prev = ts.previousElementSibling;
       if (prev && prev.classList && prev.classList.contains('tbl-copy')) return;
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'tbl-copy';
-      b.title = 'Copiar tabla (pegar en Excel)';
-      b.textContent = '⧉';
-      ts.parentNode.insertBefore(b, ts);
+      ts.parentNode.insertBefore(mkBtn(), ts);
+    });
+    // Tablas sin .table-scroll (cashflows de YAS, tickets, books, resúmenes):
+    // el mismo botón, pegado antes de la tabla. Se saltea lo que ya está
+    // dentro de un .table-scroll (lo cubre el bloque de arriba).
+    root.querySelectorAll('table').forEach(function (t) {
+      if (t.closest('.table-scroll') || t.closest('.matriz-pane')) return;
+      if (t.rows.length < 2) return;                          // sin cuerpo: nada que copiar
+      var prev = t.previousElementSibling;
+      if (prev && prev.classList && prev.classList.contains('tbl-copy')) return;
+      t.parentNode.insertBefore(mkBtn(), t);
     });
   }
 
@@ -1145,7 +1159,9 @@ window.lsSet = function (k, v) {
     var b = evt.target.closest && evt.target.closest('.tbl-copy');
     if (!b) return;
     var ts = b.nextElementSibling;
-    var tables = ts && ts.querySelectorAll ? ts.querySelectorAll('table') : [];
+    if (!ts) return;
+    // hermano = .table-scroll (varias tablas adentro) o la <table> misma
+    var tables = ts.tagName === 'TABLE' ? [ts] : (ts.querySelectorAll ? ts.querySelectorAll('table') : []);
     if (!tables.length) return;
     var txt = tsvOf(tables);
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1167,8 +1183,115 @@ window.lsSet = function (k, v) {
   }
 
   document.body.addEventListener('htmx:afterSettle', function (evt) { inject(evt.detail.elt || evt.target); });
+  // Tablas armadas por JS (p. ej. "Ver datos" de Macro) avisan con este evento.
+  document.body.addEventListener('tables:injected', function (evt) { inject(evt.detail && evt.detail.root); });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { inject(document); });
   else inject(document);
+})();
+
+// ── Copiar gráfico al portapapeles (PNG) — uPlot y SVG ──────────────────────
+// Botón ⧉ arriba a la derecha de cada gráfico. Copia la imagen al portapapeles
+// (ClipboardItem: Chrome/Edge/Safari en contexto seguro — localhost/https); si
+// no se puede (http por LAN/Tailscale), la descarga como PNG. Los SVG del
+// server usan var(--x) del tema: se resuelven a color antes de rasterizar (una
+// imagen suelta no ve el CSS de la página). Fondo sólido del tema.
+(function () {
+  function cssVar(name, fb) {
+    try { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fb; }
+    catch (e) { return fb; }
+  }
+  function feedback(b, ok) {
+    var t = b.textContent;
+    b.textContent = ok ? '✓' : '⤓';
+    b.classList.add('ok');
+    setTimeout(function () { b.textContent = t; b.classList.remove('ok'); }, 1200);
+  }
+  function download(blob, name) {
+    var a = document.createElement('a');
+    a.download = (name || 'grafico') + '.png';
+    a.href = URL.createObjectURL(blob);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+  }
+  function deliver(canvas, name, btn) {
+    canvas.toBlob(function (blob) {
+      if (!blob) return;
+      var can = !!(navigator.clipboard && navigator.clipboard.write && window.ClipboardItem);
+      if (!can) { download(blob, name); feedback(btn, false); return; }
+      try {
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+          .then(function () { feedback(btn, true); }, function () { download(blob, name); feedback(btn, false); });
+      } catch (e) { download(blob, name); feedback(btn, false); }
+    }, 'image/png');
+  }
+  function withBg(src, w, h) {
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = cssVar('--bg', '#0b0e13');
+    ctx.fillRect(0, 0, w, h);
+    if (src) ctx.drawImage(src, 0, 0, w, h);
+    return c;
+  }
+  // uPlot: el canvas ya está dibujado (fondo transparente) → fondo + copia.
+  function copyUplot(box, name, btn) {
+    var src = box.querySelector('canvas');
+    if (!src) return;
+    deliver(withBg(src, src.width, src.height), name, btn);
+  }
+  // SVG: serializar con las var(--x) resueltas → <img> → canvas 2× → copia.
+  function copySvg(svg, name, btn) {
+    var s = new XMLSerializer().serializeToString(svg);
+    s = s.replace(/var\(--([\w-]+)\)/g, function (m, v) { return cssVar('--' + v, '#888'); });
+    if (!/xmlns=/.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    var r = svg.getBoundingClientRect();
+    var w = Math.max(1, Math.round(r.width || svg.clientWidth || 800));
+    var h = Math.max(1, Math.round(r.height || svg.clientHeight || 400));
+    var img = new Image();
+    img.onload = function () {
+      var c = withBg(null, w * 2, h * 2);
+      c.getContext('2d').drawImage(img, 0, 0, w * 2, h * 2);
+      deliver(c, name, btn);
+    };
+    img.onerror = function () { feedback(btn, false); };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+  }
+  function mkBtn(title) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chart-copy';
+    b.title = title || 'Copiar gráfico (imagen al portapapeles; si no se puede, descarga PNG)';
+    b.textContent = '⧉';
+    return b;
+  }
+  // uPlot: charts.js llama window.chartCopyInject(box, nombre) tras crear el chart.
+  window.chartCopyInject = function (box, name) {
+    if (!box || box.querySelector(':scope > .chart-copy')) return;
+    var b = mkBtn();
+    if (box.querySelector(':scope > .graf-dl')) b.classList.add('chart-copy-shift');   // convive con ⤓ PNG
+    b.onclick = function () { copyUplot(box, name, b); };
+    box.style.position = box.style.position || 'relative';
+    box.appendChild(b);
+  };
+  // SVG del server (series diarias, forwards, escenario, break-even, semanal…):
+  // hermano ANTES del svg (mismo truco de margen negativo que .tbl-copy).
+  function injectSvg(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('svg').forEach(function (svg) {
+      if (svg.closest('.chart-copy-skip') || svg.closest('button') || svg.closest('a')) return;
+      var w = svg.getAttribute('width') || (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width) || 0;
+      if (!(svg.getAttribute('role') === 'img' || parseFloat(w) >= 200)) return;   // íconos afuera
+      var prev = svg.previousElementSibling;
+      if (prev && prev.classList && prev.classList.contains('chart-copy')) return;
+      var b = mkBtn();
+      b.classList.add('chart-copy-inline');
+      b.onclick = function () { copySvg(svg, (svg.getAttribute('data-name') || 'grafico'), b); };
+      svg.parentNode.insertBefore(b, svg);
+    });
+  }
+  document.body.addEventListener('htmx:afterSettle', function (evt) { injectSvg(evt.detail.elt || evt.target); });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { injectSvg(document); });
+  else injectSvg(document);
 })();
 
 // ── Matriz de forwards → histórico del par con un click ─────────────────────

@@ -66,6 +66,14 @@
             <span>Hasta</span>
             <input type="date" name="hasta" value="{{ hasta }}">
           </label>
+          <label class="field">
+            <span>Gráfico</span>
+            {# Sin `name`: es sólo de dibujo (charts.js re-dibuja con el JSON en memoria, sin request). #}
+            <select id="hm-tipo">
+              <option value="linea" selected>Línea</option>
+              <option value="barras">Barras</option>
+            </select>
+          </label>
           <a class="btn-primary" style="align-self:flex-end" href="/historicos?refresh=1&serie={{ selected }}&rango={{ rango }}">↻ Actualizar</a>
         </div>
         <p class="muted" style="font-size:11px;margin-top:6px">Desde/Hasta tienen prioridad sobre el preset de Rango. Interactivo (uPlot): zoom arrastrando, doble click reset.</p>
@@ -74,6 +82,12 @@
     <div id="hist-macro-uplot" style="min-height:300px">
       <p class="muted" style="padding:10px">Cargando gráfico…</p>
     </div>
+    {# Datos numéricos de la serie: se arman recién al abrir (charts.js, con el
+       JSON ya bajado) — la página no paga la tabla al cargar. #}
+    <details id="hm-datos" class="card hm-datos" style="margin-top:12px">
+      <summary class="card-title" style="cursor:pointer;list-style:none"><span>🗒 Ver datos <small class="muted">(fecha · valor · Δ · Δ%, se arma al abrir)</small></span><span class="card-title-aux">▾</span></summary>
+      <div class="hm-datos-body"></div>
+    </details>
   </div>
 
   {# ── Tasas por curva (BYMA) — lazy: carga al abrir la pestaña ── #}
