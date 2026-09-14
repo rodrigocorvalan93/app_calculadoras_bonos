@@ -1499,6 +1499,12 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
   padding: 6px 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; line-height: 1.5;
 }
 .graf-emis-body p { font-size: 11.5px; max-width: 560px; margin: 0; }
+/* "premio vs" (mínimo / curva / instrumento) en el título del cuadro de emisiones. */
+.graf-emis-ref { font-weight: 400; margin: 0 10px; white-space: nowrap; }
+.graf-emis-ref select {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 1px 4px; font-size: 11px; font-family: inherit; margin-left: 2px;
+}
 /* Copiar gráfico (⧉) arriba a la derecha: en uPlot como hijo absoluto del
    contenedor (.chart-copy-shift deja lugar al ⤓ PNG de Gráficos); en los SVG
    del server como hermano anterior con margen negativo (cero corrimiento). */

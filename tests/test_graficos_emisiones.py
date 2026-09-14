@@ -20,9 +20,15 @@ async def test_graficos_trae_cuadro_de_emisiones_client_side() -> None:
         # el textarea no forma parte de los controles serializados
         cuadro = page.text.split('id="graf-emis"', 1)[1].split(">", 1)[0]
         assert "name=" not in cuadro
+        # selector "premio vs" (mínimo curva/instrumento · curva · instrumento),
+        # también sin `name`: el match contra el bono que se licita es client-side
+        assert 'id="graf-emis-ref"' in page.text and 'value="instr"' in page.text
+        sel = page.text.split('id="graf-emis-ref"', 1)[1].split(">", 1)[0]
+        assert "name=" not in sel
         js = await ac.get("/static/js/charts.js")
         assert js.status_code == 200
         for frag in ("Licitación ★", "function parseEmis", "graf_emis", "vs curva NSS",
+                     "function findInstr", "graf_emis_ref", "function emisRefMode",
                      "uPlot.paths.bars", "hm-datos", "chartCopyInject"):
             assert frag in js.text
         # botón de copiado (⧉) en gráficos uPlot y SVG + tablas sueltas: app.js
