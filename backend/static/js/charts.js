@@ -51,6 +51,41 @@
     var STAR = "#ffd166";
     var emisCodes = null, emisInfo = {};   // codes alineados a xs · info por ticker
     var lastJ = null;                       // último payload (re-render sin re-fetch)
+    // Referencia del "premio" de cada corte: la curva NSS y/o el instrumento
+    // que se licita si YA cotiza en el gráfico (match por ticker: exacto o con
+    // sufijo de pata, GD30 ↔ GD30C). Del instrumento se toma la TIR offer
+    // (punta de venta = lo que paga el que compra en secundario) y, sin punta
+    // (después del cierre, cuando salen los resultados), el último/cierre.
+    // Todo sale del payload en memoria: cero requests, cero cálculos nuevos.
+    //   min   → el menor de los dos premios (default; sin bono = curva)
+    //   curva → siempre vs NSS · instr → vs el bono (sin bono = curva)
+    var emisRefSel = document.getElementById("graf-emis-ref");
+    function emisRefMode() { return emisRefSel ? emisRefSel.value : "min"; }
+    function findInstr(j, ticker) {
+      if (!j || !ticker) return null;
+      var best = null;
+      function consider(cds, offs, lastAt, label) {
+        if (!cds) return;
+        for (var i = 0; i < cds.length; i++) {
+          var c = cds[i];
+          if (!c) continue;
+          var C = String(c).toUpperCase(), score;
+          if (C === ticker) score = 3;
+          else if (C.length === ticker.length + 1 && C.indexOf(ticker) === 0) score = 2;   // GD30 → GD30C
+          else if (ticker.length === C.length + 1 && ticker.indexOf(C) === 0) score = 1;   // GD30C → GD30
+          else continue;
+          var yl = lastAt(i), yo = offs ? offs[i] : null;
+          if (yl == null && yo == null) continue;
+          if (!best || score > best.score) best = { code: c, x: j.xs[i], last: yl, off: yo, score: score, curve: label };
+        }
+      }
+      consider(j.codes, j.off, function (i) { return j.ars[i] != null ? j.ars[i] : j.usd[i]; }, null);
+      (j.cmps || []).forEach(function (c) { consider(c.codes, null, function (i) { return c.vals[i]; }, c.label); });
+      if (!best) return null;
+      best.y = (best.off != null) ? best.off : best.last;
+      best.src = (best.off != null) ? "offer" : "últ.";
+      return best;
+    }
     // "27,5" / "27,5%" / "1.234,5" (es-AR) o "27.5" → número; null si no parsea.
     function num(s) {
       s = String(s == null ? "" : s).trim().replace(/%/g, "");
@@ -125,7 +160,10 @@
         if (!em) return head + " · licitación";
         var o = head + " · licitación" + (em.note ? " · " + em.note : "");
         o += "<br>tasa " + fmtPct(em.t) + " · Dur " + fmtNum(em.d);
-        if (em.nss != null) o += "<br>vs curva NSS " + fmtPct(em.nss) + " → " + fmtPP(em.t - em.nss);
+        // Las dos distancias; "premio" marca la que se dibuja (según el modo).
+        var used = em.ref ? em.ref.kind : null;
+        if (em.nss != null) o += "<br>" + (used === "curva" ? "<b>premio</b> " : "") + "vs curva NSS " + fmtPct(em.nss) + " → " + fmtPP(em.t - em.nss);
+        if (em.instr) o += "<br>" + (used === "instr" ? "<b>premio</b> " : "") + "vs " + em.instr.code + " " + em.instr.src + " " + fmtPct(em.instr.y) + " → " + fmtPP(em.instr.dif);
         if (em.near) o += "<br>vs " + em.near.code + " (dur " + fmtNum(em.near.x) + ") " + fmtPct(em.near.y) + " → " + fmtPP(em.t - em.near.y);
         return o;
       }
@@ -236,16 +274,20 @@
               for (var j = 0; j < X0.length; j++) {
                 if (ev[j] == null || !emisCodes[j]) continue;
                 var SX = uu.valToPos(X0[j], "x", true), SY = uu.valToPos(ev[j], "y", true);
-                var info = emisInfo[emisCodes[j]];
-                if (info && info.nss != null) {
-                  var CY = uu.valToPos(info.nss, "y", true), dif = info.t - info.nss;
-                  ctx.strokeStyle = dif >= 0 ? GREEN : "#fb923c"; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]);
-                  ctx.beginPath(); ctx.moveTo(SX, SY); ctx.lineTo(SX, CY); ctx.stroke(); ctx.setLineDash([]);
+                var info = emisInfo[emisCodes[j]], ref = info && info.ref;
+                if (ref) {
+                  // Punteada hasta la referencia del premio: vertical a la curva
+                  // NSS, o diagonal al punto del instrumento que se licita.
+                  var isI = ref.kind === "instr";
+                  var RX = isI ? uu.valToPos(ref.x, "x", true) : SX;
+                  var RY = uu.valToPos(ref.y, "y", true), dif = ref.dif, col = dif >= 0 ? GREEN : "#fb923c";
+                  ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]);
+                  ctx.beginPath(); ctx.moveTo(SX, SY); ctx.lineTo(RX, RY); ctx.stroke(); ctx.setLineDash([]);
                   // uPlot deja textAlign="right" tras los ejes: fijarlo para que el
                   // "+0,40 pp" quede a la DERECHA de la ★ (el ticker va arriba).
-                  ctx.fillStyle = dif >= 0 ? GREEN : "#fb923c"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+                  ctx.fillStyle = col; ctx.textBaseline = "middle"; ctx.textAlign = "left";
                   ctx.font = "bold 10.5px system-ui,-apple-system,sans-serif";
-                  ctx.fillText(fmtPP(dif), SX + 11, (SY + CY) / 2);
+                  ctx.fillText(fmtPP(dif) + (isI ? " vs " + ref.code : ""), SX + 11, isI ? SY + 8 : (SY + RY) / 2);
                   ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.textBaseline = "bottom";
                 }
                 // estrella de 5 puntas
@@ -267,22 +309,34 @@
             var i = uu.cursor.idx;
             if (i == null) { tip.style.display = "none"; return; }
             // Punto más cercano (en Y) al cursor entre las series con valor en i.
-            var cy = uu.cursor.top, best = null, bestD = Infinity;
+            var cy = uu.cursor.top, cx = uu.cursor.left, best = null, bestD = Infinity;
+            var X0c = uu.data[0];
             for (var s = 0; s < SCAT.length; s++) {
               var e = SCAT[s], ser = uu.series[e.si];
               if (!ser || !ser.show) continue;
-              var yv = uu.data[e.si][i];
-              if (yv == null) continue;
-              var dd = (cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy);
-              if (dd < bestD) { bestD = dd; best = { e: e, yv: yv }; }
+              // Una ★ (reapertura) cae a una duration casi igual a la del bono,
+              // en un x propio a <1 px: el idx del cursor puede resolver al bono.
+              // Para las ★ se miran también los índices vecinos (a ≤8 px) y, a
+              // igual distancia, gana la ★ (es lo que el usuario tipeó para mirar).
+              var idxs = (e.kind === "emis") ? [i - 1, i, i + 1] : [i];
+              for (var q = 0; q < idxs.length; q++) {
+                var ii = idxs[q];
+                if (ii < 0 || ii >= X0c.length) continue;
+                var yv = uu.data[e.si][ii];
+                if (yv == null) continue;
+                if (ii !== i && cx != null && Math.abs(uu.valToPos(X0c[ii], "x") - cx) > 8) continue;
+                var dd = (cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy);
+                if (e.kind === "emis") dd = Math.max(0, dd - 8);
+                if (dd < bestD) { bestD = dd; best = { e: e, yv: yv, i: ii }; }
+              }
             }
-            var cds = best && codesOf(best.e), code = cds ? cds[i] : null;
+            var cds = best && codesOf(best.e), code = cds ? cds[best.i] : null;
             if (!code) { tip.style.display = "none"; return; }
             tip.innerHTML = tipHTML(code, meta[code], best.e.kind);
             tip.style.display = "block";
             // Anti-clip: si el globito se saldría por la derecha/arriba, lo
             // volteamos para que SIEMPRE se vea completo dentro del gráfico.
-            var L = uu.valToPos(uu.data[0][i], "x"), T = uu.valToPos(best.yv, "y");
+            var L = uu.valToPos(X0c[best.i], "x"), T = uu.valToPos(best.yv, "y");
             var bw = box.clientWidth, bh = box.clientHeight, tw = tip.offsetWidth, th = tip.offsetHeight;
             var left = L + 12; if (left + tw > bw - 4) { left = L - tw - 12; } if (left < 2) { left = 2; }
             var top = T - th - 8; if (top < 2) { top = T + 16; } if (top + th > bh - 2) { top = bh - th - 2; }
@@ -348,7 +402,16 @@
             var dd = Math.abs(j.xs[i] - p.d);
             if (dd < bd) { bd = dd; near = { code: j.codes[i], x: j.xs[i], y: y }; }
           }
-          emisInfo[p.c] = { c: p.c, t: p.t, d: p.d, note: p.note, nss: interp(j.xs, j.nss, p.d), near: near };
+          // Premio: vs curva NSS (en la duration del corte) y vs el instrumento
+          // si ya cotiza (offer, o último sin punta); `ref` = la que se dibuja.
+          var nssY = interp(j.xs, j.nss, p.d), ins = findInstr(j, p.c), mode = emisRefMode();
+          var pc = (nssY != null) ? { kind: "curva", y: nssY, x: p.d, dif: p.t - nssY } : null;
+          var pi = ins ? { kind: "instr", y: ins.y, x: ins.x, dif: p.t - ins.y, code: ins.code, src: ins.src } : null;
+          var ref = (mode === "curva") ? pc
+                  : (mode === "instr") ? (pi || pc)
+                  : (pc && pi) ? (pi.dif <= pc.dif ? pi : pc) : (pi || pc);
+          if (near && ins && near.code === ins.code) near = null;   // ya figura como instrumento
+          emisInfo[p.c] = { c: p.c, t: p.t, d: p.d, note: p.note, nss: nssY, instr: pi, ref: ref, near: near };
         });
       }
       var data = [xs].concat(scat, [nss]);
@@ -368,6 +431,7 @@
         clear();
         selfSet = true;                 // la construcción dispara setScale: no es zoom del usuario
         u = new uPlot(opts(), data, box);
+        box.uplot = u;                  // instancia a mano (diagnóstico / tests visuales)
         selfSet = false;
         userZoomed = false;             // chart nuevo → arranca siguiendo los datos
         if (window.chartCopyInject) {
@@ -406,6 +470,15 @@
       if (emisClear) emisClear.addEventListener("click", function () {
         emisBox.value = "";
         emisBox.dispatchEvent(new Event("input"));
+      });
+    }
+    // Modo del premio (mínimo / curva / instrumento): persiste y re-dibuja con
+    // el último payload, sin request.
+    if (emisRefSel) {
+      try { var m0 = localStorage.getItem("graf_emis_ref"); if (m0) emisRefSel.value = m0; } catch (e) { /* noop */ }
+      emisRefSel.addEventListener("change", function () {
+        try { localStorage.setItem("graf_emis_ref", emisRefSel.value); } catch (e) { /* noop */ }
+        if (lastJ) render(lastJ, false);
       });
     }
 
