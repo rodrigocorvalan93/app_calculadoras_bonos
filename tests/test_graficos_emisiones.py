@@ -22,5 +22,10 @@ async def test_graficos_trae_cuadro_de_emisiones_client_side() -> None:
         assert "name=" not in cuadro
         js = await ac.get("/static/js/charts.js")
         assert js.status_code == 200
-        for frag in ("Licitación ★", "function parseEmis", "graf_emis", "vs curva NSS"):
+        for frag in ("Licitación ★", "function parseEmis", "graf_emis", "vs curva NSS",
+                     "uPlot.paths.bars", "hm-datos", "chartCopyInject"):
             assert frag in js.text
+        # botón de copiado (⧉) en gráficos uPlot y SVG + tablas sueltas: app.js
+        app_js = await ac.get("/static/js/app.js")
+        for frag in ("window.chartCopyInject", "function copySvg", "ClipboardItem", "tables:injected"):
+            assert frag in app_js.text

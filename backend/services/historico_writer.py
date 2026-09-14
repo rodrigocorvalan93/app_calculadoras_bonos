@@ -350,6 +350,15 @@ def _marcar_sin_rueda(d: date) -> None:
         pass
 
 
+def _feed_vivo() -> bool:
+    """WS del broker conectado y con market data reciente (feed_alive)."""
+    try:
+        from backend.services.primary_ws import get_ws_client
+        return bool(get_ws_client().feed_alive)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _sin_rueda_days() -> set:
     out: set = set()
     try:
@@ -428,16 +437,17 @@ def estado_cierre() -> Dict[str, Any]:
             out["estado"] = "pendiente"
             out["texto"] = "⏳ cierre pendiente"
             out["detalle"] = (f"El autosave de las {hh:02d}:{mm:02d} todavía no guardó "
-                              "(reintenta cada 10 min hasta ~90 min)"
-                              + (f" · último intento: {r['error']}" if r.get("error") else ""))
+                              "(reintenta cada 10 min hasta ~90 min)")
             return out
+    # El texto del error (paths de OneDrive, etc.) NO va al tooltip que ven todos
+    # los roles: viaja en `error` y lo muestra sólo el banner del superuser.
     out["estado"] = "falta"
     out["texto"] = f"⚠ falta cierre {dm}" + (f" (+{atraso - 1})" if atraso and atraso > 1 else "")
     out["detalle"] = (f"La base histórica no tiene el cierre del {dm}"
                       + (f" — atraso {atraso} ruedas" if atraso and atraso > 1 else "")
-                      + (f" · último error: {r['error']}" if r.get("error")
+                      + (" · el último intento de guardado falló (detalle en el panel)" if r.get("error")
                          else f" · ¿la app estaba cerrada a las {hh:02d}:{mm:02d}? "
-                              "Programá la captura headless (python -m backend.tools.cierre)"))
+                              "Programá la captura headless (backend/tools/cierre.py)"))
     return out
 
 
@@ -479,6 +489,29 @@ def append_and_save(df: "Any", xlsx_path: str, incluir_journal: bool = True) -> 
     raise RuntimeError("unreachable")            # pragma: no cover
 
 
+def _apartar_si_corrupto(xlsx_path: str) -> None:
+    """xlsx que no es ni un zip (OneDrive a mitad de sync / Excel que murió
+    guardando): se aparta como .corrupto-<fecha> (evidencia, nunca se borra) y
+    el write de salida regenera uno limpio. Chequeo de ms, sin abrir el libro."""
+    import zipfile
+    try:
+        if not os.path.isfile(xlsx_path) or zipfile.is_zipfile(xlsx_path):
+            return
+    except OSError:
+        return
+    marca = _now().strftime("%Y%m%d-%H%M%S")
+    respaldo = f"{xlsx_path}.corrupto-{marca}"
+    try:
+        os.replace(xlsx_path, respaldo)
+    except OSError as exc_mv:
+        raise RuntimeError(
+            f"La base {xlsx_path} está corrupta pero no se pudo apartar "
+            f"({exc_mv}) — ¿archivo abierto en Excel? Cerralo y reintentá."
+        ) from exc_mv
+    logger.warning("[historico_writer] base xlsx CORRUPTA — apartada como %s; "
+                   "se regenera desde el espejo parquet", respaldo)
+
+
 def _leer_base(xlsx_path: str, pd) -> "Any":
     """Lee la base existente con AUTO-RECUPERACIÓN: si el xlsx está corrupto
     (OneDrive a mitad de sync, Excel que murió guardando, write viejo no
@@ -486,6 +519,18 @@ def _leer_base(xlsx_path: str, pd) -> "Any":
     .corrupto-<fecha> (evidencia, nunca se borra) y la base sigue desde el
     espejo — el write de salida regenera un xlsx limpio. Sin espejo sano, el
     error sube con la instrucción de recuperación manual."""
+    # Espejo parquet FRESCO (no más viejo que el xlsx, misma regla que
+    # historico_byma._pick_source): leerlo en vez del Excel — 28 ms vs ~18 s de
+    # read_excel con un año de base, todo con el GIL tomado en plena app.
+    pq_fresh = os.path.splitext(xlsx_path)[0] + ".parquet"
+    try:
+        if os.path.isfile(pq_fresh) and os.path.getmtime(pq_fresh) >= os.path.getmtime(xlsx_path) - 60.0:
+            prev = pd.read_parquet(pq_fresh)
+            prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
+            _apartar_si_corrupto(xlsx_path)     # evidencia, como el camino lento
+            return prev
+    except Exception as exc:  # noqa: BLE001 — espejo roto: el Excel manda
+        logger.warning("[historico_writer] espejo parquet ilegible (%s) — leo el Excel", exc)
     try:
         prev = pd.read_excel(xlsx_path, parse_dates=["fecha_hoy"])
         prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
@@ -557,28 +602,60 @@ def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
         if isinstance(df_last[col].dtype, pd.DatetimeTZDtype):
             df_last[col] = df_last[col].dt.tz_localize(None)
 
-    tmp = xlsx_path + ".tmp.xlsx"
-    df_last.to_excel(tmp, index=False)
-    os.replace(tmp, xlsx_path)
-
+    # 1) Espejo parquet PRIMERO (99 ms): es lo que lee la app y lo que lee el
+    #    próximo guardado. Columnas de texto con tipos mixtos rompen pyarrow
+    #    (read_excel devolvía 'Price Date' como int y el df nuevo str) → string.
     pq_path = os.path.splitext(xlsx_path)[0] + ".parquet"
+    mirror = df_last.copy()
+    for col in ("symbol", "Código", "Price Source", "Price Date"):
+        if col in mirror.columns:
+            mirror[col] = mirror[col].astype("string")
+    tmp_pq = pq_path + ".tmp"
+    mirror.to_parquet(tmp_pq, index=False)
+    os.replace(tmp_pq, pq_path)
+
+    # 2) Excel (para el equipo / bymaapi) en un SUBPROCESO: openpyxl es Python
+    #    puro y con un año de base son ~35 s con el GIL tomado — cada request y
+    #    tick del server se frenaba mientras tanto. El hijo lee el parquet recién
+    #    escrito y escribe el tmp; acá sólo el replace (atómico, con los
+    #    reintentos ante lock del caller). Si el hijo falla, se escribe acá.
+    tmp = xlsx_path + ".tmp.xlsx"
+    if not _xlsx_en_subproceso(pq_path, tmp):
+        df_last.to_excel(tmp, index=False)
+    os.replace(tmp, xlsx_path)
+    # El espejo tiene que quedar NO más viejo que el xlsx (regla de lectura
+    # de _pick_source / _leer_base): re-estampar su mtime después del replace.
     try:
-        # Columnas de texto con tipos mixtos rompen pyarrow: al re-appendear,
-        # read_excel devuelve 'Price Date' como int y el df nuevo trae str →
-        # object mixto → ArrowTypeError. String dtype (con NA) las unifica.
-        mirror = df_last.copy()
-        for col in ("symbol", "Código", "Price Source", "Price Date"):
-            if col in mirror.columns:
-                mirror[col] = mirror[col].astype("string")
-        tmp_pq = pq_path + ".tmp"
-        mirror.to_parquet(tmp_pq, index=False)
-        os.replace(tmp_pq, pq_path)
-    except Exception as exc:  # noqa: BLE001 — el Excel ya quedó bien
-        logger.warning("[historico_writer] espejo parquet no guardado: %s", exc)
-        pq_path = None
+        os.utime(pq_path, None)
+    except OSError:
+        pass
 
     return {"total_rows": len(df_last), "xlsx": xlsx_path, "parquet": pq_path,
             "consolidados": consolidados}
+
+
+_XLSX_HIJO = ("import sys, pandas as pd\n"
+              "df = pd.read_parquet(sys.argv[1])\n"
+              "df.to_excel(sys.argv[2], index=False)\n")
+
+
+def _xlsx_en_subproceso(pq_path: str, tmp_xlsx: str) -> bool:
+    """Escribe `tmp_xlsx` desde el parquet en un intérprete aparte (mismo
+    venv). True si quedó escrito; False → el caller lo hace en proceso."""
+    import subprocess
+    import sys
+    try:
+        r = subprocess.run([sys.executable, "-c", _XLSX_HIJO, pq_path, tmp_xlsx],
+                           capture_output=True, text=True, timeout=900)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("[historico_writer] xlsx en subproceso no corrió (%s) — escribo en proceso", exc)
+        return False
+    if r.returncode != 0 or not os.path.isfile(tmp_xlsx):
+        detalle = (r.stderr or r.stdout or "").strip().splitlines()
+        logger.warning("[historico_writer] xlsx en subproceso falló (rc=%s: %s) — escribo en proceso",
+                       r.returncode, detalle[-1] if detalle else "?")
+        return False
+    return True
 
 
 def _ya_guardado_hoy(xlsx_path: str) -> bool:
@@ -691,7 +768,16 @@ def save_today(force: bool = False) -> Dict[str, Any]:
     if not force and res["operados"] < settings.historico_autosave_min_operados:
         res["skipped"] = (f"sólo {res['operados']} bonos operaron hoy "
                           f"(mínimo {settings.historico_autosave_min_operados}: ¿feriado?)")
-        _marcar_sin_rueda(_now().date())      # el chip no reclama este día
+        # "Sin rueda" sólo con evidencia POSITIVA: el feed está vivo (WS conectado
+        # y recibiendo) y aun así nadie operó → feriado no listado; el chip no
+        # reclama el día. Con el feed caído a las 17:01 los cierres pegajosos de
+        # ayer también dan 0 operados: ahí NO se marca y el autosave reintenta
+        # (antes marcaba igual y el día perdido quedaba en verde para siempre).
+        res["sin_rueda"] = _feed_vivo()
+        if res["sin_rueda"]:
+            _marcar_sin_rueda(_now().date())
+        else:
+            res["retry"] = True
         return res
 
     # 1) JOURNAL LOCAL primero: el día queda capturado aunque la base falle.
@@ -910,11 +996,14 @@ class HistoricoAutosave:
                     except Exception:  # noqa: BLE001
                         logger.exception("[historico_writer] mail de cierre falló")
                     break
-                if r.get("skipped"):
+                if r.get("skipped") and not r.get("retry"):
                     logger.info("[historico_writer] autosave salteado: %s", r["skipped"])
                     break
-                logger.warning("[historico_writer] autosave falló (%s) — reintento en "
-                               "10 min", r.get("error"))
+                # skipped+retry = 0 operados con el feed caído: puede ser el WS
+                # reconectando a las 17:01, no un feriado → reintentar igual.
+                logger.warning("[historico_writer] autosave %s (%s) — reintento en 10 min",
+                               "sin datos frescos" if r.get("skipped") else "falló",
+                               r.get("skipped") or r.get("error"))
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=600.0)
                     return                             # shutdown durante la espera

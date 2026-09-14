@@ -55,6 +55,11 @@ LEAF_CERT = "oms-localhost.pem"      # fullchain: hoja + CA
 LEAF_KEY = "oms-localhost-key.pem"
 
 _RENOVAR_ANTES_DIAS = 30             # margen antes del vencimiento de la hoja
+# Vigencia de la hoja: Apple (macOS/iOS/WKWebView — Excel para Mac) rechaza
+# certs de servidor con más de 825 días entre NotBefore y NotAfter, aunque la
+# CA sea custom y esté confiada. 820 + el día de margen del NotBefore < 825.
+_LEAF_DIAS = 820
+_LEAF_DIAS_MAX_APPLE = 825
 
 # Puerto http de la app donde vive GET /excel/crl (el del .bat /
 # tls_target_port). El CDP queda HORNEADO en el certificado: si corrés
@@ -119,7 +124,10 @@ def _san_objects(hosts: List[str]):
         try:
             out.append(x509.IPAddress(ipaddress.ip_address(h)))
         except ValueError:
-            out.append(x509.DNSName(h))
+            try:
+                out.append(x509.DNSName(h))
+            except ValueError:
+                continue        # hostname no-ASCII (mac con acentos): no entra al SAN
     return out
 
 
@@ -143,6 +151,13 @@ def _leaf_ok(cert_dir: Path, hosts: List[str],
         vence = cert.not_valid_after.replace(tzinfo=dt.timezone.utc)
     if vence <= limite:
         return False, f"vence {vence:%d/%m/%Y}"
+    # Hojas anteriores a este check duraban 826 días (825 + 1 de margen): Apple
+    # las rechaza → regenerar para que Excel para Mac confíe en el puente.
+    desde = getattr(cert, "not_valid_before_utc", None)
+    if desde is None:
+        desde = cert.not_valid_before.replace(tzinfo=dt.timezone.utc)
+    if (vence - desde) > dt.timedelta(days=_LEAF_DIAS_MAX_APPLE):
+        return False, "vigencia > 825 días (macOS/iOS la rechazan)"
     try:
         san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
         have = {str(v).lower() for v in san.get_values_for_type(x509.DNSName)}
@@ -288,7 +303,10 @@ def generate(cert_dir: Optional[Path] = None, hosts: Optional[List[str]] = None,
         .issuer_name(ca_name)
         .public_key(leaf_key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(atras).not_valid_after(now + dt.timedelta(days=825))
+        # ≤ 825 días de VIGENCIA TOTAL (NotAfter − NotBefore): macOS/iOS rechazan
+        # certs de servidor más largos, incluso con CA custom confiada (Excel para
+        # Mac usa WKWebView). Windows/schannel no lo exige, por eso no se veía.
+        .not_valid_before(atras).not_valid_after(atras + dt.timedelta(days=_LEAF_DIAS))
         .add_extension(x509.SubjectAlternativeName(_san_objects(hosts)), critical=False)
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
@@ -367,6 +385,36 @@ def trust_ca_windows(ca_cert_path: Path) -> Tuple[bool, str]:
     return False, f"certutil rc={r.returncode}: {detalle[-1] if detalle else '?'}"
 
 
+def trust_ca_macos(ca_cert_path: Path) -> Tuple[bool, str]:
+    """Confía la CA en el keychain de LOGIN del usuario (sin sudo; Safari,
+    Chrome y WKWebView —Excel para Mac— lo leen). `security` pide la clave
+    del usuario una vez (diálogo GUI). Idempotente. Sólo macOS."""
+    if sys.platform != "darwin":
+        return False, "no-macos"
+    keychain = Path.home() / "Library" / "Keychains" / "login.keychain-db"
+    try:
+        r = subprocess.run(
+            ["security", "add-trusted-cert", "-r", "trustRoot", "-p", "ssl",
+             "-k", str(keychain), str(ca_cert_path)],
+            capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, f"security no corrió: {e}"
+    if r.returncode == 0:
+        return True, "CA confiada en el keychain de login (security add-trusted-cert)"
+    detalle = (r.stderr or r.stdout or "").strip().splitlines()
+    return False, f"security rc={r.returncode}: {detalle[-1] if detalle else '?'}"
+
+
+def trust_ca(ca_cert_path: Path) -> Tuple[bool, str]:
+    """Confianza de la CA según la plataforma (Windows: certutil; macOS:
+    keychain de login; Linux: a mano)."""
+    if sys.platform == "win32":
+        return trust_ca_windows(ca_cert_path)
+    if sys.platform == "darwin":
+        return trust_ca_macos(ca_cert_path)
+    return False, "confiar a mano (Linux: copiar la CA a /usr/local/share/ca-certificates y update-ca-certificates)"
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Certificado HTTPS local del add-in de Excel")
     ap.add_argument("--force", action="store_true", help="regenerar aunque esté vigente")
@@ -398,19 +446,24 @@ def main(argv: Optional[List[str]] = None) -> int:
                if res["ca_reused"] else "CA + certificado nuevos")
         say(f"[https] {que} en {cert_dir} para: {', '.join(res['hosts'])} "
             f"(motivo: {res['reason']})")
-        ok, det = trust_ca_windows(res["ca_cert"])
+        ok, det = trust_ca(res["ca_cert"])
         say(f"[https] {det}" if ok else f"[https] CA no confiada automáticamente: {det}")
         if not ok and sys.platform == "win32":
             print(f"[https] a mano:  certutil -user -addstore -f Root {res['ca_cert']}")
+        if not ok and sys.platform == "darwin":
+            print(f"[https] a mano:  security add-trusted-cert -r trustRoot -p ssl "
+                  f"-k ~/Library/Keychains/login.keychain-db {res['ca_cert']}")
         say("[https] reiniciá la app (el puente carga el cert al arrancar) y cerrá "
             "Excel POR COMPLETO antes de reabrirlo")
     else:
         say(f"[https] certificado vigente en {cert_dir} (cubre {', '.join(res['hosts'])}) — nada que hacer")
         # Re-asegurar la confianza es gratis e idempotente (p.ej. certs copiados
-        # de otra máquina, o el store del usuario limpiado).
-        ok, det = trust_ca_windows(res["ca_cert"])
-        if not ok and sys.platform == "win32":
-            print(f"[https] OJO, la CA no está confiable: {det}")
+        # de otra máquina, o el store del usuario limpiado). En macOS pediría la
+        # clave del usuario cada vez → sólo cuando se (re)genera.
+        if sys.platform == "win32":
+            ok, det = trust_ca_windows(res["ca_cert"])
+            if not ok:
+                print(f"[https] OJO, la CA no está confiable: {det}")
     say("[https] el manifest del add-in se baja de https://localhost:8443/excel/manifest.xml "
         "(el puente TLS arranca solo con la app)")
     return 0

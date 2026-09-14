@@ -96,6 +96,20 @@ def _parse_csv(text: str) -> Optional[Tuple[date, List[Tuple[float, float]]]]:
     return None
 
 
+def _ssl_ctx():
+    """Contexto TLS con el bundle de certifi (si está): el Python de python.org
+    para macOS trae el store de CAs VACÍO y urllib moría con
+    CERTIFICATE_VERIFY_FAILED → la curva quedaba clavada en el backup. Mismo
+    patrón que primary_ws; sin certifi (bymaapi suelto) cae al default."""
+    try:
+        import ssl
+
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _fetch_treasury() -> Optional[Tuple[date, List[Tuple[float, float]]]]:
     """Baja el CSV del año actual (o el anterior, si el año recién empieza)."""
     year = date.today().year
@@ -105,7 +119,7 @@ def _fetch_treasury() -> Optional[Tuple[date, List[Tuple[float, float]]]]:
                 _CSV_URL.format(year=y),
                 headers={"User-Agent": "Mozilla/5.0 (app-calculadoras-bonos)"},
             )
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as resp:
                 got = _parse_csv(resp.read().decode("utf-8", "replace"))
             if got:
                 return got

@@ -189,8 +189,18 @@ python -m venv venv
 .\venv\Scripts\activate          # Windows
 # source venv/bin/activate       # Linux/Mac
 
-pip install -r requirements.txt
+pip install -r backend/requirements.txt   # la app FastAPI (requirements.txt de la raíz = Streamlit legacy)
 ```
+
+**macOS**: doble click en `correr_app.command` (o en Terminal `zsh correr_app.command`;
+`./correr_app.command dev` = auto-reload). Crea el venv en `~/.venvs/bonos` (fuera de
+OneDrive), instala `backend/requirements.txt`, genera y confía el certificado del
+add-in de Excel (pide la clave del usuario una vez) y abre el navegador. Si la
+carpeta llegó por OneDrive y no por `git clone`: `chmod +x correr_app.command` y, si
+Gatekeeper lo frena, botón derecho → Abrir. Las rutas `%USERPROFILE%\...` de
+`secrets.txt` se remapean solas a `~/Library/CloudStorage/OneDrive-...`
+(`backend/services/deltapaths.py`); marcá "Delta Bases" como *Mantener siempre en
+este dispositivo* en OneDrive.
 
 ### Credenciales
 

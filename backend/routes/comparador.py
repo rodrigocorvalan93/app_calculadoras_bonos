@@ -44,6 +44,19 @@ def _margen_aplica(meta: Dict[str, Any]) -> bool:
 
 
 def _to_float(v: Any) -> Optional[float]:
+    """float o None. Los inputs de valor son type=text es-AR (Safari/Firefox
+    rechazan la coma decimal en type=number y mandaban "" → se pisaba con el
+    last): parse_ar_num primero ("78,5" / "1.234,5" / "0,25" / "98.5"), float de
+    fallback (números ya parseados, "0.25")."""
+    if isinstance(v, (int, float)):
+        return float(v) if v == v else None
+    try:
+        from backend.locale_ar import parse_ar_num
+        f = parse_ar_num(v)
+        if f is not None:
+            return float(f)
+    except Exception:  # noqa: BLE001
+        pass
     try:
         return float(v)
     except (TypeError, ValueError):

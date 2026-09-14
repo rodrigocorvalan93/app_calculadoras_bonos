@@ -370,6 +370,10 @@
         u = new uPlot(opts(), data, box);
         selfSet = false;
         userZoomed = false;             // chart nuevo → arranca siguiendo los datos
+        if (window.chartCopyInject) {
+          var curEl0 = form.querySelector("[name=curve]");
+          window.chartCopyInject(box, "grafico-" + ((curEl0 && curEl0.value) || "curva"));
+        }
       } else {
         // Si el usuario hizo zoom, refrescamos los datos SIN re-encuadrar
         // (resetScales=false) para no pisarle la vista.
@@ -502,38 +506,92 @@
     return new URLSearchParams(p).toString();
   }
 
-  // ── Históricos · serie macro (línea, eje temporal) ────────────────────────
+  // ── Históricos · serie macro (línea o barras, eje temporal) ───────────────
+  // + "Ver datos": la tabla numérica se arma recién al abrir el <details>, con
+  //   el JSON que ya está en memoria (cero requests, cero costo al cargar la
+  //   página); si llegan datos nuevos con el panel abierto, se re-arma.
   function initHistMacro() {
     var box = document.getElementById("hist-macro-uplot");
     var ctrls = document.getElementById("hm-ctrls");
     if (!box || !ctrls || typeof uPlot === "undefined") return;
     var MUT = cssVar("--text-muted", "#8a8a8a"), BORD = cssVar("--border", "#333");
-    var u = null;
+    var ACC = cssVar("--accent", "#e0843c");
+    var tipoSel = document.getElementById("hm-tipo");          // sin `name`: no viaja al server
+    var datos = document.getElementById("hm-datos");
+    var u = null, lastJ = null;
     box.style.position = "relative";
+
+    function fmtDia(v) { return uPlot.fmtDate("{DD}/{MM}/{YYYY}")(new Date(v * 1000)); }
+
+    function draw() {
+      var j = lastJ;
+      clearBox(box);
+      if (!j || !j.n) {
+        if (u) { u.destroy(); u = null; }
+        var e = document.createElement("div"); e.className = "alert"; e.textContent = "Sin datos para esta serie.";
+        box.appendChild(e); return;
+      }
+      var barras = !!(tipoSel && tipoSel.value === "barras");
+      var serie = { label: j.label, stroke: ACC, width: 1.6, points: { show: false },
+                    value: function (uu, v) { return fmtNum(v); } };
+      if (barras) {
+        // Barras: relleno del acento, ancho relativo al paso; sin línea.
+        serie.fill = ACC; serie.width = 0;
+        serie.paths = uPlot.paths.bars({ size: [0.7, 100] });
+      }
+      var opts = {
+        width: box.clientWidth || 900, height: 420,
+        scales: { x: { time: true } },
+        axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD } },
+               { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: 60 }],
+        series: [{ value: function (uu, v) { return v == null ? "" : fmtDia(v); } }, serie],
+        cursor: { focus: { prox: 24 } },
+      };
+      if (u) u.destroy();
+      u = new uPlot(opts, [j.x, j.y], box);
+      if (window.chartCopyInject) window.chartCopyInject(box, "macro-" + (j.label || "serie"));
+    }
+
+    // Tabla numérica (más reciente primero): fecha · valor · Δ · Δ% — mismo
+    // formato es-AR que las tablas HP; CSV con el botón genérico [data-csv-of].
+    function renderDatos() {
+      if (!datos || !datos.open) return;
+      var body = datos.querySelector(".hm-datos-body");
+      if (!body) return;
+      var j = lastJ;
+      if (!j || !j.n) { body.innerHTML = '<p class="muted" style="padding:6px">Sin datos.</p>'; return; }
+      var n = j.x.length, rows = [];
+      for (var i = n - 1; i >= 0; i--) {
+        var v = j.y[i], p = (i > 0) ? j.y[i - 1] : null;
+        var d = (v != null && p != null) ? v - p : null;
+        var pc = (v != null && p) ? (v / p - 1) * 100 : null;
+        var cls = d == null ? "" : (d > 0 ? "var-up" : (d < 0 ? "var-down" : "px-flat"));
+        rows.push("<tr><td style=\"text-align:left;color:var(--accent);font-weight:600\">" + fmtDia(j.x[i]) + "</td>" +
+                  "<td style=\"font-weight:600\">" + fmtNum(v) + "</td>" +
+                  "<td class=\"" + cls + "\">" + (d == null ? "—" : (d > 0 ? "▲ " : (d < 0 ? "▼ " : "■ ")) + fmtNum(d)) + "</td>" +
+                  "<td class=\"" + cls + "\">" + (pc == null ? "—" : fmtPct(pc)) + "</td></tr>");
+      }
+      body.innerHTML =
+        '<div class="card-title"><span>🗒 ' + (j.label || "Serie") + ' · datos</span>' +
+        '<span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#hm-datos-tbl" title="Descargar la tabla (CSV es-AR)">⤓ CSV</button> · ' + n + ' filas · más reciente primero</span></div>' +
+        '<div class="card-body table-scroll" style="max-height:420px;overflow:auto"><table class="cashflows curve-table mercado-table" data-sortable id="hm-datos-tbl">' +
+        '<thead><tr><th style="text-align:left" data-sort>Fecha</th><th data-sort>Valor</th><th data-sort>Δ</th><th data-sort>Δ%</th></tr></thead>' +
+        '<tbody>' + rows.join("") + '</tbody></table></div>';
+      if (window.htmx) window.htmx.process(body);
+      document.body.dispatchEvent(new CustomEvent("tables:injected", { detail: { root: body } }));
+    }
+
     function load() {
       fetch("/historicos/data?" + paramsOf(ctrls)).then(function (r) { return r.json(); }).then(function (j) {
-        clearBox(box);
-        if (!j || !j.n) {
-          if (u) { u.destroy(); u = null; }
-          var e = document.createElement("div"); e.className = "alert"; e.textContent = "Sin datos para esta serie.";
-          box.appendChild(e); return;
-        }
-        var opts = {
-          width: box.clientWidth || 900, height: 420,
-          scales: { x: { time: true } },
-          axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD } },
-                 { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: 60 }],
-          series: [{ value: function (uu, v) { return v == null ? "" : uPlot.fmtDate("{DD}/{MM}/{YYYY}")(new Date(v * 1000)); } },
-                   { label: j.label, stroke: cssVar("--accent", "#e0843c"), width: 1.6, points: { show: false },
-                     value: function (uu, v) { return fmtNum(v); } }],
-          cursor: { focus: { prox: 24 } },
-        };
-        if (u) u.destroy();
-        u = new uPlot(opts, [j.x, j.y], box);
+        lastJ = j;
+        draw();
+        renderDatos();
       }).catch(function () {});
     }
     load();
     ctrls.querySelectorAll("[name]").forEach(function (el) { el.addEventListener("change", load); });
+    if (tipoSel) tipoSel.addEventListener("change", draw);            // sólo re-dibuja: sin request
+    if (datos) datos.addEventListener("toggle", renderDatos);         // lazy: se arma al abrir
     window.addEventListener("resize", function () { if (u) u.setSize({ width: box.clientWidth || 900, height: 420 }); });
   }
 
@@ -604,6 +662,7 @@
         };
         if (box._u) box._u.destroy();
         box._u = new uPlot(opts, data, box);
+        if (window.chartCopyInject) window.chartCopyInject(box, "historico-" + (j.curve_label || "curva"));
       }).catch(function () {});
     }
     if (!ctrls.dataset.bound) {
@@ -726,6 +785,7 @@
         ],
         series: series,
       }, data, el);
+      if (window.chartCopyInject) window.chartCopyInject(el, "curva-" + curve);
     }).catch(function () { /* red caída: sin chart, sin ruido */ });
   }
 

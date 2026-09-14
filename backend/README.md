@@ -15,6 +15,10 @@ uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 # abrir http://127.0.0.1:8000  (redirige a /login)
 ```
 
+Windows: doble click en `run_backend (CORRER APP).bat`. **macOS**: doble click en
+`correr_app.command` (venv en `~/.venvs/bonos`, deps, certificado del add-in y
+navegador; `./correr_app.command dev` = auto-reload).
+
 Env mínimas para el muro de login (o `AUTH_ENABLED=0` para dev sin muro) — ver
 la sección **Auth** abajo. Las credenciales del broker (`PRIMARY_USER` /
 `PRIMARY_PASS`, vía `secrets.txt`) habilitan el feed en vivo; sin ellas la app

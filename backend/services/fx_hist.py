@@ -115,12 +115,14 @@ def series_list() -> List[Dict[str, Any]]:
             if s["col"] in df.columns and df[s["col"]].notna().any()]
 
 
-def series_rows(key: str, dias: int = 0) -> Optional[Dict[str, Any]]:
+def series_rows(key: str, dias: int = 0, desde: Optional[str] = None,
+                hasta: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """{"meta", "rows"} con las filas ASC de la serie: fecha ISO, valor (ya
     escalado), Δ y Δ% contra el ÚLTIMO DÍA CON DATO (los días sin dato no
     cortan la serie ni generan Δ falsas) y el plazo o/n si aplica.
-    `dias` recorta la ventana al final (0 = todo); la Δ de la primera fila
-    visible se calcula antes del recorte, así sigue siendo real."""
+    `dias` recorta la ventana al final (0 = todo); `desde`/`hasta` (ISO)
+    tienen prioridad y recortan por fecha. La Δ de la primera fila visible se
+    calcula antes del recorte, así sigue siendo real."""
     df = _load()
     spec = next((s for s in SERIES if s["key"] == key), None)
     if df is None or spec is None or spec["col"] not in df.columns:
@@ -146,7 +148,9 @@ def series_rows(key: str, dias: int = 0) -> Optional[Dict[str, Any]]:
             d["plazo"] = int(p)
         rows.append(d)
         prev = v
-    if dias and len(rows) > dias:
+    if desde or hasta:
+        rows = [r for r in rows if (not desde or r["fecha"] >= desde) and (not hasta or r["fecha"] <= hasta)]
+    elif dias and len(rows) > dias:
         rows = rows[-dias:]
     meta = dict(spec)
     meta["n_total"] = int(len(sub))

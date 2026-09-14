@@ -1,1 +1,3 @@
-<input type="number" name="val_{{ which }}" step="0.0001" value="{{ val }}" placeholder="vacío = last de mercado" autocomplete="off">
+{# type=text + inputmode=decimal (no type=number): Safari/Firefox no aceptan la
+   coma decimal es-AR en type=number y mandaban "" → se pisaba con el last. #}
+<input type="text" inputmode="decimal" name="val_{{ which }}" value="{{ val }}" placeholder="vacío = last de mercado" autocomplete="off">

@@ -373,6 +373,16 @@ def ref_5d(hoy: Optional[date] = None, ruedas: int = 5) -> Dict[str, tuple]:
     if hoy is None:
         from backend.locale_ar import hoy_ba
         hoy = hoy_ba()
+    # Ancla = último día HÁBIL ≤ hoy: un sábado/feriado el last es el del
+    # viernes, y "5 ruedas" se cuentan desde ahí (si no daba 4). Ruedas de la
+    # base ANTERIORES al ancla: el cierre del ancla mismo no cuenta.
+    try:
+        from backend.services.historico_writer import _es_habil
+        while not _es_habil(hoy):
+            hoy -= timedelta(days=1)
+    except Exception:  # noqa: BLE001 — sin calendario: sólo finde
+        while hoy.weekday() >= 5:
+            hoy -= timedelta(days=1)
     hoy_iso = hoy.isoformat()
     key = (data.get("ver") or id(data), hoy_iso, int(ruedas))
     c = _ref5d_cache

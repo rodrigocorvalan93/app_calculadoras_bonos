@@ -61,6 +61,9 @@ def test_ref_5d_quinta_rueda_anterior_a_hoy(base_limpia) -> None:
     dias2 = _base_sintetica(["AAA"], hoy, ruedas=8, con_hoy=True)
     historico_byma._ref5d_cache = None
     assert historico_byma.ref_5d(hoy)["AAA"][1] == date.fromisoformat(dias2[-6])
+    # Sábado/domingo: el ancla es el viernes → 5 ruedas desde ahí (no 4)
+    historico_byma._ref5d_cache = None
+    assert historico_byma.ref_5d(hoy + timedelta(days=1))["AAA"][1] == date.fromisoformat(dias2[-6])
     # Menos de 5 ruedas → no inventa
     _base_sintetica(["ZZZ"], hoy, ruedas=3)
     historico_byma._ref5d_cache = None
@@ -72,7 +75,8 @@ def test_ref_5d_cacheado_por_dia_y_base_y_sin_base(base_limpia) -> None:
     _base_sintetica(["AAA"], hoy)
     a = historico_byma.ref_5d(hoy)
     assert historico_byma.ref_5d(hoy) is a                      # mismo día + base → mismo dict
-    assert historico_byma.ref_5d(hoy + timedelta(days=1)) is not a
+    assert historico_byma.ref_5d(hoy + timedelta(days=1)) is a  # sábado → ancla viernes: mismo mapa
+    assert historico_byma.ref_5d(hoy - timedelta(days=1)) is not a
     historico_byma._cache = None                                # sin base en memoria
     assert historico_byma.ref_5d(hoy) == {}                     # y sin disparar la carga
     assert historico_byma._cache is None
@@ -88,7 +92,8 @@ async def test_http_mercado_muestra_5d(base_limpia) -> None:
     codes = curves.build_curve_codes().get("cer") or []
     assert len(codes) >= 2
     c0, c1 = codes[0], codes[1]
-    hoy = date.today()
+    from backend.locale_ar import hoy_ba
+    hoy = hoy_ba()                              # la ruta cuenta ruedas en fecha BA, no UTC
     _base_sintetica([c0], hoy, ruedas=8)
     historico_byma._cache["by_code"][c0]["vals"]["Last Price"][-5] = 100.0
     store = marketdata_store.get_store()

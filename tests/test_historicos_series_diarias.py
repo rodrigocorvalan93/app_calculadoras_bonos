@@ -58,6 +58,12 @@ def test_series_rows_saltea_dias_sin_dato_y_escala(archivo_fx) -> None:
     # ventana: recorta al final pero la Δ de la primera visible sigue siendo real
     corto = fx_hist.series_rows("caucion_tna_vwap", 2)["rows"]
     assert len(corto) == 2 and corto[0]["var"] is not None
+    # desde/hasta (ISO) tienen prioridad sobre la ventana y recortan por fecha
+    rango = fx_hist.series_rows("ccl", 2, "2026-09-02", "2026-09-04")["rows"]
+    assert [r["fecha"] for r in rango] == ["2026-09-02", "2026-09-03", "2026-09-04"]
+    assert rango[0]["var"] == pytest.approx(5.0)         # Δ real contra el 1/9 (fuera del recorte)
+    solo_desde = fx_hist.series_rows("ccl", 0, "2026-09-04", None)["rows"]
+    assert [r["fecha"] for r in solo_desde] == ["2026-09-04", "2026-09-07"]
 
 
 @pytest.mark.asyncio
@@ -76,6 +82,14 @@ async def test_http_series_diarias_linea_barras_y_hp(archivo_fx) -> None:
                          params={"serie": "ccl", "chart": "barras", "dias": "todo"})
         assert b.status_code == 200 and "<rect" in b.text      # modo barras
         assert "<path" not in b.text                           # sin línea en barras
+        # desde/hasta en el form y en el recorte (3 días en ventana; fechas inválidas se ignoran)
+        d = await ac.get("/historicos/series-diarias",
+                         params={"serie": "ccl", "dias": "todo", "desde": "2026-09-02", "hasta": "2026-09-04"})
+        assert d.status_code == 200 and "3 días en ventana" in d.text
+        assert 'name="desde" value="2026-09-02"' in d.text and 'name="hasta" value="2026-09-04"' in d.text
+        d2 = await ac.get("/historicos/series-diarias",
+                          params={"serie": "ccl", "dias": "todo", "desde": "ayer", "hasta": ""})
+        assert d2.status_code == 200 and "5 días en ventana" in d2.text
         # la página muestra el tab nuevo con su carga lazy
         page = await ac.get("/historicos")
         assert "Series diarias (FX + caución)" in page.text

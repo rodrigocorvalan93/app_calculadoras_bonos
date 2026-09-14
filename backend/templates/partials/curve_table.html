@@ -47,6 +47,9 @@
         </tr>
       </thead>
       <tbody>
+        {# `compact` (filtro de main.py): sin indentación entre celdas — menos
+           bytes y ~4.000 nodos de texto menos por swap en cada tick. #}
+        {% filter compact %}
         {% for r in rows %}
           {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
           <tr>
@@ -81,6 +84,7 @@
             </td>
           </tr>
         {% endfor %}
+        {% endfilter %}
       </tbody>
     </table>
     </div>

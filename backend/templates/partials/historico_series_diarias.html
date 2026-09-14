@@ -25,10 +25,15 @@
             <select name="dias">
               {% for d, lbl in [("30","30 días"),("90","90 días"),("180","180 días"),("365","1 año"),("todo","Todo")] %}<option value="{{ d }}" {% if d == dias_sel %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
             </select></label>
+          <label class="field"><span>Desde</span>
+            <input type="date" name="desde" value="{{ desde or '' }}"></label>
+          <label class="field"><span>Hasta</span>
+            <input type="date" name="hasta" value="{{ hasta or '' }}"></label>
           <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
         </div>
       </form>
       <p class="muted" style="font-size:11px;margin-top:6px">
+        Desde/Hasta tienen prioridad sobre la ventana.
         Serie diaria del cierre ({{ archivo.dmin }} → {{ archivo.dmax }} · {{ archivo.n }} días guardados).
         Las de caución usan el plazo o/n real de cada día (viernes 3D, pre-feriado 4D — columna Plazo).
       </p>

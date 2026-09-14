@@ -67,7 +67,11 @@ es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
      genera una CA local + certificado para `localhost`/`127.0.0.1`/IP LAN en
      `certs/` (gitignored) y confía la CA en el usuario de Windows
      (`certutil -user`, sin admin). Idempotente: con el cert vigente no hace
-     nada. La CA se REUSA entre regeneraciones (la confianza instalada no se
+     nada. En **macOS** lo corre `correr_app.command` con el mismo generador y
+     confía la CA en el keychain de login (`security add-trusted-cert`, pide
+     la clave del usuario una vez; Safari, Chrome y Excel para Mac la leen); la
+     hoja dura ≤ 825 días porque macOS/iOS rechazan certs más largos.
+     La CA se REUSA entre regeneraciones (la confianza instalada no se
      invalida) y el certificado lleva un **punto de distribución de CRL**
      (`http://127.0.0.1:8000/excel/crl`, servida por la app) — ver el punto
      de revocación abajo;
@@ -120,7 +124,9 @@ compartido salen con `p=shared` y los del clásico con `p=functions`.
 - **Otra compu de la mesa contra un server central**: correr el puente
   escuchando afuera (`TLS_BRIDGE_HOST=0.0.0.0`), bajar la CA pública de
   `https://<server>:8443/excel/ca.crt` en cada PC y confiarla:
-  `certutil -user -addstore -f Root oms-local-ca.crt`. Con Tailscale,
+  `certutil -user -addstore -f Root oms-local-ca.crt` (Windows) /
+  `security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db oms-local-ca.crt`
+  (Mac). Con Tailscale,
   `tailscale cert` emite un certificado válido `*.ts.net` (sin CA propia).
 - Setear `APP_BASE_URL=https://…` para fijar la URL del manifest sin depender
   del host del request.

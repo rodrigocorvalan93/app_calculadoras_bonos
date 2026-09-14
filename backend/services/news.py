@@ -49,6 +49,16 @@ def _parse(xml_bytes: bytes, source: str, max_items: int) -> List[Dict[str, Any]
     return out
 
 
+def _ssl_ctx():
+    try:
+        import ssl
+
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _refresh() -> None:
     global _items
     fresh: List[Dict[str, Any]] = []
@@ -56,7 +66,8 @@ def _refresh() -> None:
     for source, url, mx in _FEEDS:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (news-tape)"})
-            with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
+            # certifi: el Python de python.org en macOS no trae CAs (ver primary_ws)
+            with urllib.request.urlopen(req, timeout=_TIMEOUT, context=_ssl_ctx()) as r:
                 for it in _parse(r.read(), source, mx):
                     key = it["title"][:60].lower()
                     if key not in seen:
