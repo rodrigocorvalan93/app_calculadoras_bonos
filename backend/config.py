@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     # Mínimo de bonos con operaciones DE HOY para autoguardar (guard de
     # feriado/sin rueda: los cierres pegajosos de ayer no cuentan).
     historico_autosave_min_operados: int = 30
+    # Cierre COMPLETO (cierres/AAAA/AAAA-MM-DD.parquet, todos los símbolos del
+    # store): se captura con el autosave y se RE-captura N minutos después para
+    # llevarse los prints tardíos (la partición del día se pisa). 0 = sin
+    # recaptura.
+    historico_recaptura_min: int = 30
 
     # ── Auth (login wall + roles) ─────────────────────────────────────────
     # Escape hatch: AUTH_ENABLED=0 apaga el muro (dev/emergencia). Default ON.

@@ -730,6 +730,11 @@ def estado() -> Dict[str, Any]:
         r = _autosave.last_result
         out["ultimo_autosave"] = (r.get("skipped") or r.get("error")
                                   or f"OK {r.get('rows')} filas")
+    try:
+        from backend.services import cierres
+        out["cierre_completo"] = cierres.status_texto()
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 
@@ -791,6 +796,10 @@ def save_today(force: bool = False) -> Dict[str, Any]:
     if not settings.historico_base_writer and not force:
         res["ok"] = True
         res["skipped"] = "base_writer=0: sólo journal local (la consolida otra máquina)"
+        try:                                   # cierre completo: también al journal local
+            _guardar_cierre(hist_dir, df, force=force, solo_journal=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] journal del cierre completo falló: %s", exc)
         return res
     try:
         saved = append_and_save(df, xlsx)
@@ -818,13 +827,23 @@ def save_today(force: bool = False) -> Dict[str, Any]:
             res["acciones_filas"] = acres["hoy"]
     except Exception as exc:  # noqa: BLE001
         logger.warning("[historico_writer] historial de acciones falló: %s", exc)
+    # Cierre COMPLETO del día (todos los símbolos del store + métricas de los
+    # bonos): partición cierres/AAAA/AAAA-MM-DD.parquet. Best-effort.
+    try:
+        cres = _guardar_cierre(hist_dir, df, force=force)
+        if cres:
+            res["cierre_filas"] = cres["filas"]
+            res["cierre_opero"] = cres["opero"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] cierre completo falló: %s", exc)
     try:
         historico_byma.refresh()          # Qué pasó / Históricos ven el día nuevo ya
     except Exception:  # noqa: BLE001
         logger.exception("[historico_writer] refresh del histórico falló")
     try:
-        from backend.services import acciones_hist
+        from backend.services import acciones_hist, cierres
         acciones_hist.refresh()
+        cierres.refresh()
     except Exception:  # noqa: BLE001
         logger.exception("[historico_writer] refresh del histórico de acciones falló")
     logger.info("[historico_writer] base guardada: %d filas de hoy (%d operados) → %s",
@@ -1031,6 +1050,183 @@ def _guardar_acciones(hist_dir: str) -> Optional[Dict[str, Any]]:
     return append_acciones(pd.DataFrame(rows), os.path.join(hist_dir, ACCIONES_FILENAME))
 
 
+# ── Cierre COMPLETO por rueda (cierres/AAAA/AAAA-MM-DD.parquet) ─────────────
+# Una fila por símbolo del store con precio (bonos en todas sus patas, CI y
+# 24hs, acciones, CEDEARs, índice, futuros, cauciones…): último + hora, cierre
+# previo, OHLC, puntas con tamaño, volumen $, nominal, trades, `opero` (último
+# de HOY) y, para los bonos con ficha, TIREA/TNA/TEM/paridad/duration del mismo
+# build_rows que va a la base. Append-only: cada rueda es su propio archivo
+# (se pisa keep-last — el autosave lo captura a las 17:01 y lo RE-captura
+# `historico_recaptura_min` después para llevarse los prints tardíos), nunca
+# se reescribe la historia. Lo lee services/cierres (matrices numpy). Journal
+# local primero, como la base.
+CIERRES_DIRNAME = "cierres"
+_CIERRE_STR_COLS = ("symbol", "code", "plazo", "last_ts", "close_ts", "price_source")
+
+
+def cierre_path(hist_dir: str, fecha: date) -> str:
+    return os.path.join(hist_dir, CIERRES_DIRNAME, f"{fecha:%Y}", f"{fecha.isoformat()}.parquet")
+
+
+def _metricas_por_simbolo(df_bonos: "Any") -> Dict[str, Dict[str, Any]]:
+    """{symbol: fila de build_rows}. La variante base gana sobre la proyectada
+    (`…j`, mismo símbolo): la partición se indexa por símbolo."""
+    out: Dict[str, Dict[str, Any]] = {}
+    if df_bonos is None or len(df_bonos) == 0:
+        return out
+    for r in df_bonos.to_dict("records"):
+        sym = r.get("symbol")
+        if not sym:
+            continue
+        prev = out.get(sym)
+        if prev is None or (str(prev.get("Código", "")).endswith("j") and not str(r.get("Código", "")).endswith("j")):
+            out[sym] = r
+    return out
+
+
+def build_cierre_rows(df_bonos: "Any" = None) -> List[Dict[str, Any]]:
+    """Filas del cierre completo de HOY desde el store (ver CIERRES_DIRNAME)."""
+    from backend.services import marketdata_store
+    from backend.services import symbols as syms
+
+    hoy = _now().date()
+    met = _metricas_por_simbolo(df_bonos)
+    rows: List[Dict[str, Any]] = []
+    for sym, snap in marketdata_store.get_store().snapshots():
+        if snap is None or (snap.last is None and snap.close is None):
+            continue
+        code, plazo = syms.split_md_symbol(sym)
+        m = met.get(sym) or {}
+        rows.append({
+            "fecha_hoy": hoy, "symbol": sym, "code": code, "plazo": plazo,
+            "last": snap.last, "last_size": snap.last_size, "last_ts": snap.last_ts,
+            "close": snap.close, "close_ts": snap.close_ts,
+            "open": snap.open, "high": snap.high, "low": snap.low,
+            "bid": snap.bid, "bid_size": snap.bid_size, "offer": snap.offer, "offer_size": snap.offer_size,
+            "volume": snap.volume, "nominal": snap.nominal, "trade_count": snap.trade_count,
+            "opero": bool(snap.last is not None and _fecha_dato(snap.last_ts) == hoy),
+            "codigo_calc": m.get("Código"), "price_ref": m.get("Last Price"),
+            "price_source": m.get("Price Source"),
+            "tirea": m.get("TIREA"), "tna": m.get("TNA"), "tem": m.get("TEM"),
+            "paridad": m.get("Paridad"), "duration": m.get("Duration"),
+        })
+    return rows
+
+
+def _cierre_df(rows: List[Dict[str, Any]]) -> "Any":
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    for col in _CIERRE_STR_COLS + ("codigo_calc",):
+        if col in df.columns:
+            df[col] = df[col].astype("string")
+    return df
+
+
+def write_cierre_journal(df: "Any", fecha: Optional[date] = None) -> str:
+    """Copia local del cierre completo (fuera de OneDrive), atómica, pisa el
+    mismo día."""
+    fecha = fecha or _now().date()
+    path = os.path.join(journal_dir(), f"cierre_{fecha:%Y%m%d}.parquet")
+    tmp = path + ".tmp"
+    df.to_parquet(tmp, index=False)
+    os.replace(tmp, path)
+    return path
+
+
+def escribir_particion(df: "Any", hist_dir: str, fecha: date) -> str:
+    """Escribe (pisa) la partición del día: atómico + reintentos ante lock."""
+    path = cierre_path(hist_dir, fecha)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    for i in range(len(_LOCK_ESPERAS) + 1):
+        try:
+            tmp = path + ".tmp"
+            df.to_parquet(tmp, index=False)
+            os.replace(tmp, path)
+            return path
+        except (PermissionError, OSError) as exc:
+            if i == len(_LOCK_ESPERAS):
+                raise
+            logger.warning("[historico_writer] partición lockeada (%s) — reintento en %.0f s",
+                           exc, _LOCK_ESPERAS[i])
+            time.sleep(_LOCK_ESPERAS[i])
+    return path
+
+
+def _guardar_cierre(hist_dir: str, df_bonos: "Any" = None, *, force: bool = False,
+                    solo_journal: bool = False) -> Optional[Dict[str, Any]]:
+    """Cierre completo de hoy → journal local + partición compartida (writer).
+    Sin `force`, con menos de `historico_autosave_min_operados` símbolos
+    operados hoy no escribe nada (feriado / feed caído: no se guarda un día
+    de precios pegajosos como si fuera rueda)."""
+    from backend.config import settings
+
+    rows = build_cierre_rows(df_bonos)
+    if not rows:
+        logger.info("[historico_writer] cierre completo: store vacío, nada que guardar")
+        return None
+    df = _cierre_df(rows)
+    opero = int(df["opero"].sum())
+    if not force and opero < settings.historico_autosave_min_operados:
+        logger.info("[historico_writer] cierre completo salteado: sólo %d símbolos operaron hoy", opero)
+        return None
+    hoy = _now().date()
+    try:
+        write_cierre_journal(df, hoy)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] journal del cierre completo no guardado: %s", exc)
+    res = {"filas": int(len(df)), "opero": opero, "path": None}
+    if solo_journal:
+        return res
+    res["path"] = escribir_particion(df, hist_dir, hoy)
+    return res
+
+
+def recapturar_cierre(force: bool = False) -> Dict[str, Any]:
+    """Segunda captura del día (~30 min después del cierre): pisa la partición
+    con los prints tardíos y re-escribe el parquet de acciones (dedup
+    keep-last). NO toca la base px/tasas (esa se guarda una vez)."""
+    from backend.config import settings
+    from backend.services import deltapaths
+
+    res: Dict[str, Any] = {"ok": False, "skipped": None, "error": None}
+    hist_dir = deltapaths.historico_dir()
+    if not hist_dir:
+        res["error"] = "sin carpeta Delta Bases"
+        return res
+    if not force and _now().weekday() >= 5:
+        res["skipped"] = "fin de semana"
+        return res
+    try:
+        df_bonos = build_rows()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] recaptura: build_rows falló (%s) — sin métricas", exc)
+        df_bonos = None
+    solo_journal = not settings.historico_base_writer and not force
+    try:
+        c = _guardar_cierre(hist_dir, df_bonos, force=force, solo_journal=solo_journal)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[historico_writer] recaptura del cierre falló")
+        res["error"] = str(exc)
+        return res
+    if c is None:
+        res["skipped"] = "sin operados suficientes"
+        return res
+    res.update(ok=True, filas=c["filas"], opero=c["opero"], path=c["path"])
+    if not solo_journal:
+        try:
+            a = _guardar_acciones(hist_dir)
+            res["acciones_filas"] = (a or {}).get("hoy")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] recaptura de acciones falló: %s", exc)
+    try:
+        from backend.services import acciones_hist, cierres
+        acciones_hist.refresh()
+        cierres.refresh()
+    except Exception:  # noqa: BLE001
+        pass
+    return res
+
+
 def next_fire(now: datetime, hhmm: str) -> datetime:
     """Próximo disparo: hoy a HH:MM (BA) si todavía no pasó, si no mañana.
     El guard de fin de semana / feriado vive en save_today, no acá."""
@@ -1053,6 +1249,7 @@ class HistoricoAutosave:
         self._task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
         self.last_result: Optional[Dict[str, Any]] = None
+        self.last_recaptura: Optional[Dict[str, Any]] = None
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -1083,7 +1280,8 @@ class HistoricoAutosave:
         except Exception:  # noqa: BLE001
             logger.exception("[historico_writer] catch-up del journal falló")
         while not self._stop.is_set():
-            wait = (next_fire(_now(), self.hhmm) - _now()).total_seconds()
+            disparo = next_fire(_now(), self.hhmm)
+            wait = (disparo - _now()).total_seconds()
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=max(wait, 1.0))
                 break                                  # stop durante la espera
@@ -1093,6 +1291,7 @@ class HistoricoAutosave:
             # las 17:01 no puede costar el día entero — reintenta cada 10 min
             # hasta ~90 min. Los skips de calendario (finde/feriado/ya
             # guardado) cortan al primer intento.
+            guardado_hoy = False
             for _intento in range(10):
                 try:
                     self.last_result = await loop.run_in_executor(None, save_today)
@@ -1102,6 +1301,7 @@ class HistoricoAutosave:
                                         "error": "excepción — ver log"}
                 r = self.last_result
                 if r.get("ok"):
+                    guardado_hoy = True
                     logger.info("[historico_writer] autosave OK: %s filas de hoy", r["rows"])
                     # Mail de cierre con el "Qué pasó" del día (best-effort,
                     # en el threadpool; SMTP apagado → no-op logueado).
@@ -1112,6 +1312,7 @@ class HistoricoAutosave:
                         logger.exception("[historico_writer] mail de cierre falló")
                     break
                 if r.get("skipped") and not r.get("retry"):
+                    guardado_hoy = "ya tiene" in (r.get("skipped") or "")
                     logger.info("[historico_writer] autosave salteado: %s", r["skipped"])
                     break
                 # skipped+retry = 0 operados con el feed caído: puede ser el WS
@@ -1124,6 +1325,35 @@ class HistoricoAutosave:
                     return                             # shutdown durante la espera
                 except asyncio.TimeoutError:
                     continue
+            # RE-captura del cierre completo N min después del disparo: la
+            # partición del día se pisa con los prints tardíos (y el parquet de
+            # acciones se re-escribe keep-last). La base px/tasas no se toca.
+            await self._recaptura(loop, disparo, guardado_hoy)
+
+    async def _recaptura(self, loop, disparo: datetime, guardado_hoy: bool) -> None:
+        from backend.config import settings
+        mins = int(getattr(settings, "historico_recaptura_min", 0) or 0)
+        if not guardado_hoy or mins <= 0:
+            return
+        objetivo = disparo + timedelta(minutes=mins)
+        wait = (objetivo - _now()).total_seconds()
+        if wait > 0:
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=wait)
+                return                                 # shutdown durante la espera
+            except asyncio.TimeoutError:
+                pass
+        try:
+            r = await loop.run_in_executor(None, recapturar_cierre)
+            self.last_recaptura = r
+            if r.get("ok"):
+                logger.info("[historico_writer] recaptura del cierre OK: %s símbolos (%s operados)",
+                            r.get("filas"), r.get("opero"))
+            else:
+                logger.info("[historico_writer] recaptura del cierre: %s",
+                            r.get("skipped") or r.get("error"))
+        except Exception:  # noqa: BLE001
+            logger.exception("[historico_writer] recaptura del cierre reventó")
 
 
 _autosave: Optional[HistoricoAutosave] = None

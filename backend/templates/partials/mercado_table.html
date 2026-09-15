@@ -1,3 +1,4 @@
+{% from "partials/mercado_row.html" import fila %}
 {% if not selected_def %}
   <div class="alert">Curva no encontrada.</div>
 {% elif not rows %}
@@ -37,7 +38,11 @@
        página (CSS puro, el default muestra todo). Bloques: OCLH | Var |
        bid (sz+px+tirea) | last (px+vwap+tirea) | offer (px+tirea+sz) |
        vol | MAE | fuente. #}
-    <table id="mercado-tbl" class="cashflows curve-table mercado-table" data-sortable>
+    {# Tabla por filas: app.js pide `data-delta` + &since=data-seq&order=data-order
+       en cada tick y reemplaza sólo los <tr data-code> que cambiaron (flash por
+       diff). Sin data-delta (fuente MAE) el contenedor hace el swap completo. #}
+    <table id="mercado-tbl" class="cashflows curve-table mercado-table" data-sortable
+           {% if delta_url %}data-delta="{{ delta_url }}" data-seq="{{ delta_seq }}" data-order="{{ delta_order }}"{% endif %}>
       <thead>
         <tr>
           <th data-sort>Código</th>
@@ -72,41 +77,7 @@
         {# `compact` (filtro de main.py) saca la indentación entre celdas: era
            el 24 % de los bytes y ~5.500 nodos de texto por swap en cada tick. #}
         {% filter compact %}
-        {% for r in rows %}
-          {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
-          <tr style="cursor:pointer"
-              hx-get="/mercado/book/{{ r.code }}?plazo={{ plazo }}&leg={{ leg }}&fuente={{ fuente }}"
-              hx-target="#mercado-book"
-              hx-swap="innerHTML"
-              title="Ver libro de {{ r.code }}">
-            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}{% if r.estreno %} <span class="badge-new">NUEVO</span>{% endif %}{% if r.anom %} <span class="anom-badge" title="Orden ANORMAL en el book · {{ r.anom.lado }} {{ r.anom.size | ar_hum }} VN @ {{ r.anom.price | ar_num(2) }}{% if r.anom.pct_vol is not none %} · {{ r.anom.pct_vol | ar_pct(0) }} del nominal operado hoy{% endif %}">⚠</span>{% endif %}</td>
-            <td>{{ r.duration | ar_num(2) }}</td>
-            <td class="col-oclh grp">{{ r.open | ar_num(2) }}</td>
-            <td class="col-oclh">{{ r.close | ar_num(2) }}</td>
-            <td class="col-oclh">{{ r.low | ar_num(2) }}</td>
-            <td class="col-oclh">{{ r.high | ar_num(2) }}</td>
-            <td class="col-oclh">{% if r.range_pos is not none %}<div class="rango" title="Last en el {{ (r.range_pos*100)|round(0)|int }}% del rango del día"><i style="left:{{ (r.range_pos*100)|round(1) }}%"></i></div>{% else %}<span class="muted">·</span>{% endif %}</td>
-            <td class="grp" style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
-            <td class="{{ vcls }}">{{ r.var_px | ar_num(2) }}</td>
-            <td class="{{ 'var-up' if (r.ret_5d is not none and r.ret_5d >= 0) else ('var-down' if r.ret_5d is not none else '') }}"{% if r.ret_5d_fecha %} title="vs cierre del {{ r.ret_5d_fecha | ar_date }}"{% endif %}>{{ r.ret_5d | ar_pct_pp(2) if r.ret_5d is not none else "·" }}</td>
-            <td class="grp" style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
-            <td class="{{ r.bid_cls }}">{{ r.bid | ar_num(2) }}</td>
-            <td style="color:var(--cyan)">{{ (r.margen_bid if ym == 'margen' else r.tirea_bid) | ar_pct(2) }}</td>
-            <td class="grp {{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
-            <td>{{ r.vwap | ar_num(2) }}</td>
-            <td style="color:var(--accent);font-weight:600">{{ (r.margen_last if ym == 'margen' else r.tirea_last) | ar_pct(2) }}</td>
-            <td class="grp {{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>
-            <td style="color:var(--cyan)">{{ (r.margen_offer if ym == 'margen' else r.tirea_offer) | ar_pct(2) }}</td>
-            <td style="color:var(--text-muted)">{{ r.offer_size | ar_int }}</td>
-            <td class="grp vol-cell" style="--vf:{{ ((r.nominal_frac or 0)*100)|round(0)|int }}%">{{ r.nominal | ar_hum }}</td>
-            <td class="col-mae grp {{ 'var-up' if (r.mae and r.mae.var_pct is not none and r.mae.var_pct >= 0) else ('var-down' if (r.mae and r.mae.var_pct is not none) else '') }}">{{ r.mae.last | ar_num(2) if r.mae else "·" }}</td>
-            <td class="col-mae">{{ r.mae.var_pct | ar_num(2) if (r.mae and r.mae.var_pct is not none) else "·" }}</td>
-            <td class="col-mae" style="color:var(--text-muted)">{{ r.mae.volumen | ar_hum if (r.mae and r.mae.volumen is not none) else "·" }}</td>
-            <td class="col-mae" style="color:var(--text-soft)">{{ r.vol_total | ar_hum if r.vol_total is not none else "·" }}</td>
-            <td class="grp" style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
-            <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_date | ar_ts }}</td>
-          </tr>
-        {% endfor %}
+        {% for r in rows %}{{ fila(r, plazo, leg, fuente, ym) }}{% endfor %}
         {% endfilter %}
       </tbody>
     </table>

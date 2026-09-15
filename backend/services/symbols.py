@@ -12,7 +12,8 @@ REALES de BYMA terminan en mayúscula. Un strip case-insensitive mutilaba
 """
 from __future__ import annotations
 
-from typing import Iterable, List
+import re
+from typing import Iterable, List, Tuple
 
 
 def calc_to_md_code(calc_code: str) -> str:
@@ -22,6 +23,16 @@ def calc_to_md_code(calc_code: str) -> str:
     NO se tocan; sólo se strippea la `j`/`v` minúscula de las variantes de calc."""
     c = str(calc_code).strip()
     return c[:-1] if c.endswith(("j", "v")) else c
+
+
+_MD_RE = re.compile(r"^MERV - XMEV - (.+) - (24hs|CI)$")
+
+
+def split_md_symbol(symbol: str) -> Tuple[str, str]:
+    """`MERV - XMEV - TX26 - 24hs` → ('TX26', '24hs'). Un símbolo con otro
+    formato (futuros DLR/…, cauciones, índices crudos) → (símbolo, '')."""
+    m = _MD_RE.match(symbol or "")
+    return (m.group(1), m.group(2)) if m else ((symbol or ""), "")
 
 
 def md_symbol(code: str, plazo: str = "24hs") -> str:

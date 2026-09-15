@@ -35,7 +35,7 @@ lanza uvicorn en `http://127.0.0.1:8000`); no hay un server central.
 | Nueva especie | `/nueva` | Calculadora ad-hoc: se arma/pega una ficha y calcula cashflow + métricas sin tocar el universo. |
 | Comparador | `/comparador` | Dos bonos lado a lado + ubicación en curva (mismo widget que YAS, con fuente switcheable). |
 | Curvas | `/curves` | Curvas por segmento (CER, DLK, HD, tasa fija, etc.) con precios en vivo. |
-| Mercado | `/mercado` | Paneles de mercado en vivo: quotes, book por especie, cauciones, FX, MAE. |
+| Mercado | `/mercado` | Paneles de mercado en vivo: quotes, book por especie, cauciones, FX, MAE. La tabla de renta fija se actualiza **por filas**: en cada tick el cliente pide `/mercado/rows?…&since=seq&order=hash` y reemplaza sólo los `<tr>` cuyo símbolo cambió (flash por diff); el swap completo queda para cambios de conjunto/orden, paneles de acciones, MAE y cada 30 s. |
 | Break-even | `/breakeven` | BE de inflación (CER) y de deva (futuros), con gráficos SVG estilo unificado. |
 | Dólares | `/dolares` | MEP/CCL/canje implícitos por especie + calculadora de canje. |
 | Tasas | `/tasas` | Tasas cortas: cauciones, REPO, plazos. |
@@ -46,7 +46,7 @@ lanza uvicorn en `http://127.0.0.1:8000`); no hay un server central.
 | Gráficos | `/graficos` | Scatter TIR/duration por curva + ajuste NSS, con recorte por tramo (dmin–dmax), overlay de segunda curva y fuente BYMA (default) o vector CAFCI para corporativos. |
 | Total Return | `/total-return` | TR proyectado por bono (salida a TIR/fecha) y TR realizado. |
 | Escenario | `/escenario` | Senderos de inflación/deva/tasas y revaluación del universo. |
-| Históricos | `/historicos` | Series guardadas (px/tasas por rueda) con el autosave diario. Pestaña **Acciones (price action)**: cierre diario propio de acciones / CEDEARs / Merval (parquet `Delta - historico_acciones`, también lo escribe el autosave) — nivel en ARS o ÷ A3500 / CCL / MEP con canal de tendencia ±1σ/2σ, mín/máx, percentil/z, overlay del Merval (β, ρ), retornos diarios y distribución vs normal. Backfill: `python -m backend.tools.backfill_acciones --byma` / `--csv`. |
+| Históricos | `/historicos` | Series guardadas (px/tasas por rueda) con el autosave diario. El autosave además escribe el **cierre completo** (`Delta Bases/cierres/AAAA/AAAA-MM-DD.parquet`: todos los símbolos del store — bonos en todas sus patas, acciones, CEDEARs, índice, futuros — con OHLC/puntas/volumen/`opero` y las métricas de los bonos) y lo RE-captura 30 min después (`HISTORICO_RECAPTURA_MIN`) para los prints tardíos; `services/cierres.py` lo carga como matrices numpy (backfill automático desde la base) y alimenta el 5D % de Mercado. Pestaña **Acciones (price action)**: cierre diario propio de acciones / CEDEARs / Merval (parquet `Delta - historico_acciones`, también lo escribe el autosave) — nivel en ARS o ÷ A3500 / CCL / MEP con canal de tendencia ±1σ/2σ, mín/máx, percentil/z, overlay del Merval (β, ρ), retornos diarios y distribución vs normal. Backfill: `python -m backend.tools.backfill_acciones --byma` / `--csv`. |
 | Qué pasó | `/que-paso` | Resumen de la rueda por segmento + cómo se movió cada curva (mail automático opcional tras el autosave). |
 | Créditos | `/creditos` | Scoring crediticio propietario por emisor. |
 | CAFCI | `/cafci` | FCIs: series, flujos y vector de TIRs corporativas. |

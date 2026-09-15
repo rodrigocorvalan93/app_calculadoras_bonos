@@ -114,6 +114,20 @@ The native leg is a no-op, so the **basic curve is FX-free** (native ficha
 fallbacks. Implemented in
 `backend.services.fx.normalize_price(price, leg, native, fx)`.
 
+## Cierre completo (`cierres/`)
+
+Además de la base px/tasas (xlsx + parquet, sólo bonos de las curvas), el
+autosave escribe UNA partición por rueda `Delta Bases/cierres/AAAA/AAAA-MM-DD.parquet`
+con TODOS los símbolos del store (`historico_writer.build_cierre_rows`):
+último/hora, cierre previo, OHLC, puntas, volumen, `opero` (último de HOY) y
+TIREA/TNA/TEM/paridad/duration de los bonos con ficha. Append-only: nunca se
+reescribe la historia; el archivo del día se pisa (keep-last) con la
+recaptura `historico_recaptura_min` después del cierre. Journal local primero.
+`services/cierres.py` = matrices numpy (fechas × símbolos) con `at / serie /
+ret / vector_ref`; `historico_byma.ref_5d` (5D % de Mercado) lo usa cuando
+está cargado. Backfill desde la base: `cierres.importar_base()` (automático en
+el warmup del writer si no hay particiones). Nada de esto corre en un request.
+
 ## Visual style (FastAPI rewrite)
 
 Bloomberg palette + Notion/Apple/Linear typography. System sans
@@ -139,6 +153,20 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `.tick-up` / `.tick-down` (flash CSS verde/rojo estilo terminal).
 - El dot `#live-dot` de la topbar muestra el estado del feed
   (live/idle/off). Todo vanilla JS — sin librerías nuevas.
+- **Paneles por FILAS (delta)**: un contenedor `data-delta-scope` (Mercado)
+  NO swapea completo en cada `md-update`: si adentro hay una
+  `table[data-delta]`, app.js pide `data-delta&since=<data-seq>&order=<data-order>`
+  (`/mercado/rows`) y el server devuelve sólo los `<tr data-code>` cuyo
+  símbolo cambió desde esa seq (`MarketSnapshot.seq` = seq global del store en
+  su último update; header `X-Seq` = la nueva). Cada fila se reemplaza en el
+  lugar y el flash sale del diff de ESA fila. `X-Full: 1` (cambió el
+  conjunto/orden — hash `data-order` —, panel de acciones, fuente MAE) o
+  cualquier error → `htmx.trigger(scope, 'refresh')` = swap completo; el
+  `every 30s` sigue de red de seguridad. La fila es UNA macro
+  (`partials/mercado_row.html`) compartida por la tabla y el delta: tienen
+  que salir idénticas. Server: `_rows_en_seq` (1 build por params+seq,
+  single-flight) + `_ROW_MEMO` (fila por seq del símbolo: un tick re-arma
+  sólo su fila). Si agregás columnas a Mercado, van en la macro.
 
 ## Seguridad — invariantes (no regresar sin querer)
 

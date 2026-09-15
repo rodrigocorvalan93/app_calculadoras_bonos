@@ -183,11 +183,16 @@
     <button type="button" class="btn-primary" data-f-add style="font-size:11px">+ filtro</button>
     <span data-f-chips></span>
   </div>
+  {# Live por FILAS: en cada md-update app.js (data-delta-scope) pide sólo las
+     filas cambiadas (/mercado/rows) y las reemplaza en el lugar; el swap
+     completo queda para `refresh` (conjunto/orden distinto, paneles de
+     acciones, errores) y el `every 30s` de red de seguridad. #}
   <div
     id="mercado-table"
     data-flash-scope
+    data-delta-scope
     hx-get="/mercado/table"
-    hx-trigger="md-update from:body, every 30s"
+    hx-trigger="refresh, every 30s"
     hx-swap="innerHTML"
     hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=q], [name=mas]"
   >

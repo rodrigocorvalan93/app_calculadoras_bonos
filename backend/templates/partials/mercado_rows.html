@@ -1,0 +1,3 @@
+{% from "partials/mercado_row.html" import fila -%}
+{#- Delta de Mercado: sólo las filas cambiadas, mismo markup que la tabla. -#}
+{% filter compact %}{% for r in rows %}{{ fila(r, plazo, leg, fuente, ym) }}{% endfor %}{% endfilter %}

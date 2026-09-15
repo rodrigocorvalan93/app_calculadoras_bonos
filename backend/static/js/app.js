@@ -361,6 +361,81 @@ window.lsSet = function (k, v) {
     }
     flashFlush();
   });
+
+  // ── 4: paneles live por FILAS (delta) ──────────────────────────────────
+  // Un contenedor [data-delta-scope] (Mercado) ya no hace el swap completo en
+  // cada md-update: si adentro hay una table[data-delta], se pide
+  //   data-delta + &since=<data-seq>&order=<data-order>
+  // y el server devuelve sólo los <tr data-code> cuyo símbolo cambió desde
+  // esa seq (header X-Seq = la nueva). Cada fila se reemplaza en el lugar y
+  // el flash sale del diff celda a celda de ESA fila — chau snapshot de 1.500
+  // celdas y re-layout de la tabla entera por tick. X-Full=1 (cambió el
+  // conjunto/orden de filas, panel de acciones, MAE), un error de red, una
+  // fila desconocida o una tabla sin data-delta → swap completo de htmx
+  // ('refresh' en el contenedor; el `every 30s` sigue de red de seguridad).
+  var deltaBusy = {};
+  function deltaFull(scope) {
+    if (window.htmx) window.htmx.trigger(scope, 'refresh');
+  }
+  function deltaApply(tbl, html) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = '<table><tbody>' + html + '</tbody></table>';
+    var nuevas = tpl.content.querySelectorAll('tr[data-code]');
+    var n = 0;
+    for (var i = 0; i < nuevas.length; i++) {
+      var nu = nuevas[i], code = nu.getAttribute('data-code') || '';
+      if (/["\\]/.test(code)) return false;
+      var old = tbl.querySelector('tbody tr[data-code="' + code + '"]');
+      if (!old) return false;                       // fila nueva → cambió la estructura
+      var oc = old.cells, nc = nu.cells, difs = [];
+      if (oc.length === nc.length) {
+        for (var j = 1; j < nc.length; j++) {
+          var was = num((oc[j].textContent || '').trim());
+          var now = num((nc[j].textContent || '').trim());
+          if (was !== null && now !== null && was !== now) difs.push(j, now > was ? 'tick-up' : 'tick-down');
+        }
+      }
+      old.replaceWith(nu);
+      if (window.htmx) window.htmx.process(nu);   // hx-get del libro en la fila nueva
+      for (var d = 0; d < difs.length; d += 2) {
+        if (++n > MAX_CELLS) break;
+        flash(nu.cells[difs[d]], difs[d + 1]);
+      }
+    }
+    flashFlush();
+    return true;
+  }
+  function deltaTick(scope) {
+    var tbl = scope.querySelector('table[data-delta]');
+    if (!tbl) { deltaFull(scope); return; }          // panel sin delta (acciones, MAE)
+    var id = scope.id || 'x';
+    if (deltaBusy[id]) return;
+    var url = tbl.getAttribute('data-delta');
+    var seq = tbl.getAttribute('data-seq') || '0', order = tbl.getAttribute('data-order') || '';
+    if (!url) { deltaFull(scope); return; }
+    deltaBusy[id] = true;
+    fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'since=' + encodeURIComponent(seq) + '&order=' + encodeURIComponent(order),
+          { credentials: 'same-origin', headers: { 'X-Delta': '1' } })
+      .then(function (r) { return r.text().then(function (html) { return { r: r, html: html }; }); })
+      .then(function (x) {
+        var t2 = scope.querySelector('table[data-delta]');   // puede haber sido swapeada
+        if (!t2) return;
+        if (!x.r.ok || x.r.headers.get('X-Full') === '1') { deltaFull(scope); return; }
+        var newSeq = parseInt(x.r.headers.get('X-Seq') || '0', 10);
+        var curSeq = parseInt(t2.getAttribute('data-seq') || '0', 10);
+        if (newSeq && newSeq < curSeq) return;             // llegó una tabla más nueva mientras tanto
+        if (x.html && x.html.trim() && !deltaApply(t2, x.html)) { deltaFull(scope); return; }
+        if (newSeq) t2.setAttribute('data-seq', String(newSeq));
+      })
+      .catch(function () { deltaFull(scope); })
+      .then(function () { deltaBusy[id] = false; });
+  }
+  document.body.addEventListener('md-update', function () {
+    if (document.hidden) return;
+    var scopes = document.querySelectorAll('[data-delta-scope]');
+    for (var i = 0; i < scopes.length; i++) deltaTick(scopes[i]);
+  });
+  window.__mercadoDelta = { tick: deltaTick, apply: deltaApply };   // tests visuales
 })();
 
 // ── Orden por columna (client-side, genérico) ─────────────────────────────

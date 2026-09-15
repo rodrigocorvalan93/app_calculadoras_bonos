@@ -14,7 +14,7 @@ import copy
 import threading
 import time
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 @dataclass
@@ -39,6 +39,7 @@ class MarketSnapshot:
     bids: Optional[List[Dict[str, Any]]] = None    # profundidad BI (hasta 5 niveles)
     offers: Optional[List[Dict[str, Any]]] = None  # profundidad OF (hasta 5 niveles)
     updated_at: float = field(default_factory=time.time)
+    seq: int = 0                          # seq global del store en el ÚLTIMO update de este símbolo
 
     def vwap(self) -> Optional[float]:
         if self.volume and self.nominal and self.nominal != 0:
@@ -201,6 +202,9 @@ class MarketDataStore:
             snap.updated_at = now
             self._data[symbol] = snap
             self._updates += 1
+            # seq por símbolo: los paneles por filas piden "lo que cambió desde
+            # la seq S" y esto responde en O(filas) sin diffear nada.
+            snap.seq = self._updates
             self._last_update_at = now
             return snap
 
@@ -215,6 +219,12 @@ class MarketDataStore:
     def symbols(self) -> List[str]:
         with self._lock:
             return sorted(self._data.keys())
+
+    def snapshots(self) -> List[Tuple[str, MarketSnapshot]]:
+        """[(símbolo, copia shallow)] de TODO el store — para el cierre completo
+        del día. El lock se sostiene sólo para la copia (~µs por símbolo)."""
+        with self._lock:
+            return [(sym, copy.copy(snap)) for sym, snap in self._data.items()]
 
     def seq(self) -> int:
         """Secuencia global de updates (monótona). La UI la sondea (~1/s, costo
