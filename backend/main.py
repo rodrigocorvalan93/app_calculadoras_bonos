@@ -316,7 +316,12 @@ async def lifespan(app: FastAPI):
         # Medido en curves/table corp_hdmep: p99 130 → 31 ms, max 136 → 32.
         # La basura cíclica que no se libera por refcount se junta en el
         # gc.collect() periódico del saver de abajo (cada 5 min, en el pool).
-        gc.set_threshold(50_000, 20, 100)
+        # Gen-0 en 10k (no 50k): A/B con el benchmark de septiembre 2026 —
+        # 50k hacía cada colección gen-0 más pesada y les sumaba 1-3 ms de p95 a
+        # las páginas (yas 6,2 → 4,7 · curves 8,5 → 7,1 · mercado 8,8 → 7,5 ·
+        # breakeven 8,7 → 5,7 · matriz 10 → 8,4) y ~10 MB de RSS; lo que evita
+        # los picos de 120-200 ms es la gen-2 rara (20, 100), que se mantiene.
+        gc.set_threshold(10_000, 20, 100)
     except Exception:  # noqa: BLE001
         logger.exception("[main] gc.freeze failed")
 
