@@ -84,6 +84,18 @@ def panel_tickers(panel: str) -> List[str]:
     return {"cedears": CEDEARS, "general": GENERAL}.get(panel, LIDERES)
 
 
+def panel_map() -> Dict[str, str]:
+    """{ticker: 'L' | 'G' | 'C'} de TODO lo suscripto (listas curadas ∪
+    membresía viva). Líder gana sobre General y sobre CEDEAR si un ticker
+    aparece en dos. Lo usa el histórico diario de acciones para etiquetar."""
+    out: Dict[str, str] = {}
+    for panel, curada, tag in (("lideres", LIDERES, "L"), ("general", GENERAL, "G"),
+                               ("cedears", CEDEARS, "C")):
+        for code in sorted(set(curada) | set(panel_tickers(panel))):
+            out.setdefault(code, tag)
+    return out
+
+
 def cedears_universo() -> List[str]:
     """TODOS los CEDEARs conocidos: la lista viva completa (orden de volumen
     desc) + los curados que no estén en ella al final. Es una lista de NOMBRES

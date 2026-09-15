@@ -535,6 +535,101 @@ def _iso_o_none(s: Optional[str]) -> Optional[str]:
         return None
 
 
+# ── Acciones / CEDEARs / Merval: price action ────────────────────────────
+_AC_CACHE: Dict[tuple, str] = {}       # HTML por (parámetros, mtime de los archivos)
+
+
+def _pa_fmt_rows(rows: list, dec: int) -> list:
+    """Celdas pre-formateadas (mismo criterio que _sd_fmt_rows)."""
+    from backend.locale_ar import fmt_hum, fmt_num
+
+    def cls(v):
+        if v is None:
+            return ""
+        return "var-up" if v > 0.00005 else ("var-down" if v < -0.00005 else "px-flat")
+
+    def arrow(v):
+        return "▲" if v > 0.00005 else ("▼" if v < -0.00005 else "■")
+
+    out = []
+    for r in rows:
+        out.append({
+            "fecha": r["fecha"],
+            "valor_s": fmt_num(r["valor"], dec),
+            "var_s": ("—" if r["var"] is None else f"{arrow(r['var'])} {fmt_num(r['var'], dec)}"),
+            "var_cls": cls(r["var"]),
+            "pct_s": ("—" if r["var_pct"] is None else fmt_num(r["var_pct"], 2) + "%"),
+            "pct_cls": cls(r["var_pct"]),
+            "vol_s": ("—" if not r.get("volumen") else fmt_hum(r["volumen"])),
+        })
+    return out
+
+
+def _pa_default(names: list) -> Optional[str]:
+    for pref in ("GGAL", "YPFD", "SPY"):
+        if pref in names:
+            return pref
+    return next((n for n in names if n != "MERVAL"), names[0] if names else None)
+
+
+@router.get("/historicos/acciones", response_class=HTMLResponse)
+async def historicos_acciones(
+    request: Request, ticker: str = "", base: str = "ars", modo: str = "precio",
+    dias: str = "90", desde: Optional[str] = None, hasta: Optional[str] = None,
+    cmp: str = "1",
+) -> HTMLResponse:
+    """Pestaña 'Acciones': price action de una acción / CEDEAR / Merval sobre
+    el cierre diario propio — nivel (ARS o ÷ A3500 / CCL / MEP) con canal de
+    tendencia ±1σ/2σ, mín/máx, percentil/z y overlay del Merval, o retornos
+    diarios; distribución vs normal al costado; tabla HP. Carga sólo al abrir
+    el tab o tocar el form; análisis numpy en el executor; render cacheado por
+    (parámetros, mtime del parquet de acciones y del FX)."""
+    from backend.services import acciones_hist, price_action
+
+    base = base if base in price_action.BASES else "ars"
+    modo = "retornos" if modo == "retornos" else "precio"
+    dias_sel = dias if dias in price_action.VENTANAS else "90"
+    desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
+    comparar = cmp != "0"
+    tk = (ticker or "").strip().upper()
+    sig = (acciones_hist.signature(), fx_hist.signature())
+    key = (tk, base, modo, dias_sel, desde, hasta, comparar, sig)
+    html = _AC_CACHE.get(key)
+    if html is not None:
+        return HTMLResponse(html)
+    loop = asyncio.get_running_loop()
+
+    def _build() -> Dict[str, Any]:
+        lst = acciones_hist.tickers()
+        names = [t["ticker"] for t in lst]
+        sel = tk if tk in names else _pa_default(names)
+        pa = (price_action.analizar(sel, base, modo, price_action.VENTANAS[dias_sel], desde, hasta, comparar)
+              if sel else None)
+        grupos: list = []
+        for t in lst:
+            if not grupos or grupos[-1][0] != t["panel_label"]:
+                grupos.append((t["panel_label"], []))
+            grupos[-1][1].append(t)
+        dec, dec_tick = 2, 0
+        if pa and pa.get("ok"):
+            u = abs(pa["nivel"]["ultimo"])
+            dec = 2 if u >= 100 else (3 if u >= 10 else 4)
+            dec_tick = 0 if u >= 100 else (2 if u >= 10 else 3)
+        return {"archivo": acciones_hist.status(), "grupos": grupos, "sel": sel, "base": base,
+                "modo": modo, "dias_sel": dias_sel, "desde": desde, "hasta": hasta,
+                "comparar": comparar, "bases": price_action.BASES, "pa": pa,
+                "dec": dec, "dec_tick": dec_tick,
+                "rows_fmt": (_pa_fmt_rows(pa["tabla"], dec) if pa and pa.get("ok") else [])}
+
+    ctx = await loop.run_in_executor(None, _build)
+    resp = _render(request, "partials/historico_acciones.html", **ctx)
+    if _AC_CACHE and next(iter(_AC_CACHE))[-1] != sig:
+        _AC_CACHE.clear()                       # cambió un archivo → todo lo viejo afuera
+    if len(_AC_CACHE) < 128:
+        _AC_CACHE[key] = bytes(resp.body).decode("utf-8")
+    return resp
+
+
 @router.get("/historicos/series-diarias", response_class=HTMLResponse)
 async def historicos_series_diarias(
     request: Request, serie: str = "", chart: str = "linea", dias: str = "90",

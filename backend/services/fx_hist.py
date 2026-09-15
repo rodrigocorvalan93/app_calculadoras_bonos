@@ -105,6 +105,16 @@ def status() -> Dict[str, Any]:
             "dmax": df["fecha_hoy"].iloc[-1].isoformat()}
 
 
+def columna(col: str) -> Dict[str, float]:
+    """{fecha ISO: valor} de una columna del archivo (sin NaN). Lo usa el price
+    action de acciones para dividir por CCL / MEP / A3500 del mismo cierre."""
+    df = _load()
+    if df is None or col not in df.columns:
+        return {}
+    sub = df[["fecha_hoy", col]].dropna(subset=[col])
+    return {f.isoformat(): float(v) for f, v in zip(sub["fecha_hoy"], sub[col]) if v > 0}
+
+
 def series_list() -> List[Dict[str, Any]]:
     """Series disponibles EN el archivo (columna presente y con algún dato) —
     un archivo viejo sin las columnas de caución no rompe nada."""
