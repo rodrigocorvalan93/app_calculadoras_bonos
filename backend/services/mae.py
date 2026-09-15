@@ -126,6 +126,13 @@ def refresh() -> bool:
 
 # ── Lectura (path de request: sólo cache en memoria) ────────────────────────
 
+def snapshot_ts() -> float:
+    """Timestamp del último snapshot MAE (0.0 si nunca hubo): versión barata
+    para los caches que dependen del match cross-venue."""
+    with _lock:
+        return float(_snap.get("ts") or 0.0)
+
+
 def status() -> Dict[str, Any]:
     with _lock:
         rf = list(_snap["rentafija"])

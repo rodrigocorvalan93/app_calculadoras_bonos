@@ -12,6 +12,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any, Dict, List
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -26,6 +27,10 @@ from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_s
 # benefits from fan-out across cores.
 _row_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="curve-rows")
 _bg_tasks: set = set()      # refs vivas de tasks fire-and-forget (create_task guarda débil)
+# (código, plazo, fuente, settle, ts MAE, versión 5D, huella del índice) →
+# (seq del símbolo, fila). Ver _rows_for.
+_ROW_MEMO: Dict[tuple, tuple] = {}
+_ROW_MEMO_MAX = 4096
 
 router = APIRouter(prefix="/curves", tags=["curves"])
 
@@ -285,6 +290,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             "code": code,                # ticker BYMA = nombre de variable
             "calc": calc,                # ficha NATIVA que valuó la fila (…D/…C)
             "symbol": symbol,
+            "seq": int(getattr(snap, "seq", 0) or 0) if snap else 0,   # último update del símbolo
             "leg": leg,
             "last": last, "bid": bid, "offer": offer,
             "close": close, "open": open_, "high": high, "low": low,
@@ -402,10 +408,35 @@ async def _rows_for(
     # del event loop (que sigue responsivo por el GIL-switch cada ~5 ms) y sin el
     # overhead del fan-out. El pool con varios workers da paralelismo a nivel
     # REQUEST (varios paneles a la vez), no intra-tabla.
+    # Memo de filas por símbolo: con la MISMA seq del snapshot (y mismo día,
+    # settle, MAE, 5D e índices) la fila sale idéntica, así un tick de un bono
+    # no re-arma las 166 filas de la curva — sólo la que cambió. Sólo leg
+    # nativa + fuente BYMA + especies FX-free (una especie pesos de un
+    # hard-dollar depende del FX de OTROS símbolos). Devuelve copias: los
+    # callers mutan las filas (fracciones de volumen, overrides).
+    memo_ok = leg == "native" and fuente != "mae" and book
+    mae_ts = mae_svc.snapshot_ts() if memo_ok else None
+    ref5 = historico_byma.ref_5d_version() if memo_ok else None
+    store = marketdata_store.get_store()
+
     def _build_all() -> list[dict]:
         out: list[dict] = []
         for c in codes:
-            r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
+            if memo_ok and not _pesos_de_dolar(c, pricing.bond_meta(c)):
+                snap = store.get(syms.md_symbol(c, plazo))
+                sseq = int(getattr(snap, "seq", 0) or 0) if snap is not None else -1
+                key = (c, plazo, fuente, settle, mae_ts, ref5,
+                       pricing._index_fingerprint(pricing._bond_index_kind(c)))
+                ent = _ROW_MEMO.get(key)
+                if ent is not None and ent[0] == sseq:
+                    r = dict(ent[1]) if ent[1] is not None else None
+                else:
+                    r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
+                    if len(_ROW_MEMO) >= _ROW_MEMO_MAX:
+                        _ROW_MEMO.clear()
+                    _ROW_MEMO[key] = (sseq, dict(r) if r is not None else None)
+            else:
+                r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
             if r is not None:
                 out.append(r)
         return out
@@ -550,12 +581,15 @@ async def mercado_page(
     table = curves.build_curve_codes()
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
     selected_key = curve if (curve and curve in table) else default_key
-    rows, row_meta = (
-        await _rows_for(selected_key, plazo, only_quoting, leg, book=True, fuente=fuente)
-        if selected_key else ([], {})
+    # Mismas filas (y misma seq/orden) que /mercado/table: la tabla inicial ya
+    # sale con data-delta/seq/order y el primer tick pide sólo lo que cambió.
+    seq, rows, row_meta, ohash = (
+        await _rows_en_seq(selected_key, plazo, only_quoting, leg, fuente, "", 0)
+        if selected_key else (0, [], {}, "")
     )
-    if _es_corp(selected_key):
-        rows, row_meta = _vista_corp(rows, row_meta)      # la página arranca sin q/mas
+    delta_qs = urlencode({"curve": selected_key or "", "plazo": plazo,
+                          "only_quoting": "true" if only_quoting else "false", "leg": leg,
+                          "fuente": fuente, "ym": ym, "panel": "rf", "q": "", "mas": 0})
     return await asyncio.get_running_loop().run_in_executor(None, lambda: _render(
         request,
         "mercado.html",
@@ -571,7 +605,95 @@ async def mercado_page(
         fuente=fuente,
         ym=ym,
         book_open=book,
+        delta_url=("/mercado/rows?" + delta_qs) if (selected_key and fuente != "mae") else "",
+        delta_seq=seq,
+        delta_order=ohash,
     ))
+
+
+# ── Mercado por filas: filas de la curva construidas UNA vez por (params, seq)
+# y compartidas entre la tabla completa (/mercado/table, cada 30 s) y el delta
+# (/mercado/rows, cada tick, N clientes): single-flight por key.
+_ROWS_CACHE: Dict[tuple, tuple] = {}          # key → (seq, rows, meta, order_hash)
+_ROWS_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_ROWS_MAX = 64
+
+
+def _order_hash(codes) -> str:
+    import hashlib
+    return hashlib.blake2b(",".join(codes).encode("utf-8"), digest_size=6).hexdigest()
+
+
+async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fuente: str,
+                       q: str, mas: int) -> tuple:
+    """(seq, rows, meta, order_hash) de la curva para la seq actual del store.
+    La seq se toma ANTES de armar las filas: un tick que entre durante el
+    build queda para el próximo delta (nunca se pierde)."""
+    key = (curve, plazo, bool(only_quoting), leg, fuente, (q or "").strip(), int(mas or 0))
+    store = marketdata_store.get_store()
+    seq = store.seq()
+    ent = _ROWS_CACHE.get(key)
+    if ent is not None and ent[0] == seq:
+        return ent
+    lock = _ROWS_LOCKS.setdefault(key, asyncio.Lock())
+    async with lock:
+        ent = _ROWS_CACHE.get(key)
+        if ent is not None and ent[0] >= seq:
+            return ent
+        seq = store.seq()
+        rows, meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
+        if _es_corp(curve):
+            rows, meta = _vista_corp(rows, meta, q, mas)
+        ent = (seq, rows, meta, _order_hash(r["code"] for r in rows))
+        if len(_ROWS_CACHE) >= _ROWS_MAX:
+            _ROWS_CACHE.pop(next(iter(_ROWS_CACHE)), None)
+        _ROWS_CACHE[key] = ent
+        return ent
+
+
+@mercado_router.get("/mercado/rows", response_class=HTMLResponse)
+async def mercado_rows(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    only_quoting: bool = True,
+    leg: str = "native",
+    fuente: str = "byma",
+    ym: str = "tir",
+    panel: str = "rf",
+    q: str = "",
+    mas: int = 0,
+    since: int = 0,
+    order: str = "",
+) -> HTMLResponse:
+    """Delta de Mercado: sólo los `<tr>` cuyo símbolo cambió desde `since`
+    (seq del store que la tabla del cliente ya tiene). Headers: X-Seq (la seq
+    de estas filas → próximo `since`), X-Rows, o X-Full=1 (cuerpo vacío)
+    cuando el cliente tiene que hacer el swap completo: cambió el conjunto u
+    orden de filas (`order` ≠ hash actual), panel de acciones, fuente MAE.
+    Costo por tick: filas compartidas con /mercado/table (1 build por seq) +
+    Jinja de las pocas filas cambiadas (~1 ms)."""
+    if panel in ("lideres", "cedears", "general", "todas") or fuente == "mae" or not curve:
+        return HTMLResponse("", headers={"X-Full": "1", "Cache-Control": "no-store"})
+    seq, rows, _meta, ohash = await _rows_en_seq(curve, plazo, only_quoting, leg, fuente, q, mas)
+    hdr = {"X-Seq": str(seq), "Cache-Control": "no-store"}
+    if order != ohash:
+        hdr["X-Full"] = "1"
+        return HTMLResponse("", headers=hdr)
+    # Leg no nativa: el precio convertido depende del FX (otros símbolos) →
+    # se mandan todas las filas (siguen siendo sólo <tr>, sin el card).
+    cambiadas = rows if leg != "native" else [r for r in rows if int(r.get("seq") or 0) > since]
+    hdr["X-Rows"] = str(len(cambiadas))
+    if not cambiadas:
+        return HTMLResponse("", headers=hdr)
+    ctx = dict(rows=cambiadas, plazo=plazo, leg=leg, fuente=fuente,
+               ym="margen" if ym == "margen" else "tir")
+    if len(cambiadas) > 40:
+        resp = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: _render(request, "partials/mercado_rows.html", **ctx))
+    else:
+        resp = _render(request, "partials/mercado_rows.html", **ctx)
+    return HTMLResponse(resp.body, headers=hdr)
 
 
 @mercado_router.get("/mercado/table", response_class=HTMLResponse)
@@ -624,9 +746,7 @@ async def mercado_table_partial(
                                       rows=eq_rows, panel=panel, plazo=plazo, **ctx))
         return _render(request, "partials/equities_table.html",
                        rows=eq_rows, panel=panel, plazo=plazo, **ctx)
-    rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
-    if _es_corp(curve):
-        rows, row_meta = _vista_corp(rows, row_meta, q, mas)
+    seq, rows, row_meta, ohash = await _rows_en_seq(curve, plazo, only_quoting, leg, fuente, q, mas)
     # 7-12 ms de Jinja @120-200 filas × 25 filtros/fila: al pool, como equities.
     return await asyncio.get_running_loop().run_in_executor(
         None, lambda: _render(
@@ -640,6 +760,11 @@ async def mercado_table_partial(
             leg=leg,
             fuente=fuente,
             ym="margen" if ym == "margen" else "tir",
+            # tabla por filas: el cliente pide /mercado/rows?…&since=seq&order=hash
+            # en cada tick y reemplaza sólo las filas cambiadas.
+            delta_url=("/mercado/rows?" + request.url.query) if fuente != "mae" else "",
+            delta_seq=seq,
+            delta_order=ohash,
         ))
 
 

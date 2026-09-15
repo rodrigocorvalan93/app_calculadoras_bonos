@@ -384,7 +384,12 @@ def ref_5d(hoy: Optional[date] = None, ruedas: int = 5) -> Dict[str, tuple]:
         while hoy.weekday() >= 5:
             hoy -= timedelta(days=1)
     hoy_iso = hoy.isoformat()
-    key = (data.get("ver") or id(data), hoy_iso, int(ruedas))
+    try:
+        from backend.services import cierres as _cierres
+        cierres_id = id(_cierres.loaded())          # None → id(None): cambia al cargar/recargar
+    except Exception:  # noqa: BLE001
+        cierres_id = 0
+    key = (data.get("ver") or id(data), hoy_iso, int(ruedas), cierres_id)
     c = _ref5d_cache
     if c is not None and c[0] == key:
         return c[1]
@@ -423,6 +428,13 @@ def ref_5d(hoy: Optional[date] = None, ruedas: int = 5) -> Dict[str, tuple]:
         pass
     _ref5d_cache = (key, out)
     return out
+
+
+def ref_5d_version() -> Any:
+    """Clave del último ref_5d armado (base, día, ruedas, cierres): cambia
+    cuando cambia el 5D — la usan los memos de filas de Mercado."""
+    c = _ref5d_cache
+    return c[0] if c is not None else None
 
 
 # ── Resumen semanal por segmento (Δprecio + ΔTIR) ────────────────────────────

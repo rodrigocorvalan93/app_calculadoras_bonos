@@ -153,6 +153,20 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `.tick-up` / `.tick-down` (flash CSS verde/rojo estilo terminal).
 - El dot `#live-dot` de la topbar muestra el estado del feed
   (live/idle/off). Todo vanilla JS — sin librerías nuevas.
+- **Paneles por FILAS (delta)**: un contenedor `data-delta-scope` (Mercado)
+  NO swapea completo en cada `md-update`: si adentro hay una
+  `table[data-delta]`, app.js pide `data-delta&since=<data-seq>&order=<data-order>`
+  (`/mercado/rows`) y el server devuelve sólo los `<tr data-code>` cuyo
+  símbolo cambió desde esa seq (`MarketSnapshot.seq` = seq global del store en
+  su último update; header `X-Seq` = la nueva). Cada fila se reemplaza en el
+  lugar y el flash sale del diff de ESA fila. `X-Full: 1` (cambió el
+  conjunto/orden — hash `data-order` —, panel de acciones, fuente MAE) o
+  cualquier error → `htmx.trigger(scope, 'refresh')` = swap completo; el
+  `every 30s` sigue de red de seguridad. La fila es UNA macro
+  (`partials/mercado_row.html`) compartida por la tabla y el delta: tienen
+  que salir idénticas. Server: `_rows_en_seq` (1 build por params+seq,
+  single-flight) + `_ROW_MEMO` (fila por seq del símbolo: un tick re-arma
+  sólo su fila). Si agregás columnas a Mercado, van en la macro.
 
 ## Seguridad — invariantes (no regresar sin querer)
 

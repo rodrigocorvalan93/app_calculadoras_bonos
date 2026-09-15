@@ -35,7 +35,7 @@ lanza uvicorn en `http://127.0.0.1:8000`); no hay un server central.
 | Nueva especie | `/nueva` | Calculadora ad-hoc: se arma/pega una ficha y calcula cashflow + métricas sin tocar el universo. |
 | Comparador | `/comparador` | Dos bonos lado a lado + ubicación en curva (mismo widget que YAS, con fuente switcheable). |
 | Curvas | `/curves` | Curvas por segmento (CER, DLK, HD, tasa fija, etc.) con precios en vivo. |
-| Mercado | `/mercado` | Paneles de mercado en vivo: quotes, book por especie, cauciones, FX, MAE. |
+| Mercado | `/mercado` | Paneles de mercado en vivo: quotes, book por especie, cauciones, FX, MAE. La tabla de renta fija se actualiza **por filas**: en cada tick el cliente pide `/mercado/rows?…&since=seq&order=hash` y reemplaza sólo los `<tr>` cuyo símbolo cambió (flash por diff); el swap completo queda para cambios de conjunto/orden, paneles de acciones, MAE y cada 30 s. |
 | Break-even | `/breakeven` | BE de inflación (CER) y de deva (futuros), con gráficos SVG estilo unificado. |
 | Dólares | `/dolares` | MEP/CCL/canje implícitos por especie + calculadora de canje. |
 | Tasas | `/tasas` | Tasas cortas: cauciones, REPO, plazos. |
