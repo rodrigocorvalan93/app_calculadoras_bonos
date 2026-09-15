@@ -23,5 +23,7 @@ jobs:
         run: python -m pip install -r backend/requirements.txt
       - name: Lint (ruff F/E9)
         run: python -m ruff check backend/ --select F,E9
+      # --timeout: un test colgado falla a los 5 min CON su stack (pytest-timeout)
+      # en vez de comerse los 25 min del job en silencio.
       - name: Suite de tests
-        run: python -m pytest -q
+        run: python -m pytest -q --timeout=300
