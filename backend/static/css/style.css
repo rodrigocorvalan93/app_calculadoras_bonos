@@ -1333,6 +1333,32 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 /* Banda ±1σ del histórico de forwards (media punteada fc-avg encima). */
 .fut-chart .fc-band { fill: var(--accent); opacity: 0.10; }
 
+/* ── Históricos · price action de acciones (canal ±σ, retornos, histograma) ── */
+.pa-row { display: flex; gap: 12px; align-items: stretch; margin-top: 12px; }
+.pa-main { flex: 1 1 560px; min-width: 0; }
+.pa-side { flex: 0 0 330px; min-width: 260px; }
+@media (max-width: 1100px) { .pa-row { flex-wrap: wrap; } .pa-side { flex: 1 1 100%; } }
+.pa-metrics { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) { .pa-metrics { grid-template-columns: repeat(2, 1fr); } }
+.fut-chart .pa-band1 { fill: var(--accent); opacity: 0.14; }
+.fut-chart .pa-band2 { fill: var(--accent); opacity: 0.07; }
+.fut-chart .pa-tend { stroke: var(--accent); stroke-width: 1.3; stroke-dasharray: 6 4; opacity: 0.9; }
+.fut-chart .pa-minmax { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; opacity: 0.8; }
+.fut-chart .pa-mlabel { fill: var(--text-muted); font-size: 10px; }
+.fut-chart .pa-overlay { fill: none; stroke: var(--cyan); stroke-width: 1.4; stroke-dasharray: 4 3; opacity: 0.85; }
+.fut-chart .pa-bar { fill: var(--green); opacity: 0.85; }
+.fut-chart .pa-bar.neg { fill: var(--red); }
+.fut-chart .pa-media { stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.fut-chart .pa-sig1 { stroke: var(--yellow); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.8; }
+.fut-chart .pa-sig2 { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+.fut-chart .pa-llabel { fill: var(--text-muted); font-size: 10px; }
+.fut-chart .pa-hbar { fill: var(--accent); opacity: 0.55; }
+.fut-chart .pa-normal { fill: none; stroke: var(--yellow); stroke-width: 1.8; }
+.fut-chart .pa-mu { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.fut-chart .pa-ultimo { stroke: var(--green); stroke-width: 1.6; }
+.pa-diststats { font-size: 11px; margin: 6px 0 0; line-height: 1.5; }
+.pa-tabla > summary::-webkit-details-marker { display: none; }
+
 /* ── Escenario — inputs por categoría + tabla agrupada ─────────────────── */
 .esc-cats { display: grid; gap: 4px; margin: 10px 0 2px; max-width: 560px; }
 .esc-cats-head, .esc-cat-row { display: grid; grid-template-columns: 1fr 120px 120px; gap: 8px; align-items: center; }

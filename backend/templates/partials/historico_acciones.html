@@ -1,0 +1,198 @@
+{# Históricos · Acciones — price action de acciones / CEDEARs / Merval sobre
+   el cierre diario propio (Delta - historico_acciones). Nivel (ARS o ÷ FX)
+   con canal de tendencia ±1σ/±2σ, mín/máx y overlay del Merval, o retornos
+   diarios con ±1σ/±2σ; al costado la distribución vs la normal. Sin polling:
+   la data cambia 1×/día; se carga al abrir el tab o tocar el form y el HTML
+   queda cacheado por mtime en la ruta. #}
+{% macro nv(v, d) -%}{% if v is none %}—{% else %}{{ v | ar_num(d) }}{% endif %}{%- endmacro %}
+{% macro pct(v, d=2) -%}{% if v is none %}—{% else %}{{ v | ar_num(d) }}%{% endif %}{%- endmacro %}
+{% if not archivo.loaded %}
+  <div class="alert">Todavía no hay cierres de acciones guardados en <code>Delta - historico_acciones.parquet</code>:
+    se llena solo con el autosave del cierre (Líderes + General + CEDEARs + Merval, sólo las que operaron ese día),
+    desde hoy. Para no arrancar de cero: <code>python -m backend.tools.backfill_acciones --byma --desde 2025-01-01</code>
+    (BYMA Open Data, best-effort) o <code>--csv cierres.csv</code> (fecha, ticker, cierre).</div>
+{% else %}
+  <div class="curve-picker card">
+    <div class="card-body">
+      <form hx-get="/historicos/acciones" hx-target="#hist-acciones" hx-swap="innerHTML">
+        <div class="row-fields">
+          <label class="field"><span>Especie</span>
+            <select name="ticker">
+              {% for grp, items in grupos %}<optgroup label="{{ grp }}">
+                {% for t in items %}<option value="{{ t.ticker }}" {% if t.ticker == sel %}selected{% endif %}>{{ t.ticker }}</option>{% endfor %}
+              </optgroup>{% endfor %}
+            </select></label>
+          <label class="field"><span>Moneda</span>
+            <select name="base">
+              {% for k, lbl in bases.items() %}<option value="{{ k }}" {% if k == base %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select></label>
+          <label class="field"><span>Vista</span>
+            <select name="modo">
+              <option value="precio" {% if modo == "precio" %}selected{% endif %}>Precio (nivel)</option>
+              <option value="retornos" {% if modo == "retornos" %}selected{% endif %}>Retornos diarios</option>
+            </select></label>
+          <label class="field"><span>Ventana</span>
+            <select name="dias">
+              {% for d, lbl in [("30","30 ruedas"),("60","60 ruedas"),("90","90 ruedas"),("180","180 ruedas"),("365","1 año"),("todo","Todo")] %}<option value="{{ d }}" {% if d == dias_sel %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select></label>
+          <label class="field"><span>Desde</span>
+            <input type="date" name="desde" value="{{ desde or '' }}"></label>
+          <label class="field"><span>Hasta</span>
+            <input type="date" name="hasta" value="{{ hasta or '' }}"></label>
+          <label class="field"><span>vs Merval</span>
+            <select name="cmp">
+              <option value="1" {% if comparar %}selected{% endif %}>Sí</option>
+              <option value="0" {% if not comparar %}selected{% endif %}>No</option>
+            </select></label>
+          <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
+        </div>
+      </form>
+      <p class="muted" style="font-size:11px;margin-top:6px">
+        Desde/Hasta tienen prioridad sobre la ventana. Cierre diario propio ({{ archivo.dmin }} → {{ archivo.dmax }} ·
+        {{ archivo.n_dias }} ruedas · {{ archivo.n_tickers }} especies{% if not archivo.merval %} · sin Merval todavía{% endif %}).
+        ÷ A3500 / CCL / MEP divide el precio por el FX del mismo día (series diarias del cierre; A3500 del BCRA).
+        Canal = regresión lineal de la ventana ± 1σ / 2σ de los residuos; z = distancia del último a la media (y al canal) en desvíos.
+      </p>
+    </div>
+  </div>
+
+  {% if pa and pa.ok %}
+  {% set st = pa.nivel %}{% set rt = pa.retornos %}{% set g = pa.geom %}{% set gh = pa.geom_hist %}{% set h = pa.hist %}
+  <div class="metrics-grid pa-metrics" style="margin-top:12px">
+    <div class="metric metric-highlight">
+      <div class="metric-label">{{ pa.ticker }} · último {{ pa.hasta }}{% if pa.base != "ars" %} <span class="conv">{{ pa.base_label }}</span>{% endif %}</div>
+      <div class="metric-value">{{ nv(st.ultimo, dec) }}</div>
+    </div>
+    <div class="metric {{ 'metric-positive' if st.ret_ventana >= 0 else 'metric-negative' }}">
+      <div class="metric-label">Retorno ventana ({{ pa.n }} ruedas)</div>
+      <div class="metric-value">{{ pct(st.ret_ventana) }}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Media · desvío</div>
+      <div class="metric-value" style="font-size:15px">{{ nv(st.media, dec) }} · {{ nv(st.desvio, dec) }}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Mín · Máx</div>
+      <div class="metric-value" style="font-size:15px" title="mín {{ st.min_fecha }} · máx {{ st.max_fecha }}">{{ nv(st.min, dec) }} · {{ nv(st.max, dec) }}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Percentil · z vs media</div>
+      <div class="metric-value" style="font-size:15px">{{ (st.percentil * 100) | ar_num(0) }}º · {{ nv(st.z, 2) }}σ</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Tendencia · z vs canal</div>
+      <div class="metric-value" style="font-size:15px" title="pendiente de la regresión por rueda (anualizada {{ pct(st.pend_anual, 0) }}) · R² {{ nv(st.r2, 2) }}">{{ pct(st.pend_pct, 3) }}/rueda · {{ nv(st.z_tend, 2) }}σ</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">Vol anualizada · máx drawdown</div>
+      <div class="metric-value" style="font-size:15px">{{ pct(rt.vol_anual, 1) }} · {{ pct(st.mdd, 1) }}</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">vs Merval · β · ρ · relativo</div>
+      <div class="metric-value" style="font-size:15px">{% if pa.cmp and not pa.cmp.insuficiente %}{{ nv(pa.cmp.beta, 2) }} · {{ nv(pa.cmp.corr, 2) }} · <span class="{{ 'var-up' if pa.cmp.ret_rel >= 0 else 'var-down' }}">{{ pct(pa.cmp.ret_rel, 1) }}</span>{% elif pa.ticker == "MERVAL" %}es el índice{% else %}—{% endif %}</div>
+    </div>
+  </div>
+
+  <div class="pa-row">
+    <div class="card pa-main">
+      <div class="card-title">
+        <span>{% if pa.modo == "precio" %}📈 {{ pa.ticker }} · precio {{ pa.base_label }} · canal de tendencia{% else %}📊 {{ pa.ticker }} · retornos diarios {{ pa.base_label }}{% endif %}</span>
+        <span class="card-title-aux">{{ pa.desde }} → {{ pa.hasta }} · {{ pa.n }} ruedas{% if pa.modo == "precio" and g.overlay %} · <span style="color:var(--cyan)">- - Merval rebasado</span>{% endif %}</span>
+      </div>
+      <div class="card-body">
+        {% if pa.modo == "precio" %}
+        <svg class="fut-chart pa-chart" viewBox="0 0 {{ g.w }} {{ g.h }}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Precio de {{ pa.ticker }} con canal de tendencia">
+          {% for t in g.yticks %}
+            <line class="fc-grid" x1="{{ g.x0 }}" y1="{{ t.y }}" x2="{{ g.x1 }}" y2="{{ t.y }}"/>
+            <text class="fc-vlabel" x="{{ g.x0 - 6 }}" y="{{ t.y + 3.5 }}" text-anchor="end">{{ t.v | ar_num(dec_tick) }}</text>
+          {% endfor %}
+          {% if g.band2 %}<polygon class="pa-band2" points="{{ g.band2 }}"><title>canal ±2σ</title></polygon>{% endif %}
+          {% if g.band1 %}<polygon class="pa-band1" points="{{ g.band1 }}"><title>canal ±1σ</title></polygon>{% endif %}
+          <line class="pa-tend" x1="{{ g.tend.x1 }}" y1="{{ g.tend.y1 }}" x2="{{ g.tend.x2 }}" y2="{{ g.tend.y2 }}"><title>tendencia (regresión lineal)</title></line>
+          <line class="pa-minmax" x1="{{ g.x0 }}" x2="{{ g.x1 }}" y1="{{ g.max.y }}" y2="{{ g.max.y }}"/>
+          <text class="pa-mlabel" x="{{ g.x1 - 2 }}" y="{{ g.max.y - 3 }}" text-anchor="end">máx {{ nv(st.max, dec) }}</text>
+          <line class="pa-minmax" x1="{{ g.x0 }}" x2="{{ g.x1 }}" y1="{{ g.min.y }}" y2="{{ g.min.y }}"/>
+          <text class="pa-mlabel" x="{{ g.x1 - 2 }}" y="{{ g.min.y + 11 }}" text-anchor="end">mín {{ nv(st.min, dec) }}</text>
+          {% if g.overlay %}<polyline class="pa-overlay" points="{{ g.overlay }}"><title>Merval rebasado al nivel inicial de {{ pa.ticker }}</title></polyline>{% endif %}
+          <polyline class="fc-line" points="{{ g.poly }}"/>
+          <circle class="fc-dot" cx="{{ g.last.cx }}" cy="{{ g.last.cy }}" r="4">
+            <title>{{ pa.hasta }} · {{ nv(st.ultimo, dec) }} · percentil {{ (st.percentil * 100) | ar_num(0) }} · z {{ nv(st.z, 2) }}σ</title></circle>
+          {% for xl in g.xlabels %}<text class="fc-xlabel" x="{{ xl.x }}" y="{{ g.xlabel_y }}" text-anchor="middle">{{ xl.txt }}</text>{% endfor %}
+        </svg>
+        {% else %}
+        <svg class="fut-chart pa-chart" viewBox="0 0 {{ g.w }} {{ g.h }}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Retornos diarios de {{ pa.ticker }}">
+          {% for t in g.yticks %}
+            <line class="fc-grid" x1="{{ g.x0 }}" y1="{{ t.y }}" x2="{{ g.x1 }}" y2="{{ t.y }}"/>
+            <text class="fc-vlabel" x="{{ g.x0 - 6 }}" y="{{ t.y + 3.5 }}" text-anchor="end">{{ t.v | ar_num(1) }}%</text>
+          {% endfor %}
+          <line class="fc-zero" x1="{{ g.x0 }}" x2="{{ g.x1 }}" y1="{{ g.zero_y }}" y2="{{ g.zero_y }}"/>
+          {% for l in g.lineas %}
+            <line class="{{ l.cls }}" x1="{{ g.x0 }}" x2="{{ g.x1 }}" y1="{{ l.y }}" y2="{{ l.y }}"/>
+            <text class="pa-llabel" x="{{ g.x1 - 2 }}" y="{{ l.y - 2 }}" text-anchor="end">{{ l.lbl }}</text>
+          {% endfor %}
+          {% for b in g.bars %}<rect class="pa-bar{% if b.neg %} neg{% endif %}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"><title>{{ b.fecha }} · {{ b.v | ar_num(2) }}%</title></rect>{% endfor %}
+          {% for xl in g.xlabels %}<text class="fc-xlabel" x="{{ xl.x }}" y="{{ g.xlabel_y }}" text-anchor="middle">{{ xl.txt }}</text>{% endfor %}
+        </svg>
+        {% endif %}
+        <p class="muted" style="font-size:11px;margin:6px 0 0">
+          {% if pa.modo == "precio" %}
+            Último a {{ nv(st.z_tend, 2) }}σ del canal ({{ nv(st.tend_ultimo, dec) }} en la tendencia, σ {{ nv(st.sigma_tend, dec) }}) ·
+            {{ (st.pos_rango * 100) | ar_num(0) if st.pos_rango is not none else "—" }}% del rango mín→máx ·
+            máx {{ st.max_fecha }} · mín {{ st.min_fecha }}.
+          {% else %}
+            Último retorno {{ pct(rt.ultimo) }} ({{ rt.ultimo_fecha }}) = {{ nv(rt.z_ultimo, 2) }}σ · media {{ pct(rt.media, 3) }} · σ diaria {{ pct(rt.desvio) }} ·
+            días positivos {{ pct(rt.pos_pct, 0) }} · mejor {{ pct(rt.max) }} ({{ rt.max_fecha }}) · peor {{ pct(rt.min) }} ({{ rt.min_fecha }}).
+          {% endif %}
+          {% if pa.cmp and not pa.cmp.insuficiente %}Merval en la ventana {{ pct(pa.cmp.ret_merval, 1) }} ({{ pa.cmp.n }} ruedas comunes).{% endif %}
+        </p>
+      </div>
+    </div>
+    <div class="card pa-side">
+      <div class="card-title"><span>🔔 Distribución vs normal</span><span class="card-title-aux">{{ "precio" if pa.modo == "precio" else "retornos" }} · {{ h.k }} bins</span></div>
+      <div class="card-body">
+        {% if gh %}
+        {% set dh = dec if pa.modo == "precio" else 2 %}{% set uh = "" if pa.modo == "precio" else "%" %}
+        <svg class="fut-chart pa-hist" viewBox="0 0 {{ gh.w }} {{ gh.h }}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Distribución de {{ pa.ticker }} vs normal">
+          {% for b in gh.bars %}<rect class="pa-hbar" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"><title>{{ b.lo | ar_num(dh) }}{{ uh }} … {{ b.hi | ar_num(dh) }}{{ uh }}: {{ b.n }}</title></rect>{% endfor %}
+          <polyline class="pa-normal" points="{{ gh.curva }}"><title>normal μ {{ h.mu | ar_num(dh) }}{{ uh }} · σ {{ h.sd | ar_num(dh) }}{{ uh }}</title></polyline>
+          <line class="pa-mu" x1="{{ gh.mu_x }}" x2="{{ gh.mu_x }}" y1="{{ gh.y0 }}" y2="{{ gh.y1 }}"/>
+          {% if gh.ultimo_x is not none %}<line class="pa-ultimo" x1="{{ gh.ultimo_x }}" x2="{{ gh.ultimo_x }}" y1="{{ gh.y0 }}" y2="{{ gh.y1 }}"><title>último</title></line>{% endif %}
+          {% for xl in gh.xlabels %}<text class="fc-xlabel" x="{{ xl.x }}" y="{{ gh.xlabel_y }}" text-anchor="{{ xl.anchor }}">{{ xl.v | ar_num(dh) }}{{ uh }}</text>{% endfor %}
+        </svg>
+        <p class="muted pa-diststats">
+          n {{ h.n }} · μ {{ h.mu | ar_num(dh) }}{{ uh }} · σ {{ h.sd | ar_num(dh) }}{{ uh }} ·
+          asimetría {{ nv(h.skew, 2) }} · curtosis (exceso) {{ nv(h.kurt, 2) }}<br>
+          dentro de ±1σ {{ pct(h.dentro_1s, 0) }} <span class="muted">(normal 68%)</span> · ±2σ {{ pct(h.dentro_2s, 0) }} <span class="muted">(normal 95%)</span>
+          — <span style="color:var(--green)">│</span> último · <span style="color:var(--yellow)">—</span> normal
+        </p>
+        {% else %}
+        <p class="muted" style="font-size:12px">Con menos de 3 ruedas no hay distribución.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <details class="card pa-tabla" style="margin-top:12px">
+    <summary class="card-title" style="cursor:pointer;list-style:none">
+      <span>🗒 Tabla histórica (HP)</span>
+      <span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#pa-tbl" title="Descargar la tabla como se ve (CSV es-AR)">⤓ CSV</button> · {{ rows_fmt | length }} ruedas · más reciente primero ▾</span>
+    </summary>
+    <div class="card-body table-scroll">
+      <table class="cashflows curve-table mercado-table" data-sortable id="pa-tbl">
+        <thead><tr>
+          <th style="text-align:left" data-sort>Fecha</th>
+          <th data-sort>Cierre{% if pa.base != "ars" %} {{ pa.base_label }}{% endif %}</th>
+          <th data-sort>Δ</th><th data-sort>Δ%</th><th data-sort>Volumen $</th>
+        </tr></thead>
+        <tbody>
+          {% for r in rows_fmt %}
+          <tr><td style="text-align:left;color:var(--accent);font-weight:600">{{ r.fecha }}</td><td style="font-weight:600">{{ r.valor_s }}</td><td class="{{ r.var_cls }}">{{ r.var_s }}</td><td class="{{ r.pct_cls }}">{{ r.pct_s }}</td><td>{{ r.vol_s }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% elif pa %}
+  <div class="alert" style="margin-top:12px">{{ pa.motivo }}</div>
+  {% endif %}
+{% endif %}

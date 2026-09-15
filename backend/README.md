@@ -46,7 +46,7 @@ lanza uvicorn en `http://127.0.0.1:8000`); no hay un server central.
 | Gráficos | `/graficos` | Scatter TIR/duration por curva + ajuste NSS, con recorte por tramo (dmin–dmax), overlay de segunda curva y fuente BYMA (default) o vector CAFCI para corporativos. |
 | Total Return | `/total-return` | TR proyectado por bono (salida a TIR/fecha) y TR realizado. |
 | Escenario | `/escenario` | Senderos de inflación/deva/tasas y revaluación del universo. |
-| Históricos | `/historicos` | Series guardadas (px/tasas por rueda) con el autosave diario. |
+| Históricos | `/historicos` | Series guardadas (px/tasas por rueda) con el autosave diario. Pestaña **Acciones (price action)**: cierre diario propio de acciones / CEDEARs / Merval (parquet `Delta - historico_acciones`, también lo escribe el autosave) — nivel en ARS o ÷ A3500 / CCL / MEP con canal de tendencia ±1σ/2σ, mín/máx, percentil/z, overlay del Merval (β, ρ), retornos diarios y distribución vs normal. Backfill: `python -m backend.tools.backfill_acciones --byma` / `--csv`. |
 | Qué pasó | `/que-paso` | Resumen de la rueda por segmento + cómo se movió cada curva (mail automático opcional tras el autosave). |
 | Créditos | `/creditos` | Scoring crediticio propietario por emisor. |
 | CAFCI | `/cafci` | FCIs: series, flujos y vector de TIRs corporativas. |

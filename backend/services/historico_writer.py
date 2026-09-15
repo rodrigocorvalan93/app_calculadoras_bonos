@@ -810,10 +810,23 @@ def save_today(force: bool = False) -> Dict[str, Any]:
             res["fx_filas"] = fxres["filas"]
     except Exception as exc:  # noqa: BLE001
         logger.warning("[historico_writer] historial FX falló: %s", exc)
+    # Cierre de acciones / CEDEARs / Merval (price action en Históricos).
+    # Best-effort igual que el FX: nunca voltea el cierre de bonos.
+    try:
+        acres = _guardar_acciones(hist_dir)
+        if acres:
+            res["acciones_filas"] = acres["hoy"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] historial de acciones falló: %s", exc)
     try:
         historico_byma.refresh()          # Qué pasó / Históricos ven el día nuevo ya
     except Exception:  # noqa: BLE001
         logger.exception("[historico_writer] refresh del histórico falló")
+    try:
+        from backend.services import acciones_hist
+        acciones_hist.refresh()
+    except Exception:  # noqa: BLE001
+        logger.exception("[historico_writer] refresh del histórico de acciones falló")
     logger.info("[historico_writer] base guardada: %d filas de hoy (%d operados) → %s",
                 res["rows"], res["operados"], xlsx)
     return res
@@ -914,6 +927,108 @@ def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001 — el xlsx ya quedó bien
         logger.warning("[historico_writer] espejo parquet FX no guardado: %s", exc)
     return {"filas": len(df), "xlsx": xlsx}
+
+
+# ── Historial diario de acciones / CEDEARs / Merval ────────────────────────
+# Cierre de las especies de los paneles de equities (Líder + General + CEDEARs
+# suscriptos) y del índice Merval, para el "price action" de Históricos. Sólo
+# las que OPERARON hoy (last_ts de hoy: un cierre pegajoso de ayer no es dato
+# de hoy, igual que `operados_hoy` para bonos). Parquet puro, SIN espejo xlsx:
+# son cientos de filas por día que nadie abre a mano — un Excel de 100k filas
+# tardaría segundos en cada cierre. Lo escribe la máquina writer dentro del
+# autosave / botón manual / captura headless, best-effort después del FX.
+ACCIONES_FILENAME = "Delta - historico_acciones.parquet"
+MERVAL_TICKER = "MERVAL"
+
+
+def _accion_row(hoy: date, code: str, panel: str, snap) -> Dict[str, Any]:
+    return {"fecha_hoy": hoy, "ticker": code, "panel": panel,
+            "ultimo": float(snap.last), "apertura": snap.open, "maximo": snap.high,
+            "minimo": snap.low, "cierre_ant": snap.close, "vwap": snap.vwap(),
+            "volumen": snap.volume, "nominal": snap.nominal}
+
+
+def build_acciones_rows(plazo: str = "24hs") -> List[Dict[str, Any]]:
+    """Filas del día: una por acción/CEDEAR con operación de HOY en el store
+    (plazo 24hs) + el Merval si el feed lo publicó hoy. ~µs por símbolo (puro
+    lookup, sin pricing)."""
+    from backend.services import equities, marketdata_store
+    from backend.services import symbols as syms
+
+    store = marketdata_store.get_store()
+    hoy = _now().date()
+    paneles = equities.panel_map()
+    try:
+        # CEDEARs suscriptos on-demand (buscador / "ver más"): si operaron
+        # hoy y están en el store, también se guardan.
+        for c in equities.cedears_universo():
+            paneles.setdefault(c, "C")
+    except Exception:  # noqa: BLE001
+        pass
+    rows: List[Dict[str, Any]] = []
+    for code, tag in paneles.items():
+        snap = store.get(syms.md_symbol(code, plazo))
+        if snap is None or snap.last is None or snap.last <= 0:
+            continue
+        if _fecha_dato(snap.last_ts) != hoy:
+            continue
+        rows.append(_accion_row(hoy, code, tag, snap))
+    mv = equities.merval_snapshot()
+    if mv is not None and mv.last and _fecha_dato(mv.last_ts) == hoy:
+        rows.append(_accion_row(hoy, MERVAL_TICKER, "I", mv))
+    return rows
+
+
+def append_acciones(df: "Any", pq: str, *, gana_previo: bool = False) -> Dict[str, Any]:
+    """Appendea filas al parquet de acciones con dedup por (fecha, ticker),
+    orden (ticker, fecha), escritura atómica y reintentos ante lock. Default:
+    la fila nueva pisa a la vieja; `gana_previo=True` (backfill) conserva lo
+    que la app ya capturó. Un parquet ilegible se aparta como `.corrupto-…`
+    en vez de perderse (la serie sigue desde hoy)."""
+    import pandas as pd
+
+    prev = None
+    if os.path.exists(pq):
+        try:
+            prev = pd.read_parquet(pq)
+        except Exception as exc:  # noqa: BLE001
+            marca = _now().strftime("%Y%m%d-%H%M%S")
+            try:
+                os.replace(pq, f"{pq}.corrupto-{marca}")
+            except OSError:
+                pass
+            logger.warning("[historico_writer] parquet de acciones ilegible (%s): "
+                           "apartado como .corrupto-%s, arranco de nuevo", exc, marca)
+    partes = [df, prev] if gana_previo else [prev, df]
+    df = pd.concat([p for p in partes if p is not None and len(p)], ignore_index=True)
+    df["fecha_hoy"] = pd.to_datetime(df["fecha_hoy"]).dt.date
+    df = (df.drop_duplicates(subset=["fecha_hoy", "ticker"], keep="last")
+            .sort_values(["ticker", "fecha_hoy"]).reset_index(drop=True))
+    for i in range(len(_LOCK_ESPERAS) + 1):
+        try:
+            tmp = pq + ".tmp"
+            df.to_parquet(tmp, index=False)
+            os.replace(tmp, pq)
+            break
+        except (PermissionError, OSError) as exc:
+            if i == len(_LOCK_ESPERAS):
+                raise
+            logger.warning("[historico_writer] acciones lockeado (%s) — reintento en %.0f s",
+                           exc, _LOCK_ESPERAS[i])
+            time.sleep(_LOCK_ESPERAS[i])
+    hoy = _now().date()
+    return {"filas": int(len(df)), "hoy": int((df["fecha_hoy"] == hoy).sum()),
+            "tickers": int(df["ticker"].nunique()), "parquet": pq}
+
+
+def _guardar_acciones(hist_dir: str) -> Optional[Dict[str, Any]]:
+    import pandas as pd
+
+    rows = build_acciones_rows()
+    if not rows:
+        logger.info("[historico_writer] sin acciones operadas hoy para guardar")
+        return None
+    return append_acciones(pd.DataFrame(rows), os.path.join(hist_dir, ACCIONES_FILENAME))
 
 
 def next_fire(now: datetime, hhmm: str) -> datetime:

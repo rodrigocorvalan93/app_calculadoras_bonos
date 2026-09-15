@@ -3,7 +3,7 @@
 {% block tab_historicos %}active{% endblock %}
 
 {% block content %}
-<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false, fechasLoaded: false, seriesLoaded: false }">
+<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false, fechasLoaded: false, seriesLoaded: false, accionesLoaded: false }">
   <header class="yas-header">
     <h1>Históricos</h1>
     <p class="muted">Series macro del BCRA y evolución histórica de tasas por curva (BYMA). Rango personalizable. Lectura única + cache; <strong>Actualizar</strong> relee.</p>
@@ -34,6 +34,9 @@
     <button @click="tab='series'; if(!seriesLoaded){seriesLoaded=true; $nextTick(()=>htmx.trigger('#hist-series','reveal'))}"
             :style="tab==='series' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
             style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">💾 Series diarias (FX + caución)</button>
+    <button @click="tab='acciones'; if(!accionesLoaded){accionesLoaded=true; $nextTick(()=>htmx.trigger('#hist-acciones','reveal'))}"
+            :style="tab==='acciones' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
+            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Acciones (price action)</button>
   </div>
 
   {# ── Macro (BCRA) ── #}
@@ -108,6 +111,14 @@
   <div x-show="tab==='series'" x-cloak>
     <div id="hist-series" hx-get="/historicos/series-diarias" hx-trigger="reveal" hx-swap="innerHTML">
       <p class="muted" style="padding:10px">Cargando series diarias…</p>
+    </div>
+  </div>
+
+  {# ── Acciones / CEDEARs / Merval: price action sobre el cierre diario propio
+     (lazy: parquet cacheado por mtime, análisis numpy ~1 ms, HTML cacheado) ── #}
+  <div x-show="tab==='acciones'" x-cloak>
+    <div id="hist-acciones" hx-get="/historicos/acciones" hx-trigger="reveal" hx-swap="innerHTML">
+      <p class="muted" style="padding:10px">Cargando price action…</p>
     </div>
   </div>
 </section>
