@@ -141,6 +141,15 @@ def _percentil(v: np.ndarray, x: float) -> float:
     return float((np.sum(v < x) + 0.5 * np.sum(v == x)) / len(v))
 
 
+def _es_ruido(x: float, ref: float) -> bool:
+    """True si |x| es ruido de punto flotante frente a |ref|. Una serie plana
+    (precio que no operó en toda la ventana, TIR fija) deja residuos de
+    ~1e-14 en el ajuste lineal: no son un σ ni un rango — tratarlos como
+    tales daba z-scores absurdos y un eje sin ancho (loop infinito en los
+    ticks con numpy 2.5)."""
+    return not (abs(float(x)) > abs(float(ref)) * 1e-9)
+
+
 def _momentos(v: np.ndarray):
     """(asimetría, curtosis en exceso) — None con menos de 3 datos o σ = 0."""
     n = len(v)
@@ -160,6 +169,8 @@ def _stats_nivel(f: List[str], y: np.ndarray, es_tir: bool = False) -> Dict[str,
     n = len(y)
     last, media = float(y[-1]), float(y.mean())
     desv = float(y.std(ddof=1)) if n > 1 else 0.0
+    if _es_ruido(desv, media):
+        desv = 0.0
     imin, imax = int(y.argmin()), int(y.argmax())
     vmin, vmax = float(y[imin]), float(y[imax])
     x = np.arange(n, dtype=float)
@@ -167,7 +178,9 @@ def _stats_nivel(f: List[str], y: np.ndarray, es_tir: bool = False) -> Dict[str,
     tend = intercept + slope * x
     resid = y - tend
     sigma = float(resid.std(ddof=2)) if n > 2 else 0.0
-    ss_tot = float(((y - media) ** 2).sum())
+    if _es_ruido(sigma, media):
+        sigma = 0.0
+    ss_tot = float(((y - media) ** 2).sum()) if desv > 0 else 0.0
     if es_tir:
         pend_pct: Optional[float] = float(slope)
         ret_ventana = last - float(y[0])
@@ -201,8 +214,10 @@ def _stats_retornos(r_f: List[str], r: np.ndarray) -> Dict[str, Any]:
                 "z_ultimo": None, "percentil_ultimo": None}
     media = float(r.mean())
     desv = float(r.std(ddof=1)) if m > 1 else 0.0
+    if _es_ruido(desv, max(abs(media), float(np.abs(r).max()))):
+        desv = 0.0
     imin, imax = int(r.argmin()), int(r.argmax())
-    skew, kurt = _momentos(r)
+    skew, kurt = _momentos(r) if desv > 0 else (None, None)
     last = float(r[-1])
     return {"n": m, "media": media, "desvio": desv,
             "vol_anual": (desv * math.sqrt(_RUEDAS_ANUAL)) if desv > 0 else None,
@@ -258,11 +273,13 @@ def _histograma(v: np.ndarray) -> Optional[Dict[str, Any]]:
         return None
     k = int(min(30, max(8, round(math.sqrt(n) * 1.4))))
     lo, hi = float(v.min()), float(v.max())
-    if hi <= lo:
+    if hi <= lo or _es_ruido(hi - lo, hi):
         hi = lo + (abs(lo) * 0.01 or 1.0)
     counts, edges = np.histogram(v, bins=k, range=(lo, hi))
     mu = float(v.mean())
     sd = float(v.std(ddof=1)) if n > 1 else 0.0
+    if _es_ruido(sd, max(abs(mu), abs(hi))):
+        sd = 0.0
     w = float(edges[1] - edges[0])
     xs = np.linspace(lo, hi, 80)
     if sd > 0:
@@ -301,7 +318,10 @@ def _geom_precio(f: List[str], y: np.ndarray, st: Dict[str, Any], cmp: Optional[
     ov = cmp.get("_overlay") if (cmp and not cmp.get("insuficiente")) else None
     if ov is not None and len(ov):
         lo, hi = min(lo, float(ov.min())), max(hi, float(ov.max()))
-    span = (hi - lo) or (abs(hi) * 0.02) or 1.0
+    span = hi - lo
+    if _es_ruido(span, hi):                  # serie plana: rango de ±1 % alrededor del nivel
+        span = abs(hi) * 0.02 or 1.0
+        lo, hi = hi - span / 2.0, hi + span / 2.0
     lo -= span * 0.06
     hi += span * 0.06
 

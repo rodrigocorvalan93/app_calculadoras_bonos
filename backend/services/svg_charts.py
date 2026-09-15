@@ -13,9 +13,17 @@ from typing import Any, Dict, List, Optional
 
 
 def _nice_ticks(lo: float, hi: float, n: int = 5) -> List[float]:
-    """Ticks 'lindos' (1/2/2.5/5 × 10^k) dentro de [lo, hi]."""
+    """Ticks 'lindos' (1/2/2.5/5 × 10^k) dentro de [lo, hi].
+
+    Un rango degenerado (lo == hi, no finito, o tan angosto que es ruido de
+    punto flotante frente al nivel — p. ej. una serie plana cuyo canal ±σ
+    queda a 1e-14 del precio) devuelve un solo tick: si el paso cae por
+    debajo del ULP del valor, `v += step` no avanza y el loop no termina
+    (pasó en CI con numpy 2.5). El loop además está acotado por si acaso —
+    esto corre dentro de un request y nunca puede colgar un worker."""
+    lo, hi = float(lo), float(hi)
     span = hi - lo
-    if span <= 0 or not math.isfinite(span):
+    if span <= 0 or not math.isfinite(span) or span <= max(abs(lo), abs(hi)) * 1e-9:
         return [lo]
     raw = span / max(1, n)
     step = 10.0 ** math.floor(math.log10(raw))
@@ -25,10 +33,16 @@ def _nice_ticks(lo: float, hi: float, n: int = 5) -> List[float]:
             break
     out: List[float] = []
     v = math.ceil(lo / step) * step
-    while v <= hi + step * 1e-6:
+    tope = hi + step * 1e-6
+    for _ in range(max(1, n) * 4 + 8):
+        if v > tope:
+            break
         out.append(round(v, 10))
-        v += step
-    return out
+        nv = v + step
+        if nv <= v:                      # el paso no mueve el float: cortar
+            break
+        v = nv
+    return out or [lo]
 
 
 def barras_pct(segs: List[Dict[str, Any]], avg_val: Optional[float], *,

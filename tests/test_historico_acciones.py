@@ -4,6 +4,7 @@ mín/máx, percentil/z, retornos, distribución vs normal, ÷ FX, vs Merval),
 la pestaña HTTP y el backfill por CSV."""
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -201,6 +202,48 @@ def test_bonos_precio_y_tir(base_acciones, monkeypatch) -> None:
         assert not price_action.analizar("ZZZZ9")["ok"]
     finally:
         cierres.refresh()
+
+
+def test_series_planas_no_cuelgan(base_acciones) -> None:
+    """Serie plana (precio que no operó / TIR fija): el ajuste lineal deja
+    residuos de ~1e-14 en el canal ±σ y `_nice_ticks` elegía un paso menor
+    al ULP del nivel → `v += step` no avanzaba (loop infinito en CI con
+    numpy 2.5). Ahora: σ = 0 (sin z-scores de ruido), eje de ±1 % alrededor
+    del nivel, histograma con ancho y ticks finitos."""
+    from backend.services import historico_byma as hb
+    from backend.services.svg_charts import _nice_ticks
+    assert _nice_ticks(0.0, 1.0, 5) == [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    assert _nice_ticks(20.0, 20.0) == [20.0]
+    assert _nice_ticks(19.99999999999999, 20.0) == [19.99999999999999]     # rango = ruido
+    assert _nice_ticks(20.0 - 3.552713678800501e-15, 20.0 + 1e-15) == [20.0 - 3.552713678800501e-15]
+    assert 3 <= len(_nice_ticks(1234.5, 1259.19, 5)) <= 8
+    _, dias = base_acciones
+    fechas = [d.isoformat() for d in dias[-40:]]
+    hb._cache = {"loaded": True, "ver": "t", "by_code": {"TX28": {
+        "base": "TX28", "dates": fechas,
+        "vals": {"Last Price": [1234.5] * 40, "TIREA": [0.2] * 40}}}}
+    try:
+        for n in (20, 40):
+            for campo, modo in (("precio", "precio"), ("precio", "retornos"), ("tir", "precio"), ("tir", "retornos")):
+                r = price_action.analizar("TX28", "ars", modo, n, campo=campo)
+                assert r["ok"] and r["n"] == n and r["fuente"] == "base", (n, campo, modo, r.get("motivo"))
+                nv = r["nivel"]
+                assert nv["sigma_tend"] == 0.0 and nv["z_tend"] is None and nv["z"] is None and nv["desvio"] == 0.0
+                assert nv["ultimo"] == pytest.approx(20.0 if campo == "tir" else 1234.5)
+                assert r["retornos"]["desvio"] == 0.0 and r["retornos"]["vol_anual"] is None
+                assert r["retornos"]["z_ultimo"] is None and r["retornos"]["skew"] is None
+                g = r["geom"]
+                assert g["modo"] == modo and 1 <= len(g["yticks"]) <= 12
+                assert all(math.isfinite(t["v"]) and math.isfinite(t["y"]) for t in g["yticks"])
+                if modo == "precio":
+                    assert g["band1"] is None and g["band2"] is None
+                    lo_t, hi_t = g["yticks"][0]["v"], g["yticks"][-1]["v"]
+                    assert lo_t <= nv["ultimo"] <= hi_t and hi_t - lo_t < nv["ultimo"] * 0.03
+                h = r["hist"]
+                assert h["sd"] == 0.0 and h["hi"] > h["lo"] and sum(h["counts"]) == h["n"]
+                assert all(math.isfinite(float(x)) for x in r["geom_hist"]["curva"].replace(",", " ").split())
+    finally:
+        hb._cache = None
 
 
 # ── writer: filas del día desde el store + append con dedup ──────────────
