@@ -239,3 +239,12 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
 `pytest -q` at the repo root. New backend features need a smoke test
 that (a) exercises the calc, (b) hits the HTTP endpoint via
 `httpx.AsyncClient` with `ASGITransport`.
+
+CI (`.github/workflows/tests.yml`) corre la suite en **Ubuntu y Windows**
+(Python 3.12) con `pytest-timeout --timeout=300`: la app se despliega como
+servicio Windows y el add-in de Excel vive ahí, así que nada Unix-only
+(`os.fchmod`, `fcntl`, señales) puede entrar sin guard. Los tests de rutas
+Mac (`test_deltapaths.py`) parchean `deltapaths._WINDOWS` para correr en
+los dos runners. Las credenciales de bootstrap de la suite son sintéticas
+(`tests/conftest.py`): nunca una cuenta real. Las regresiones de la
+auditoría externa (sept. 2026) viven en `tests/test_auditoria_tanda1.py`.

@@ -646,8 +646,17 @@ async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fue
             rows, meta = _vista_corp(rows, meta, q, mas)
         ent = (seq, rows, meta, _order_hash(r["code"] for r in rows))
         if len(_ROWS_CACHE) >= _ROWS_MAX:
-            _ROWS_CACHE.pop(next(iter(_ROWS_CACHE)), None)
+            viejo = next(iter(_ROWS_CACHE))
+            _ROWS_CACHE.pop(viejo, None)
+            # El lock se va con su entrada (si nadie lo tiene tomado): antes
+            # quedaba para siempre y cada búsqueda de texto distinta sumaba uno.
+            lk = _ROWS_LOCKS.get(viejo)
+            if lk is not None and not lk.locked():
+                _ROWS_LOCKS.pop(viejo, None)
         _ROWS_CACHE[key] = ent
+        if len(_ROWS_LOCKS) > _ROWS_MAX * 2:          # red de seguridad
+            for k in [k for k, lk in _ROWS_LOCKS.items() if k not in _ROWS_CACHE and not lk.locked()]:
+                _ROWS_LOCKS.pop(k, None)
         return ent
 
 

@@ -219,7 +219,7 @@ async def test_admin_tarjeta_instalacion_excel(auth_on):
     """/admin muestra la guía de instalación multi-máquina con el link al
     manifest universal (localhost)."""
     async with _client() as ac:
-        await ac.post("/login", data={"username": "rodricor93", "password": "Rc_874562",
+        await ac.post("/login", data={"username": "su_test", "password": "clave-de-test-2026!",
                                       "next": "/yas"})
         r = await ac.get("/admin")
     assert r.status_code == 200

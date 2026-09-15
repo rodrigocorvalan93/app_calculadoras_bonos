@@ -33,7 +33,7 @@ def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
 
 
-async def _login(ac: AsyncClient, user: str = "rodricor93", pwd: str = "Rc_874562"):
+async def _login(ac: AsyncClient, user: str = "su_test", pwd: str = "clave-de-test-2026!"):
     return await ac.post("/login", data={"username": user, "password": pwd, "next": "/yas"})
 
 

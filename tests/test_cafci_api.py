@@ -209,7 +209,7 @@ async def test_feature_por_rol_ciclo_completo(tmp_path, monkeypatch) -> None:
     auth.refresh()
     assert auth.ensure_bootstrapped()["created"]
     async with _client() as su:
-        await su.post("/login", data={"username": "rodricor93", "password": "Rc_874562", "next": "/yas"})
+        await su.post("/login", data={"username": "su_test", "password": "clave-de-test-2026!", "next": "/yas"})
         await su.post("/admin/users", data={"username": "prem", "password": "clave123", "role": "premium"})
         # superuser: siempre panel + div, y el box muestra el checkbox
         assert (await su.get("/cafci/fondos")).status_code == 200
@@ -223,7 +223,7 @@ async def test_feature_por_rol_ciclo_completo(tmp_path, monkeypatch) -> None:
         assert page.status_code == 200 and 'id="cafci-fondos"' not in page.text
     # el superuser la tilda para premium
     async with _client() as su:
-        await su.post("/login", data={"username": "rodricor93", "password": "Rc_874562", "next": "/yas"})
+        await su.post("/login", data={"username": "su_test", "password": "clave-de-test-2026!", "next": "/yas"})
         r = await su.post("/admin/features", data={"feat_premium_cafci_fondos": "on"})
         assert r.status_code == 200 and "actualizadas" in r.text
     assert auth.can_feature("premium", "cafci_fondos")
@@ -234,7 +234,7 @@ async def test_feature_por_rol_ciclo_completo(tmp_path, monkeypatch) -> None:
         assert 'id="cafci-fondos"' in (await ac.get("/cafci")).text      # y ve el div
     # la destilda → vuelve el 403
     async with _client() as su:
-        await su.post("/login", data={"username": "rodricor93", "password": "Rc_874562", "next": "/yas"})
+        await su.post("/login", data={"username": "su_test", "password": "clave-de-test-2026!", "next": "/yas"})
         await su.post("/admin/features", data={})
     async with _client() as ac:
         await ac.post("/login", data={"username": "prem", "password": "clave123", "next": "/yas"})

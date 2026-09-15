@@ -38,6 +38,11 @@ _WIN_VAR_RE = re.compile(r"%([^%]+)%")
 _MIN_TAIL = 2
 
 
+# Constante (no `os.name` inline) para que los tests del remapeo macOS puedan
+# correr también en un runner Windows parcheándola — la lógica es la misma.
+_WINDOWS = os.name == "nt"
+
+
 def _expand_direct(raw: str) -> str:
     """Expansión clásica multiplataforma: %VAR% (con USERPROFILE/HOME cayendo
     al home real si la env no existe), $VAR/${VAR} y ~ (con / o \\)."""
@@ -151,7 +156,7 @@ def expand(raw: Optional[str], want: str = "dir") -> Optional[str]:
     if not raw:
         return raw
     direct = _expand_direct(raw)
-    if _exists(direct, want) or os.name == "nt":
+    if _exists(direct, want) or _WINDOWS:
         return direct
     parts = _parts(direct)
     if parts:

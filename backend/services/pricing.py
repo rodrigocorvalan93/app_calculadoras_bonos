@@ -983,26 +983,42 @@ def _index_fingerprint(kind: str) -> Any:
     def _f() -> Any:
         if kind in ("tamar", "badlar"):
             # Huella del floater: benchmark (tail-5 mean, mueve margen_tna) +
-            # último valor de la proyección (mueve el cupón → TIR). Cualquiera
+            # token de la proyección (mueve el cupón → TIR). Cualquiera
             # de los dos cambia tras un refresh de índices → key nueva.
-            import rentafija
-
-            col = kind.upper()
-            bench = _bench_pct(col)
-            try:
-                proy = rentafija.inputs.get(f"{kind}_proyectado")
-                pv = float(proy[col].iloc[-1]) if proy is not None and len(proy) else 0.0
-            except Exception:  # noqa: BLE001
-                pv = 0.0
+            bench = _bench_pct(kind.upper())
             return (round(bench, 6) if bench == bench else 0.0,
-                    round(pv, 6) if pv == pv else 0.0)
+                    _proyeccion_token(f"{kind}_proyectado", kind.upper()))
         cols = _INDEX_COLS.get(kind)
         if not cols:
             return 0.0
         _, val = _last_series_value(*cols)
-        return round(float(val), 6) if np.isfinite(val) else 0.0
+        last = round(float(val), 6) if np.isfinite(val) else 0.0
+        if kind in ("cer", "uva"):
+            # La TIR de un CER/UVA a un precio dado se calcula con la
+            # PROYECCIÓN (cer_proyectado / uva_proyectado), no sólo con el
+            # último observado: si un refresh de índices cambia la proyección
+            # con el mismo último CER (rollover, ventana de la tarde), sin
+            # esto la métrica cacheada seguía hasta 1 h con la curva vieja.
+            return (last, _proyeccion_token(f"{kind}_proyectado", cols[1]))
+        return last
 
     return _index_val_cache.get_or_compute(kind, _f)
+
+
+def _proyeccion_token(key: str, col: str) -> Any:
+    """Token barato de la serie proyectada `rentafija.inputs[key]`: cambia si
+    el refresh reasignó el DataFrame (id), si creció (len) o si movió el
+    último valor — sin hashear la serie entera en cada key de cache."""
+    import rentafija
+
+    try:
+        proy = rentafija.inputs.get(key)
+        if proy is None or not len(proy):
+            return 0
+        pv = float(proy[col].iloc[-1])
+        return (len(proy), round(pv, 6) if pv == pv else 0.0, id(proy))
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def metrics_for_market_price(

@@ -184,7 +184,7 @@ async def test_campana_solo_superuser(tmp_path, monkeypatch) -> None:
     auth.refresh()
     assert auth.ensure_bootstrapped()["created"]
     async with _client() as su:
-        await su.post("/login", data={"username": "rodricor93", "password": "Rc_874562", "next": "/yas"})
+        await su.post("/login", data={"username": "su_test", "password": "clave-de-test-2026!", "next": "/yas"})
         await su.post("/admin/users", data={"username": "prem", "password": "clave123", "role": "premium"})
         y = await su.get("/yas")
         assert 'id="alert-bell"' in y.text                  # superuser la ve

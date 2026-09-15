@@ -180,6 +180,14 @@ class Settings(BaseSettings):
     # vuelve al comportamiento anterior (siempre serie).
     dlk_fx_intradia: bool = True
 
+    # Paneles BYMA (listas de tickers, data pública): si la cadena TLS del
+    # host falla, por default NO se reintenta sin verificar (un certificado
+    # inválido no puede ser la puerta para inyectar un panel); la app cae a la
+    # lista curada. BYMA_PANELES_TLS_INSEGURO=1 rehabilita el reintento sin
+    # verificación SÓLO como parche explícito en una máquina sin el
+    # intermedio de BYMA instalado (y queda logueado cada vez).
+    byma_paneles_tls_inseguro: bool = False
+
     # ── Horarios de mercado (relojes de la topbar + rueda del watchdog) ───
     # Formato "HH:MM-HH:MM" en hora local de cada plaza. Override por env
     # (MKT_HORARIO_ARG / MKT_HORARIO_NY) si BYMA/NYSE cambian el horario.

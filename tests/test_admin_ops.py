@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from backend.config import settings
 from backend.services import auth, oms
 
-SU, PW = "rodricor93", "Rc_874562"
+SU, PW = "su_test", "clave-de-test-2026!"
 
 
 @pytest.fixture()

@@ -98,6 +98,17 @@ def _fetch_panel(session, ep: str) -> Optional[List[str]]:
     except Exception as exc:  # noqa: BLE001
         import requests
         if isinstance(exc, requests.exceptions.SSLError):
+            from backend.config import settings
+            if not settings.byma_paneles_tls_inseguro:
+                # Un certificado inválido NO es la puerta para reintentar sin
+                # verificar (antes: retry con verify=False en silencio). Se cae
+                # a la lista curada; el operador arregla la cadena (intermedio
+                # de BYMA) o prende BYMA_PANELES_TLS_INSEGURO=1 a sabiendas.
+                logger.warning("[byma_paneles] %s: TLS falló (%s) — sin reintento inseguro "
+                               "(BYMA_PANELES_TLS_INSEGURO=0); uso la lista curada", ep, exc)
+                return None
+            logger.warning("[byma_paneles] %s: TLS falló (%s) — REINTENTO SIN VERIFICAR "
+                           "(BYMA_PANELES_TLS_INSEGURO=1)", ep, exc)
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")     # InsecureRequestWarning

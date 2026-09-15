@@ -461,6 +461,7 @@ _save_lock = threading.Lock()
 # Backoff ante un xlsx lockeado (OneDrive sincronizando / abierto en Excel):
 # 3 reintentos, después sube el error (el autosave reintenta a los 10 min).
 _LOCK_ESPERAS = (2.0, 5.0, 15.0)
+_PQ_GRACIA_S = 2.0      # = historico_byma.PQ_GRACIA_S (misma regla de frescura del espejo)
 
 
 def append_and_save(df: "Any", xlsx_path: str, incluir_journal: bool = True) -> Dict[str, Any]:
@@ -524,7 +525,12 @@ def _leer_base(xlsx_path: str, pd) -> "Any":
     # read_excel con un año de base, todo con el GIL tomado en plena app.
     pq_fresh = os.path.splitext(xlsx_path)[0] + ".parquet"
     try:
-        if os.path.isfile(pq_fresh) and os.path.getmtime(pq_fresh) >= os.path.getmtime(xlsx_path) - 60.0:
+        # Gracia de 2 s (antes 60): el writer re-estampa el mtime del espejo
+        # después del xlsx, así que en el tándem normal el parquet nunca es más
+        # viejo; sólo cubre el orden/mtime grueso de OneDrive. Con 60 s una
+        # corrección a mano en el Excel dentro del minuto se ignoraba y el
+        # próximo guardado la pisaba.
+        if os.path.isfile(pq_fresh) and os.path.getmtime(pq_fresh) >= os.path.getmtime(xlsx_path) - _PQ_GRACIA_S:
             prev = pd.read_parquet(pq_fresh)
             prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
             _apartar_si_corrupto(xlsx_path)     # evidencia, como el camino lento
@@ -565,8 +571,25 @@ def _leer_base(xlsx_path: str, pd) -> "Any":
 def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
                             incluir_journal: bool = True) -> Dict[str, Any]:
     prev = None
+    pq_solo = os.path.splitext(xlsx_path)[0] + ".parquet"
     if os.path.exists(xlsx_path):
         prev = _leer_base(xlsx_path, pd)
+    elif os.path.isfile(pq_solo):
+        # Base SÓLO en parquet (xlsx apartado por corrupto, sync a medias,
+        # corte entre las dos escrituras): antes se ignoraba y el guardado
+        # pisaba el espejo con el día nuevo — la historia se perdía salvo lo
+        # que rescatara el journal (≤ 90 días). El lector ya aceptaba el
+        # parquet suelto; el writer tiene que hacer lo mismo. Si existe pero
+        # no se puede leer, NO se sigue: pisar una base ilegible es borrarla.
+        try:
+            prev = pd.read_parquet(pq_solo)
+            prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"La base histórica existe sólo como parquet y no se pudo leer ({exc}). "
+                f"No guardo para no pisarla: revisá {pq_solo}") from exc
+        logger.warning("[historico_writer] sin %s: base leída del espejo parquet (%d filas)",
+                       os.path.basename(xlsx_path), len(prev))
 
     frames = [prev] if prev is not None else []
     consolidados = 0

@@ -19,7 +19,7 @@ def auth_on(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "app_users_path", str(tmp_path / "store.json"))
     auth.refresh()
     b = auth.ensure_bootstrapped()
-    assert b["created"] and b["user"] == "rodricor93"
+    assert b["created"] and b["user"] == "su_test"
     yield
     auth.refresh()   # limpia el cache global para los siguientes tests
 
@@ -51,18 +51,18 @@ async def test_wall_htmx_da_401_con_hx_redirect(auth_on):
 @pytest.mark.asyncio
 async def test_login_ok_y_acceso(auth_on):
     async with _client() as ac:
-        r = await _login(ac, "rodricor93", "Rc_874562")
+        r = await _login(ac, "su_test", "clave-de-test-2026!")
         assert r.status_code == 303
         y = await ac.get("/yas")
         assert y.status_code == 200 and "Análisis de Yields" in y.text
         # superuser ve el panel y el chip
-        assert "/admin" in y.text and "rodricor93" in y.text
+        assert "/admin" in y.text and "su_test" in y.text
 
 
 @pytest.mark.asyncio
 async def test_login_mal_falla(auth_on):
     async with _client() as ac:
-        r = await _login(ac, "rodricor93", "malaclave")
+        r = await _login(ac, "su_test", "malaclave")
         assert r.status_code == 401 and "incorrect" in r.text.lower()
 
 
@@ -78,7 +78,7 @@ async def test_paginas_publicas_sin_sesion(auth_on):
 @pytest.mark.asyncio
 async def test_basico_no_ve_ordenes(auth_on):
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         r = await su.post("/admin/users", data={"username": "juan", "password": "clave123",
                                                 "role": "basico", "email": ""})
         assert r.status_code == 200 and "creado" in r.text
@@ -96,7 +96,7 @@ async def test_basico_no_ve_ordenes(auth_on):
 @pytest.mark.asyncio
 async def test_admin_solo_superuser(auth_on):
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "pepe", "password": "clave123", "role": "premium"})
     async with _client() as ac:
         await _login(ac, "pepe", "clave123")
@@ -106,7 +106,7 @@ async def test_admin_solo_superuser(auth_on):
 @pytest.mark.asyncio
 async def test_config_role_tabs(auth_on):
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         # dejar a básico sólo YAS + Curvas
         r = await su.post("/admin/tabs", data={"tab_basico_yas": "on", "tab_basico_curves": "on",
                                                "tab_premium_yas": "on"})
@@ -114,7 +114,7 @@ async def test_config_role_tabs(auth_on):
     assert set(auth.allowed_tabs("basico")) == {"yas", "curves"}
     # ahora un básico no entra a /breakeven (antes estaba permitido)
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "ana", "password": "clave123", "role": "basico"})
     async with _client() as ac:
         await _login(ac, "ana", "clave123")
@@ -129,7 +129,7 @@ async def test_sub_endpoints_compartidos_no_se_gatean(auth_on):
     (/dolares/rail, que sondea toda página) ni en /historicos/semanal (que usa la
     pestaña Qué pasó). La PÁGINA exacta sí se gatea."""
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         # básico ve sólo YAS + Qué pasó (ni dólares ni históricos)
         await su.post("/admin/tabs", data={"tab_basico_yas": "on", "tab_basico_quepaso": "on",
                                            "tab_premium_yas": "on"})
@@ -153,7 +153,7 @@ async def test_guardar_especie_solo_superuser(auth_on):
             "vencimiento": "01/07/2027", "frecuencia": "2", "tipo_tasa": "FIJA",
             "cupon": "5", "tipo_amortizacion": "BULLET"}
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "prem", "password": "clave123", "role": "premium"})
     async with _client() as ac:
         await _login(ac, "prem", "clave123")
@@ -162,7 +162,7 @@ async def test_guardar_especie_solo_superuser(auth_on):
         g = await ac.post("/nueva/guardar", data={"token": "loquesea"})
         assert "superuser" in g.text.lower()                              # endpoint bloqueado
     async with _client() as ac:
-        await _login(ac, "rodricor93", "Rc_874562")
+        await _login(ac, "su_test", "clave-de-test-2026!")
         r = await ac.post("/nueva/parse", data=form)
         assert "Guardar especie" in r.text                                # superuser sí lo ve
 
@@ -170,7 +170,7 @@ async def test_guardar_especie_solo_superuser(auth_on):
 @pytest.mark.asyncio
 async def test_logout(auth_on):
     async with _client() as ac:
-        await _login(ac, "rodricor93", "Rc_874562")
+        await _login(ac, "su_test", "clave-de-test-2026!")
         assert (await ac.get("/yas")).status_code == 200
         lo = await ac.get("/logout")
         assert lo.status_code == 303
@@ -181,7 +181,7 @@ async def test_logout(auth_on):
 @pytest.mark.asyncio
 async def test_reset_token_flow(auth_on):
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "lucia", "password": "vieja123", "role": "premium"})
     token = auth.make_reset_token("lucia", ttl_seconds=3600)
     async with _client() as ac:
@@ -219,8 +219,8 @@ def test_seed_users_script(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_no_borrar_ultimo_superuser(auth_on):
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
-        r = await su.post("/admin/users/delete", data={"username": "rodricor93"})
+        await _login(su, "su_test", "clave-de-test-2026!")
+        r = await su.post("/admin/users/delete", data={"username": "su_test"})
         # es el usuario logueado → bloqueado
         assert "propio usuario" in r.text or "último superuser" in r.text
 
@@ -231,7 +231,7 @@ async def test_ordenes_gateado_por_prefijo_y_live_kill_superuser(auth_on):
     (antes sólo la página exacta se gateaba, y confirmar/multi/kill/live se colaban
     para cualquier logueado). Armar LIVE y el kill-switch son además superuser-only."""
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "bruno", "password": "clave123", "role": "basico"})
         await su.post("/admin/users", data={"username": "pia", "password": "clave123", "role": "premium"})
     # Básico (sin la pestaña Órdenes): NINGÚN sub-endpoint de plata pasa → 403.
@@ -252,7 +252,7 @@ async def test_ordenes_gateado_por_prefijo_y_live_kill_superuser(auth_on):
         assert (await ac.post("/ordenes/kill", data={"on": "1"})).status_code == 403
     # Superuser: el kill-switch pasa el gate (lo dejamos desactivado = default).
     async with _client() as ac:
-        await _login(ac, "rodricor93", "Rc_874562")
+        await _login(ac, "su_test", "clave-de-test-2026!")
         assert (await ac.post("/ordenes/kill", data={"on": "0"})).status_code == 200
 
 
@@ -302,7 +302,7 @@ async def test_conexion_abierta_a_todos(auth_on):
     tiene usuario/clave (opcionales) pero NO la URL libre (sólo el selector de
     brokers) ni el prefill del usuario de la casa."""
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "leo", "password": "clave123", "role": "basico"})
         page_su = await su.get("/conexion")
         assert page_su.status_code == 200 and "URL del endpoint" in page_su.text
@@ -327,7 +327,7 @@ async def test_conexion_no_su_solo_brokers_conocidos(auth_on, fake_ws):
     from backend.routes import conexion as conx
 
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "mia", "password": "clave123", "role": "premium"})
     async with _client() as ac:
         await _login(ac, "mia", "clave123")
@@ -355,7 +355,7 @@ async def test_conexion_su_mantiene_url_libre(auth_on, fake_ws):
     """El superuser sigue pudiendo apuntar a un endpoint fuera de la lista y
     con credenciales propias (deploys nuevos / broker de prueba)."""
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         r = await su.post("/conexion/login", data={"url": "https://api.nuevo.xoms.com.ar/",
                                                    "username": "propio", "password": "secreta"})
         assert r.status_code == 200

@@ -471,6 +471,24 @@
         emisBox.value = "";
         emisBox.dispatchEvent(new Event("input"));
       });
+      // Cajón minimizado por default (abajo del gráfico); recuerda el estado.
+      // Colapsado o no, los ★ se dibujan igual: sólo se oculta el cuerpo.
+      var emisToggle = document.getElementById("graf-emis-toggle");
+      var emisBody = document.getElementById("graf-emis-body");
+      function emisOpen(open) {
+        if (!emisToggle || !emisBody) return;
+        emisBody.hidden = !open;
+        emisToggle.setAttribute("aria-expanded", open ? "true" : "false");
+        var caret = emisToggle.querySelector(".graf-emis-caret");
+        if (caret) caret.textContent = open ? "▾" : "▸";
+        try { localStorage.setItem("graf_emis_open", open ? "1" : "0"); } catch (e) { /* noop */ }
+      }
+      if (emisToggle && emisBody) {
+        var o0 = "0";
+        try { o0 = localStorage.getItem("graf_emis_open") || "0"; } catch (e) { /* noop */ }
+        emisOpen(o0 === "1");
+        emisToggle.addEventListener("click", function () { emisOpen(emisBody.hidden); });
+      }
     }
     // Modo del premio (mínimo / curva / instrumento): persiste y re-dibuja con
     // el último payload, sin request.

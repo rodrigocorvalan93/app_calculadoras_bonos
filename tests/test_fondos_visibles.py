@@ -111,7 +111,7 @@ def test_auth_visible_fondos_roundtrip(auth_on):
 @pytest.mark.asyncio
 async def test_restringido_no_ve_fondo_ajeno(auth_on, carteras):
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "jrivas", "password": "clave123",
                                             "role": "premium"})
         # restringir vía el endpoint del panel (form: sin `todos`, cod=20)
@@ -143,7 +143,7 @@ async def test_yas_tenencia_filtrada(auth_on, carteras):
     """El desplegable de tenencia del YAS recalcula totales con lo visible: el
     restringido ve SU fondo y no la posición agregada del desk."""
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "jrivas", "password": "clave123",
                                             "role": "premium"})
         await su.post("/admin/users/fondos", data={"username": "jrivas", "cod": "20"})
@@ -158,7 +158,7 @@ async def test_yas_tenencia_filtrada(auth_on, carteras):
 @pytest.mark.asyncio
 async def test_admin_todos_restaura(auth_on, carteras):
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "jrivas", "password": "clave123",
                                             "role": "basico"})
         await su.post("/admin/users/fondos", data={"username": "jrivas", "cod": "20"})

@@ -82,8 +82,15 @@ def _load_all() -> Dict[str, Any]:
         data = json.loads(p.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return {"v": 2, "users": {}, "presets": {}}
-    except (OSError, ValueError):
+    except OSError:
         logger.exception("[escenario_prefs] archivo ilegible; arranco de defaults")
+        return {"v": 2, "users": {}, "presets": {}}
+    except ValueError as exc:
+        # JSON roto: apartar con evidencia antes de arrancar de defaults, o el
+        # próximo guardado pisa los senderos/presets del equipo.
+        from backend.services.archivos import apartar_corrupto
+        logger.error("[escenario_prefs] archivo corrupto (%s); lo aparto y arranco de defaults", exc)
+        apartar_corrupto(p, str(exc))
         return {"v": 2, "users": {}, "presets": {}}
     presets = {}
     for name, pr in (data.get("presets") or {}).items():

@@ -17,6 +17,7 @@ difiere, el error crudo se muestra en el panel para ajustar el path.
 """
 from __future__ import annotations
 
+import math
 import asyncio
 import functools
 import json
@@ -206,9 +207,9 @@ async def market_ref_rest(symbol: str) -> Optional[float]:
         md = d.get("marketData") or {}
         for k in ("LA", "CL"):
             v = md.get(k)
-            px = v.get("price") if isinstance(v, dict) else None
+            px = _ref_ok(v.get("price")) if isinstance(v, dict) else None
             if px:
-                return float(px)
+                return px
     except Exception:  # noqa: BLE001 — best-effort: cualquier problema → sin ref
         return None
     return None
@@ -239,6 +240,21 @@ def _hint_magnitud(price: float, ref: float, band: float) -> str:
     return ""
 
 
+def _finito(v: Any) -> bool:
+    try:
+        return math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _ref_ok(x: Any) -> Optional[float]:
+    """Referencia de precio usable (float finito > 0) o None."""
+    if x is None or not _finito(x):
+        return None
+    f = float(x)
+    return f if f > 0 else None
+
+
 def validate(code: str, side: str, qty: float, price: Optional[float],
              account: str, last_ref: Optional[float], moneda: str = "ARS",
              ordtype: str = "limit", theo_ref: Optional[float] = None,
@@ -266,11 +282,17 @@ def validate(code: str, side: str, qty: float, price: Optional[float],
         return "Falta la especie."
     if side not in ("buy", "sell"):
         return "Lado inválido."
-    if not qty or qty <= 0:
+    if not qty or not _finito(qty) or qty <= 0:
         return "Cantidad (VN) debe ser > 0."
     is_market = ordtype == "market"
-    if not is_market and (not price or price <= 0):
+    if not is_market and (not price or not _finito(price) or price <= 0):
         return "Precio debe ser > 0 (orden Limit)."
+    # Referencias del feed / valor técnico: NaN, inf o ≤ 0 NO son una referencia
+    # (NaN es verdadero y toda comparación con él da False: antes anulaba la
+    # banda de precio y, en Market, también el tope de notional). Se tratan
+    # exactamente como "sin referencia" (política explícita de abajo).
+    last_ref = _ref_ok(last_ref)
+    theo_ref = _ref_ok(theo_ref)
     is_usd = (moneda or "ARS").upper() in ("USD", "USB")
     cap = settings.oms_max_notional_usd if is_usd else settings.oms_max_notional
     unit = "USD" if is_usd else "ARS"
@@ -553,6 +575,16 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
     if ordtype != "market":
         params["price"] = payload["price"]
+    # Re-chequeo del kill-switch y del modo JUSTO antes de transmitir: entre el
+    # chequeo de entrada y acá hubo esperas (audit, resolve del instrumento —
+    # segundos la primera vez) y el freno pudo activarse en el medio; antes la
+    # orden salía igual. Sin ningún await entre esta lectura y el envío.
+    if _kill["on"]:
+        await audit_async("rechazada_kill", {**rec, "etapa": "pre_envio"})
+        return {"status": "RECHAZADA", "motivo": "kill-switch activado antes del envío", **rec}
+    if not is_live():
+        await audit_async("paper_enviada", {**rec, "etapa": "pre_envio"})
+        return {"status": "PAPER", "motivo": "modo paper (cambió antes del envío): NO viajó al broker", **rec}
     try:
         d = await get_ws_client().get_json_checked("rest/order/newSingleOrder", params)
         await audit_async("live_respuesta", {**rec, "broker": d})

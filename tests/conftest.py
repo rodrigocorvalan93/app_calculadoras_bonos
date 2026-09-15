@@ -19,9 +19,11 @@ if str(ROOT) not in sys.path:
 os.environ.setdefault("AUTH_ENABLED", "0")
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")
 os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_auth_store.json"))
-os.environ.setdefault("APP_SUPERUSER_USER", "rodricor93")
-os.environ.setdefault("APP_SUPERUSER_PASSWORD", "Rc_874562")
-os.environ.setdefault("APP_SUPERUSER_EMAIL", "rodrigocorvalan93@gmail.com")
+# Bootstrap del superuser de la suite: valores SINTÉTICOS (nunca una cuenta
+# real — el repo se comparte y el historial de git no se limpia).
+os.environ.setdefault("APP_SUPERUSER_USER", "su_test")
+os.environ.setdefault("APP_SUPERUSER_PASSWORD", "clave-de-test-2026!")
+os.environ.setdefault("APP_SUPERUSER_EMAIL", "su_test@example.com")
 
 
 import pytest

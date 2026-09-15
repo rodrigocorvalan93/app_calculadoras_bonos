@@ -346,7 +346,7 @@ async def test_guardar_base_solo_superuser(auth_on, monkeypatch) -> None:
         r = await ac.post("/historicos/guardar-base")
         assert r.status_code in (302, 401)
     async with _client() as su:
-        r = await su.post("/login", data={"username": "rodricor93", "password": "Rc_874562",
+        r = await su.post("/login", data={"username": "su_test", "password": "clave-de-test-2026!",
                                           "next": "/yas"})
         assert r.status_code in (200, 303)
         r = await su.post("/admin/users", data={"username": "juan", "password": "clave123",

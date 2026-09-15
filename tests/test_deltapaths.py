@@ -25,9 +25,14 @@ _TENANT_DIR = "OneDrive-SharedLibraries-DELTAASSETMANAGEMENTS.A"
 
 @pytest.fixture()
 def mac_home(tmp_path, monkeypatch):
-    """HOME apuntando a un layout estilo macOS con el OneDrive del equipo."""
+    """HOME apuntando a un layout estilo macOS con el OneDrive del equipo.
+    En Windows `expanduser("~")` / `Path.home()` ignoran HOME (usan
+    USERPROFILE) y `expand()` corta antes del escaneo OneDrive: se fija
+    USERPROFILE al mismo tmp y se apaga la constante de plataforma, así la
+    lógica Mac se prueba igual en un runner Windows (CI)."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("USERPROFILE", raising=False)
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr("backend.services.deltapaths._WINDOWS", False)
     for var in ("DELTA_BASES_DIR", "DELTA_HISTORICO_DIR", "DELTA_HISTORICO_PATH",
                 "DELTA_CAFCI_DIR", "DELTA_CAFCI_PATH", "DELTA_COMPOSICION_PATH",
                 "DELTA_PN_PATH", "DELTA_FONDOS_PATH", "DELTA_ESPECIES_PATH"):

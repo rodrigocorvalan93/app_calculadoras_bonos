@@ -10,6 +10,7 @@ the same templates as the legacy app.
 """
 from __future__ import annotations
 
+import math
 import copy
 import threading
 import time
@@ -52,12 +53,24 @@ class MarketSnapshot:
         return d
 
 
+def _finito(v: Any) -> Optional[float]:
+    """float FINITO o None. `"nan"` / `"inf"` son strings JSON válidos y
+    `float()` los acepta: sin este filtro un NaN entraba al store, pasaba por
+    verdadero en los `if last_ref:` del OMS y anulaba la banda de precio y el
+    tope de notional (NaN comparado con cualquier cosa da False)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
 def _md_value(v: Any, key: str = "price") -> Optional[float]:
     """Extract `price` / `size` from a Primary marketData field.
 
     Primary's schema is inconsistent across entries: list-of-dict for
     BI/OF/LA, plain dict sometimes, scalar for OP/HI/LO/EV/NV/TV. Same
-    tolerant decoder used by the recorder.
+    tolerant decoder used by the recorder. Sólo devuelve floats finitos.
     """
     if v is None:
         return None
@@ -67,12 +80,9 @@ def _md_value(v: Any, key: str = "price") -> Optional[float]:
         v = v[0]
     if isinstance(v, dict):
         val = v.get(key)
-        try:
-            return float(val) if val is not None else None
-        except (TypeError, ValueError):
-            return None
+        return _finito(val) if val is not None else None
     if isinstance(v, (int, float)):
-        return float(v)
+        return _finito(v)
     return None
 
 
@@ -93,19 +103,29 @@ def _depth_levels(raw: Any) -> Optional[List[Dict[str, Any]]]:
     for lvl in raw:
         if not isinstance(lvl, dict):
             continue
-        p = lvl.get("price")
-        s = lvl.get("size")
-        try:
-            p = float(p) if p is not None else None
-        except (TypeError, ValueError):
-            p = None
-        try:
-            s = float(s) if s is not None else None
-        except (TypeError, ValueError):
-            s = None
+        p = _finito(lvl.get("price"))
+        s = _finito(lvl.get("size"))
         if p is not None:
             out.append({"price": p, "size": s})
     return out or None
+
+
+_SNAP_NUM_FIELDS = ("bid", "bid_size", "offer", "offer_size", "last", "last_size", "open",
+                    "close", "high", "low", "volume", "trade_count", "nominal", "open_interest")
+
+
+def _sanear_snapshot(snap: "MarketSnapshot") -> None:
+    """NaN/inf persistidos (json acepta el token NaN) → None; niveles del book
+    sin precio finito afuera. Mismo criterio que el ingest en vivo."""
+    for f in _SNAP_NUM_FIELDS:
+        v = getattr(snap, f, None)
+        if v is not None and _finito(v) is None:
+            setattr(snap, f, None)
+    for f in ("bids", "offers"):
+        lv = getattr(snap, f, None)
+        if isinstance(lv, list):
+            ok = [x for x in lv if isinstance(x, dict) and _finito(x.get("price")) is not None]
+            setattr(snap, f, ok or None)
 
 
 class MarketDataStore:
@@ -272,6 +292,7 @@ class MarketDataStore:
                 except (TypeError, ValueError):
                     continue
                 snap.symbol = sym
+                _sanear_snapshot(snap)
                 cur = self._data.get(sym)
                 if cur is not None and (cur.updated_at or 0) >= (snap.updated_at or 0):
                     continue

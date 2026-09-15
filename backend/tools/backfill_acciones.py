@@ -104,16 +104,26 @@ def importar_csv(path: str) -> "Any":
     return pd.DataFrame(rows)
 
 
+_TLS_INSEGURO = False    # --tls-inseguro: reintento sin verificar SÓLO si el operador lo pide
+
+
 def _byma_get(session, params: Dict[str, Any]):
-    """GET con el mismo fallback TLS que byma_paneles (cadena incompleta del
-    sitio de BYMA): verify normal primero, sin verificar sólo ante SSLError."""
+    """GET con verificación TLS normal. Ante SSLError (cadena incompleta del
+    sitio de BYMA en algunas máquinas) NO se reintenta sin verificar salvo que
+    el backfill corra con --tls-inseguro: es una herramienta manual y el
+    operador decide a sabiendas."""
     import requests
     url = _BYMA_BASE + _BYMA_HIST
     try:
         r = session.get(url, params=params, timeout=_TIMEOUT)
         r.raise_for_status()
         return r.json()
-    except requests.exceptions.SSLError:
+    except requests.exceptions.SSLError as exc:
+        if not _TLS_INSEGURO:
+            raise SystemExit(
+                f"TLS contra BYMA falló ({exc}). Instalá el certificado intermedio de BYMA "
+                "en esta máquina o corré el backfill con --tls-inseguro (sólo para esta bajada manual)."
+            ) from exc
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             r = session.get(url, params=params, timeout=_TIMEOUT, verify=False)
@@ -186,7 +196,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--hasta", help="AAAA-MM-DD (default: hoy)")
     ap.add_argument("--tickers", help="lista separada por comas (default: paneles curados + MERVAL)")
     ap.add_argument("--destino", help="carpeta del parquet (default: Delta Bases de secrets.txt)")
+    ap.add_argument("--tls-inseguro", action="store_true",
+                    help="si la cadena TLS de BYMA falla, reintentar SIN verificar (sólo esta bajada)")
     a = ap.parse_args(argv)
+    global _TLS_INSEGURO
+    _TLS_INSEGURO = bool(a.tls_inseguro)
     if not a.csv and not a.byma:
         ap.print_help()
         return 2

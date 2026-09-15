@@ -159,7 +159,12 @@ def parse_ficha(text: str) -> Tuple[Optional[str], Dict[str, Any]]:
     if dict_node is None:
         raise ValueError("No encontré un diccionario de ficha en el texto pegado.")
 
-    ficha = _eval_node(dict_node)
+    try:
+        ficha = _eval_node(dict_node)
+    except (TypeError, OverflowError, ZeroDivisionError) as exc:
+        # `'a' - 1`, `-'x'`, `[1] * 'b'`: literales válidos para el AST pero
+        # aritmética imposible — es un error del texto pegado, no un 500.
+        raise ValueError(f"Operación inválida en la ficha: {exc}") from exc
     if not isinstance(ficha, dict) or "Código" not in ficha:
         raise ValueError("La ficha no tiene la clave 'Código'.")
     return name, ficha

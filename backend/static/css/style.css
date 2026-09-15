@@ -1519,12 +1519,20 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .cmp-chip b:hover { opacity: 1; color: var(--red); }
 /* Nuevas emisiones (Gráficos): textarea "ticker; tasa; duration" + ayuda */
 .graf-emis-body { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+.graf-emis-body[hidden] { display: none; }   /* el display:flex le ganaba al `hidden` del navegador */
 .graf-emis-body textarea {
   width: 300px; max-width: 100%; box-sizing: border-box; resize: vertical;
   background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
   padding: 6px 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; line-height: 1.5;
 }
 .graf-emis-body p { font-size: 11.5px; max-width: 560px; margin: 0; }
+/* Cajón de emisiones minimizado por default: el título es el botón que lo abre. */
+.graf-emis-toggle {
+  background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit;
+  cursor: pointer; text-align: left; display: inline-flex; align-items: center; gap: 6px;
+}
+.graf-emis-toggle:hover { opacity: .8; }
+.graf-emis-caret { display: inline-block; width: 10px; font-size: 11px; opacity: .7; }
 /* "premio vs" (mínimo / curva / instrumento) en el título del cuadro de emisiones. */
 .graf-emis-ref { font-weight: 400; margin: 0 10px; white-space: nowrap; }
 .graf-emis-ref select {
