@@ -140,6 +140,69 @@ def test_analizar_dividido_por_fx(base_acciones, monkeypatch) -> None:
     assert not r["ok"] and "÷ CCL" in r["motivo"]
 
 
+def _particiones_bono(env_dir, dias, code: str = "TX26", p0: float = 1500.0, t0: float = 0.30) -> None:
+    """Particiones del cierre completo para un bono: precio lineal (+2 por
+    rueda) y TIREA lineal (+0,1 pp por rueda), con nominal."""
+    from backend.services import cierres
+    sym = f"MERV - XMEV - {code} - 24hs"
+    for i, d in enumerate(dias):
+        df = pd.DataFrame([{"fecha_hoy": d, "symbol": sym, "code": code, "plazo": "24hs",
+                            "last": p0 + i * 2.0, "close": p0 + i * 2.0 - 1.0, "opero": True,
+                            "tirea": t0 + i * 0.001, "nominal": 5e5 + i}])
+        for col in ("symbol", "code", "plazo"):
+            df[col] = df[col].astype("string")
+        hw.escribir_particion(df, str(env_dir), d)
+    cierres.refresh()
+
+
+def test_bonos_precio_y_tir(base_acciones, monkeypatch) -> None:
+    from backend.services import cierres, historico_byma as hb
+    tmp, dias = base_acciones
+    _particiones_bono(tmp, dias[-40:])
+    try:
+        pa = price_action.analizar("TX26", "ars", "precio", 30)
+        assert pa["ok"] and pa["fuente"] == "cierres" and pa["panel"] == "B" and not pa["es_tir"]
+        assert pa["n"] == 30 and pa["nivel"]["ultimo"] == pytest.approx(1500.0 + 39 * 2.0)
+        assert pa["cmp"] is None                                   # bonos: sin Merval
+        assert pa["tabla"][0]["volumen"] == pytest.approx(5e5 + 39)
+        assert pa["nivel"]["mdd"] is not None and pa["u_delta"] == "%"
+        # TIR: nivel en %, Δ en pp, sin ÷ FX, sin drawdown, pendiente en pp/rueda
+        pt = price_action.analizar("TX26", "ccl", "retornos", 30, campo="tir")
+        assert pt["ok"] and pt["es_tir"] and pt["base"] == "ars" and pt["u_delta"] == " pp" and pt["u_nivel"] == "%"
+        assert pt["nivel"]["ultimo"] == pytest.approx((0.30 + 39 * 0.001) * 100)
+        assert pt["nivel"]["ret_ventana"] == pytest.approx(29 * 0.1)
+        assert pt["nivel"]["mdd"] is None and pt["nivel"]["pend_pct"] == pytest.approx(0.1, abs=1e-6)
+        assert pt["retornos"]["n"] == 30 and pt["retornos"]["media"] == pytest.approx(0.1)
+        assert pt["tabla"][0]["var"] == pytest.approx(0.1, abs=1e-9) and pt["tabla"][0]["var_pct"] is None
+        assert sum(pt["hist"]["counts"]) == 30 and pt["geom"]["modo"] == "retornos"
+        # sin cierre completo para el bono → cae a la base px/tasas (precio y TIR)
+        hb._cache = {"loaded": True, "ver": "t", "by_code": {"TX28": {
+            "base": "TX28", "dates": [d.isoformat() for d in dias[-20:]],
+            "vals": {"Last Price": [100.0 + i for i in range(20)], "TIREA": [0.4 + i / 1000 for i in range(20)]}}}}
+        try:
+            assert hb.codigos() == ["TX28"]
+            pb = price_action.analizar("TX28", "ars", "precio", 10)
+            assert pb["ok"] and pb["fuente"] == "base" and pb["nivel"]["ultimo"] == 119.0 and pb["n"] == 10
+            pbt = price_action.analizar("TX28", campo="tir")
+            assert pbt["ok"] and pbt["fuente"] == "base" and pbt["nivel"]["ultimo"] == pytest.approx(41.9)
+            # proyectado (…j): la TIR va por la base (el cierre completo guarda la variante base)
+            from backend.services import bond_universe
+            jc = next((c for c in bond_universe.all_codes() if c.endswith("j")), None)
+            if jc:
+                hb._cache["by_code"][jc] = {"base": jc[:-1], "dates": [d.isoformat() for d in dias[-20:]],
+                                            "vals": {"TIREA": [0.2] * 20, "Last Price": [1.0] * 20}}
+                pj = price_action.analizar(jc, campo="tir")
+                assert pj["ok"] and pj["fuente"] == "base" and pj["nivel"]["ultimo"] == pytest.approx(20.0)
+        finally:
+            hb._cache = None
+        # una acción no tiene TIR; un ticker sin ficha ni serie → motivo claro
+        r = price_action.analizar("GGAL", campo="tir")
+        assert not r["ok"] and "TIR" in r["motivo"]
+        assert not price_action.analizar("ZZZZ9")["ok"]
+    finally:
+        cierres.refresh()
+
+
 # ── writer: filas del día desde el store + append con dedup ──────────────
 def test_build_rows_y_append_dedup(tmp_path, monkeypatch) -> None:
     from backend.services import marketdata_store
@@ -214,13 +277,27 @@ async def test_http_pestana_acciones(base_acciones, monkeypatch) -> None:
         assert rd.status_code == 200 and 'value="GGAL" selected' in rd.text
         rv = await ac.get("/historicos/acciones", params={"ticker": "GGAL", "desde": "2030-01-01"})
         assert rv.status_code == 200 and "ruedas" in rv.text and "<svg" not in rv.text
-        # sin archivo → aviso con el backfill, sin form
+        # bonos: entran por el cierre completo (precio) y con campo=tir la TIR en pp
+        from backend.services import cierres
+        _particiones_bono(base_acciones[0], base_acciones[1][-40:])
+        rh._GRUPOS_CACHE = ()
         rh._AC_CACHE.clear()
+        rb = await ac.get("/historicos/acciones", params={"ticker": "TX26", "campo": "tir", "dias": "30"})
+        assert rb.status_code == 200 and "Bonos ·" in rb.text and 'value="TX26" selected' in rb.text
+        assert 'name="campo"' in rb.text and 'value="tir" selected' in rb.text
+        for frag in ("TX26 · TIR", "Δ TIR en la ventana", " pp", "no aplica a bonos", "canal de tendencia"):
+            assert frag in rb.text, frag
+        rp = await ac.get("/historicos/acciones", params={"ticker": "TX26", "dias": "30"})
+        assert rp.status_code == 200 and "TX26 · último" in rp.text and "precio ARS" in rp.text
+        # sin archivos → aviso con el backfill, sin form
+        rh._AC_CACHE.clear()
+        rh._GRUPOS_CACHE = ()
         monkeypatch.setenv("DELTA_HISTORICO_DIR", str(base_acciones[0] / "vacio"))
         (base_acciones[0] / "vacio").mkdir()
         acciones_hist.refresh()
+        cierres.refresh()
         rs = await ac.get("/historicos/acciones")
-        assert rs.status_code == 200 and "Todavía no hay cierres" in rs.text and "backfill_acciones" in rs.text
+        assert rs.status_code == 200 and "Todavía no hay series" in rs.text and "backfill_acciones" in rs.text
 
 
 # ── backfill CSV ─────────────────────────────────────────────────────────

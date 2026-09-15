@@ -74,6 +74,69 @@ def _alinear(fechas: List[str], fx: Dict[str, float]) -> List[Optional[float]]:
 
 
 # ── Estadística ───────────────────────────────────────────────────────────
+def serie_de(ticker: str, campo: str = "precio") -> Optional[Dict[str, Any]]:
+    """Serie diaria de `ticker` según lo que haya guardado:
+      - acciones / CEDEARs / Merval → parquet de acciones (precio);
+      - bonos con ficha → cierre completo (services/cierres: precio de pantalla
+        o TIREA) con fallback a la base px/tasas (historico_byma), que tiene
+        un año de historia. Los códigos proyectados (`…j`) van por la base
+        (el cierre completo guarda las métricas de la variante base).
+    {"fechas", "ultimo" (ndarray), "volumen", "panel", "fuente"}; la TIR sale
+    en % (×100). None si no hay nada."""
+    from backend.services import acciones_hist as ah
+
+    raw = (ticker or "").strip()
+    if not raw:
+        return None
+    es_tir = campo == "tir"
+    if not es_tir:
+        s = ah.serie(raw.upper())
+        if s:
+            return {**s, "fuente": "acciones"}
+    from backend.services import cierres, historico_byma as hb, pricing
+    from backend.services import symbols as syms
+
+    # Códigos de calc con sufijo `j`/`v` MINÚSCULA (TX26j): el ticker se
+    # respeta tal cual y recién después se prueba en mayúsculas.
+    t = next((c for c in (raw, raw.upper()) if pricing.bond_meta(c)), None)
+    if t is None:
+        return None
+    k = 100.0 if es_tir else 1.0
+    proy = t.endswith("j")
+
+    def _cierres():
+        sym = syms.md_symbol(t, "24hs")
+        m = cierres.ensure_loaded()            # corre en el executor de la ruta
+        if m is None:
+            return None
+        f, v = cierres.serie(sym, "tirea" if es_tir else "last")
+        if len(f) < 2:
+            return None
+        vol = None
+        j = m.idx_s.get(sym) if not es_tir else None
+        if j is not None and "nominal" in m.mat:
+            vol = np.array([m.mat["nominal"][m.idx_f[x], j] for x in f], dtype=float)
+        return {"fechas": f, "ultimo": np.asarray(v, dtype=float) * k, "volumen": vol,
+                "panel": "B", "fuente": "cierres"}
+
+    def _base():
+        f, v = hb.serie_codigo(t, "TIREA" if es_tir else "Last Price")
+        if len(f) < 2:
+            return None
+        return {"fechas": f, "ultimo": np.asarray(v, dtype=float) * k, "volumen": None,
+                "panel": "B", "fuente": "base"}
+
+    for fn in ((_base, _cierres) if (es_tir and proy) else (_cierres, _base)):
+        try:
+            s = fn()
+        except Exception:  # noqa: BLE001 — una fuente rota no tapa la otra
+            s = None
+        if s:
+            s["ticker"] = t
+            return s
+    return None
+
+
 def _percentil(v: np.ndarray, x: float) -> float:
     return float((np.sum(v < x) + 0.5 * np.sum(v == x)) / len(v))
 
@@ -90,7 +153,10 @@ def _momentos(v: np.ndarray):
     return float((z ** 3).mean()), float((z ** 4).mean() - 3.0)
 
 
-def _stats_nivel(f: List[str], y: np.ndarray) -> Dict[str, Any]:
+def _stats_nivel(f: List[str], y: np.ndarray, es_tir: bool = False) -> Dict[str, Any]:
+    """Estadística del nivel. Con `es_tir` el nivel es una tasa en %: las
+    variaciones van en puntos porcentuales (Δ, pendiente en pp/rueda) y no
+    hay drawdown."""
     n = len(y)
     last, media = float(y[-1]), float(y.mean())
     desv = float(y.std(ddof=1)) if n > 1 else 0.0
@@ -102,15 +168,22 @@ def _stats_nivel(f: List[str], y: np.ndarray) -> Dict[str, Any]:
     resid = y - tend
     sigma = float(resid.std(ddof=2)) if n > 2 else 0.0
     ss_tot = float(((y - media) ** 2).sum())
-    peak = np.maximum.accumulate(y)
-    pend_pct = (float(slope) / float(tend[-1]) * 100.0) if tend[-1] else None
+    if es_tir:
+        pend_pct: Optional[float] = float(slope)
+        ret_ventana = last - float(y[0])
+        mdd: Optional[float] = None
+    else:
+        pend_pct = (float(slope) / float(tend[-1]) * 100.0) if tend[-1] else None
+        ret_ventana = (last / float(y[0]) - 1.0) * 100.0
+        peak = np.maximum.accumulate(y)
+        mdd = float(((y / peak) - 1.0).min() * 100.0)
     return {
         "ultimo": last, "media": media, "desvio": desv,
         "min": vmin, "min_fecha": f[imin], "max": vmax, "max_fecha": f[imax],
         "percentil": _percentil(y, last), "z": ((last - media) / desv) if desv > 0 else None,
         "pos_rango": ((last - vmin) / (vmax - vmin)) if vmax > vmin else None,
-        "ret_ventana": (last / float(y[0]) - 1.0) * 100.0,
-        "mdd": float(((y / peak) - 1.0).min() * 100.0),
+        "ret_ventana": ret_ventana,
+        "mdd": mdd,
         "tend_ultimo": float(tend[-1]), "sigma_tend": sigma,
         "z_tend": ((last - float(tend[-1])) / sigma) if sigma > 0 else None,
         "pend_pct": pend_pct,
@@ -328,14 +401,16 @@ def _geom_hist(h: Dict[str, Any], ultimo: Optional[float],
     }
 
 
-def _tabla(f: List[str], y: np.ndarray, v: Optional[np.ndarray], prev: Optional[float]) -> List[Dict[str, Any]]:
+def _tabla(f: List[str], y: np.ndarray, v: Optional[np.ndarray], prev: Optional[float],
+           es_tir: bool = False) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     p = prev
     for i in range(len(y)):
         val = float(y[i])
+        tiene_prev = p is not None and (es_tir or p)
         rows.append({"fecha": f[i], "valor": val,
-                     "var": (val - p) if p else None,
-                     "var_pct": ((val / p - 1.0) * 100.0) if p else None,
+                     "var": (val - p) if tiene_prev else None,
+                     "var_pct": ((val / p - 1.0) * 100.0) if (tiene_prev and not es_tir and p) else None,
                      "volumen": (float(v[i]) if v is not None and np.isfinite(v[i]) else None)})
         p = val
     rows.reverse()
@@ -345,22 +420,26 @@ def _tabla(f: List[str], y: np.ndarray, v: Optional[np.ndarray], prev: Optional[
 # ── Entrada principal ─────────────────────────────────────────────────────
 def analizar(ticker: str, base: str = "ars", modo: str = "precio", dias: int = 90,
              desde: Optional[str] = None, hasta: Optional[str] = None,
-             comparar: bool = True) -> Dict[str, Any]:
-    """Todo el análisis de un ticker en una ventana. `ok=False` + `motivo`
-    cuando no hay serie / FX / ruedas suficientes."""
-    from backend.services import acciones_hist as ah
-
-    ticker = (ticker or "").strip().upper()
-    base = base if base in BASES else "ars"
+             comparar: bool = True, campo: str = "precio") -> Dict[str, Any]:
+    """Todo el análisis de un ticker en una ventana. `campo`: "precio" (acciones,
+    CEDEARs, Merval y bonos) o "tir" (bonos: la TIREA en %, variaciones en
+    pp, sin ÷ FX ni Merval). `ok=False` + `motivo` cuando no hay serie / FX /
+    ruedas suficientes."""
+    ticker = (ticker or "").strip()
+    campo = "tir" if campo == "tir" else "precio"
+    es_tir = campo == "tir"
+    base = base if (base in BASES and not es_tir) else "ars"
     modo = "retornos" if modo == "retornos" else "precio"
-    s = ah.serie(ticker)
+    s = serie_de(ticker, campo)
     if not s:
-        return {"ok": False, "ticker": ticker, "motivo": f"no hay cierres guardados de {ticker or '—'}"}
+        que = "TIR guardada (sólo bonos con ficha)" if es_tir else "cierres guardados"
+        return {"ok": False, "ticker": ticker, "motivo": f"no hay {que} de {ticker or '—'}"}
+    ticker = s.get("ticker") or ticker.upper()          # código resuelto (TX26j conserva la j)
     fechas: List[str] = list(s["fechas"])
     px = np.asarray(s["ultimo"], dtype=float)
     vol = s.get("volumen")
     vol = np.asarray(vol, dtype=float) if vol is not None else None
-    ok = np.isfinite(px) & (px > 0)
+    ok = np.isfinite(px) if es_tir else (np.isfinite(px) & (px > 0))
     if not ok.all():
         idx_ok = np.flatnonzero(ok)
         fechas = [fechas[i] for i in idx_ok]
@@ -391,18 +470,21 @@ def analizar(ticker: str, base: str = "ars", modo: str = "precio", dias: int = 9
     v = vol[i0:i1 + 1] if vol is not None else None
     n = len(y)
     prev = float(px[i0 - 1]) if i0 > 0 else None
-    # Retornos diarios (%): el primero contra la rueda previa a la ventana si
-    # existe (así una ventana de 90 tiene 90 retornos, no 89).
-    if prev:
-        r = (y / np.concatenate(([prev], y[:-1])) - 1.0) * 100.0
+    # Retornos diarios (% — o Δ en pp para la TIR): el primero contra la rueda
+    # previa a la ventana si existe (así una ventana de 90 tiene 90, no 89).
+    if prev is not None and (es_tir or prev > 0):
+        base_r = np.concatenate(([prev], y[:-1]))
+        r = (y - base_r) if es_tir else (y / base_r - 1.0) * 100.0
         r_f = f
     else:
-        r = (y[1:] / y[:-1] - 1.0) * 100.0
+        r = (y[1:] - y[:-1]) if es_tir else (y[1:] / y[:-1] - 1.0) * 100.0
         r_f = f[1:]
 
-    st = _stats_nivel(f, y)
+    st = _stats_nivel(f, y, es_tir)
     rt = _stats_retornos(r_f, r)
-    cmp = _vs_merval(ah, f, y, base, fx_al) if (comparar and ticker != MERVAL) else None
+    from backend.services import acciones_hist as ah
+    cmp = (_vs_merval(ah, f, y, base, fx_al)
+           if (comparar and ticker != MERVAL and not es_tir and s.get("fuente") == "acciones") else None)
     if modo == "precio":
         h = _histograma(y)
         geom = _geom_precio(f, y, st, cmp)
@@ -418,7 +500,9 @@ def analizar(ticker: str, base: str = "ars", modo: str = "precio", dias: int = 9
     return {
         "ok": True, "ticker": ticker, "panel": s.get("panel", ""), "base": base,
         "base_label": BASES[base], "modo": modo, "n": n, "n_total": n_all,
+        "campo": campo, "es_tir": es_tir, "fuente": s.get("fuente", ""),
+        "u_nivel": "%" if es_tir else "", "u_delta": " pp" if es_tir else "%",
         "desde": f[0], "hasta": f[-1], "nivel": st, "retornos": rt, "cmp": cmp,
         "hist": h, "geom": geom, "geom_hist": (_geom_hist(h, ultimo_h) if h else None),
-        "tabla": _tabla(f, y, v, prev),
+        "tabla": _tabla(f, y, v, prev, es_tir),
     }

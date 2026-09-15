@@ -207,6 +207,30 @@ def available() -> bool:
     return ensure_loaded()["loaded"]
 
 
+def codigos() -> List[str]:
+    """Códigos con historia en la base YA cargada (no dispara la carga)."""
+    c = _cache
+    return list((c or {}).get("by_code") or {}) if c and c.get("loaded") else []
+
+
+def serie_codigo(code: str, metric: str = "Last Price") -> Tuple[List[str], List[float]]:
+    """(fechas ISO, valores) de un código para una métrica de la base, sin
+    huecos (None afuera; precios ≤ 0 afuera). Vacío si no hay base o código."""
+    c = ensure_loaded()
+    e = (c.get("by_code") or {}).get(code)
+    if not e:
+        return [], []
+    vals = e["vals"].get(metric) or []
+    f_out: List[str] = []
+    v_out: List[float] = []
+    for d, v in zip(e["dates"], vals):
+        if v is None or v != v or (metric == "Last Price" and v <= 0):
+            continue
+        f_out.append(d)
+        v_out.append(float(v))
+    return f_out, v_out
+
+
 def meta() -> Dict[str, Any]:
     c = ensure_loaded()
     return {"loaded": c["loaded"], "error": c["error"], "n_codes": c["n_codes"],
