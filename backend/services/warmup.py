@@ -137,13 +137,16 @@ def prime_aux_loaders() -> None:
     cargados. Defensivo: un fallo acá nunca debe tumbar el warmup."""
     # Import perezoso: estos módulos arrastran pandas/OMScredit, que no queremos
     # cargar al importar warmup.
-    from backend.services import credito, delta_especies, historico_byma, positions
+    from backend.services import cierres, credito, delta_especies, historico_byma, positions
 
     for label, loader in (
         ("delta_especies", delta_especies.ensure_loaded),
         ("positions", positions.ensure_loaded),
         ("credito", credito._ensure),
         ("historico_byma", historico_byma.ensure_loaded),
+        # cierre completo: backfill desde la base si no hay particiones (writer)
+        # + matriz numpy en RAM (~1 s/año) — el 5D % de Mercado la lee de acá
+        ("cierres", cierres.prime),
     ):
         try:
             loader()

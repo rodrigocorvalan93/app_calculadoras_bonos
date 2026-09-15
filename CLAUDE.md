@@ -114,6 +114,20 @@ The native leg is a no-op, so the **basic curve is FX-free** (native ficha
 fallbacks. Implemented in
 `backend.services.fx.normalize_price(price, leg, native, fx)`.
 
+## Cierre completo (`cierres/`)
+
+Además de la base px/tasas (xlsx + parquet, sólo bonos de las curvas), el
+autosave escribe UNA partición por rueda `Delta Bases/cierres/AAAA/AAAA-MM-DD.parquet`
+con TODOS los símbolos del store (`historico_writer.build_cierre_rows`):
+último/hora, cierre previo, OHLC, puntas, volumen, `opero` (último de HOY) y
+TIREA/TNA/TEM/paridad/duration de los bonos con ficha. Append-only: nunca se
+reescribe la historia; el archivo del día se pisa (keep-last) con la
+recaptura `historico_recaptura_min` después del cierre. Journal local primero.
+`services/cierres.py` = matrices numpy (fechas × símbolos) con `at / serie /
+ret / vector_ref`; `historico_byma.ref_5d` (5D % de Mercado) lo usa cuando
+está cargado. Backfill desde la base: `cierres.importar_base()` (automático en
+el warmup del writer si no hay particiones). Nada de esto corre en un request.
+
 ## Visual style (FastAPI rewrite)
 
 Bloomberg palette + Notion/Apple/Linear typography. System sans

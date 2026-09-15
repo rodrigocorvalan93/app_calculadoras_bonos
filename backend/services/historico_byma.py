@@ -405,6 +405,22 @@ def ref_5d(hoy: Optional[date] = None, ruedas: int = 5) -> Dict[str, tuple]:
             if n == ruedas:
                 out[str(code)] = (float(v), date.fromisoformat(dates[i]))
                 break
+    # Cierre COMPLETO (services/cierres, particiones por rueda): mismos precios
+    # de pantalla y, cuando existe, gana — trae la recaptura de las 17:35 y
+    # cubre TODOS los símbolos (acciones, CEDEARs, CI…), no sólo la base. Sin
+    # particiones cargadas es un no-op y queda lo de la base.
+    try:
+        from backend.services import cierres
+        vec = cierres.vector_ref(ruedas, hoy)
+        if vec:
+            for code, entry in data["by_code"].items():
+                v = vec.get(entry.get("base") or "")
+                if v is not None:
+                    out[str(code)] = v
+            for md, v in vec.items():
+                out.setdefault(md, v)
+    except Exception:  # noqa: BLE001 — el 5D nunca voltea Mercado
+        pass
     _ref5d_cache = (key, out)
     return out
 

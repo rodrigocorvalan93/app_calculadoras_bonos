@@ -14,7 +14,7 @@ import copy
 import threading
 import time
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 @dataclass
@@ -215,6 +215,12 @@ class MarketDataStore:
     def symbols(self) -> List[str]:
         with self._lock:
             return sorted(self._data.keys())
+
+    def snapshots(self) -> List[Tuple[str, MarketSnapshot]]:
+        """[(símbolo, copia shallow)] de TODO el store — para el cierre completo
+        del día. El lock se sostiene sólo para la copia (~µs por símbolo)."""
+        with self._lock:
+            return [(sym, copy.copy(snap)) for sym, snap in self._data.items()]
 
     def seq(self) -> int:
         """Secuencia global de updates (monótona). La UI la sondea (~1/s, costo
