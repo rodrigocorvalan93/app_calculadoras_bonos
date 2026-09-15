@@ -40,7 +40,7 @@ async def test_posiciones_matriz_data_no_cruza_rol(auth_on):
     página sino también en los partials de datos, que antes quedaban abiertos y
     filtraban las tenencias reales de los fondos."""
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "nico", "password": "clave123",
                                              "role": "basico"})
         await su.post("/admin/users", data={"username": "prem", "password": "clave123",
@@ -159,7 +159,7 @@ async def test_mercado_book_cache_no_cruza_usuarios(auth_on):
     (per_user=True). Antes, el HTML del primer usuario (con SU vista de
     fondos) se servía como hit a cualquier otro en la misma ventana seq/TTL."""
     async with _client() as su:
-        await _login(su, "rodricor93", "Rc_874562")
+        await _login(su, "su_test", "clave-de-test-2026!")
         await su.post("/admin/users", data={"username": "prem2", "password": "clave123",
                                             "role": "premium"})
         r1 = await su.get("/mercado/book/GD30")

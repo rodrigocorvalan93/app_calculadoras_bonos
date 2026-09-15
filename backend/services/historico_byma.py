@@ -27,6 +27,10 @@ _METRICS = ("TIREA", "TNA", "TEM", "Paridad")          # métricas de tasa/parid
 _EXTRA = ("Last Price", "Duration")                    # para la vista "un bono" (futuro)
 
 _lock = threading.Lock()
+# Gracia con la que el espejo parquet puede ser MÁS VIEJO que el xlsx y aun
+# así leerse (tándem xlsx+parquet con OneDrive/mtime grueso). Misma regla en
+# historico_writer._leer_base.
+PQ_GRACIA_S = 2.0
 _cache: Optional[Dict[str, Any]] = None
 
 
@@ -82,9 +86,11 @@ def _pick_source(xlsx: Optional[str]) -> Tuple[Optional[str], str]:
         return (pq, "parquet") if pq_ok else (None, "")
     if pq_ok:
         try:
-            # 60 s de gracia: bymaapi escribe xlsx y parquet en tándem y el
-            # orden/mtime puede variar con OneDrive de por medio.
-            if os.path.getmtime(pq) >= os.path.getmtime(xlsx) - 60.0:
+            # 2 s de gracia (antes 60): bymaapi/autosave escriben xlsx y parquet
+            # en tándem y re-estampan el espejo al final; la gracia sólo cubre
+            # el orden/mtime grueso de OneDrive. Un Excel más nuevo que eso es
+            # una edición a mano y tiene que ganar (el parquet se regenera).
+            if os.path.getmtime(pq) >= os.path.getmtime(xlsx) - PQ_GRACIA_S:
                 return pq, "parquet"
         except OSError:
             pass

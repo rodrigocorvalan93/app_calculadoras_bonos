@@ -299,8 +299,8 @@ async def test_http_admin_reporte_especies(carteras, tmp_path, monkeypatch) -> N
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
             r = await ac.get("/admin/especies-faltantes")
             assert r.status_code in (302, 401, 403)        # sin sesión no pasa
-            await ac.post("/login", data={"username": "rodricor93",
-                                          "password": "Rc_874562", "next": "/admin"})
+            await ac.post("/login", data={"username": "su_test",
+                                          "password": "clave-de-test-2026!", "next": "/admin"})
             ok = await ac.get("/admin/especies-faltantes")
             assert ok.status_code == 200 and "ZZZZ9" in ok.text
             page = await ac.get("/admin")

@@ -624,7 +624,10 @@ async def excel_calc(request: Request) -> Response:
     except Exception:  # noqa: BLE001
         return Response(content='{"error":"body inválido"}',
                         media_type="application/json", status_code=400)
-    items = (body or {}).get("items")
+    if not isinstance(body, dict):                # `[1]`, `"x"`, `null`: JSON válido, no un objeto
+        return Response(content='{"error":"body inválido: se espera un objeto {\\"items\\":[...]}"}',
+                        media_type="application/json", status_code=400)
+    items = body.get("items")
     if not isinstance(items, list) or not items:
         return Response(content='{"error":"items vacío"}',
                         media_type="application/json", status_code=400)

@@ -78,8 +78,16 @@ def _load() -> List[Dict[str, Any]]:
         return []
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError:
         logger.exception("[alertas] archivo ilegible; arranco vacío")
+        return []
+    except ValueError as exc:
+        # JSON roto (corte a mitad de escritura, edición a mano): se aparta
+        # con evidencia — si arrancáramos vacío sobre el mismo path, el
+        # próximo guardado lo pisaría y las alertas se perderían de verdad.
+        from backend.services.archivos import apartar_corrupto
+        logger.error("[alertas] archivo corrupto (%s); lo aparto y arranco vacío", exc)
+        apartar_corrupto(p, str(exc))
         return []
     raw = data.get("alertas") if isinstance(data, dict) else None
     return [s for a in (raw or []) if (s := _sane(a)) is not None]

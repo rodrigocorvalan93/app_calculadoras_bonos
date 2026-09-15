@@ -8,6 +8,7 @@ y el blotter leen del store / del audit acotado.
 """
 from __future__ import annotations
 
+import math
 import asyncio
 from typing import Any, Dict, List, Optional
 
@@ -33,7 +34,9 @@ def _last_ref(code: str, plazo: str) -> Optional[float]:
     snap = mds.get_store().get(syms.md_symbol(code, plazo))
     if snap is None:
         return None
-    return snap.last if snap.last is not None else snap.close
+    v = snap.last if snap.last is not None else snap.close
+    # Sólo una referencia usable (finita y > 0); NaN/0 = sin referencia.
+    return v if (v is not None and math.isfinite(v) and v > 0) else None
 
 
 def _moneda(code: str) -> str:

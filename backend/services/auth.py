@@ -150,7 +150,20 @@ def _save_locked(data: Dict[str, Any]) -> None:
     # otros permisos, O_TRUNC lo vacía pero el modo no cambia; lo forzamos igual.
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.fchmod(fd, 0o600)
+        # os.fchmod no existe en Windows antes de Python 3.13: ahí el archivo
+        # queda protegido por las ACL del perfil del usuario (el store vive
+        # fuera de OneDrive, bajo la cuenta del servicio) y chmod sólo toca el
+        # bit read-only. En Unix el fchmod fuerza 0600 aunque el tmp ya
+        # existiera con otro modo. Antes: AttributeError → NINGÚN guardado de
+        # usuarios/claves/tokens funcionaba en un server Windows.
+        fchmod = getattr(os, "fchmod", None)
+        if fchmod is not None:
+            fchmod(fd, 0o600)
+        else:
+            try:
+                os.chmod(str(tmp), 0o600)
+            except OSError:
+                pass
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(payload)
             f.flush()
@@ -162,6 +175,24 @@ def _save_locked(data: Dict[str, Any]) -> None:
             pass
         raise
     os.replace(tmp, path)
+
+
+def _persist(data: Dict[str, Any]) -> None:
+    """Guarda el store (bajo _lock) y, si el disco falla, DESCARTA la copia en
+    memoria: el próximo `_store()` relee el archivo y el cambio fallido no
+    queda vivo en el proceso. Antes, una promoción / clave / token que no se
+    pudo escribir (disco lleno, permisos, lock de OneDrive) seguía aplicada en
+    RAM mientras el request devolvía 500 — permisos distintos a los del disco
+    hasta el próximo reinicio."""
+    global _cache, _excel_index
+    try:
+        _save_locked(data)
+    except Exception:
+        _cache = None
+        _nav_cache.clear()
+        _feat_cache.clear()
+        _excel_index = None
+        raise
 
 
 def _store() -> Dict[str, Any]:
@@ -235,7 +266,7 @@ def get_secret_key() -> str:
         data = _store()
         if not data.get("secret"):
             data["secret"] = secrets.token_hex(32)
-            _save_locked(data)
+            _persist(data)
         return data["secret"]
 
 
@@ -257,7 +288,7 @@ def ensure_bootstrapped() -> Dict[str, Any]:
             logger.warning("[auth] %s", msg)
             return {"created": False, "user": None, "warning": msg}
         data["users"][user] = _make_record(pwd, "superuser", settings.app_superuser_email)
-        _save_locked(data)
+        _persist(data)
         logger.info("[auth] superuser '%s' creado desde env (bootstrap)", user)
         return {"created": True, "user": user, "warning": None}
 
@@ -396,7 +427,7 @@ def create_user(username: str, password: str, role: str, email: str = "") -> Non
         if name in data["users"]:
             raise AuthError(f"El usuario '{name}' ya existe.")
         data["users"][name] = _make_record(password, role, email)
-        _save_locked(data)
+        _persist(data)
 
 
 def set_password(username: str, password: str) -> None:
@@ -416,7 +447,7 @@ def set_password(username: str, password: str) -> None:
         if u.get("fondos") is not None:
             rec["fondos"] = u.get("fondos")
         data["users"][name] = rec
-        _save_locked(data)
+        _persist(data)
 
 
 def update_user(username: str, role: Optional[str] = None, email: Optional[str] = None) -> None:
@@ -435,7 +466,7 @@ def update_user(username: str, role: Optional[str] = None, email: Optional[str] 
             u["role"] = role
         if email is not None:
             u["email"] = email.strip()
-        _save_locked(data)
+        _persist(data)
 
 
 def delete_user(username: str) -> None:
@@ -449,7 +480,7 @@ def delete_user(username: str) -> None:
         if u.get("role") == "superuser" and _count_superusers(data) <= 1:
             raise AuthError("No podés borrar al último superuser.")
         del data["users"][name]
-        _save_locked(data)
+        _persist(data)
         _excel_index = None    # su token de Excel (si tenía) deja de valer ya
 
 
@@ -461,7 +492,7 @@ def set_role_tabs(role: str, tabs: List[str]) -> None:
     with _lock:
         data = _store()
         data["role_tabs"][role] = clean
-        _save_locked(data)
+        _persist(data)
         _nav_cache.pop(role, None)
 
 
@@ -499,7 +530,7 @@ def set_role_features(role: str, keys: List[str]) -> None:
     with _lock:
         data = _store()
         data.setdefault("role_features", {})[role] = clean
-        _save_locked(data)
+        _persist(data)
         _feat_cache.pop(role, None)
 
 
@@ -560,7 +591,7 @@ def set_visible_fondos(username: str, cods: Optional[List[int]]) -> None:
                 u["fondos"] = sorted({int(c) for c in cods})
             except (TypeError, ValueError):
                 raise AuthError("Códigos de fondo inválidos.") from None
-        _save_locked(data)
+        _persist(data)
 
 
 # ── Acceso Excel (add-in) por usuario ────────────────────────────────────────
@@ -612,7 +643,7 @@ def set_excel_access(username: str, enabled: bool) -> Optional[str]:
         u["excel_enabled"] = bool(enabled)
         if enabled and not u.get("excel_token"):
             u["excel_token"] = secrets.token_urlsafe(24)
-        _save_locked(data)
+        _persist(data)
         _excel_index = None
         return u.get("excel_token") if enabled else None
 
@@ -627,7 +658,7 @@ def regen_excel_token(username: str) -> str:
         if not u:
             raise AuthError(f"El usuario '{name}' no existe.")
         u["excel_token"] = secrets.token_urlsafe(24)
-        _save_locked(data)
+        _persist(data)
         _excel_index = None
         return u["excel_token"]
 
