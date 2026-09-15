@@ -14,7 +14,8 @@ cantidad de particiones + mtime de la última) matrices float32 por campo —
                               anterior — lo que usa el 5D % de Mercado
 
 Costo: carga ~1 s/año en el warmup (executor); consultas en µs-ms. Nada corre
-en un request si la firma no cambió. Backfill: `importar_base()` convierte la
+en un request si la firma no cambió. RAM: float64 para último/cierre/TIR/
+paridad/duration, float32 para el resto (~13 MB por año con 700 símbolos). Backfill: `importar_base()` convierte la
 base px/tasas existente en particiones (fechas que faltan), así la matriz
 arranca con toda la historia de bonos y no desde cero.
 """
@@ -37,6 +38,10 @@ logger = logging.getLogger("backend.cierres")
 
 CAMPOS = ("last", "close", "open", "high", "low", "bid", "offer", "volume", "nominal",
           "tirea", "tna", "tem", "paridad", "duration")
+# Campos analíticos en float64 (retornos, Δ de TIR en pp, percentiles: el
+# float32 pierde el 7º dígito y un Merval de 2.100.000,50 ya no lo guarda);
+# el resto (OHLC, puntas, volúmenes) en float32 — mitad de RAM.
+_F64 = {"last", "close", "tirea", "paridad", "duration"}
 _lock = threading.Lock()
 _cache: Dict[str, Any] = {"sig": None, "data": None}
 _vref_cache: Dict[tuple, Dict[str, tuple]] = {}
@@ -108,7 +113,7 @@ def _build(df: pd.DataFrame) -> Optional[Matriz]:
     for c in CAMPOS:
         if c not in df.columns:
             continue
-        m = np.full((nf, ns), np.nan, dtype=np.float32)
+        m = np.full((nf, ns), np.nan, dtype=(np.float64 if c in _F64 else np.float32))
         m[fi, si] = pd.to_numeric(df[c], errors="coerce").to_numpy(dtype=float)
         mat[c] = m
     opero = np.zeros((nf, ns), dtype=bool)

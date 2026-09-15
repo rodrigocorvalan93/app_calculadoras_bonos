@@ -566,59 +566,99 @@ def _pa_fmt_rows(rows: list, dec: int) -> list:
 
 
 def _pa_default(names: list) -> Optional[str]:
-    for pref in ("GGAL", "YPFD", "SPY"):
+    for pref in ("GGAL", "YPFD", "SPY", "TX26", "AL30D", "GD30C"):
         if pref in names:
             return pref
     return next((n for n in names if n != "MERVAL"), names[0] if names else None)
+
+
+_GRUPOS_CACHE: tuple = ()      # (firma, grupos, nombres)
+
+
+def _grupos_especies() -> tuple:
+    """[(etiqueta, [{"ticker"}])] para el selector de la pestaña: acciones /
+    CEDEARs / índice por panel (parquet de acciones) + BONOS por curva con
+    historia guardada (cierre completo o base px/tasas). Cacheado por las
+    firmas de los archivos (cambian 1×/día)."""
+    global _GRUPOS_CACHE
+    from backend.services import acciones_hist, cierres, curves, symbols as syms
+
+    con_hist: set = set()
+    m = cierres.ensure_loaded()            # corre en el executor de la ruta; cache por firma
+    if m is not None:
+        con_hist |= {m.codes[j] for j in range(len(m.simbolos)) if m.plazos[j] == "24hs"}
+    base_codes = historico_byma.codigos()
+    con_hist |= set(base_codes)
+    sig = (acciones_hist.signature(), cierres.signature(), len(base_codes))
+    if _GRUPOS_CACHE and _GRUPOS_CACHE[0] == sig:
+        return _GRUPOS_CACHE[1], _GRUPOS_CACHE[2]
+    grupos: list = []
+    for t in acciones_hist.tickers():
+        if not grupos or grupos[-1][0] != t["panel_label"]:
+            grupos.append((t["panel_label"], []))
+        grupos[-1][1].append(t)
+    if con_hist:
+        cc = curves.build_curve_codes()
+        for c in curves.list_curves():
+            codes = [k for k in cc.get(c.key, []) if k in con_hist or syms.calc_to_md_code(k) in con_hist]
+            if codes:
+                grupos.append((f"Bonos · {c.label}", [{"ticker": k} for k in codes]))
+    nombres = [t["ticker"] for _, items in grupos for t in items]
+    _GRUPOS_CACHE = (sig, grupos, nombres)
+    return grupos, nombres
 
 
 @router.get("/historicos/acciones", response_class=HTMLResponse)
 async def historicos_acciones(
     request: Request, ticker: str = "", base: str = "ars", modo: str = "precio",
     dias: str = "90", desde: Optional[str] = None, hasta: Optional[str] = None,
-    cmp: str = "1",
+    cmp: str = "1", campo: str = "precio",
 ) -> HTMLResponse:
-    """Pestaña 'Acciones': price action de una acción / CEDEAR / Merval sobre
-    el cierre diario propio — nivel (ARS o ÷ A3500 / CCL / MEP) con canal de
-    tendencia ±1σ/2σ, mín/máx, percentil/z y overlay del Merval, o retornos
-    diarios; distribución vs normal al costado; tabla HP. Carga sólo al abrir
-    el tab o tocar el form; análisis numpy en el executor; render cacheado por
-    (parámetros, mtime del parquet de acciones y del FX)."""
-    from backend.services import acciones_hist, price_action
+    """Pestaña 'Acciones': price action de una acción / CEDEAR / Merval (parquet
+    de acciones) o de un BONO (cierre completo / base px/tasas: precio o TIR)
+    — nivel (ARS o ÷ A3500 / CCL / MEP) con canal de tendencia ±1σ/2σ,
+    mín/máx, percentil/z y overlay del Merval, o retornos diarios;
+    distribución vs normal al costado; tabla HP. Carga sólo al abrir el tab o
+    tocar el form; análisis numpy en el executor; render cacheado por
+    (parámetros, firmas de los archivos)."""
+    from backend.services import acciones_hist, cierres, price_action
 
     base = base if base in price_action.BASES else "ars"
     modo = "retornos" if modo == "retornos" else "precio"
+    campo = "tir" if campo == "tir" else "precio"
     dias_sel = dias if dias in price_action.VENTANAS else "90"
     desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
     comparar = cmp != "0"
-    tk = (ticker or "").strip().upper()
-    sig = (acciones_hist.signature(), fx_hist.signature())
-    key = (tk, base, modo, dias_sel, desde, hasta, comparar, sig)
+    tk = (ticker or "").strip()
+    sig = (acciones_hist.signature(), fx_hist.signature(), cierres.signature(), len(historico_byma.codigos()))
+    key = (tk, base, modo, campo, dias_sel, desde, hasta, comparar, sig)
     html = _AC_CACHE.get(key)
     if html is not None:
         return HTMLResponse(html)
     loop = asyncio.get_running_loop()
 
     def _build() -> Dict[str, Any]:
-        lst = acciones_hist.tickers()
-        names = [t["ticker"] for t in lst]
-        sel = tk if tk in names else _pa_default(names)
-        pa = (price_action.analizar(sel, base, modo, price_action.VENTANAS[dias_sel], desde, hasta, comparar)
+        grupos, names = _grupos_especies()
+        # exacto primero (los códigos de calc `…j` llevan la j minúscula), después
+        # sin distinguir mayúsculas (lo que tipea alguien a mano en la URL)
+        por_upper = {n.upper(): n for n in names}
+        sel = tk if tk in names else (por_upper.get(tk.upper()) or _pa_default(names))
+        pa = (price_action.analizar(sel, base, modo, price_action.VENTANAS[dias_sel], desde, hasta,
+                                    comparar, campo)
               if sel else None)
-        grupos: list = []
-        for t in lst:
-            if not grupos or grupos[-1][0] != t["panel_label"]:
-                grupos.append((t["panel_label"], []))
-            grupos[-1][1].append(t)
         dec, dec_tick = 2, 0
         if pa and pa.get("ok"):
             u = abs(pa["nivel"]["ultimo"])
             dec = 2 if u >= 100 else (3 if u >= 10 else 4)
             dec_tick = 0 if u >= 100 else (2 if u >= 10 else 3)
-        return {"archivo": acciones_hist.status(), "grupos": grupos, "sel": sel, "base": base,
-                "modo": modo, "dias_sel": dias_sel, "desde": desde, "hasta": hasta,
+            if pa["es_tir"]:
+                dec, dec_tick = 2, 1
+        archivo = acciones_hist.status()
+        return {"archivo": archivo, "hay_datos": bool(archivo.get("loaded") or names),
+                "grupos": grupos, "sel": sel, "base": base,
+                "modo": modo, "campo": campo, "dias_sel": dias_sel, "desde": desde, "hasta": hasta,
                 "comparar": comparar, "bases": price_action.BASES, "pa": pa,
-                "dec": dec, "dec_tick": dec_tick,
+                "dec": dec, "dec_tick": dec_tick, "cierres": cierres.status(),
                 "rows_fmt": (_pa_fmt_rows(pa["tabla"], dec) if pa and pa.get("ok") else [])}
 
     ctx = await loop.run_in_executor(None, _build)
