@@ -164,21 +164,53 @@ def fmt_date(d: Any) -> str:
     return str(d)
 
 
+def _ts_to_dt(ts: Any) -> Any:
+    """Epoch-ms, epoch-s, ISO 'AAAA-MM-DDTHH:MM:SS[.fff][+tz]' o datetime →
+    datetime en hora BA; None si no se puede interpretar."""
+    if isinstance(ts, datetime):
+        return ts.astimezone(TZ_BA) if ts.tzinfo else ts
+    try:
+        n = float(ts)
+    except (TypeError, ValueError):
+        s = str(ts).strip()
+        try:
+            d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return d.astimezone(TZ_BA) if d.tzinfo else d
+    if n <= 0:
+        return None
+    try:
+        if n > 1e11:                                   # epoch en milisegundos
+            n = n / 1000.0
+        # tz-aware: con el server en UTC el naive mostraba la hora UTC (+3 h)
+        return datetime.fromtimestamp(n, TZ_BA)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def fmt_ts(ts: Any) -> str:
-    """Epoch-ms (o string) → 'DD/MM HH:MM:SS'. Para Price Date (LA/CL)."""
+    """Epoch-ms / ISO / datetime → 'DD/MM HH:MM:SS'. Para Price Date (LA/CL)
+    y los timestamps del audit del OMS."""
     if _is_missing(ts) or ts == "":
         return DASH
-    try:
-        ms = float(ts)
-    except (TypeError, ValueError):
+    d = _ts_to_dt(ts)
+    if d is None:
         return str(ts)
-    if ms <= 0:
+    return d.strftime("%d/%m %H:%M:%S")
+
+
+def fmt_hora(ts: Any) -> str:
+    """Como ar_ts pero corto: 'HH:MM:SS' si es de HOY (BA), si no
+    'DD/MM HH:MM'. Para columnas de hora angostas (blotter, 'last @')."""
+    if _is_missing(ts) or ts == "":
         return DASH
-    try:
-        # tz-aware: con el server en UTC el naive mostraba la hora UTC (+3 h)
-        return datetime.fromtimestamp(ms / 1000.0, TZ_BA).strftime("%d/%m %H:%M:%S")
-    except (OverflowError, OSError, ValueError):
-        return DASH
+    d = _ts_to_dt(ts)
+    if d is None:
+        return str(ts)
+    if d.date() == hoy_ba():
+        return d.strftime("%H:%M:%S")
+    return d.strftime("%d/%m %H:%M")
 
 
 def fmt_hum(x: Any) -> str:
@@ -204,5 +236,6 @@ JINJA_FILTERS = {
     "ar_money": fmt_money,
     "ar_date": fmt_date,
     "ar_ts": fmt_ts,
+    "ar_hora": fmt_hora,
     "ar_hum": fmt_hum,
 }

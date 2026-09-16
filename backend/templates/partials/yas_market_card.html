@@ -5,7 +5,7 @@
   <div class="market-card-head">
     <span class="market-card-sym">{{ symbol }}</span>
     {% if snap and snap.last_ts %}
-      <span class="market-card-ts">last @ {{ snap.last_ts }}</span>
+      <span class="market-card-ts" title="{{ snap.last_ts | ar_ts }}">last @ {{ snap.last_ts | ar_hora }}</span>
     {% elif not snap %}
       <span class="market-card-ts muted">sin data en el store</span>
     {% endif %}
