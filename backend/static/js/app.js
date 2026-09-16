@@ -1135,11 +1135,20 @@ window.lsSet = function (k, v) {
     }
     links.slice(cut).forEach(function (a) { a.classList.add('tab-overflow'); });
     // la activa siempre a la vista: si cayó en el desborde, entra en lugar
-    // de la última que cabía
+    // de la última que cabía — y si es más ancha que esa, se esconden las
+    // que hagan falta (antes quedaba recortada en el borde: "Total Retur").
     var act = nav.querySelector('a.tab.active.tab-overflow');
     if (act && cut > 0) {
       act.classList.remove('tab-overflow');
-      links[cut - 1].classList.add('tab-overflow');
+      var vis = links.slice(0, cut);
+      var total = act.offsetWidth + 4;
+      vis.forEach(function (a) { total += a.offsetWidth + 4; });
+      while (vis.length && total > avail) {
+        var last = vis.pop();
+        var lw = last.offsetWidth;             // medir ANTES de ocultar (display:none → 0)
+        last.classList.add('tab-overflow');
+        total -= lw + 4;
+      }
     }
     // menú = clones de las ocultas (los originales quedan para re-medir)
     menu.innerHTML = '';
@@ -1532,4 +1541,52 @@ window.lsSet = function (k, v) {
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   });
+})();
+
+// ── Aviso de errores de red/servidor en los swaps de htmx ─────────────────
+// Antes un panel que fallaba quedaba con datos viejos EN SILENCIO. Un toast
+// discreto abajo a la derecha, con throttle (uno cada 20 s como mucho) y sin
+// cubrir /market/seq ni las filas delta de Mercado (esos ya los maneja el
+// motor live con el dot y "⚠ Feed caído"). Click para cerrar.
+(function () {
+  var lastAt = 0, box = null, hideT = null;
+  function show(msg) {
+    var now = Date.now();
+    if (now - lastAt < 20000) return;
+    lastAt = now;
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'toast';
+      box.setAttribute('role', 'status');
+      box.addEventListener('click', function () { box.classList.remove('show'); });
+      document.body.appendChild(box);
+    }
+    box.textContent = msg;
+    box.classList.add('show');
+    clearTimeout(hideT);
+    hideT = setTimeout(function () { box.classList.remove('show'); }, 7000);
+  }
+  function skip(path) {
+    return !path || path.indexOf('/market/seq') === 0 || path.indexOf('/mercado/rows') === 0;
+  }
+  function nombre(evt) {
+    var t = evt.detail && evt.detail.target;
+    var p = evt.detail && evt.detail.requestConfig && evt.detail.requestConfig.path;
+    var card = t && t.closest ? t.closest('.card') : null;
+    var ttl = card ? card.querySelector('.card-title span') : null;
+    var txt = ttl ? ttl.textContent.replace(/\s+/g, ' ').trim() : '';
+    return txt ? '«' + txt.slice(0, 40) + '»' : (p || 'el panel');
+  }
+  document.body.addEventListener('htmx:responseError', function (evt) {
+    var p = evt.detail.requestConfig && evt.detail.requestConfig.path;
+    if (skip(p)) return;
+    var st = evt.detail.xhr ? evt.detail.xhr.status : 0;
+    show('No se pudo actualizar ' + nombre(evt) + ' (HTTP ' + st + '). Se reintenta solo.');
+  });
+  document.body.addEventListener('htmx:sendError', function (evt) {
+    var p = evt.detail.requestConfig && evt.detail.requestConfig.path;
+    if (skip(p)) return;
+    show('Sin conexión con el server: ' + nombre(evt) + ' quedó con datos viejos.');
+  });
+  window.__toast = show;
 })();

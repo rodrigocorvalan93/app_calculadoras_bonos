@@ -582,7 +582,9 @@
   }
 
   function clearBox(box) {
-    Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert")).forEach(function (n) { n.remove(); });
+    // p.muted = el placeholder "Cargando gráfico…" del template: quedaba
+    // pegado arriba del chart de Históricos para siempre.
+    Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert,p.muted")).forEach(function (n) { n.remove(); });
   }
   function palette() {
     return ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c",

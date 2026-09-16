@@ -318,7 +318,9 @@ async def test_yas_market_card_with_injected_snapshot() -> None:
     assert "69,9500" in r.text  # bid
     assert "70,0500" in r.text  # offer
     assert "70,0000" in r.text  # last
-    assert "2026-05-28T15:30:00" in r.text
+    # el timestamp del feed se muestra legible (ar_hora: no es de hoy → DD/MM
+    # HH:MM) y el valor completo queda en el title — antes era el ISO/epoch crudo
+    assert "last @ 28/05 15:30" in r.text and 'title="28/05 15:30:00"' in r.text
 
 
 @pytest.mark.asyncio
