@@ -79,6 +79,8 @@ async def login_submit(request: Request, username: str = Form(...),
     if ok:
         _login_fails.pop(ip, None)                 # sesión limpia: reset del contador
         request.session["user"] = username.strip().lower()
+        # versión de sesión: un cambio/reset de clave posterior la invalida
+        request.session["sv"] = auth.session_version(username)
         return RedirectResponse(url=_safe_next(next), status_code=303)
     _login_fails[ip].append(time.time())
     if len(_login_fails) > 256:
@@ -162,10 +164,13 @@ async def reset_submit(request: Request, token: str = Form(...),
     try:
         # PBKDF2 (200k iteraciones, ~50 ms GIL-bound) + fsync del store: al
         # threadpool, igual que el login — en el event loop congelaba los
-        # paneles live de todos mientras se re-hasheaba.
-        import asyncio
-        await asyncio.get_running_loop().run_in_executor(None, auth.set_password, user, password)
+        # paneles live de todos mientras se re-hasheaba. `reset_with_token`
+        # re-valida el token y cambia la clave bajo el MISMO lock: dos POST
+        # simultáneos con el mismo token no pueden cambiarla dos veces.
+        await asyncio.get_running_loop().run_in_executor(None, auth.reset_with_token, token, password)
     except auth.AuthError as exc:
+        if "enlace" in str(exc):                   # token consumido en el medio
+            return _render(request, "reset.html", token="", valid=False, error=None, done=False)
         return _render(request, "reset.html", token=token, valid=True, done=False,
                        username=user, error=str(exc))
     return _render(request, "reset.html", token="", valid=False, done=True, error=None)

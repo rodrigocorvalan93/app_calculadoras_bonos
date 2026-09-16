@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import math
 import asyncio
+
+import httpx
 import functools
 import json
 import logging
@@ -146,6 +148,10 @@ def audit_tail(n: int = 30) -> List[Dict[str, Any]]:
 _BLOTTER_STATUS = {
     "paper_enviada": "PAPER", "live_respuesta": "ENVIADA", "live_error": "ERROR",
     "rechazada_kill": "RECHAZADA", "rechazada_pretrade": "RECHAZADA",
+    "rechazada_contexto": "RECHAZADA",
+    "live_rechazo_broker": "RECHAZADA (broker)",     # HTTP 200 con JSON de rechazo
+    "live_desconocida": "DESCONOCIDA",               # respuesta perdida: pudo entrar
+    "live_desconocida_sin_rastro": "NO ENTRÓ",       # reconciliada: no está en el broker
     "paper_cancelada": "CANCELADA", "live_cancel_respuesta": "CANCELADA",
 }
 
@@ -340,6 +346,11 @@ def validate(code: str, side: str, qty: float, price: Optional[float],
 
 
 def new_token(payload: Dict[str, Any]) -> str:
+    from backend.services import primary_ws
+    # El ticket queda atado al contexto de broker con el que se armó: si
+    # alguien reconecta (otro host / otra sesión) antes de confirmarlo, `place`
+    # lo rechaza en vez de mandarlo al broker nuevo.
+    payload["ctx_version"] = primary_ws.context_version()
     tok = uuid.uuid4().hex[:16]
     with _pending_lock:
         # higiene: limpiar vencidos
@@ -461,7 +472,10 @@ async def accounts() -> List[Dict[str, Any]]:
     falla pero hay configuradas, se muestran igual (no rompe el panel); sin
     configuradas, el error del broker se propaga como hasta ahora."""
     global _accounts_cache
-    host = settings.primary_base_url
+    from backend.services import primary_ws
+    # host + versión de contexto: re-login en el mismo host con otras
+    # credenciales = otras cuentas; antes la lista vieja sobrevivía 60 s.
+    host = (settings.primary_base_url, primary_ws.context_version())
     c = _accounts_cache
     if c is not None and c[0] == host and (time.monotonic() - c[1]) < _ACCOUNTS_TTL:
         return c[2]
@@ -529,6 +543,14 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     if _kill["on"]:
         await audit_async("rechazada_kill", rec)
         return {"status": "RECHAZADA", "motivo": "kill-switch activado", **rec}
+    ctx = payload.get("ctx_version")
+    if ctx is not None:
+        from backend.services import primary_ws
+        if int(ctx) != primary_ws.context_version():
+            await audit_async("rechazada_contexto", rec)
+            return {"status": "RECHAZADA",
+                    "motivo": "el broker / la sesión cambió después de armar el ticket — volvé a armarlo",
+                    **rec}
     if not is_live():
         await audit_async("paper_enviada", rec)
         return {"status": "PAPER", "motivo": "modo paper (OMS_LIVE=0): NO viajó al broker", **rec}
@@ -587,17 +609,100 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "PAPER", "motivo": "modo paper (cambió antes del envío): NO viajó al broker", **rec}
     try:
         d = await get_ws_client().get_json_checked("rest/order/newSingleOrder", params)
-        await audit_async("live_respuesta", {**rec, "broker": d})
-        o = d.get("order") if isinstance(d, dict) else None
-        if isinstance(o, dict) and o.get("clientId"):
-            t = asyncio.get_running_loop().create_task(_order_followup(
-                str(o["clientId"]), str(o.get("proprietary") or "api"), rec))
-            _followups.add(t)
-            t.add_done_callback(_followups.discard)
-        return {"status": d.get("status", "?"), "broker": d, **rec}
     except Exception as exc:  # noqa: BLE001
+        if _resultado_desconocido(exc):
+            # El request PUDO llegar al broker (timeout esperando la respuesta,
+            # conexión cortada a mitad): no es un error limpio sino un estado
+            # DESCONOCIDO — el operador no debe reenviar a ciegas. Se reconcilia
+            # en background contra las órdenes activas del broker.
+            await audit_async("live_desconocida", {**rec, "error": str(exc)})
+            _spawn(_reconciliar_desconocida(rec))
+            return {"status": "DESCONOCIDA",
+                    "motivo": (f"sin respuesta del broker ({str(exc)[:120]}): la orden PUDO haber "
+                               "entrado — verificá en la Matriz / activas antes de reenviar"),
+                    **rec}
         await audit_async("live_error", {**rec, "error": str(exc)})
         return {"status": "ERROR", "motivo": str(exc), **rec}
+    o = d.get("order") if isinstance(d, dict) else None
+    aceptada = (isinstance(d, dict) and str(d.get("status") or "").upper() == "OK"
+                and isinstance(o, dict) and bool(o.get("clientId")))
+    if not aceptada:
+        # HTTP 200 con JSON de rechazo ({"status":"ERROR","message":…}): antes
+        # se auditaba como live_respuesta y el blotter lo dejaba ENVIADA.
+        msg = _broker_msg(d)
+        await audit_async("live_rechazo_broker", {**rec, "broker": d, "motivo": msg})
+        return {"status": "RECHAZADA", "motivo": f"el broker rechazó la orden: {msg}", "broker": d, **rec}
+    await audit_async("live_respuesta", {**rec, "broker": d})
+    _spawn(_order_followup(str(o["clientId"]), str(o.get("proprietary") or "api"), rec))
+    return {"status": "OK", "broker": d, **rec}
+
+
+def _spawn(coro) -> None:
+    t = asyncio.get_running_loop().create_task(coro)
+    _followups.add(t)
+    t.add_done_callback(_followups.discard)
+
+
+def _resultado_desconocido(exc: BaseException) -> bool:
+    """True si el fallo ocurrió DESPUÉS de que el request pudo salir (el broker
+    quizá lo procesó): timeouts de lectura/escritura, conexión cortada,
+    protocolo roto. Un ConnectError / ConnectTimeout nunca llegó al broker."""
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return False
+    return isinstance(exc, (httpx.TimeoutException, httpx.RemoteProtocolError,
+                            httpx.ReadError, httpx.WriteError, httpx.CloseError))
+
+
+def _broker_msg(d: Any) -> str:
+    if isinstance(d, dict):
+        for k in ("message", "description", "detail", "error", "status"):
+            v = d.get(k)
+            if v:
+                return str(v)[:200]
+    return str(d)[:200]
+
+
+_RECONCILE_DELAYS = (2.0, 6.0)
+
+
+def _misma_orden(o: Dict[str, Any], rec: Dict[str, Any]) -> bool:
+    try:
+        iid = o.get("instrumentId") if isinstance(o.get("instrumentId"), dict) else {}
+        if str(iid.get("symbol") or o.get("symbol") or "") != str(rec.get("symbol") or ""):
+            return False
+        if str(o.get("side") or "").lower() != str(rec.get("side") or "").lower():
+            return False
+        if float(o.get("orderQty") or 0) != float(rec.get("qty") or 0):
+            return False
+        if str(rec.get("ordtype") or "limit") != "market" and rec.get("price") is not None:
+            if abs(float(o.get("price") or 0) - float(rec["price"])) > 1e-9:
+                return False
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+async def _reconciliar_desconocida(rec: Dict[str, Any]) -> None:
+    """Tras una respuesta perdida: busca la orden entre las ACTIVAS del broker
+    (símbolo + lado + VN + precio). Si aparece, audita su estado real como
+    `live_estado` (el blotter pasa de DESCONOCIDA a EN MERCADO / …); si no,
+    `live_desconocida_sin_rastro`. Best-effort, en background."""
+    from backend.services.primary_ws import get_ws_client
+    for delay in _RECONCILE_DELAYS:
+        await asyncio.sleep(delay)
+        try:
+            d = await get_ws_client().get_json_checked("rest/order/actives",
+                                                       {"accountId": rec.get("account")})
+        except Exception:  # noqa: BLE001
+            continue
+        for o in (d.get("orders", []) if isinstance(d, dict) else []):
+            if isinstance(o, dict) and _misma_orden(o, rec):
+                await audit_async("live_estado", {**rec, "estado": str(o.get("status") or "NEW"),
+                                                  "texto": "encontrada en el broker tras la respuesta perdida",
+                                                  "broker_order_id": o.get("clientId")})
+                return
+    await audit_async("live_desconocida_sin_rastro",
+                      {**rec, "texto": "no aparece entre las activas del broker (2 consultas)"})
 
 
 async def cancel(client_order_id: str, proprietary: str = "api") -> Dict[str, Any]:

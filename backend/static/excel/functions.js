@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v16 · 2026-09-10 (memo con TTL 5 min + key estable cruzando medianoche; serial acotado a hoy±10 años; DD/MM validado con pivote de año corto)";
+var OMS_BUILD = "v17 · 2026-09-16 (poller: un solo sondeo en vuelo con timeout y backoff; refresco cada 30 s aunque el seq no avance; estado stale/down desde /seq)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -25,14 +25,47 @@ function _beacon(st, d) {
 // ── Motor de datos compartido ────────────────────────────────────────────────
 var OMSFeed = (function () {
   var POLL_MS = 1000;
+  // Refresco máximo por TIEMPO aunque el seq no avance: la salud del feed y
+  // los pollers MAE no mueven el seq del store (sólo el feed BYMA lo hace),
+  // así que con seq quieto el add-in se quedaba con precios y estado viejos
+  // para siempre. El snapshot está cacheado en el server: cuesta ~nada.
+  var MAX_AGE_MS = 30000;
+  var SEQ_TIMEOUT_MS = 8000;      // un sondeo colgado no puede acumular otros
+  var SNAP_TIMEOUT_MS = 20000;
+  var BACKOFF_MAX_MS = 30000;
   var token = "";
   var snap = null;        // último snapshot completo
   var lastSeq = null;
+  var lastSnapAt = 0;     // Date.now() del último snapshot bajado
   var timer = null;
-  var status = "off";     // off | live | idle | auth | error
+  var status = "off";     // off | live | idle | stale | down | auth | error
   var sinks = [];         // callbacks (celdas + taskpane)
   var lastErr = "";       // detalle del último error de red (para el beacon)
   var beaconed = {};      // estados ya reportados (1 beacon por estado y vida)
+  var inflight = false;   // UN solo sondeo en vuelo (antes: uno nuevo por tick)
+  var errs = 0;           // errores seguidos → backoff exponencial
+  var nextTryAt = 0;
+
+  // fetch con plazo: AbortController donde existe (WebView2) y, siempre, una
+  // carrera contra un timeout — un runtime viejo sin AbortController también
+  // corta la espera (el request queda huérfano pero el poller sigue).
+  function fetchT(url, ms) {
+    var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var opts = { headers: headers(), cache: "no-store" };
+    if (ctrl) { opts.signal = ctrl.signal; }
+    var tm = null;
+    var guard = new Promise(function (_resolve, reject) {
+      tm = setTimeout(function () {
+        try { if (ctrl) { ctrl.abort(); } } catch (e) { /* noop */ }
+        reject(new Error("timeout " + ms + " ms: " + url));
+      }, ms);
+    });
+    return Promise.race([fetch(url, opts), guard]).then(function (r) {
+      clearTimeout(tm); return r;
+    }, function (e) {
+      clearTimeout(tm); throw e;
+    });
+  }
 
   function getTokenSync() { return token; }
 
@@ -108,10 +141,22 @@ var OMSFeed = (function () {
     }
   }
 
+  // Estado a partir del flag que manda /excel/v1/seq ("<seq>" o "<seq> stale"
+  // / "<seq> down") y de la salud que viaja en el snapshot. "stale"/"down"
+  // pisan a live/idle: puede haber snapshot nuevo con precios BYMA viejos.
+  function healthStatus(flag, data, avanzo) {
+    if (flag === "down") { return "down"; }
+    if (flag === "stale" || (data && data.health && data.health.warn)) { return "stale"; }
+    return avanzo ? "live" : "idle";
+  }
+
   function tick() {
+    if (inflight) { return; }                              // ya hay un sondeo en vuelo
+    if (errs > 0 && Date.now() < nextTryAt) { return; }    // backoff tras errores
+    inflight = true;
     loadToken().then(function () {
-      if (!token) { status = "auth"; notify(); return; }
-      fetch("/excel/v1/seq", { headers: headers(), cache: "no-store" })
+      if (!token) { status = "auth"; notify(); return null; }
+      return fetchT("/excel/v1/seq", SEQ_TIMEOUT_MS)
         .then(function (r) {
           if (r.status === 401) { status = "auth"; notify(); return null; }
           if (!r.ok) { throw new Error("http " + r.status); }
@@ -119,12 +164,16 @@ var OMSFeed = (function () {
         })
         .then(function (txt) {
           if (txt === null) { return null; }
-          var s = parseInt(txt, 10);
-          if (snap !== null && s === lastSeq) {
-            status = (snap.health && snap.health.warn) ? "stale" : "idle";
+          var parts = String(txt).trim().split(/\s+/);
+          var s = parseInt(parts[0], 10);
+          var flag = parts[1] || "";
+          var fresco = snap !== null && s === lastSeq && (Date.now() - lastSnapAt) < MAX_AGE_MS;
+          if (fresco) {
+            status = healthStatus(flag, snap, false);
             notify(); return null;
           }
-          return fetch("/excel/v1/snapshot", { headers: headers(), cache: "no-store" })
+          var avanzo = (lastSeq === null) || (s !== lastSeq);
+          return fetchT("/excel/v1/snapshot", SNAP_TIMEOUT_MS)
             .then(function (r) {
               if (r.status === 401) { status = "auth"; notify(); return null; }
               if (!r.ok) { throw new Error("http " + r.status); }
@@ -132,19 +181,22 @@ var OMSFeed = (function () {
             })
             .then(function (data) {
               if (!data) { return null; }
-              snap = data; lastSeq = data.seq;
-              // "stale" pisa a "live": el seq avanza también por MAE/pollers,
-              // así que puede haber snapshot nuevo con precios BYMA viejos.
-              status = (data.health && data.health.warn) ? "stale" : "live";
+              snap = data; lastSeq = data.seq; lastSnapAt = Date.now();
+              status = healthStatus(flag, data, avanzo);
               notify();
               return null;
             });
-        })
-        .catch(function (e) {
-          if (status !== "auth") { status = "error"; }
-          lastErr = String((e && e.message) || e);
-          notify();
         });
+    }).then(function () {
+      errs = 0;
+    }, function (e) {
+      errs += 1;
+      nextTryAt = Date.now() + Math.min(BACKOFF_MAX_MS, POLL_MS * Math.pow(2, errs - 1));
+      if (status !== "auth") { status = "error"; }
+      lastErr = String((e && e.message) || e);
+      notify();
+    }).then(function () {
+      inflight = false;
     });
   }
 

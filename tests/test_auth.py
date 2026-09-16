@@ -290,6 +290,12 @@ def fake_ws(monkeypatch):
         return fake
 
     monkeypatch.setattr(primary_ws, "reset_ws_client", _reset)
+    # /conexion/login arma un cliente CANDIDATO (PrimaryWS(url)) y recién con
+    # login OK lo publica con set_ws_client: espiamos el constructor y dejamos
+    # el singleton/versión reales intactos para los demás tests.
+    monkeypatch.setattr(primary_ws, "PrimaryWS", _reset)
+    monkeypatch.setattr(primary_ws, "_singleton", primary_ws._singleton)
+    monkeypatch.setattr(primary_ws, "_context_version", primary_ws._context_version)
     monkeypatch.setattr(settings, "primary_user", "casa")
     monkeypatch.setattr(settings, "primary_pass", "clave-casa")
     monkeypatch.setattr(settings, "primary_base_url", conx.KNOWN_HOSTS[0][1])

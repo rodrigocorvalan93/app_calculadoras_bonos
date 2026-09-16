@@ -446,8 +446,47 @@ def set_password(username: str, password: str) -> None:
         # ...ni pisar la visibilidad de fondos configurada
         if u.get("fondos") is not None:
             rec["fondos"] = u.get("fondos")
+        # Clave nueva ⇒ las sesiones web anteriores dejan de valer (F06).
+        rec["sv"] = int(u.get("sv") or 0) + 1
         data["users"][name] = rec
         _persist(data)
+
+
+def session_version(username: Optional[str]) -> int:
+    """Versión de sesión del usuario: la cookie la lleva y el middleware la
+    compara en cada request. Sube al cambiar/resetear la contraseña o al
+    'cerrar sesiones' desde /admin → todas las cookies anteriores dejan de
+    autenticar (antes una cookie robada seguía válida 14 días aunque el usuario
+    cambiara la clave). Cookies viejas sin `sv` cuentan como 0."""
+    if not username:
+        return 0
+    u = _store()["users"].get(_norm(username))
+    return int((u or {}).get("sv") or 0)
+
+
+def bump_session_version(username: str) -> int:
+    """Invalida todas las sesiones web del usuario (Excel NO: su token es aparte)."""
+    name = _norm(username)
+    with _lock:
+        data = _store()
+        u = data["users"].get(name)
+        if not u:
+            raise AuthError(f"El usuario '{name}' no existe.")
+        u["sv"] = int(u.get("sv") or 0) + 1
+        _persist(data)
+        return u["sv"]
+
+
+def reset_with_token(token: str, password: str) -> str:
+    """Reset por token de forma ATÓMICA (chequeo + cambio bajo el mismo lock):
+    dos POST simultáneos con el mismo token no pueden cambiar la clave dos
+    veces — el segundo ya ve la huella nueva y falla. Devuelve el username."""
+    with _lock:
+        user = check_reset_token(token)
+        if not user:
+            raise AuthError("El enlace no es válido, expiró o ya se usó.")
+        set_password(user, password)
+        return user
 
 
 def update_user(username: str, role: Optional[str] = None, email: Optional[str] = None) -> None:

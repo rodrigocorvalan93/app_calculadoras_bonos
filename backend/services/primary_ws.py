@@ -555,6 +555,16 @@ class PrimaryWS:
 
 
 _singleton: Optional[PrimaryWS] = None
+# Versión del CONTEXTO de broker (host + sesión): sube en cada swap del
+# singleton. Los tickets de órdenes la guardan al armarse y el envío la
+# re-chequea; los caches de comitentes / instrumentos la llevan en la key. Así
+# un ticket armado contra el broker A no viaja al broker B después de una
+# reconexión, y una lista de cuentas del contexto viejo no sobrevive al cambio.
+_context_version = 0
+
+
+def context_version() -> int:
+    return _context_version
 
 
 def get_ws_client(base_url: str | None = None) -> PrimaryWS:
@@ -567,9 +577,17 @@ def get_ws_client(base_url: str | None = None) -> PrimaryWS:
     return _singleton
 
 
+def set_ws_client(client: PrimaryWS) -> PrimaryWS:
+    """Publica `client` como singleton y sube la versión de contexto. El caller
+    debe haber logueado el candidato ANTES (y stop()eado el viejo)."""
+    global _singleton, _context_version
+    _singleton = client
+    _context_version += 1
+    return _singleton
+
+
 def reset_ws_client(base_url: str) -> PrimaryWS:
     """Reemplaza el singleton por uno nuevo apuntando a `base_url` (reconexión
-    en caliente desde /conexion). El caller debe stop()ear el viejo ANTES."""
-    global _singleton
-    _singleton = PrimaryWS(base_url)
-    return _singleton
+    en caliente). Preferir el flujo de /conexion: candidato logueado primero y
+    recién ahí `set_ws_client` — esto queda para compatibilidad/tests."""
+    return set_ws_client(PrimaryWS(base_url))

@@ -11,6 +11,7 @@
 
   var STATUS_LABEL = { off: "sin conexión", live: "en vivo", idle: "sin ticks",
                        stale: "⚠ conectado pero SIN market data — precios posiblemente viejos",
+                       down: "⚠ feed del broker CAÍDO — precios de la última conexión",
                        auth: "token inválido / falta token", error: "error de red" };
 
   function paintStatus(_snap, status) {
