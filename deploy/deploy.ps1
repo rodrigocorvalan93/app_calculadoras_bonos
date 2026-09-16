@@ -37,23 +37,31 @@ if ($dirty) {
 }
 
 Write-Host "Deploy: $($local.Substring(0,7)) -> $($remote.Substring(0,7))"
-git merge --ff-only "origin/$Branch"
-& $py -m pip install -q -r backend\requirements.txt
-& $py -m backend.tools.https_local --quiet
+# $ErrorActionPreference = "Stop" NO cubre el exit code de ejecutables nativos
+# (git / pip / nssm): sin este chequeo un merge o un pip fallido seguia,
+# reiniciaba el servicio y escribia "Deploy OK".
+function Check-Exit([string]$paso) {
+  if ($LASTEXITCODE -ne 0) { throw "$paso fallo (exit $LASTEXITCODE) - deploy abortado, el servicio sigue con la version anterior." }
+}
+git merge --ff-only "origin/$Branch"; Check-Exit "git merge --ff-only"
+& $py -m pip install -q -r backend\requirements.txt; Check-Exit "pip install"
+& $py -m backend.tools.https_local --quiet; Check-Exit "https_local"
 
-& nssm restart $ServiceName
+& nssm restart $ServiceName; Check-Exit "nssm restart"
 
+# Espera hasta que la app este LISTA (ready = universo cargado), no solo viva.
 $deadline = (Get-Date).AddSeconds(45)
 $r = $null
 do {
   Start-Sleep -Seconds 2
   try { $r = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/healthz" -TimeoutSec 3 } catch { $r = $null }
-} while (-not $r -and (Get-Date) -lt $deadline)
+} while (-not ($r -and $r.status -eq "ok" -and $r.ready) -and (Get-Date) -lt $deadline)
 
-if ($r -and $r.status -eq "ok") {
+if ($r -and $r.status -eq "ok" -and $r.ready) {
   Write-Host "Deploy OK -> $(git rev-parse --short HEAD) - bonds=$($r.bonds_loaded) feed_alive=$($r.feed_alive)"
 } else {
-  Write-Warning "La app no respondio /healthz tras el deploy. Ultimas lineas del log:"
+  if ($r) { Write-Warning "La app responde pero NO esta lista: $($r.ready_motivo)" }
+  Write-Warning "La app no respondio /healthz (ready) tras el deploy. Ultimas lineas del log:"
   Get-Content (Join-Path $repo "logs\service.log") -Tail 30 -ErrorAction SilentlyContinue
   Write-Warning "ROLLBACK:  git reset --hard $($local.Substring(0,7)) ; nssm restart $ServiceName"
   exit 1

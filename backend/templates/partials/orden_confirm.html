@@ -2,7 +2,7 @@
   <div class="alert">⚠️ {{ error }}</div>
 
 {% elif result %}
-  <div class="card" style="border-color:{{ 'var(--green)' if result.status in ('PAPER','OK','ENVIADA') else 'var(--red)' }}">
+  <div class="card" style="border-color:{{ 'var(--green)' if result.status in ('PAPER','OK','ENVIADA') else ('#d29922' if result.status == 'DESCONOCIDA' else 'var(--red)') }}">
     <div class="card-title"><span>Resultado: <b>{{ result.status }}</b></span>
       <span class="card-title-aux">{{ result.client_order_id }}</span></div>
     <div class="card-body" style="font-size:13px">

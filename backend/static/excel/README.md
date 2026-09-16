@@ -162,3 +162,12 @@ plano, ~µs) cada 1 s y sólo si la secuencia avanzó baja `/excel/v1/snapshot`.
 El server construye ese snapshot **una vez por segundo como máximo** y cachea
 los bytes: N libros = 1 build + N lookups. Con la pestaña/planilla quieta o el
 mercado cerrado no se transfiere nada más que el entero de la seq.
+
+Robustez del poller (v17): hay **un solo sondeo en vuelo** (un fetch colgado
+no acumula otros), cada request tiene timeout (8 s el seq, 20 s el snapshot)
+y los errores seguidos aplican backoff exponencial hasta 30 s. Aunque el seq
+no avance, el snapshot se vuelve a bajar **cada 30 s** (la salud del feed y
+los pollers MAE no mueven el seq). `/excel/v1/seq` agrega `stale` / `down`
+después del entero cuando el feed está degradado o caído, y el add-in lo
+refleja al instante en el estado del panel (los add-ins viejos siguen
+leyendo el entero con `parseInt`).

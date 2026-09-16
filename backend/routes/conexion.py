@@ -27,8 +27,14 @@ import logging
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
+import asyncio
+
 from backend.config import settings
 from backend.services import primary_ws
+
+# Serializa las reconexiones en caliente: dos /conexion/login a la vez no
+# pueden pisarse el singleton del broker.
+_swap_lock = asyncio.Lock()
 
 logger = logging.getLogger("backend.conexion")
 
@@ -131,37 +137,56 @@ async def conexion_login(
         return _render(request, "partials/conexion_status.html",
                        **_status_ctx("Faltan usuario o clave (y secrets.txt no los tiene).", False))
 
-    # Reconexión en caliente: parar el WS actual, apuntar al host nuevo,
-    # loguear y re-suscribir el universo completo.
-    old = primary_ws.get_ws_client()
+    # Reconexión en caliente, en este orden: (1) loguear un cliente CANDIDATO
+    # contra el host nuevo, (2) recién con login OK parar el actual y publicar
+    # el candidato (sube la versión de contexto: tickets y caches del broker
+    # viejo quedan inválidos), (3) arrancar el WS. Antes se paraba el cliente
+    # compartido de la mesa ANTES de saber si el login nuevo andaba: un login
+    # fallido (o un básico con credenciales malas) dejaba a todos sin feed ni
+    # REST. Serializado: dos reconexiones a la vez no se pisan.
+    async with _swap_lock:
+        cand = primary_ws.PrimaryWS(url)
+        try:
+            ok = await cand.login(user, pwd)
+        except Exception as exc:  # noqa: BLE001 — DNS caído, timeout, SSL…
+            await _descartar(cand)
+            return _render(request, "partials/conexion_status.html",
+                           **_status_ctx(f"No pude conectar con {url}: {exc} "
+                                         "(la conexión actual sigue como estaba)", False))
+        if not ok:
+            await _descartar(cand)
+            return _render(request, "partials/conexion_status.html",
+                           **_status_ctx("El broker rechazó usuario/clave (login fallido). "
+                                         "Probá el otro host o revisá las credenciales "
+                                         "(la conexión actual sigue como estaba).", False))
+
+        old = primary_ws.get_ws_client()
+        try:
+            await old.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        ws = primary_ws.set_ws_client(cand)
+        # Login OK → persistir en memoria (healthz / reconexiones) y arrancar el WS.
+        settings.primary_base_url = url
+        settings.primary_user = user
+        settings.primary_pass = pwd
+        try:
+            from backend.main import _initial_symbols     # import diferido (sin ciclo)
+            # _initial_symbols lee Excel/CSV del universo (decenas de ms, GIL-bound)
+            # → threadpool para no frenar el event loop con el WS ya vivo.
+            import asyncio
+            seed = await asyncio.get_running_loop().run_in_executor(None, _initial_symbols)
+            await ws.start(symbols=seed)
+            msg = f"Conectado a {url} — {len(seed)} símbolos suscriptos."
+        except Exception as exc:  # noqa: BLE001
+            msg = f"Login OK pero el WS no arrancó: {exc}"
+            return _render(request, "partials/conexion_status.html", **_status_ctx(msg, False))
+    return _render(request, "partials/conexion_status.html", **_status_ctx(msg, True))
+
+
+async def _descartar(cand) -> None:
+    """Cierra el cliente candidato que no llegó a publicarse (su http, si abrió)."""
     try:
-        await old.stop()
+        await cand.stop()
     except Exception:  # noqa: BLE001
         pass
-    ws = primary_ws.reset_ws_client(url)
-    try:
-        ok = await ws.login(user, pwd)
-    except Exception as exc:  # noqa: BLE001 — DNS caído, timeout, SSL…
-        return _render(request, "partials/conexion_status.html",
-                       **_status_ctx(f"No pude conectar con {url}: {exc}", False))
-    if not ok:
-        return _render(request, "partials/conexion_status.html",
-                       **_status_ctx("El broker rechazó usuario/clave (login fallido). "
-                                     "Probá el otro host o revisá las credenciales.", False))
-
-    # Login OK → persistir en memoria (healthz / reconexiones) y arrancar el WS.
-    settings.primary_base_url = url
-    settings.primary_user = user
-    settings.primary_pass = pwd
-    try:
-        from backend.main import _initial_symbols     # import diferido (sin ciclo)
-        # _initial_symbols lee Excel/CSV del universo (decenas de ms, GIL-bound)
-        # → threadpool para no frenar el event loop con el WS ya vivo.
-        import asyncio
-        seed = await asyncio.get_running_loop().run_in_executor(None, _initial_symbols)
-        await ws.start(symbols=seed)
-        msg = f"Conectado a {url} — {len(seed)} símbolos suscriptos."
-    except Exception as exc:  # noqa: BLE001
-        msg = f"Login OK pero el WS no arrancó: {exc}"
-        return _render(request, "partials/conexion_status.html", **_status_ctx(msg, False))
-    return _render(request, "partials/conexion_status.html", **_status_ctx(msg, True))

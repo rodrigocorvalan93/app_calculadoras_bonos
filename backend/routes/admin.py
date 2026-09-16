@@ -106,7 +106,35 @@ async def reset_password(request: Request, username: str = Form(...), password: 
         # PBKDF2 (~50 ms GIL-bound) + fsync → threadpool, como el login.
         await asyncio.get_running_loop().run_in_executor(
             None, auth.set_password, username, password)
-        return _ctx(request, msg=f"Contraseña de '{username}' actualizada.")
+        _refrescar_sv_propia(request, username)
+        return _ctx(request, msg=f"Contraseña de '{username}' actualizada "
+                                 "(sus otras sesiones web quedaron cerradas).")
+    except auth.AuthError as exc:
+        return _ctx(request, error=str(exc))
+
+
+def _refrescar_sv_propia(request: Request, username: str) -> None:
+    """Si el superuser cambió SU propia clave / cerró SUS sesiones, esta
+    sesión sigue viva: se le carga la versión nueva a la cookie."""
+    me = (getattr(request.state, "user", None) or {}).get("username")
+    if me and me == (username or "").strip().lower():
+        try:
+            request.session["sv"] = auth.session_version(username)
+        except Exception:  # noqa: BLE001 — sin sesión (auth apagado): nada que refrescar
+            pass
+
+
+@router.post("/users/sesiones", response_class=HTMLResponse)
+async def cerrar_sesiones(request: Request, username: str = Form(...)) -> HTMLResponse:
+    """Invalida todas las sesiones web del usuario (cookie robada, PC
+    compartida, baja de un colaborador sin borrar el usuario). El token de
+    Excel NO cambia: para eso está regenerar el token."""
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, auth.bump_session_version, username)
+        _refrescar_sv_propia(request, username)
+        return _ctx(request, msg=f"Sesiones web de '{username}' cerradas (Excel sigue).")
     except auth.AuthError as exc:
         return _ctx(request, error=str(exc))
 

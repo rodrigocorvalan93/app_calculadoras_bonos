@@ -84,7 +84,12 @@
                 {% endif %}
               </td>
               <td>
-                <form method="post" action="/admin/users/delete" onsubmit="return confirm('¿Borrar {{ u.username }}?')">
+                <form method="post" action="/admin/users/sesiones" style="display:inline"
+                      onsubmit="return confirm('¿Cerrar todas las sesiones web de {{ u.username }}? (el token de Excel sigue)')">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <button type="submit" class="btn-mini" title="Cerrar sesiones web (cookie robada / PC compartida)">⏏</button>
+                </form>
+                <form method="post" action="/admin/users/delete" style="display:inline" onsubmit="return confirm('¿Borrar {{ u.username }}?')">
                   <input type="hidden" name="username" value="{{ u.username }}">
                   <button type="submit" class="btn-mini btn-danger" title="Borrar">✕</button>
                 </form>

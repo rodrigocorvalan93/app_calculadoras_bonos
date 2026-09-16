@@ -219,6 +219,27 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
 - **`/conexion`**: la allowlist de hosts para no-superuser es la barrera
   anti-harvesting (el login MANDA la clave al host elegido). Mantené el
   match exacto de URL normalizada; la URL libre es superuser-only.
+  **Reconexión**: se loguea un cliente CANDIDATO y recién con login OK se
+  para el actual y se publica (`primary_ws.set_ws_client`, bajo
+  `conexion._swap_lock`); un login fallido no toca la conexión de la mesa.
+  Cada swap sube `primary_ws.context_version()`: los tickets la guardan
+  (`ctx_version`) y `oms.place` rechaza los de otro contexto; los caches de
+  comitentes e instrumentos la llevan en la key.
+- **Estados de orden** (`oms.place`): sólo `status == "OK"` + `order.clientId`
+  es ENVIADA; un JSON de rechazo es `live_rechazo_broker` (RECHAZADA (broker));
+  un timeout/corte DESPUÉS de mandar es `live_desconocida` (DESCONOCIDA: la
+  orden PUDO entrar — no reenviar a ciegas) y se reconcilia contra
+  `rest/order/actives` (`_reconciliar_desconocida` → `live_estado` o
+  `live_desconocida_sin_rastro`). ConnectError = nunca salió = ERROR.
+- **Versión de sesión** (`auth.session_version`, campo `sv` del usuario): la
+  cookie la lleva y el middleware la compara en cada request (~1 µs). Sube con
+  cambio/reset de clave y con "cerrar sesiones" en /admin → las cookies
+  anteriores dejan de autenticar. El token de Excel es independiente.
+  `auth.reset_with_token` valida y cambia bajo el mismo lock (token de un uso
+  aun con dos POST simultáneos).
+- **Readiness**: `/readyz` = 200/503 (universo cargado) y `/healthz` lleva
+  `ready`; `deploy/deploy.ps1` espera `ready` y chequea `$LASTEXITCODE` de
+  git/pip/nssm (un paso fallido aborta sin reiniciar el servicio).
 - **Puente TLS del add-in** (`services/tls_bridge.py`): listener https
   (default `127.0.0.1:8443`) que proxya al uvicorn http local — Office exige
   https para el runtime de funciones custom. PISA `X-Forwarded-*` del cliente

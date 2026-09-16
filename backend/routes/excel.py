@@ -182,12 +182,43 @@ def _snapshot_bytes(codes_key: str) -> bytes:
     return body
 
 
+_health_flag_cache = {"at": 0.0, "flag": ""}
+
+
+def _health_flag() -> str:
+    """"stale" / "down" / "" según feed_health, memoizado 1 s: el /seq se
+    sondea 1/s por libro abierto y el veredicto recorre la canasta líquida."""
+    now = time.monotonic()
+    if now - _health_flag_cache["at"] < 1.0:
+        return _health_flag_cache["flag"]
+    flag = ""
+    try:
+        from backend.services import feed_health
+        h = feed_health.snapshot()
+        if h.get("feed_down"):
+            flag = "down"
+        elif h.get("warn"):
+            flag = "stale"
+    except Exception:  # noqa: BLE001 — la salud nunca rompe el seq
+        flag = ""
+    _health_flag_cache["at"] = now
+    _health_flag_cache["flag"] = flag
+    return flag
+
+
 @router.get("/v1/seq", response_class=PlainTextResponse)
 async def excel_seq() -> PlainTextResponse:
     """Secuencia del store (texto plano). El add-in la sondea 1/s y sólo baja
     el snapshot cuando avanzó — mismo contrato que /market/seq, pero bajo el
-    esquema de auth por token del add-in."""
-    return PlainTextResponse(str(mds.get_store().seq()),
+    esquema de auth por token del add-in.
+
+    Con el feed degradado viaja un flag después del entero ("123 stale" /
+    "123 down"): el seq NO avanza cuando BYMA se frena, así que sin esto el
+    add-in mostraba "sin ticks" con precios viejos para siempre. Los add-ins
+    viejos hacen parseInt() y siguen leyendo el entero."""
+    flag = _health_flag()
+    seq = str(mds.get_store().seq())
+    return PlainTextResponse(seq + (" " + flag if flag else ""),
                              headers={"Cache-Control": "no-store"})
 
 

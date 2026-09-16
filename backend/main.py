@@ -595,7 +595,7 @@ def create_app() -> FastAPI:
 
     # ── Login wall + gating por rol ───────────────────────────────────────
     # Público (sin sesión): login/recuperación, estáticos, health, favicon.
-    _PUBLIC_EXACT = {"/login", "/logout", "/forgot", "/reset", "/healthz",
+    _PUBLIC_EXACT = {"/login", "/logout", "/forgot", "/reset", "/healthz", "/readyz",
                      "/favicon.ico", "/favicon.png"}
     # /.well-known/*: público (sin muro de login) para que Office reciba el
     # JSON de arriba —o un 404 limpio— y no un 302 a /login con HTML adentro.
@@ -681,6 +681,15 @@ def create_app() -> FastAPI:
         username = request.session.get("user")
         role = auth_svc.role_of(username) if username else None
         if not username or role is None:
+            return _needs_login(request)
+        # Versión de sesión: una cookie emitida antes de un cambio/reset de
+        # contraseña (o de "cerrar sesiones" en /admin) ya no autentica.
+        try:
+            sv = int(request.session.get("sv") or 0)
+        except (TypeError, ValueError):
+            sv = -1
+        if sv != auth_svc.session_version(username):
+            request.session.clear()
             return _needs_login(request)
 
         request.state.user = {"username": username, "role": role}
@@ -878,11 +887,30 @@ def create_app() -> FastAPI:
     async def index() -> RedirectResponse:
         return RedirectResponse(url="/yas", status_code=302)
 
+    def _ready() -> tuple:
+        """(ready, motivo): el proceso vive (liveness) ≠ puede operar
+        (readiness). Universo vacío = ninguna calculadora anda; el broker
+        desconectado NO es un motivo (paper / sin feed es legítimo)."""
+        n = len(bond_universe.all_codes())
+        if n <= 0:
+            return False, "universo de bonos vacío"
+        return True, ""
+
+    @app.get("/readyz")
+    async def readyz(request: Request) -> Response:
+        """Readiness para el deploy / monitoreo: 200 si la app puede operar,
+        503 con el motivo si no. /healthz sigue siendo liveness (siempre 200)."""
+        ok, motivo = _ready()
+        return JSONResponse({"ready": ok, "motivo": motivo or None}, status_code=200 if ok else 503)
+
     @app.get("/healthz")
     async def healthz(request: Request) -> dict:
         ws = get_ws_client()
+        ready, motivo = _ready()
         return {
             "status": "ok",
+            "ready": ready,
+            "ready_motivo": motivo or None,
             "bonds_loaded": len(bond_universe.all_codes()),
             "broker_authenticated": ws.authenticated,
             # feed_alive ≠ authenticated: la sesión REST puede seguir abierta

@@ -97,7 +97,10 @@ async def valid_symbols() -> Optional[Set[str]]:
     None si no se pudo traer (sin login / error / vacío) ⇒ el llamador NO debe
     bloquear (fail-open)."""
     global _sym_cache, _sym_cache_host
-    host = settings.primary_base_url
+    from backend.services import primary_ws
+    # host + versión de contexto: un re-login (mismo host, otra sesión/cuenta)
+    # también invalida el universo cacheado.
+    host = (settings.primary_base_url, primary_ws.context_version())
     with _sym_lock:
         if _sym_cache is not None and _sym_cache_host == host:
             return _sym_cache
