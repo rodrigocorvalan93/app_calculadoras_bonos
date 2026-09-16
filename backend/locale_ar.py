@@ -161,6 +161,11 @@ def fmt_date(d: Any) -> str:
         return d.strftime("%d/%m/%Y")
     if isinstance(d, date):
         return d.strftime("%d/%m/%Y")
+    if isinstance(d, str) and len(d) >= 10:           # ISO 'AAAA-MM-DD…' → DD/MM/AAAA
+        try:
+            return date.fromisoformat(d[:10]).strftime("%d/%m/%Y")
+        except ValueError:
+            pass
     return str(d)
 
 

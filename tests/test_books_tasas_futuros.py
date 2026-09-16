@@ -20,7 +20,9 @@ def store_limpio(monkeypatch):
     y el singleton compartido contaminaría los picks por volumen."""
     st = mds.MarketDataStore()
     monkeypatch.setattr(mds, "_store", st)
-    return st
+    cauc_svc.reset_memo()          # el memo "último pick de hoy" es global al proceso
+    yield st
+    cauc_svc.reset_memo()
 
 
 def test_vwap_evnv_derivacion_y_gates(store_limpio) -> None:
@@ -141,11 +143,20 @@ def test_build_fx_row_incluye_caucion(monkeypatch, store_limpio) -> None:
     assert row["caucion_usd_tna_vwap"] == pytest.approx(5.0)
     assert row["caucion_usd_monto"] == 3.65e9 + 1e7 * 0.05
 
-    # sin caución el FX se guarda igual: las claves van en None (columnas estables)
+    # Store vacío a la hora del guardado (feed que degradó a cierre, reinicio):
+    # la caución igual sale del último pick VÁLIDO visto hoy (memo) — antes
+    # quedaba un hueco aunque el riel la hubiera mostrado operando todo el día.
     monkeypatch.setattr(mds, "_store", mds.MarketDataStore())
     row2 = hw.build_fx_row()
     assert row2 is not None and row2["ccl"] == 1480.0
-    assert row2["caucion_tna"] is None and row2["caucion_usd_tna"] is None
+    assert row2["caucion_plazo_d"] == 2 and row2["caucion_tna"] == 31.0 and row2["caucion_usd_tna"] == 5.0
+    assert row2["caucion_tna_vwap"] is None            # sin snapshot no hay EV/NV que validar
+    # y si hoy NO se vio ninguna caución o/n operada: las claves van en None
+    # (columnas estables), el FX se guarda igual
+    cauc_svc.reset_memo()
+    row3 = hw.build_fx_row()
+    assert row3 is not None and row3["ccl"] == 1480.0
+    assert row3["caucion_tna"] is None and row3["caucion_usd_tna"] is None
 
 
 @pytest.mark.asyncio

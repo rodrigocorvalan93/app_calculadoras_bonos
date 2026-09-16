@@ -37,6 +37,17 @@
         Serie diaria del cierre ({{ archivo.dmin }} → {{ archivo.dmax }} · {{ archivo.n }} días guardados).
         Las de caución usan el plazo o/n real de cada día (viernes 3D, pre-feriado 4D — columna Plazo).
       </p>
+      {% if archivo.series %}
+      {# Cobertura por serie: cuántos días tienen dato y el último. Una serie que
+         dejó de grabarse (caución sin tasa "de hoy" al cierre, feed sin ese
+         símbolo) se ve acá, no recién por un hueco en el gráfico. #}
+      <p class="muted sd-cobertura" style="font-size:11px;margin-top:4px">
+        <b>Con dato:</b>
+        {% for k, s in archivo.series.items() %}<span class="sd-cob{% if s.n == 0 or (s.ultimo and s.ultimo != archivo.dmax) %} sd-cob-warn{% endif %}"
+            title="{{ s.label }}: {{ s.n }} días con dato{% if s.ultimo %} · último {{ s.ultimo }}{% endif %}">{{ s.label | replace(' — ', ' ') }}
+          <b>{{ s.n }}</b>{% if s.ultimo and s.ultimo != archivo.dmax %} <small>(último {{ s.ultimo }})</small>{% endif %}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+      </p>
+      {% endif %}
     </div>
   </div>
 
