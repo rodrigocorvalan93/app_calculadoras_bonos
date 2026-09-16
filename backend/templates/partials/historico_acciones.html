@@ -56,10 +56,18 @@
           <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
         </div>
       </form>
+      {# Cuánta historia hay guardada, a la vista (no en letra chica): la
+         pestaña arrancó de cero con el autosave y varios análisis piden ≥ 10
+         ruedas comunes (β / correlación) o una ventana con ≥ 2 ruedas. #}
+      <p class="pa-guardado" style="font-size:12px;margin-top:8px">
+        <b>Guardado:</b>
+        {% if archivo.loaded %}acciones <b>{{ archivo.n_dias }}</b> ruedas ({{ archivo.dmin | ar_date }} → {{ archivo.dmax | ar_date }}) · <b>{{ archivo.n_tickers }}</b> especies{% if not archivo.merval %} · sin Merval todavía{% endif %}{% else %}acciones: <b>0</b> ruedas{% endif %}
+        · {% if cierres.loaded %}bonos <b>{{ cierres.n_particiones }}</b> ruedas ({{ cierres.dmin | ar_date }} → {{ cierres.dmax | ar_date }}) · {{ cierres.n_simbolos }} símbolos{% else %}bonos: sólo base px/tasas{% endif %}.
+        {% if not archivo.loaded or archivo.n_dias < 20 %}<span class="muted">Pocas ruedas todavía (β/correlación piden 10 comunes): para arrancar con 2 años de historia corré desde tu PC
+          <code>python -m backend.tools.backfill_acciones --byma --desde 2024-09-01</code> (BYMA Open Data) o <code>--csv cierres.csv</code>.</span>{% endif %}
+      </p>
       <p class="muted" style="font-size:11px;margin-top:6px">
         Desde/Hasta tienen prioridad sobre la ventana.
-        {% if archivo.loaded %}Acciones: cierre diario propio {{ archivo.dmin }} → {{ archivo.dmax }} · {{ archivo.n_dias }} ruedas · {{ archivo.n_tickers }} especies{% if not archivo.merval %} · sin Merval todavía{% endif %}.{% endif %}
-        {% if cierres.loaded %}Bonos: cierre completo {{ cierres.dmin }} → {{ cierres.dmax }} · {{ cierres.n_particiones }} ruedas (precio de pantalla y TIR de la base).{% else %}Bonos: base px/tasas (precio de pantalla y TIR).{% endif %}
         ÷ A3500 / CCL / MEP divide el precio por el FX del mismo día (series diarias del cierre; A3500 del BCRA); no aplica a la TIR.
         Canal = regresión lineal de la ventana ± 1σ / 2σ de los residuos; z = distancia del último a la media (y al canal) en desvíos.
       </p>

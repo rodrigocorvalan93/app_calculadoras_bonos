@@ -902,6 +902,15 @@ def build_fx_row() -> Optional[Dict[str, Any]]:
         from backend.services import cauciones
         cauc = cauciones.hist_row("PESOS")
         cauc_usd = cauciones.hist_row("DOLAR")
+        # Trazabilidad: qué caución se lleva el histórico y, si no hay, por qué
+        # (el riel puede mostrar una tasa y la base quedar vacía: cierre de
+        # otra rueda, plazo fuera de 1D-4D, símbolos sin tick).
+        logger.info("[historico_writer] FX del día: ccl=%s mep=%s a3500=%s · caución $=%s · caución US$=%s",
+                    snap.ccl, snap.usb, oficial, cauc, cauc_usd)
+        for mon, fila in (("PESOS", cauc), ("DOLAR", cauc_usd)):
+            if fila is None:
+                logger.warning("[historico_writer] sin caución %s para el histórico: %s",
+                               mon, cauciones.diagnostico(mon))
     except Exception:  # noqa: BLE001 — la caución jamás frena el guardado del FX
         logger.warning("[historico_writer] caución para el histórico falló", exc_info=True)
     if not (snap.ccl or snap.usb or oficial or cauc or cauc_usd):
@@ -946,7 +955,11 @@ def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
     if prev is not None and len(prev):
         prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
         df = pd.concat([prev, df], ignore_index=True)
-    df = (df.drop_duplicates(subset=["fecha_hoy"], keep="last")
+    # Dedup por fecha POR COLUMNA (último valor no nulo), no por fila: un
+    # segundo guardado del mismo día (recaptura, botón manual, reinicio)
+    # actualiza lo que trae y NO pisa con vacío lo que ya estaba — antes un
+    # autosave sin caución borraba la caución guardada más temprano.
+    df = (df.groupby("fecha_hoy", as_index=False, sort=True).last()
             .sort_values("fecha_hoy").reset_index(drop=True))
     for i in range(len(_LOCK_ESPERAS) + 1):
         try:
@@ -1241,6 +1254,14 @@ def recapturar_cierre(force: bool = False) -> Dict[str, Any]:
             res["acciones_filas"] = (a or {}).get("hoy")
         except Exception as exc:  # noqa: BLE001
             logger.warning("[historico_writer] recaptura de acciones falló: %s", exc)
+        # Segunda chance para la fila FX/caución del día: el merge por columna
+        # sólo completa lo que quedó vacío en el autosave (caución que no
+        # estaba como "de hoy" a las 17:01), nunca pisa un dato ya guardado.
+        try:
+            f = _guardar_fx(hist_dir)
+            res["fx"] = bool(f)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] recaptura del FX/caución falló: %s", exc)
     try:
         from backend.services import acciones_hist, cierres
         acciones_hist.refresh()

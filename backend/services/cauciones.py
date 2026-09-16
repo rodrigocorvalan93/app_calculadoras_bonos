@@ -135,7 +135,9 @@ def rail_pick(moneda: str = "PESOS") -> Dict[str, Any] | None:
     all_rows = byma_rows(moneda, include_close_only=True)
     rows = [r for r in all_rows if r["tasa"] is not None]
     if rows:
-        return _pick_short(rows)
+        pick = _pick_short(rows)
+        _memo_hoy(moneda, pick)
+        return pick
     closed = [r for r in all_rows if r["close"] is not None]
     if not closed:
         return None
@@ -237,23 +239,67 @@ def book(moneda: str = "PESOS", dias: int = 1) -> Dict[str, Any] | None:
     }
 
 
+# Último pick o/n VÁLIDO visto HOY por moneda: {moneda: (fecha BA, pick)}. Lo
+# alimenta rail_pick (corre en cada refresh del riel de todas las pestañas) y
+# lo usa hist_row como red de seguridad: si a la hora del autosave el store ya
+# no tiene la tasa como "de hoy" (feed que degrada a cierre, reinicio, símbolo
+# que quedó sin tick), el histórico igual se lleva la última caución operada
+# hoy en vez de un hueco. Sólo memoria del proceso; se descarta al cambiar el día.
+_ULTIMO_HOY: Dict[str, tuple] = {}
+
+
+def _pick_valido(pick: Dict[str, Any] | None) -> bool:
+    # La serie es "caución o/n": si el fallback del riel cayó a un plazo
+    # fuera de 1D-4D (p. ej. sólo operó la 7D), NO vale — mezclar tenors
+    # haría las Δ día contra día incomparables.
+    return bool(pick) and not pick.get("es_cierre") and pick.get("tasa") is not None \
+        and pick.get("_n") in _RAIL_PLAZOS
+
+
+def _memo_hoy(moneda: str, pick: Dict[str, Any] | None) -> None:
+    if _pick_valido(pick):
+        _ULTIMO_HOY[_moneda_tk(moneda)] = (hoy_ba(), dict(pick))
+
+
+def reset_memo() -> None:
+    """Olvida los picks memorizados (tests / reinicio lógico)."""
+    _ULTIMO_HOY.clear()
+
+
+def ultimo_hoy(moneda: str = "PESOS") -> Dict[str, Any] | None:
+    """El último pick o/n válido de HOY (o None): diagnóstico y fallback."""
+    m = _ULTIMO_HOY.get(_moneda_tk(moneda))
+    return dict(m[1]) if m and m[0] == hoy_ba() else None
+
+
 def hist_row(moneda: str = "PESOS") -> Dict[str, Any] | None:
     """Dato de caución overnight para el HISTÓRICO diario: el plazo o/n real
     del día (rail_pick: mayor volumen entre 1D-4D → un viernes cae solo al 3D
     y pre-feriado al 4D, así la serie no tiene huecos), con la tasa operada
     HOY (jamás el cierre de otra rueda) y el VWAP del día si el feed lo
-    codifica en EV/NV (ver vwap_evnv — todo dato de API, nada grabado)."""
+    codifica en EV/NV (ver vwap_evnv — todo dato de API, nada grabado).
+    Si el pick en vivo ya no vale (ver _ULTIMO_HOY), cae al último válido
+    visto hoy; None sólo si hoy no se vio ninguna caución o/n operada."""
     pick = rail_pick(moneda)
-    if not pick or pick.get("es_cierre") or pick.get("tasa") is None:
-        return None
-    # La serie es "caución o/n": si el fallback del riel cayó a un plazo
-    # fuera de 1D-4D (p. ej. sólo operó la 7D), NO se guarda — mezclar
-    # tenors haría las Δ día contra día incomparables. El riel sí puede
-    # mostrar ese fallback (el label trae el plazo); la base no.
-    if pick.get("_n") not in _RAIL_PLAZOS:
-        return None
+    if not _pick_valido(pick):
+        pick = ultimo_hoy(moneda)
+        if pick is None:
+            return None
     snap = marketdata_store.get_store().get(
         f"MERV - XMEV - {_moneda_tk(moneda)} - {pick['_n']}D")
     return {"plazo_d": pick["_n"], "tna": pick["tasa"],
             "vwap": vwap_evnv(snap, pick["_n"]) if snap is not None else None,
             "monto": pick.get("volumen")}
+
+
+def diagnostico(moneda: str = "PESOS") -> str:
+    """Una línea para el log del autosave: por qué (no) hay caución o/n hoy."""
+    try:
+        pick = rail_pick(moneda)
+        memo = ultimo_hoy(moneda)
+        if pick is None:
+            return "sin snapshots de caución en el store (¿símbolos no suscriptos?)"
+        return (f"pick {pick.get('plazo')} tasa={pick.get('tasa')} cierre={bool(pick.get('es_cierre'))} "
+                f"vol={pick.get('volumen')} · memo hoy={'sí' if memo else 'no'}")
+    except Exception as exc:  # noqa: BLE001
+        return f"diagnóstico falló: {exc}"

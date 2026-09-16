@@ -128,6 +128,17 @@ ret / vector_ref`; `historico_byma.ref_5d` (5D % de Mercado) lo usa cuando
 está cargado. Backfill desde la base: `cierres.importar_base()` (automático en
 el warmup del writer si no hay particiones). Nada de esto corre en un request.
 
+**Series diarias FX + caución** (`Delta - historico_fx`, `_guardar_fx`): UNA
+fila por día que se mergea POR COLUMNA (último valor no nulo) — un segundo
+guardado del día (recaptura, botón manual) completa lo que falta y nunca pisa
+con vacío lo ya guardado. La caución o/n sale de `cauciones.hist_row`: pick en
+vivo del riel o, si a la hora del autosave el store ya no la tiene como "de
+hoy", el último pick válido visto hoy (`_ULTIMO_HOY`, lo alimenta `rail_pick`
+en cada refresh del riel). El autosave loguea qué caución guardó y, si no hay,
+`cauciones.diagnostico()`; la recaptura vuelve a intentar la fila FX.
+`fx_hist.status()["series"]` = cobertura por serie (n días con dato, último),
+visible en la pestaña Series diarias.
+
 ## Visual style (FastAPI rewrite)
 
 Bloomberg palette + Notion/Apple/Linear typography. System sans

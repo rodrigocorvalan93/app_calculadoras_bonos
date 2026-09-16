@@ -97,12 +97,27 @@ def signature() -> tuple:
 
 
 def status() -> Dict[str, Any]:
+    """Estado del archivo + cobertura POR SERIE: cuántos días tienen dato y
+    el último con dato — así una serie que dejó de grabarse (p. ej. la
+    caución) se ve en la pestaña en vez de descubrirse por un hueco."""
     df = _load()
     if df is None or not len(df):
         return {"loaded": False}
+    series: Dict[str, Dict[str, Any]] = {}
+    for s in SERIES:
+        col = s["col"]
+        if col not in df.columns:
+            series[s["key"]] = {"label": s["label"], "n": 0, "ultimo": None}
+            continue
+        vals = pd.to_numeric(df[col], errors="coerce")
+        ok = vals.notna() & (vals != 0)
+        n = int(ok.sum())
+        ultimo = df.loc[ok, "fecha_hoy"].iloc[-1].isoformat() if n else None
+        series[s["key"]] = {"label": s["label"], "n": n, "ultimo": ultimo}
     return {"loaded": True, "n": int(len(df)),
             "dmin": df["fecha_hoy"].iloc[0].isoformat(),
-            "dmax": df["fecha_hoy"].iloc[-1].isoformat()}
+            "dmax": df["fecha_hoy"].iloc[-1].isoformat(),
+            "series": series}
 
 
 def columna(col: str) -> Dict[str, float]:
