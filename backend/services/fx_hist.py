@@ -49,11 +49,15 @@ def _path() -> Optional[str]:
         return None
     xlsx = os.path.join(d, FX_FILENAME)
     pq = os.path.splitext(xlsx)[0] + ".parquet"
-    if os.path.isfile(pq):
+    # El espejo sólo si es copia fiel del Excel (firma / mtime estricto): un
+    # Excel corregido a mano después del guardado tiene que verse en la
+    # pestaña y no ser pisado por el próximo guardado (auditoría R06).
+    from backend.services import espejo
+    if os.path.isfile(pq) and espejo.espejo_valido(pq, xlsx):
         return pq
     if os.path.isfile(xlsx):
         return xlsx
-    return None
+    return pq if os.path.isfile(pq) else None
 
 
 def _load() -> Optional[pd.DataFrame]:

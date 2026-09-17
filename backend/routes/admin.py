@@ -120,6 +120,7 @@ def _refrescar_sv_propia(request: Request, username: str) -> None:
     if me and me == (username or "").strip().lower():
         try:
             request.session["sv"] = auth.session_version(username)
+            request.session["uid"] = auth.session_uid(username)
         except Exception:  # noqa: BLE001 — sin sesión (auth apagado): nada que refrescar
             pass
 

@@ -27,10 +27,6 @@ _METRICS = ("TIREA", "TNA", "TEM", "Paridad")          # métricas de tasa/parid
 _EXTRA = ("Last Price", "Duration")                    # para la vista "un bono" (futuro)
 
 _lock = threading.Lock()
-# Gracia con la que el espejo parquet puede ser MÁS VIEJO que el xlsx y aun
-# así leerse (tándem xlsx+parquet con OneDrive/mtime grueso). Misma regla en
-# historico_writer._leer_base.
-PQ_GRACIA_S = 2.0
 _cache: Optional[Dict[str, Any]] = None
 
 
@@ -74,37 +70,36 @@ def _parquet_sibling(xlsx_path: str) -> str:
 
 
 def _pick_source(xlsx: Optional[str]) -> Tuple[Optional[str], str]:
-    """(path, formato) a leer. El parquet espejo gana si existe y no es más
-    viejo que el Excel (bymaapi y el autosave escriben ambos; si alguien
-    actualizó SOLO el Excel — bymaapi viejo, edición a mano — el Excel manda
-    y el parquet se regenera después de leerlo). Sin Excel, vale el parquet
-    suelto: la base sigue disponible."""
+    """(path, formato) a leer. El parquet espejo gana si existe y es copia
+    fiel del Excel (`espejo.espejo_valido`: firma del xlsx en el sidecar o,
+    sin firma, mtime estricto). Si alguien actualizó el Excel después —
+    bymaapi viejo, edición a mano, sync de OneDrive — el Excel manda y el
+    parquet se regenera después de leerlo. Sin Excel, vale el parquet suelto:
+    la base sigue disponible."""
+    from backend.services import espejo
+
     pq = _parquet_sibling(xlsx) if xlsx else _resolve_named(
         os.path.splitext(_HISTORICO_FILENAME)[0] + ".parquet")
     pq_ok = pq is not None and os.path.isfile(pq)
     if xlsx is None:
         return (pq, "parquet") if pq_ok else (None, "")
-    if pq_ok:
-        try:
-            # 2 s de gracia (antes 60): bymaapi/autosave escriben xlsx y parquet
-            # en tándem y re-estampan el espejo al final; la gracia sólo cubre
-            # el orden/mtime grueso de OneDrive. Un Excel más nuevo que eso es
-            # una edición a mano y tiene que ganar (el parquet se regenera).
-            if os.path.getmtime(pq) >= os.path.getmtime(xlsx) - PQ_GRACIA_S:
-                return pq, "parquet"
-        except OSError:
-            pass
+    if pq_ok and espejo.espejo_valido(pq, xlsx):
+        return pq, "parquet"
     return xlsx, "xlsx"
 
 
 def _regen_parquet(xlsx_path: str, df) -> None:
-    """Cache best-effort: espeja el Excel recién leído a .parquet (atómico)
-    para que la PRÓXIMA carga sea ~100× más rápida. Nunca rompe la carga."""
+    """Cache best-effort: espeja el Excel recién leído a .parquet (atómico) y
+    lo firma con la huella de ESE Excel, para que la PRÓXIMA carga sea ~100×
+    más rápida. Nunca rompe la carga."""
+    from backend.services import espejo
+
     pq = _parquet_sibling(xlsx_path)
     tmp = pq + ".tmp"
     try:
         df.to_parquet(tmp, index=False)
         os.replace(tmp, pq)
+        espejo.marcar_espejo(pq, xlsx_path)
         logger.info("[historico_byma] parquet espejo regenerado: %s", pq)
     except Exception as exc:  # noqa: BLE001 — sin pyarrow / sin permisos: seguimos con xlsx
         logger.info("[historico_byma] no pude regenerar el parquet (%s)", exc)

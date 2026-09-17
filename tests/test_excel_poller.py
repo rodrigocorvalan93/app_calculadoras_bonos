@@ -22,6 +22,8 @@ def test_poller_js_en_node() -> None:
     assert out["fetch_colgado"]["ok"], out["fetch_colgado"]  # un solo request en vuelo
     assert out["errores"]["ok"], out["errores"]              # backoff ante errores seguidos
     assert out["flags"]["ok"], out["flags"]                  # stale / down desde /seq
+    assert out["cuerpo_colgado"]["ok"], out["cuerpo_colgado"]        # R09: timeout hasta el cuerpo
+    assert out["oneshot_colgado"]["ok"], out["oneshot_colgado"]      # R09: el rescate también
     assert out["ok"]
 
 

@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v17 · 2026-09-16 (poller: un solo sondeo en vuelo con timeout y backoff; refresco cada 30 s aunque el seq no avance; estado stale/down desde /seq)";
+var OMS_BUILD = "v18 · 2026-09-17 (poller: el timeout cubre también el cuerpo de la respuesta y el rescate one-shot; un solo sondeo en vuelo con backoff; refresco cada 30 s aunque el seq no avance; estado stale/down desde /seq)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -46,10 +46,15 @@ var OMSFeed = (function () {
   var errs = 0;           // errores seguidos → backoff exponencial
   var nextTryAt = 0;
 
-  // fetch con plazo: AbortController donde existe (WebView2) y, siempre, una
-  // carrera contra un timeout — un runtime viejo sin AbortController también
+  // fetch con plazo que cubre el request ENTERO, cuerpo incluido: la carrera
+  // contra el timeout envuelve fetch + text()/json(). La versión anterior
+  // cortaba el timer al llegar los headers, y un cuerpo que nunca terminaba
+  // (proxy / WebView2 colgado a mitad de la respuesta) dejaba el sondeo "en
+  // vuelo" para siempre → el poller no volvía a pedir nada (auditoría R09).
+  // AbortController donde existe (WebView2); un runtime viejo sin él también
   // corta la espera (el request queda huérfano pero el poller sigue).
-  function fetchT(url, ms) {
+  // Resuelve {auth: true} ante 401, si no {body: <texto | JSON>}.
+  function fetchBody(url, ms, kind) {
     var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
     var opts = { headers: headers(), cache: "no-store" };
     if (ctrl) { opts.signal = ctrl.signal; }
@@ -60,8 +65,13 @@ var OMSFeed = (function () {
         reject(new Error("timeout " + ms + " ms: " + url));
       }, ms);
     });
-    return Promise.race([fetch(url, opts), guard]).then(function (r) {
-      clearTimeout(tm); return r;
+    var work = fetch(url, opts).then(function (r) {
+      if (r.status === 401) { return { auth: true }; }
+      if (!r.ok) { throw new Error("http " + r.status); }
+      return (kind === "json" ? r.json() : r.text()).then(function (body) { return { body: body }; });
+    });
+    return Promise.race([work, guard]).then(function (v) {
+      clearTimeout(tm); return v;
     }, function (e) {
       clearTimeout(tm); throw e;
     });
@@ -154,17 +164,13 @@ var OMSFeed = (function () {
     if (inflight) { return; }                              // ya hay un sondeo en vuelo
     if (errs > 0 && Date.now() < nextTryAt) { return; }    // backoff tras errores
     inflight = true;
+    function done() { inflight = false; }
     loadToken().then(function () {
       if (!token) { status = "auth"; notify(); return null; }
-      return fetchT("/excel/v1/seq", SEQ_TIMEOUT_MS)
-        .then(function (r) {
-          if (r.status === 401) { status = "auth"; notify(); return null; }
-          if (!r.ok) { throw new Error("http " + r.status); }
-          return r.text();
-        })
-        .then(function (txt) {
-          if (txt === null) { return null; }
-          var parts = String(txt).trim().split(/\s+/);
+      return fetchBody("/excel/v1/seq", SEQ_TIMEOUT_MS, "text")
+        .then(function (res) {
+          if (res.auth) { status = "auth"; notify(); return null; }
+          var parts = String(res.body).trim().split(/\s+/);
           var s = parseInt(parts[0], 10);
           var flag = parts[1] || "";
           var fresco = snap !== null && s === lastSeq && (Date.now() - lastSnapAt) < MAX_AGE_MS;
@@ -173,13 +179,10 @@ var OMSFeed = (function () {
             notify(); return null;
           }
           var avanzo = (lastSeq === null) || (s !== lastSeq);
-          return fetchT("/excel/v1/snapshot", SNAP_TIMEOUT_MS)
-            .then(function (r) {
-              if (r.status === 401) { status = "auth"; notify(); return null; }
-              if (!r.ok) { throw new Error("http " + r.status); }
-              return r.json();
-            })
-            .then(function (data) {
+          return fetchBody("/excel/v1/snapshot", SNAP_TIMEOUT_MS, "json")
+            .then(function (res2) {
+              if (res2.auth) { status = "auth"; notify(); return null; }
+              var data = res2.body;
               if (!data) { return null; }
               snap = data; lastSeq = data.seq; lastSnapAt = Date.now();
               status = healthStatus(flag, data, avanzo);
@@ -195,9 +198,7 @@ var OMSFeed = (function () {
       if (status !== "auth") { status = "error"; }
       lastErr = String((e && e.message) || e);
       notify();
-    }).then(function () {
-      inflight = false;
-    });
+    }).then(done, done);                                   // inflight se libera SIEMPRE
   }
 
   function start() {
@@ -208,25 +209,24 @@ var OMSFeed = (function () {
   // a su timeout sin datos (p. ej. el poller del runtime no arrancó — la causa
   // del #¡OCUPADO! eterno en algunas builds). Single-flight: N celdas en
   // timeout → 1 solo fetch; si funciona, inyecta el snapshot y notifica a
-  // TODAS las suscripciones (el poller sigue reintentando por su lado).
+  // TODAS las suscripciones (el poller sigue reintentando por su lado). Con
+  // el mismo plazo que el poller: antes no tenía ninguno y un rescate colgado
+  // bloqueaba todos los rescates siguientes.
   var _oneshot = null;
   function oneshot() {
     if (_oneshot) { return _oneshot; }
     _oneshot = loadToken().then(function () {
       if (!token) { status = "auth"; notify(); return null; }
-      return fetch("/excel/v1/snapshot", { headers: headers(), cache: "no-store" })
-        .then(function (r) {
-          if (r.status === 401) { status = "auth"; notify(); return null; }
-          if (!r.ok) { throw new Error("http " + r.status); }
-          return r.json();
-        })
-        .then(function (data) {
+      return fetchBody("/excel/v1/snapshot", SNAP_TIMEOUT_MS, "json")
+        .then(function (res) {
+          if (res.auth) { status = "auth"; notify(); return null; }
+          var data = res.body;
           if (data) {
-            snap = data; lastSeq = data.seq;
+            snap = data; lastSeq = data.seq; lastSnapAt = Date.now();
             status = (data.health && data.health.warn) ? "stale" : "live";
             notify();
           }
-          return data;
+          return data || null;
         });
     }).catch(function () { return null; }).then(function (d) { _oneshot = null; return d; });
     return _oneshot;

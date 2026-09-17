@@ -691,6 +691,14 @@ def create_app() -> FastAPI:
         if sv != auth_svc.session_version(username):
             request.session.clear()
             return _needs_login(request)
+        # Identidad de la cuenta: una cookie emitida para un usuario que
+        # después se borró y se recreó con el mismo nombre (otro uid) no
+        # autentica al nuevo. Cookies sin `uid` (anteriores a este campo) se
+        # rechazan: un solo re-login.
+        uid = request.session.get("uid")
+        if uid is None or str(uid) != auth_svc.session_uid(username):
+            request.session.clear()
+            return _needs_login(request)
 
         request.state.user = {"username": username, "role": role}
         request.state.nav_tabs = auth_svc.nav_for(role)

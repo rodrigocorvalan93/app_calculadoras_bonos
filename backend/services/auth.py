@@ -227,6 +227,12 @@ def _make_record(password: str, role: str, email: str = "") -> Dict[str, Any]:
         "hash": _hash(password, salt),
         "iterations": _PBKDF2_ITERS,
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # Identidad de la CUENTA (no del nombre): la cookie la lleva y el
+        # middleware la compara. Borrar y recrear un usuario con el mismo
+        # nombre da otro uid → las cookies del anterior no autentican al nuevo
+        # (auditoría R04/B06: antes el sv arrancaba en 0 y la cookie vieja
+        # entraba con el rol del recreado).
+        "uid": secrets.token_hex(8),
     }
 
 
@@ -277,6 +283,14 @@ def ensure_bootstrapped() -> Dict[str, Any]:
     from backend.config import settings
     with _lock:
         data = _store()
+        # Registros anteriores a la versión con `uid`: se les asigna uno (una
+        # sola vez, persistido). Hasta acá su uid es "" y una cookie con "" los
+        # autentica; desde acá, sólo las cookies emitidas para este uid.
+        sin_uid = [u for u in data["users"].values() if isinstance(u, dict) and not u.get("uid")]
+        if sin_uid:
+            for u in sin_uid:
+                u["uid"] = secrets.token_hex(8)
+            _persist(data)
         has_su = any(u.get("role") == "superuser" for u in data["users"].values())
         if has_su:
             return {"created": False, "user": None, "warning": None}
@@ -448,8 +462,21 @@ def set_password(username: str, password: str) -> None:
             rec["fondos"] = u.get("fondos")
         # Clave nueva ⇒ las sesiones web anteriores dejan de valer (F06).
         rec["sv"] = int(u.get("sv") or 0) + 1
+        # ...pero la cuenta es la MISMA: el uid se conserva (sólo cambia al
+        # borrar y recrear el usuario).
+        rec["uid"] = u.get("uid") or rec["uid"]
         data["users"][name] = rec
         _persist(data)
+
+
+def session_uid(username: Optional[str]) -> str:
+    """Identidad de la cuenta que viaja en la cookie (`uid`). "" si el usuario
+    no existe o el registro es anterior al campo (hasta el próximo
+    `ensure_bootstrapped`, que lo completa)."""
+    if not username:
+        return ""
+    u = _store()["users"].get(_norm(username))
+    return str((u or {}).get("uid") or "")
 
 
 def session_version(username: Optional[str]) -> int:

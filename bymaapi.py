@@ -952,6 +952,14 @@ def _guardar_excel_directo(df: pd.DataFrame, file_path: str) -> None:
                     mirror[col] = mirror[col].astype("string")
             mirror.to_parquet(parquet_path, index=False)
             print(f"Espejo parquet actualizado en '{parquet_path}'.")
+            # Firma del Excel junto al espejo (backend.services.espejo, stdlib
+            # puro): la app sabe que este parquet es copia de ESTE xlsx; sin la
+            # firma, releería el Excel entero en la próxima carga.
+            try:
+                from backend.services import espejo
+                espejo.marcar_espejo(parquet_path, file_path)
+            except Exception:  # noqa: BLE001 — sin repo en sys.path: vale la regla de mtime
+                pass
         except Exception as e:  # noqa: BLE001
             print(f"(Espejo parquet no guardado: {e} — el Excel quedó bien. Tip: pip install pyarrow)")
 

@@ -151,8 +151,13 @@ _BLOTTER_STATUS = {
     "rechazada_contexto": "RECHAZADA",
     "live_rechazo_broker": "RECHAZADA (broker)",     # HTTP 200 con JSON de rechazo
     "live_desconocida": "DESCONOCIDA",               # respuesta perdida: pudo entrar
-    "live_desconocida_sin_rastro": "NO ENTRÓ",       # reconciliada: no está en el broker
-    "paper_cancelada": "CANCELADA", "live_cancel_respuesta": "CANCELADA",
+    "live_desconocida_posible": "DESCONOCIDA",       # hay una orden igual sin hora: ¿anterior?
+    "live_desconocida_no_verificable": "DESCONOCIDA",  # el broker no respondió la lista completa
+    "live_desconocida_sin_rastro": "NO ENTRÓ",       # verificada la lista completa del día: no está
+    "paper_cancelada": "CANCELADA",
+    "live_cancel_respuesta": "CANCEL ACEPTADA",      # el broker aceptó el pedido (estado final: seguimiento)
+    "live_cancel_rechazo": "CANCEL RECHAZADA",       # la orden sigue viva
+    "live_cancel_error": "CANCEL ERROR",
 }
 
 # Estado REAL en el broker (evento live_estado, del seguimiento post-envío) →
@@ -349,8 +354,13 @@ def new_token(payload: Dict[str, Any]) -> str:
     from backend.services import primary_ws
     # El ticket queda atado al contexto de broker con el que se armó: si
     # alguien reconecta (otro host / otra sesión) antes de confirmarlo, `place`
-    # lo rechaza en vez de mandarlo al broker nuevo.
-    payload["ctx_version"] = primary_ws.context_version()
+    # lo rechaza en vez de mandarlo al broker nuevo. En una multiorden la
+    # versión va en CADA hija (place recibe las hijas sueltas, no el batch).
+    ctx = primary_ws.context_version()
+    payload["ctx_version"] = ctx
+    for hija in (payload.get("batch") or []):
+        if isinstance(hija, dict):
+            hija["ctx_version"] = ctx
     tok = uuid.uuid4().hex[:16]
     with _pending_lock:
         # higiene: limpiar vencidos
@@ -607,18 +617,30 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not is_live():
         await audit_async("paper_enviada", {**rec, "etapa": "pre_envio"})
         return {"status": "PAPER", "motivo": "modo paper (cambió antes del envío): NO viajó al broker", **rec}
+    if ctx is not None:
+        # El contexto también se re-chequea acá: un swap de broker durante el
+        # audit / resolve (auditoría R02) mandaba el ticket por la conexión
+        # nueva. El cliente se toma en la MISMA sentencia que el envío.
+        from backend.services import primary_ws as _pws
+        if int(ctx) != _pws.context_version():
+            await audit_async("rechazada_contexto", {**rec, "etapa": "pre_envio"})
+            return {"status": "RECHAZADA",
+                    "motivo": "el broker / la sesión cambió mientras se preparaba el envío — volvé a armar el ticket",
+                    **rec}
+    rec["enviada_ts"] = time.time()          # para la reconciliación: sólo órdenes de después de esto
     try:
         d = await get_ws_client().get_json_checked("rest/order/newSingleOrder", params)
     except Exception as exc:  # noqa: BLE001
         if _resultado_desconocido(exc):
             # El request PUDO llegar al broker (timeout esperando la respuesta,
-            # conexión cortada a mitad): no es un error limpio sino un estado
-            # DESCONOCIDO — el operador no debe reenviar a ciegas. Se reconcilia
-            # en background contra las órdenes activas del broker.
+            # conexión cortada a mitad, HTTP 5xx al serializar la respuesta):
+            # no es un error limpio sino un estado DESCONOCIDO — el operador
+            # no debe reenviar a ciegas. Se reconcilia en background contra
+            # las órdenes del día en el broker.
             await audit_async("live_desconocida", {**rec, "error": str(exc)})
             _spawn(_reconciliar_desconocida(rec))
             return {"status": "DESCONOCIDA",
-                    "motivo": (f"sin respuesta del broker ({str(exc)[:120]}): la orden PUDO haber "
+                    "motivo": (f"sin respuesta válida del broker ({str(exc)[:120]}): la orden PUDO haber "
                                "entrado — verificá en la Matriz / activas antes de reenviar"),
                     **rec}
         await audit_async("live_error", {**rec, "error": str(exc)})
@@ -646,9 +668,16 @@ def _spawn(coro) -> None:
 def _resultado_desconocido(exc: BaseException) -> bool:
     """True si el fallo ocurrió DESPUÉS de que el request pudo salir (el broker
     quizá lo procesó): timeouts de lectura/escritura, conexión cortada,
-    protocolo roto. Un ConnectError / ConnectTimeout nunca llegó al broker."""
+    protocolo roto, HTTP 5xx, cuerpo vacío o no-JSON. Un ConnectError /
+    ConnectTimeout nunca llegó al broker; un 4xx es un rechazo antes de
+    procesar (sin sesión, mal formado)."""
+    from backend.services.primary_ws import BrokerHTTPError, BrokerRespuestaInvalida
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return False
+    if isinstance(exc, BrokerHTTPError):
+        return exc.status_code >= 500
+    if isinstance(exc, BrokerRespuestaInvalida):
+        return True
     return isinstance(exc, (httpx.TimeoutException, httpx.RemoteProtocolError,
                             httpx.ReadError, httpx.WriteError, httpx.CloseError))
 
@@ -663,9 +692,11 @@ def _broker_msg(d: Any) -> str:
 
 
 _RECONCILE_DELAYS = (2.0, 6.0)
+_RECONCILE_MARGEN_S = 5.0        # tolerancia de reloj entre el server y el broker
 
 
 def _misma_orden(o: Dict[str, Any], rec: Dict[str, Any]) -> bool:
+    """Mismos términos económicos (símbolo, lado, VN, precio si es Limit)."""
     try:
         iid = o.get("instrumentId") if isinstance(o.get("instrumentId"), dict) else {}
         if str(iid.get("symbol") or o.get("symbol") or "") != str(rec.get("symbol") or ""):
@@ -682,27 +713,105 @@ def _misma_orden(o: Dict[str, Any], rec: Dict[str, Any]) -> bool:
         return False
 
 
+def _ts_orden(o: Dict[str, Any]) -> Optional[float]:
+    """Epoch del alta de la orden en el broker (`transactTime`, formato Primary
+    'AAAAMMDD-HH:MM:SS.mmm-0300', o ISO). None si no viene / no parsea."""
+    raw = o.get("transactTime") or o.get("transactionTime") or o.get("timestamp")
+    if not raw:
+        return None
+    s = str(raw).strip()
+    for fmt in ("%Y%m%d-%H:%M:%S.%f%z", "%Y%m%d-%H:%M:%S%z", "%Y%m%d-%H:%M:%S.%f", "%Y%m%d-%H:%M:%S"):
+        try:
+            d = datetime.strptime(s, fmt)
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=_TZ_BA)
+            return d.timestamp()
+        except ValueError:
+            continue
+    try:
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_TZ_BA)
+        return d.timestamp()
+    except ValueError:
+        try:
+            n = float(s)
+            return n / 1000.0 if n > 1e11 else n
+        except ValueError:
+            return None
+
+
+def _es_nuestra(o: Dict[str, Any], rec: Dict[str, Any]) -> Optional[bool]:
+    """¿La orden del broker es ESTE intento? True si además de los términos su
+    alta es posterior al envío (con margen); False si es de antes (una orden
+    anterior idéntica, auditoría R01/B04); None si el broker no informa la hora
+    — ambiguo, no se atribuye."""
+    if not _misma_orden(o, rec):
+        return False
+    t0 = rec.get("enviada_ts")
+    ts = _ts_orden(o)
+    if not t0 or ts is None:
+        return None
+    return ts >= float(t0) - _RECONCILE_MARGEN_S
+
+
 async def _reconciliar_desconocida(rec: Dict[str, Any]) -> None:
-    """Tras una respuesta perdida: busca la orden entre las ACTIVAS del broker
-    (símbolo + lado + VN + precio). Si aparece, audita su estado real como
-    `live_estado` (el blotter pasa de DESCONOCIDA a EN MERCADO / …); si no,
-    `live_desconocida_sin_rastro`. Best-effort, en background."""
+    """Tras una respuesta perdida, busca el intento en el broker y audita SÓLO
+    lo que la evidencia permite (auditoría R01):
+      · aparece una orden con los mismos términos dada de alta DESPUÉS del
+        envío → `live_estado` con su estado real (EN MERCADO / EJECUTADA / …);
+      · aparece una con los mismos términos pero sin hora o de antes → sigue
+        DESCONOCIDA (`live_desconocida_posible`, con su clientId para mirarla);
+      · la lista COMPLETA del día (`rest/order/all`: activas + ejecutadas +
+        canceladas + rechazadas) respondió y no está → `live_desconocida_sin_rastro`
+        ("NO ENTRÓ (verificado)");
+      · sólo respondió `actives` (o ninguna) → no hay prueba: sigue
+        DESCONOCIDA (`live_desconocida_no_verificable`) — una orden ejecutada
+        al instante no es una activa, y una consulta fallida no es evidencia.
+    Best-effort, en background; ante cualquier duda queda DESCONOCIDA."""
     from backend.services.primary_ws import get_ws_client
+    cuenta = rec.get("account")
+    verificado_todo = False
     for delay in _RECONCILE_DELAYS:
         await asyncio.sleep(delay)
-        try:
-            d = await get_ws_client().get_json_checked("rest/order/actives",
-                                                       {"accountId": rec.get("account")})
-        except Exception:  # noqa: BLE001
-            continue
-        for o in (d.get("orders", []) if isinstance(d, dict) else []):
-            if isinstance(o, dict) and _misma_orden(o, rec):
-                await audit_async("live_estado", {**rec, "estado": str(o.get("status") or "NEW"),
-                                                  "texto": "encontrada en el broker tras la respuesta perdida",
-                                                  "broker_order_id": o.get("clientId")})
-                return
-    await audit_async("live_desconocida_sin_rastro",
-                      {**rec, "texto": "no aparece entre las activas del broker (2 consultas)"})
+        ambigua: Optional[Dict[str, Any]] = None
+        for path in ("rest/order/all", "rest/order/actives"):
+            try:
+                d = await get_ws_client().get_json_checked(path, {"accountId": cuenta})
+            except Exception:  # noqa: BLE001 — sin respuesta no hay evidencia
+                continue
+            ordenes = d.get("orders", []) if isinstance(d, dict) else None
+            if not isinstance(ordenes, list):
+                continue
+            if path == "rest/order/all":
+                verificado_todo = True
+            for o in ordenes:
+                if not isinstance(o, dict):
+                    continue
+                v = _es_nuestra(o, rec)
+                if v is True:
+                    await audit_async("live_estado", {**rec, "estado": str(o.get("status") or "NEW"),
+                                                      "texto": "encontrada en el broker tras la respuesta perdida",
+                                                      "broker_order_id": o.get("clientId")})
+                    return
+                if v is None and ambigua is None:
+                    ambigua = o
+            if path == "rest/order/all":
+                break                       # la lista completa alcanza; actives es subconjunto
+        if ambigua is not None:
+            await audit_async("live_desconocida_posible",
+                              {**rec, "texto": ("hay una orden con los mismos términos pero sin hora de alta "
+                                                "(¿anterior?): verificá antes de reenviar"),
+                               "broker_order_id": ambigua.get("clientId")})
+            return
+    if verificado_todo:
+        await audit_async("live_desconocida_sin_rastro",
+                          {**rec, "texto": "no está en la lista completa de órdenes del día del broker "
+                                           f"({len(_RECONCILE_DELAYS)} consultas): no entró"})
+    else:
+        await audit_async("live_desconocida_no_verificable",
+                          {**rec, "texto": "no se pudo consultar la lista completa del día en el broker: "
+                                           "sigue DESCONOCIDA — verificá en la Matriz antes de reenviar"})
 
 
 async def cancel(client_order_id: str, proprietary: str = "api") -> Dict[str, Any]:
@@ -715,8 +824,16 @@ async def cancel(client_order_id: str, proprietary: str = "api") -> Dict[str, An
     try:
         d = await get_ws_client().get_json_checked("rest/order/cancelById", {
             "clientOrderId": client_order_id, "proprietary": proprietary})
-        await audit_async("live_cancel_respuesta", {**rec, "broker": d})
-        return {"status": d.get("status", "?"), "broker": d, **rec}
     except Exception as exc:  # noqa: BLE001
         await audit_async("live_cancel_error", {**rec, "error": str(exc)})
         return {"status": "ERROR", "motivo": str(exc), **rec}
+    if isinstance(d, dict) and str(d.get("status") or "").upper() == "OK":
+        # OK = el broker ACEPTÓ el pedido de cancelar; el estado final lo
+        # confirma el seguimiento / la Matriz (CANCELLED), no esta respuesta.
+        await audit_async("live_cancel_respuesta", {**rec, "broker": d})
+        return {"status": "OK", "broker": d, **rec}
+    # HTTP 200 con JSON de rechazo: la orden SIGUE VIVA. Antes se auditaba
+    # como live_cancel_respuesta y el blotter la mostraba CANCELADA (R03).
+    msg = _broker_msg(d)
+    await audit_async("live_cancel_rechazo", {**rec, "broker": d, "motivo": msg})
+    return {"status": "ERROR", "motivo": f"el broker rechazó la cancelación: {msg}", "broker": d, **rec}

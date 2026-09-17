@@ -205,15 +205,20 @@ async def test_f03_respuesta_perdida_es_desconocida_y_se_reconcilia(oms_tmp, mon
     monkeypatch.setattr(primary_ws, "get_ws_client", lambda: _WS())
     monkeypatch.setattr(oms, "_RECONCILE_DELAYS", (0.01, 0.02))
     oms.set_live(True)
-    # a) la orden SÍ entró: aparece entre las activas → estado real
+    # a) la orden SÍ entró: aparece en la lista del día con alta POSTERIOR al
+    #    envío (transactTime formato Primary) → estado real
+    from datetime import datetime as _dt
+    from backend.services.oms import _TZ_BA
+    alta = (_dt.now(_TZ_BA)).strftime("%Y%m%d-%H:%M:%S.%f")[:-3] + _dt.now(_TZ_BA).strftime("%z")
     _WS.activas = [{"instrumentId": {"symbol": "MERV - XMEV - AL30 - 24hs"}, "side": "BUY",
-                    "orderQty": 100, "price": 941.0, "status": "NEW", "clientId": "77"}]
+                    "orderQty": 100, "price": 941.0, "status": "NEW", "clientId": "77",
+                    "transactTime": alta}]
     res = await oms.place(_payload())
     assert res["status"] == "DESCONOCIDA" and "PUDO" in res["motivo"]
     await asyncio.gather(*list(oms._followups))
     assert oms.blotter(3)[0]["status"] == "EN MERCADO"
     assert any(a["event"] == "live_desconocida" for a in oms.audit_tail(10))
-    # b) no aparece → NO ENTRÓ
+    # b) la lista COMPLETA del día responde y no aparece → NO ENTRÓ (verificado)
     _WS.activas = []
     res = await oms.place(_payload(price=942.0))
     assert res["status"] == "DESCONOCIDA"
