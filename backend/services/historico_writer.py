@@ -1065,7 +1065,22 @@ def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
     columnas = list(fila.keys()) + [c for r in acumulado.values() for c in r if c not in fila]
     columnas = list(dict.fromkeys(columnas))
     df = pd.DataFrame([acumulado[k] for k in sorted(acumulado)], columns=columnas)
-    df = df.reset_index(drop=True)
+    return escribir_fx(df.reset_index(drop=True), xlsx)
+
+
+# Columnas canónicas de la fila FX (mismo orden que build_fx_row).
+FX_COLUMNAS = ("fecha_hoy", "ccl", "mep", "canje", "oficial_a3500", "ccl_base",
+               "caucion_plazo_d", "caucion_tna", "caucion_tna_vwap", "caucion_monto",
+               "caucion_usd_plazo_d", "caucion_usd_tna", "caucion_usd_tna_vwap", "caucion_usd_monto")
+
+
+def escribir_fx(df: "Any", xlsx: str) -> Dict[str, Any]:
+    """Escribe el historial FX COMPLETO (`df`, una fila por día, ya mergeado):
+    xlsx atómico con reintentos ante lock, espejo parquet y firma del espejo.
+    Es el ÚNICO camino de escritura del archivo — lo usan el autosave
+    (`_guardar_fx`) y el backfill (`backend.tools.backfill_fx`), así los dos
+    dejan exactamente el mismo formato."""
+    pq = os.path.splitext(xlsx)[0] + ".parquet"
     for i in range(len(_LOCK_ESPERAS) + 1):
         try:
             tmp = xlsx + ".tmp.xlsx"

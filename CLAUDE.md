@@ -153,7 +153,15 @@ hoy", el último pick válido visto hoy (`_ULTIMO_HOY`, lo alimenta `rail_pick`
 en cada refresh del riel). El autosave loguea qué caución guardó y, si no hay,
 `cauciones.diagnostico()`; la recaptura vuelve a intentar la fila FX.
 `fx_hist.status()["series"]` = cobertura por serie (n días con dato, último),
-visible en la pestaña Series diarias.
+visible en la pestaña Series diarias. `historico_writer.escribir_fx(df, xlsx)`
+es el ÚNICO camino de escritura del archivo (xlsx atómico + espejo + firma).
+**Backfill hacia atrás**: `python -m backend.tools.backfill_fx --argentinadatos
+[--dry-run] [--huecos] [--csv fx.csv]` (fuera de la app, en la máquina con
+Delta Bases): sólo inserta fechas ANTERIORES a la primera fila de la app (o
+días hábiles faltantes con `--huecos`), nunca pisa una fila existente, respalda
+xlsx+parquet a `*.bak-<fecha>` y marca `ccl_base = ext:<fuente>`. Acciones /
+CEDEARs: `backend.tools.backfill_acciones --byma` (BYMA Open Data; las filas
+de la app ganan).
 
 ## Visual style (FastAPI rewrite)
 
