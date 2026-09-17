@@ -324,17 +324,31 @@ def curve_series(curve_key: str, metric: str = "TIREA", desde: Optional[str] = N
             "scale": 1.0 if is_price else 100.0}
 
 
+# Memo del scatter por (curva, fechas, métrica, tipo, versión de la base): el
+# recorrido es O(fechas × códigos × obs) de Python puro (~500 códigos × 250
+# ruedas) y la pestaña lo vuelve a pedir en cada click de excluir / tramo —
+# esos filtros se aplican DESPUÉS (routes.historico._scatter_chart), así que
+# acá se sirve la misma foto de memoria. Se vacía solo al cambiar la carga.
+_scatter_memo: Dict[tuple, Dict[str, Any]] = {}
+_SCATTER_MEMO_MAX = 48
+
+
 def scatter_by_dates(curve_key: str, fechas: List[str], metric: str = "TEM",
                      proy: str = "todos") -> Dict[str, Any]:
     """Foto de la curva en VARIAS fechas: por cada fecha, puntos
-    (Duration, metric) de los bonos de la curva con dato a esa fecha (último
-    conocido ≤ fecha, con tolerancia de 7 días). Puro índice en memoria —
-    costo ~µs por punto, sin pricing."""
+    (Duration, metric, precio) de los bonos de la curva con dato a esa fecha
+    (último conocido ≤ fecha, con tolerancia de 7 días). Puro índice en
+    memoria — costo ~µs por punto, sin pricing. `px` = precio de pantalla a
+    esa fecha (para el Δ precio del hover; None si la base no lo tiene)."""
     from backend.services import curves, symbols as syms
     c = ensure_loaded()
     metric = metric if metric in _METRICS else "TEM"
     if not c["loaded"]:
         return {"loaded": False, "series": [], "metric": metric}
+    key = (curve_key, tuple(f for f in fechas if f), metric, proy, c.get("ver"))
+    hit = _scatter_memo.get(key)
+    if hit is not None:
+        return hit
     base_set = {syms.calc_to_md_code(x) for x in curves.build_curve_codes().get(curve_key, [])}
     series: List[Dict[str, Any]] = []
     for f in fechas:
@@ -353,12 +367,19 @@ def scatter_by_dates(curve_key: str, fechas: List[str], metric: str = "TEM",
             dur, dd = _value_and_date_at(e, "Duration", f)
             if v is None or dur is None or dv is None or dv < lim or dd is None or dd < lim:
                 continue
-            pts.append({"code": code, "dur": dur, "v": v})
+            px, dp = _value_and_date_at(e, "Last Price", f)
+            if px is not None and (dp is None or dp < lim):
+                px = None
+            pts.append({"code": code, "dur": dur, "v": v, "px": px})
         if pts:
             pts.sort(key=lambda p: p["dur"])
             series.append({"fecha": f, "points": pts})
     label = next((cv.label for cv in curves.list_curves() if cv.key == curve_key), curve_key)
-    return {"loaded": True, "series": series, "metric": metric, "curve_label": label}
+    out = {"loaded": True, "series": series, "metric": metric, "curve_label": label}
+    if len(_scatter_memo) >= _SCATTER_MEMO_MAX:
+        _scatter_memo.clear()
+    _scatter_memo[key] = out
+    return out
 
 
 def _value_and_date_at(entry: Dict[str, Any], metric: str, target_iso: str

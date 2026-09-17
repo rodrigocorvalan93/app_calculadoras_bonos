@@ -1519,6 +1519,24 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 }
 .cmp-chip b { margin-left: 4px; opacity: .55; font-weight: 400; cursor: pointer; }
 .cmp-chip b:hover { opacity: 1; color: var(--red); }
+/* Históricos · curva por fecha: hover sutil (los demás bonos se atenúan, el
+   elegido queda al frente con su línea punteada), etiquetas discretas de la
+   última fecha, bonos apagados desde la leyenda. */
+.hc-svg circle.hc-pt, .hc-svg text.hc-lbl { transition: opacity .15s ease; }
+.hc-svg circle.hc-pt { cursor: default; }
+.hc-svg text.hc-lbl { opacity: .62; pointer-events: none; font-variant-numeric: tabular-nums; }
+.hc-svg.hc-nolabels text.hc-lbl { display: none; }
+.hc-svg.hc-dim circle.hc-pt:not(.hc-on) { opacity: .28 !important; }
+.hc-svg.hc-dim text.hc-lbl:not(.hc-on) { opacity: .18; }
+.hc-svg.hc-dim circle.hc-pt.hc-on { opacity: 1 !important; }
+.hc-svg.hc-dim text.hc-lbl.hc-on { opacity: .95; }
+.hc-svg circle.hc-pt.hc-off, .hc-svg text.hc-lbl.hc-off { opacity: .08 !important; }
+.hc-svg .hc-hover text { font-variant-numeric: tabular-nums; pointer-events: none; }
+.hc-legend { margin-top: 8px; align-items: center; }
+.hc-chip { cursor: pointer; user-select: none; }
+.hc-chip.hc-chip-off { opacity: .38; text-decoration: line-through; }
+.hc-toggle { font-weight: 400; cursor: pointer; }
+.hc-toggle input { vertical-align: -1px; margin: 0 2px 0 0; accent-color: var(--accent); }
 /* Nuevas emisiones (Gráficos): textarea "ticker; tasa; duration" + ayuda */
 .graf-emis-body { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
 .graf-emis-body[hidden] { display: none; }   /* el display:flex le ganaba al `hidden` del navegador */

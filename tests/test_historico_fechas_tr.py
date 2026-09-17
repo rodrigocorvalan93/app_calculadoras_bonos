@@ -64,10 +64,43 @@ def test_scatter_dos_fechas(base_sintetica) -> None:
     assert {p["code"] for p in hoy["points"]} == {base_sintetica["c1"], base_sintetica["c2"]}
     p1 = next(p for p in hoy["points"] if p["code"] == base_sintetica["c1"])
     assert p1["dur"] == pytest.approx(0.47) and p1["v"] == pytest.approx(0.0221)
+    assert p1["px"] == pytest.approx(100.0)                      # precio a esa fecha (Δ precio del hover)
+    # memo por (curva, fechas, métrica, tipo, versión de la base): misma foto de memoria
+    assert historico_byma.scatter_by_dates("lecap", [_HOY.isoformat(), _PREV.isoformat()], "TEM") is sc
+    historico_byma.refresh()
+    assert historico_byma.scatter_by_dates("lecap", [_HOY.isoformat(), _PREV.isoformat()], "TEM") is not sc
     # fecha sin datos cerca (tolerancia 7 días) → la serie ni aparece
     lejos = (_PREV - timedelta(days=20)).isoformat()
     sc2 = historico_byma.scatter_by_dates("lecap", [lejos], "TEM")
     assert sc2["series"] == []
+
+
+def test_scatter_chart_excluir_y_tramo() -> None:
+    """Excluir bonos (outliers) y acotar el tramo de duration sacan puntos ANTES
+    del fit, como en Gráficos; la leyenda (`codes`) queda ordenada por duration
+    y `excluded` lista sólo los que estaban en la foto."""
+    from backend.routes.historico import _parse_exclude, _scatter_chart
+
+    assert _parse_exclude(" tx26, T30J6;tzxm7  tx26 ") == ["TX26", "T30J6", "TZXM7"]
+    puntos = [{"code": c, "dur": d, "v": v, "px": 100.0 + i}
+              for i, (c, d, v) in enumerate([("A1", 0.2, 0.30), ("B2", 0.5, 0.27), ("C3", 0.9, 0.24),
+                                             ("D4", 1.6, 0.20), ("E5", 2.4, 0.17), ("F6", 3.5, 0.15),
+                                             ("G7", 5.0, 0.13)])]
+    sc = {"loaded": True, "metric": "TIREA", "curve_label": "CER",
+          "series": [{"fecha": "2026-08-13", "points": puntos},
+                     {"fecha": "2026-09-13", "points": [dict(p, v=p["v"] - 0.01) for p in puntos[:-1]]}]}
+    ch = _scatter_chart(sc)
+    assert [c["code"] for c in ch["codes"]] == ["A1", "B2", "C3", "D4", "E5", "F6", "G7"]
+    assert ch["ultima"] == "2026-09-13" and [s["ultima"] for s in ch["series"]] == [False, True]
+    assert ch["series"][0]["grupos"][0]["points"][0]["px"] == 100.0
+    ch2 = _scatter_chart(sc, dmin=0.4, dmax=3.0, exclude=["c3", "ZZ9"])
+    vis = {p["code"] for s in ch2["series"] for g in s["grupos"] for p in g["points"]}
+    assert vis == {"B2", "D4", "E5"}                           # 0,4 ≤ dur ≤ 3, sin C3
+    assert ch2["excluded"] == ["c3"] and ch2["dmin"] == 0.4 and ch2["dmax"] == 3.0
+    assert [c["code"] for c in ch2["codes"]] == ["B2", "D4", "E5"]
+    # todo afuera → sin puntos pero con el motivo (excluidos / tramo) para el template
+    ch3 = _scatter_chart(sc, dmin=10.0)
+    assert ch3["n"] == 0 and ch3["dmin"] == 10.0 and ch3["codes"] == []
 
 
 def test_metrica_precio_en_curve_series(base_sintetica) -> None:
@@ -104,6 +137,23 @@ async def test_http_tab_curva_fechas_y_metrica_precio(base_sintetica) -> None:
         assert r.status_code == 200
         assert "TR realizado" in r.text and base_sintetica["c1"] in r.text
         assert "<svg" in r.text                                     # scatter renderizado
+        # interacción client-side: puntos con data-* (hover Δ tasa / Δ precio),
+        # etiquetas de la última fecha, leyenda con chips y capa de hover
+        c1 = base_sintetica["c1"]
+        assert f'class="hc-pt" data-code="{c1}" data-fecha="{_HOY.isoformat()}"' in r.text
+        assert 'data-px="100.0"' in r.text and 'class="hc-hover"' in r.text
+        assert f'class="hc-lbl" data-code="{c1}"' in r.text and r.text.count("hc-lbl") == 2
+        assert f'class="cmp-chip hc-chip" data-code="{c1}"' in r.text and "hc-labels-toggle" in r.text
+        # excluir un bono del fit + tramo de duration (es-AR): el punto no viaja
+        r3 = await ac.get("/historicos/curva-fechas", params={
+            "curve": "lecap", "metric": "TEM", "f1": _HOY.isoformat(), "f2": _PREV.isoformat(),
+            "exclude": c1.lower(), "dmin": "0,6", "dmax": "3"})
+        assert r3.status_code == 200
+        assert f'data-code="{c1}"' not in r3.text.split("hc-excluded")[0]
+        assert f'class="hc-restore lnk" data-code="{c1}"' in r3.text   # ↺ para volver a incluirlo
+        assert f'name="exclude" value="{c1}"' in r3.text and 'name="dmin" value="0,6"' in r3.text
+        assert 'name="dmax" value="3"' in r3.text                       # el tramo vuelve al form (no la fecha máx. de la base)
+        assert 'data-dur="0.82"' in r3.text and 'data-dur="0.47"' not in r3.text
         r2 = await ac.get("/historicos/curva", params={"curve": "lecap", "metric": "Last Price"})
         assert r2.status_code == 200 and "Precio" in r2.text
         # la página muestra el tab nuevo
