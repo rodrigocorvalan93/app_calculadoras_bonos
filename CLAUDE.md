@@ -188,6 +188,13 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `.tick-up` / `.tick-down` (flash CSS verde/rojo estilo terminal).
 - El dot `#live-dot` de la topbar muestra el estado del feed
   (live/idle/off). Todo vanilla JS — sin librerías nuevas.
+- **Copiar gráfico (⧉)** (`app.js`, `copySvg`): un SVG del server que pinta
+  por CLASES (`.fut-chart .pa-*`, `.fc-*`, `.hc-*`) o con `var(--x)` no puede
+  serializarse a secas — la imagen suelta no ve el CSS de la página y cae al
+  default de SVG (relleno negro, sin stroke, serif). Se clona con el estilo
+  CALCULADO inline (pintura + tipografía, `display:none` respetado) y recién
+  ahí se rasteriza; sólo al click, ~1 ms por 100 nodos. Regresión:
+  `tests/chart_copy_harness.cjs` (JS real en Node).
 - **Paneles por FILAS (delta)**: un contenedor `data-delta-scope` (Mercado)
   NO swapea completo en cada `md-update`: si adentro hay una
   `table[data-delta]`, app.js pide `data-delta&since=<data-seq>&order=<data-order>`
