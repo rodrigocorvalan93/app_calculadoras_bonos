@@ -778,12 +778,165 @@
     draw();
   }
 
-  function boot() { initGraficos(); initHistMacro(); }
+  // ── Históricos · curva por fecha (SVG del server + interacción sutil) ─────
+  // El scatter viene renderizado del server (SVG con data-* por punto). Acá,
+  // sin ningún request: hover sobre un bono = línea punteada tenue uniendo
+  // sus fotos en cada fecha + texto discreto con cuánto amplió/comprimió y
+  // cuánto movió el precio (primera → última fecha); leyenda con apagar/
+  // prender por bono (recordado por curva) y × para excluirlo del fit (viaja
+  // en "Excluir bonos" y re-arma la foto); etiquetas de la última fecha
+  // prendibles. Todo vanilla, O(puntos) por hover.
+  function initHistFechas() {
+    var wrap = document.querySelector("#hist-fechas .hc-wrap");
+    if (!wrap || wrap._hcInit) return;
+    wrap._hcInit = true;
+    var svg = wrap.querySelector("svg.hc-svg");
+    var hover = svg ? svg.querySelector(".hc-hover") : null;
+    if (!svg || !hover) return;
+    var curve = wrap.getAttribute("data-curve") || "";
+    var NS = "http://www.w3.org/2000/svg";
+    var x1 = parseFloat(svg.getAttribute("data-x1")) || 900, y0 = parseFloat(svg.getAttribute("data-y0")) || 0;
+    var metric = svg.getAttribute("data-metric") || "";
+
+    function num(s) { var v = parseFloat(s); return isNaN(v) ? null : v; }
+    function fmt(v, d) { return (v == null) ? "" : v.toFixed(d).replace(".", ","); }
+    function signed(v, d) { return (v > 0 ? "+" : "") + fmt(v, d); }
+    function dm(iso) { return iso && iso.length >= 10 ? iso.slice(8, 10) + "/" + iso.slice(5, 7) : iso; }
+
+    // Índice por bono: sus puntos en orden cronológico.
+    var byCode = {};
+    Array.prototype.forEach.call(svg.querySelectorAll("circle.hc-pt"), function (el) {
+      var c = el.getAttribute("data-code");
+      if (!c) return;
+      (byCode[c] = byCode[c] || []).push({
+        el: el, fecha: el.getAttribute("data-fecha") || "", v: num(el.getAttribute("data-v")),
+        dur: num(el.getAttribute("data-dur")), px: num(el.getAttribute("data-px")),
+        x: num(el.getAttribute("cx")), y: num(el.getAttribute("cy")),
+      });
+    });
+    Object.keys(byCode).forEach(function (c) { byCode[c].sort(function (a, b) { return a.fecha < b.fecha ? -1 : (a.fecha > b.fecha ? 1 : 0); }); });
+
+    function clearHover() {
+      while (hover.firstChild) hover.removeChild(hover.firstChild);
+      svg.classList.remove("hc-dim");
+      Array.prototype.forEach.call(svg.querySelectorAll(".hc-on"), function (n) { n.classList.remove("hc-on"); });
+    }
+    function el(tag, attrs, text) {
+      var n = document.createElementNS(NS, tag);
+      Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    function showHover(code, at) {
+      clearHover();
+      var pts = byCode[code];
+      if (!pts || !pts.length) return;
+      svg.classList.add("hc-dim");
+      pts.forEach(function (p) { p.el.classList.add("hc-on"); });
+      Array.prototype.forEach.call(svg.querySelectorAll('.hc-lbl[data-code="' + code.replace(/"/g, "") + '"]'), function (n) { n.classList.add("hc-on"); });
+      if (pts.length > 1) {
+        hover.appendChild(el("polyline", {
+          points: pts.map(function (p) { return p.x + "," + p.y; }).join(" "),
+          fill: "none", stroke: "var(--text-muted)", "stroke-width": "1", "stroke-dasharray": "2 3", opacity: "0.55",
+        }));
+      }
+      var a = pts[0], b = pts[pts.length - 1], lines;
+      if (pts.length > 1 && a.v != null && b.v != null) {
+        var dbps = (b.v - a.v) * 100;                            // métrica en % → bps
+        var dir = dbps > 0.5 ? "amplió" : (dbps < -0.5 ? "comprimió" : "sin cambio");
+        var l2 = dir + " " + fmt(Math.abs(dbps), 0) + " bps";
+        if (a.px != null && b.px != null && a.px > 0) l2 += " · px " + signed((b.px / a.px - 1) * 100, 1) + " %";
+        lines = [code + " · " + dm(a.fecha) + " → " + dm(b.fecha), l2];
+      } else {
+        lines = [code + " · " + dm(b.fecha), "dur " + fmt(b.dur, 2) + " · " + metric + " " + fmt(b.v, 2) + " %"];
+      }
+      var p = at || b, left = p.x + 9, anchor = "start";
+      if (p.x > x1 * 0.78) { left = p.x - 9; anchor = "end"; }
+      var top = Math.max(y0 + 12, p.y - 14);
+      var t = el("text", { x: left, y: top, "text-anchor": anchor, "font-size": "10", fill: "var(--text-muted)", opacity: "0.95", "class": "hc-tip" });
+      t.appendChild(el("tspan", { x: left, dy: "0" }, lines[0]));
+      t.appendChild(el("tspan", { x: left, dy: "12" }, lines[1]));
+      hover.appendChild(t);
+    }
+    svg.addEventListener("mouseover", function (e) {
+      var n = e.target;
+      if (!n || !n.getAttribute) return;
+      var code = n.getAttribute("data-code");
+      if (!code || !(n.classList.contains("hc-pt") || n.classList.contains("hc-lbl"))) return;
+      var at = n.classList.contains("hc-pt") ? { x: num(n.getAttribute("cx")), y: num(n.getAttribute("cy")) } : null;
+      showHover(code, at);
+    });
+    svg.addEventListener("mouseleave", clearHover);
+
+    // Leyenda: apagar/prender (client-side, recordado por curva) y excluir del fit.
+    var storeKey = "hc_off:" + curve, off = {};
+    try { (JSON.parse(localStorage.getItem(storeKey) || "[]") || []).forEach(function (c) { off[c] = 1; }); } catch (e) { /* noop */ }
+    function applyOff() {
+      Object.keys(byCode).forEach(function (c) {
+        var on = !off[c];
+        byCode[c].forEach(function (p) { p.el.classList.toggle("hc-off", !on); });
+        Array.prototype.forEach.call(svg.querySelectorAll('.hc-lbl[data-code="' + c.replace(/"/g, "") + '"]'), function (n) { n.classList.toggle("hc-off", !on); });
+        var chip = wrap.querySelector('.hc-chip[data-code="' + c.replace(/"/g, "") + '"]');
+        if (chip) chip.classList.toggle("hc-chip-off", !on);
+      });
+      try { localStorage.setItem(storeKey, JSON.stringify(Object.keys(off).filter(function (c) { return byCode[c]; }))); } catch (e) { /* noop */ }
+    }
+    applyOff();
+    var form = document.getElementById("hc-fechas-form"), excl = document.getElementById("hc-exclude");
+    function submitWith(value) {
+      if (!excl || !form) return;
+      excl.value = value.trim();
+      if (window.htmx) window.htmx.trigger(form, "submit");
+    }
+    wrap.addEventListener("click", function (e) {
+      var x = e.target.closest ? e.target.closest(".hc-excl") : null;
+      if (x) {
+        var code = x.parentNode.getAttribute("data-code");
+        var cur = (excl ? excl.value : "").split(/[\s,;]+/).filter(Boolean);
+        if (cur.indexOf(code) < 0) cur.push(code);
+        submitWith(cur.join(" "));
+        return;
+      }
+      var r = e.target.closest ? e.target.closest(".hc-restore") : null;
+      if (r) {
+        var back = r.getAttribute("data-code");
+        submitWith((excl ? excl.value : "").split(/[\s,;]+/).filter(function (c) { return c && c !== back; }).join(" "));
+        return;
+      }
+      var chip = e.target.closest ? e.target.closest(".hc-chip") : null;
+      if (chip) {
+        var c = chip.getAttribute("data-code");
+        if (off[c]) delete off[c]; else off[c] = 1;
+        applyOff();
+        clearHover();
+      }
+    });
+    wrap.addEventListener("mouseover", function (e) {
+      var chip = e.target.closest ? e.target.closest(".hc-chip") : null;
+      if (chip && !e.target.classList.contains("hc-excl")) showHover(chip.getAttribute("data-code"), null);
+    });
+    wrap.querySelector(".hc-legend").addEventListener("mouseleave", clearHover);
+
+    // Etiquetas de la última fecha: prendidas por default, recordado.
+    var tog = wrap.querySelector(".hc-labels-toggle");
+    function applyLabels(on) { svg.classList.toggle("hc-nolabels", !on); try { localStorage.setItem("hc_labels", on ? "1" : "0"); } catch (e) { /* noop */ } }
+    if (tog) {
+      var l0 = "1";
+      try { l0 = localStorage.getItem("hc_labels") || "1"; } catch (e) { /* noop */ }
+      tog.checked = (l0 !== "0");
+      applyLabels(tog.checked);
+      tog.addEventListener("change", function () { applyLabels(tog.checked); });
+    }
+  }
+
+  function boot() { initGraficos(); initHistMacro(); initHistFechas(); }
   if (document.readyState !== "loading") boot();
   else document.addEventListener("DOMContentLoaded", boot);
-  // La pestaña "Tasas por curva" se carga lazy (htmx); al insertarse, init uPlot.
+  // Las pestañas "Tasas por curva" / "Curva por fecha" se cargan lazy (htmx);
+  // al insertarse, init.
   document.addEventListener("htmx:afterSwap", function (e) {
     if (e.target && e.target.id === "hist-curva") initHistCurva();
+    if (e.target && e.target.id === "hist-fechas") initHistFechas();
   });
 })();
 

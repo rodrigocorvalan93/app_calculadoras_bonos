@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -149,7 +150,18 @@ async def historicos_curva(request: Request, curve: str = "", metric: str = "TIR
                    desde=desde or "", hasta=hasta or "", **ctx)
 
 
-def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> Dict[str, Any]:
+def _parse_exclude(raw: str) -> List[str]:
+    """'T30J6 TX26, tzxm7' → ['T30J6', 'TX26', 'TZXM7'] (sin duplicados, en orden)."""
+    out: List[str] = []
+    for tok in re.split(r"[\s,;]+", str(raw or "").upper()):
+        if tok and tok not in out:
+            out.append(tok)
+    return out
+
+
+def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480,
+                   dmin: Optional[float] = None, dmax: Optional[float] = None,
+                   exclude: Optional[List[str]] = None) -> Dict[str, Any]:
     """SVG scatter 'curva en varias fechas': X = Duration, Y = métrica (%),
     una serie de puntos por fecha + la CURVA NSS AJUSTADA (misma nss.py que
     Gráficos/Curvas, robusta a outliers); polilínea sólo como fallback (<4
@@ -160,11 +172,33 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> D
     separan en GRUPOS y se fitea una NSS POR GRUPO por fecha — una sola curva
     por el medio de las dos nubes no describía a ninguna. Proy se dibuja con
     marcador hueco y fit punteado (mismo color de la fecha). El eje X arranca
-    en 0: una duration negativa no existe, era padding."""
+    en 0: una duration negativa no existe, era padding.
+
+    `exclude` (códigos) y `dmin`/`dmax` (tramo de duration) sacan puntos
+    ANTES del fit, como en Gráficos: un outlier o un tramo (0,1 a 3 años) se
+    eligen sin recalcular nada del server (el scatter crudo está memoizado en
+    historico_byma). Devuelve además `codes` (los que quedan, con su duration
+    a la última fecha, para la leyenda) y `excluded` (los que se sacaron)."""
     series = sc.get("series") or []
+    excl = {c.upper() for c in (exclude or [])}
+    if series and (excl or dmin is not None or dmax is not None):
+        filtradas = []
+        for s in series:
+            pts = [p for p in s["points"]
+                   if str(p["code"]).upper() not in excl
+                   and (dmin is None or p["dur"] >= dmin)
+                   and (dmax is None or p["dur"] <= dmax)]
+            if pts:
+                filtradas.append({**s, "points": pts})
+        presentes = {str(p["code"]).upper() for s in series for p in s["points"]}
+        excluded = [c for c in (exclude or []) if c.upper() in presentes]
+        series = filtradas
+    else:
+        excluded = []
     if not series:
         return {"loaded": sc.get("loaded", False), "n": 0, "metric": sc.get("metric"),
-                "curve_label": sc.get("curve_label")}
+                "curve_label": sc.get("curve_label"), "excluded": excluded,
+                "dmin": dmin, "dmax": dmax, "codes": []}
     # Separar por población y fitear POR GRUPO antes de fijar los ejes: el
     # rango Y contempla los puntos Y las curvas ajustadas (sin esto, un valle
     # de la NSS entre puntos quedaba planchado contra el piso). Guardia
@@ -204,11 +238,15 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> D
 
     out = []
     mixto = False
+    # La fecha MÁS RECIENTE lleva las etiquetas de los bonos (una sola vez por
+    # bono, junto al punto): en las otras fechas el hover/la línea punteada ya
+    # identifican al bono, y etiquetar todo sería ruido.
+    ultima = max(s["fecha"] for s in series)
     for i, (s, gs) in enumerate(zip(series, grupos_por_serie)):
         grupos = []
         for g in gs:
             pts = [{"x": sx(p["dur"]), "y": sy(p["v"] * 100.0), "code": p["code"],
-                    "dur": p["dur"], "v": p["v"] * 100.0} for p in g["raw"]]
+                    "dur": p["dur"], "v": p["v"] * 100.0, "px": p.get("px")} for p in g["raw"]]
             if g["fit_pts"]:
                 path = "M " + " L ".join(f"{sx(d)},{sy(max(ymin, min(ymax, v)))}"
                                          for d, v in g["fit_pts"])
@@ -219,14 +257,22 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480) -> D
         if len(grupos) > 1:
             mixto = True
         out.append({"fecha": s["fecha"], "color": _PALETTE[i % len(_PALETTE)],
-                    "grupos": grupos})
+                    "grupos": grupos, "ultima": s["fecha"] == ultima})
     yticks = [{"y": sy(ymin + (ymax - ymin) / 5 * i), "v": round(ymin + (ymax - ymin) / 5 * i, 2)}
               for i in range(6)]
     xticks = [{"x": sx(xmin + (xmax - xmin) / 6 * i), "v": round(xmin + (xmax - xmin) / 6 * i, 1)}
               for i in range(7)]
+    # Leyenda: cada bono una vez, ordenado por su duration en la fecha más
+    # reciente en que aparece (así la leyenda sigue el eje X).
+    dur_por_code: Dict[str, float] = {}
+    for s in sorted(series, key=lambda s: s["fecha"]):
+        for p in s["points"]:
+            dur_por_code[str(p["code"])] = p["dur"]
+    codes = [{"code": c, "dur": d} for c, d in sorted(dur_por_code.items(), key=lambda kv: (kv[1], kv[0]))]
     return {"loaded": True, "n": len(out), "series": out, "mixto": mixto,
             "metric": sc.get("metric"), "curve_label": sc.get("curve_label"),
-            "yticks": yticks, "xticks": xticks,
+            "yticks": yticks, "xticks": xticks, "ultima": ultima,
+            "codes": codes, "excluded": excluded, "dmin": dmin, "dmax": dmax,
             "width": width, "height": height, "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph}
 
 
@@ -236,15 +282,24 @@ async def historicos_curva_fechas(
     curve: str = "", metric: str = "TEM", proy: str = "todos",
     f1: str = "", f2: str = "", f3: str = "", f4: str = "",
     trd1: str = "", trd2: str = "",
+    dmin: str = "", dmax: str = "", exclude: str = "",
 ) -> HTMLResponse:
     """Pestaña 'Curva por fecha': la misma curva fotografiada en hasta 4 fechas
     (Duration vs métrica, como el Excel del usuario) + total return REALIZADO
     de sus bonos entre dos fechas (ΔP dirty + cupones cobrados, vía la ficha).
-    El scatter es índice en memoria; la tabla TR corre en executor y se cachea
-    (el pasado no cambia)."""
+    El scatter es índice en memoria (memoizado por fechas); `dmin`/`dmax`
+    (tramo de duration, es-AR) y `exclude` (códigos a sacar del fit) se
+    aplican encima, como en Gráficos. La tabla TR corre en executor y se
+    cachea (el pasado no cambia)."""
     from datetime import timedelta
 
+    from backend.locale_ar import parse_ar_num
     from backend.services import curves as curves_svc, tr_realizado
+
+    d_min, d_max = parse_ar_num(dmin), parse_ar_num(dmax)
+    if d_min is not None and d_max is not None and d_min > d_max:
+        d_min, d_max = d_max, d_min
+    excl = _parse_exclude(exclude)
 
     # La 1ª carga de la base (~20k filas de Excel/parquet) es sync y el warmup no
     # la precalienta: corría INLINE vía meta() y congelaba el event loop entero
@@ -260,13 +315,14 @@ async def historicos_curva_fechas(
     sel = curve if curve in keys else (keys[0] if keys else None)
 
     # Defaults: hoy (última fecha de la base) y ~1 mes atrás; TR entre ambas.
-    dmax = meta.get("dmax")
-    if dmax and not f1:
-        f1 = dmax
-    if dmax and not f2:
+    # (`fecha_max`, no `dmax`: ese nombre es el tramo de duration del form.)
+    fecha_max = meta.get("dmax")
+    if fecha_max and not f1:
+        f1 = fecha_max
+    if fecha_max and not f2:
         try:
             from datetime import date as _date
-            f2 = (_date.fromisoformat(dmax) - timedelta(days=30)).isoformat()
+            f2 = (_date.fromisoformat(fecha_max) - timedelta(days=30)).isoformat()
         except ValueError:
             f2 = ""
     trd1 = trd1 or f2 or ""
@@ -280,7 +336,8 @@ async def historicos_curva_fechas(
         # congelaba el loop por click.
         scatter = await loop.run_in_executor(
             None, lambda: _scatter_chart(
-                historico_byma.scatter_by_dates(sel, fechas, metric, proy)))
+                historico_byma.scatter_by_dates(sel, fechas, metric, proy),
+                dmin=d_min, dmax=d_max, exclude=excl))
         if trd1 and trd2 and trd1 < trd2:
             tr_tabla = await loop.run_in_executor(
                 None, tr_realizado.tabla, sel, trd1, trd2, proy)
@@ -289,6 +346,7 @@ async def historicos_curva_fechas(
                    curve_opts=[{"key": k, "label": labels.get(k, k)} for k in keys],
                    curve_sel=sel, metric=metric, proy=proy,
                    f1=f1, f2=f2, f3=f3, f4=f4, trd1=trd1, trd2=trd2,
+                   dmin=dmin, dmax=dmax, exclude=" ".join(excl),
                    scatter=scatter, tr=tr_tabla, hist_meta=meta)
 
 

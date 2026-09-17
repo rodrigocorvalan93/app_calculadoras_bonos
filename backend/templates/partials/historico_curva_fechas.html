@@ -5,7 +5,7 @@
 {% else %}
   <div class="curve-picker card">
     <div class="card-body">
-      <form hx-get="/historicos/curva-fechas" hx-target="#hist-fechas" hx-swap="innerHTML">
+      <form id="hc-fechas-form" hx-get="/historicos/curva-fechas" hx-target="#hist-fechas" hx-swap="innerHTML">
         <div class="row-fields">
           <label class="field"><span>Curva</span>
             <select name="curve">
@@ -25,6 +25,15 @@
             </select></label>
         </div>
         <div class="row-fields">
+          {# Tramo de duration (como en Gráficos): el fit NSS y los puntos se
+             limitan al rango — p. ej. 0,1 a 3 años. Excluir saca outliers del
+             fit; la × de cada chip de la leyenda lo completa por vos. #}
+          <label class="field" style="max-width:110px"><span>Dur mín <small class="muted">(outliers)</small></span>
+            <input type="text" inputmode="decimal" name="dmin" value="{{ dmin or '' }}" placeholder="ej. 0,1" autocomplete="off"></label>
+          <label class="field" style="max-width:110px"><span>Dur máx <small class="muted">(tramo)</small></span>
+            <input type="text" inputmode="decimal" name="dmax" value="{{ dmax or '' }}" placeholder="ej. 3" autocomplete="off"></label>
+          <label class="field" style="max-width:220px"><span>Excluir bonos <small class="muted">(del fit)</small></span>
+            <input type="text" id="hc-exclude" name="exclude" value="{{ exclude or '' }}" placeholder="ej. TZXM7 T30J6" autocomplete="off"></label>
           <label class="field"><span>TR desde</span><input type="date" name="trd1" value="{{ trd1 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
           <label class="field"><span>TR hasta</span><input type="date" name="trd2" value="{{ trd2 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
           <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
@@ -32,17 +41,20 @@
       </form>
       <p class="muted" style="font-size:11px;margin-top:6px">
         Foto de la curva ({{ scatter.metric if scatter else metric }} vs Duration) en cada fecha elegida — por bono, el último dato ≤ fecha (tolerancia 7 días).
+        Pasá el mouse por un bono para ver cuánto amplió o comprimió y cuánto movió el precio entre la primera y la última fecha; en la leyenda, click apaga/prende un bono (sin recalcular) y la × lo saca del fit.
         Abajo, el <b>total return realizado</b> entre "TR desde" y "TR hasta": ΔP <i>dirty</i> + cupones/amortizaciones cobrados en la ventana (de la ficha) — el corte de cupón no muerde.
       </p>
     </div>
   </div>
 
   {% if scatter and scatter.n %}
-  <div class="card" style="margin-top:12px">
+  <div class="card hc-wrap" style="margin-top:12px" data-curve="{{ curve_sel }}">
     <div class="card-title"><span>📐 {{ scatter.curve_label }} — {{ scatter.metric }} vs Duration</span>
-      <span class="card-title-aux">{% for s in scatter.series %}<span style="color:{{ s.color }}">● {{ s.fecha }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% if scatter.mixto %} · <span class="muted">○ proy (fit punteado)</span>{% endif %}</span></div>
+      <span class="card-title-aux">{% for s in scatter.series %}<span style="color:{{ s.color }}">● {{ s.fecha }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% if scatter.mixto %} · <span class="muted">○ proy (fit punteado)</span>{% endif %}
+        · <label class="hc-toggle" title="Etiquetas de los bonos en la fecha más reciente"><input type="checkbox" class="hc-labels-toggle" checked> etiquetas</label></span></div>
     <div class="card-body table-scroll">
-      <svg viewBox="0 0 {{ scatter.width }} {{ scatter.height }}" style="width:100%;max-width:{{ scatter.width }}px" role="img">
+      <svg class="hc-svg" viewBox="0 0 {{ scatter.width }} {{ scatter.height }}" style="width:100%;max-width:{{ scatter.width }}px" role="img"
+           data-x0="{{ scatter.x0 }}" data-x1="{{ scatter.x1 }}" data-y0="{{ scatter.y0 }}" data-y1="{{ scatter.y1 }}" data-metric="{{ scatter.metric }}">
         {% for t in scatter.yticks %}
           <line x1="{{ scatter.x0 }}" x2="{{ scatter.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
           <text x="{{ scatter.x0 - 8 }}" y="{{ t.y + 4 }}" text-anchor="end" font-size="11" fill="var(--text-muted)">{{ t.v | ar_num(2) }}%</text>
@@ -60,21 +72,41 @@
                 {% if g.proy or not g.fit %}stroke-dasharray="{{ '6 4' if g.proy else '3 4' }}"{% endif %}
                 opacity="{{ '0.85' if g.fit else '0.7' }}"/>
           {% for p in g.points %}
+            {# data-* alimentan el hover (línea punteada + Δ entre fechas) y la
+               leyenda (apagar/prender por bono): todo client-side, sin requests. #}
             {% if g.proy %}
-            <circle cx="{{ p.x }}" cy="{{ p.y }}" r="3.9" fill="none" stroke="{{ s.color }}" stroke-width="1.8" opacity="0.92">
+            <circle class="hc-pt" data-code="{{ p.code }}" data-fecha="{{ s.fecha }}" data-v="{{ p.v }}" data-dur="{{ p.dur }}" data-px="{{ p.px if p.px is not none else '' }}"
+                    cx="{{ p.x }}" cy="{{ p.y }}" r="3.9" fill="none" stroke="{{ s.color }}" stroke-width="1.8" opacity="0.92">
             {% else %}
-            <circle cx="{{ p.x }}" cy="{{ p.y }}" r="4.2" fill="{{ s.color }}" opacity="0.92">
+            <circle class="hc-pt" data-code="{{ p.code }}" data-fecha="{{ s.fecha }}" data-v="{{ p.v }}" data-dur="{{ p.dur }}" data-px="{{ p.px if p.px is not none else '' }}"
+                    cx="{{ p.x }}" cy="{{ p.y }}" r="4.2" fill="{{ s.color }}" opacity="0.92">
             {% endif %}
               <title>{{ p.code }} · {{ s.fecha }} · dur {{ p.dur | ar_num(2) }} · {{ p.v | ar_num(2) }}%</title>
             </circle>
+            {% if s.ultima %}
+            <text class="hc-lbl" data-code="{{ p.code }}" x="{{ p.x + 6 }}" y="{{ p.y + 3.5 }}" font-size="9.5" fill="var(--text-muted)">{{ p.code }}</text>
+            {% endif %}
           {% endfor %}
           {% endfor %}
         {% endfor %}
+        <g class="hc-hover"></g>
       </svg>
+      {# Leyenda de bonos (ordenada por duration a la última fecha): click =
+         apagar/prender sin recalcular (recordado por curva); × = excluir del
+         fit (viaja en "Excluir bonos" y re-arma la foto en el server). #}
+      <div class="hc-legend cmp-chips">
+        {% for c in scatter.codes %}
+        <span class="cmp-chip hc-chip" data-code="{{ c.code }}" title="dur {{ c.dur | ar_num(2) }} · click: apagar/prender · ×: excluir del fit">{{ c.code }}<b class="hc-excl" title="Excluir del fit">×</b></span>
+        {% endfor %}
+        {% if scatter.excluded %}
+        <span class="muted hc-excluded" style="font-size:11px;align-self:center">excluidos:
+          {% for c in scatter.excluded %}<span class="hc-restore lnk" data-code="{{ c }}" title="Volver a incluir">{{ c }} ↺</span>{% if not loop.last %}, {% endif %}{% endfor %}</span>
+        {% endif %}
+      </div>
     </div>
   </div>
   {% elif scatter %}
-  <div class="alert" style="margin-top:12px">Sin puntos para esas fechas (¿la base tiene datos ahí?).</div>
+  <div class="alert" style="margin-top:12px">Sin puntos para esas fechas{% if scatter.excluded or scatter.dmin is not none or scatter.dmax is not none %} con ese tramo / esas exclusiones{% endif %} (¿la base tiene datos ahí?).</div>
   {% endif %}
 
   {% if tr and tr.rows %}
