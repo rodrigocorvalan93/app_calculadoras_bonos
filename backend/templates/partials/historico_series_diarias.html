@@ -48,6 +48,15 @@
           <b>{{ s.n }}</b>{% if s.ultimo and s.ultimo != archivo.dmax %} <small>(último {{ s.ultimo }})</small>{% endif %}</span>{% if not loop.last %} · {% endif %}{% endfor %}
       </p>
       {% endif %}
+      {% if archivo.n < 60 %}
+      {# Serie corta: cómo completar CCL/MEP/canje hacia atrás desde una fuente
+         externa sin pisar lo que grabó la app (corre fuera de la app). #}
+      <p class="muted" style="font-size:11px;margin-top:4px">
+        Pocos días todavía. Para completar CCL / MEP / canje hacia atrás:
+        <code>python -m backend.tools.backfill_fx --argentinadatos --dry-run</code> (muestra el plan) y después sin <code>--dry-run</code>;
+        sólo agrega fechas anteriores a la primera de la app, nunca pisa una fila y deja respaldo.
+      </p>
+      {% endif %}
     </div>
   </div>
 
