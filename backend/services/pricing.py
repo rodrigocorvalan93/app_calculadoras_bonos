@@ -964,6 +964,20 @@ def _bond_index_kind(code: str) -> str:
     return k
 
 
+_INDEX_KINDS = ("a3500", "cer", "uva", "tamar", "badlar")
+
+
+def indices_token() -> tuple:
+    """Huella conjunta de TODOS los índices/proyecciones que mueven una TIR
+    (A3500 aplicable, último CER/UVA + token de su proyección, benchmark y
+    proyección TAMAR/BADLAR). Cambia cuando un refresh de índices cambia algo
+    aunque el feed BYMA esté quieto: es lo que invalida las filas cacheadas de
+    Mercado/Curvas (auditoría R05: una proyección nueva sin tick dejaba la
+    tabla con la TIR vieja hasta el próximo tick). Cada huella viene de
+    `_index_val_cache` (TTL 2 s) → sub-µs en caliente."""
+    return tuple(_index_fingerprint(k) for k in _INDEX_KINDS)
+
+
 def _index_fingerprint(kind: str) -> Any:
     if not kind:
         return 0.0

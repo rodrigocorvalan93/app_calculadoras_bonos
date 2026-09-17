@@ -615,6 +615,7 @@ async def mercado_page(
 # y compartidas entre la tabla completa (/mercado/table, cada 30 s) y el delta
 # (/mercado/rows, cada tick, N clientes): single-flight por key.
 _ROWS_CACHE: Dict[tuple, tuple] = {}          # key → (seq, rows, meta, order_hash)
+_ROWS_IDX: Dict[tuple, tuple] = {}            # key → pricing.indices_token() con el que se armó
 _ROWS_LOCKS: Dict[tuple, asyncio.Lock] = {}
 _ROWS_MAX = 64
 
@@ -632,15 +633,22 @@ async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fue
     key = (curve, plazo, bool(only_quoting), leg, fuente, (q or "").strip(), int(mas or 0))
     store = marketdata_store.get_store()
     seq = store.seq()
+    # Validez = seq del feed Y huella de índices/proyecciones: un refresh de
+    # índices sin tick (rollover, ventana de la tarde del A3500) cambiaba la
+    # TIR en el cache de métricas pero estas filas seguían viejas hasta el
+    # próximo tick BYMA (auditoría R05). `_ROW_MEMO` ya lleva la huella por
+    # bono: sólo se re-arman las filas cuyo índice cambió.
+    idx = pricing.indices_token()
     ent = _ROWS_CACHE.get(key)
-    if ent is not None and ent[0] == seq:
+    if ent is not None and ent[0] == seq and _ROWS_IDX.get(key) == idx:
         return ent
     lock = _ROWS_LOCKS.setdefault(key, asyncio.Lock())
     async with lock:
         ent = _ROWS_CACHE.get(key)
-        if ent is not None and ent[0] >= seq:
+        if ent is not None and ent[0] >= seq and _ROWS_IDX.get(key) == idx:
             return ent
         seq = store.seq()
+        idx = pricing.indices_token()
         rows, meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
         if _es_corp(curve):
             rows, meta = _vista_corp(rows, meta, q, mas)
@@ -648,12 +656,14 @@ async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fue
         if len(_ROWS_CACHE) >= _ROWS_MAX:
             viejo = next(iter(_ROWS_CACHE))
             _ROWS_CACHE.pop(viejo, None)
+            _ROWS_IDX.pop(viejo, None)
             # El lock se va con su entrada (si nadie lo tiene tomado): antes
             # quedaba para siempre y cada búsqueda de texto distinta sumaba uno.
             lk = _ROWS_LOCKS.get(viejo)
             if lk is not None and not lk.locked():
                 _ROWS_LOCKS.pop(viejo, None)
         _ROWS_CACHE[key] = ent
+        _ROWS_IDX[key] = idx
         if len(_ROWS_LOCKS) > _ROWS_MAX * 2:          # red de seguridad
             for k in [k for k, lk in _ROWS_LOCKS.items() if k not in _ROWS_CACHE and not lk.locked()]:
                 _ROWS_LOCKS.pop(k, None)

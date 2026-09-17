@@ -8,7 +8,7 @@ Layout:
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
@@ -31,6 +31,30 @@ def _parse_ar_number(raw: Optional[str]) -> Optional[float]:
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     templates = request.app.state.templates
     return templates.TemplateResponse(request, template, ctx)
+
+
+# Single-flight de recálculos IDÉNTICOS en vuelo (auditoría R10): N usuarios
+# pidiendo el mismo bono / modo / valor / settle / VN al mismo tiempo → UN
+# cálculo en el pool; los demás esperan ese mismo Future. Sólo se comparte el
+# cálculo (métricas + ticket, de sólo lectura en el template); la tenencia por
+# fondos visibles y el render siguen por request. Costo: un lookup de dict.
+_INFLIGHT: Dict[tuple, "asyncio.Future"] = {}
+
+
+def _single_flight(key: tuple, fn) -> "asyncio.Future":
+    fut = _INFLIGHT.get(key)
+    if fut is None:
+        fut = asyncio.get_running_loop().run_in_executor(None, fn)
+        _INFLIGHT[key] = fut
+
+        def _limpiar(f, k=key):
+            if _INFLIGHT.get(k) is f:
+                _INFLIGHT.pop(k, None)
+
+        fut.add_done_callback(_limpiar)
+    # shield: si un request se cancela (cliente que cerró), no cancela el
+    # Future compartido que los otros siguen esperando.
+    return asyncio.shield(fut)
 
 
 @router.get("", response_class=HTMLResponse)
@@ -110,7 +134,8 @@ async def yas_recompute(
         )
         return m, pricing.ticket_rows(m, nominales=parsed_nom)
 
-    metrics, ticket = await asyncio.get_running_loop().run_in_executor(None, _calc)
+    key = (code, mode, parsed_value, settle, parsed_nom, parsed_fx, parsed_freq, parsed_base)
+    metrics, ticket = await _single_flight(key, _calc)
     return _render(
         request,
         "partials/yas_result.html",

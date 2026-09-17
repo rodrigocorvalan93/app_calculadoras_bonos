@@ -138,6 +138,21 @@ def _subscribe_payload(symbols: Iterable[str], depth: int = 5,
     })
 
 
+class BrokerHTTPError(RuntimeError):
+    """El broker respondió con un HTTP ≠ 200. `status_code` deja decidir al
+    OMS: un 5xx después de mandar una orden NO prueba que no la procesó."""
+
+    def __init__(self, path: str, status_code: int, text: str = "") -> None:
+        super().__init__(f"{path} → HTTP {status_code}: {text}")
+        self.path = path
+        self.status_code = int(status_code)
+
+
+class BrokerRespuestaInvalida(RuntimeError):
+    """HTTP 200 con cuerpo vacío o no-JSON: el request llegó, la respuesta no
+    se puede interpretar (sesión vencida, proxy, corte al serializar)."""
+
+
 class PrimaryWS:
     """One-process singleton WS client to Primary."""
 
@@ -252,18 +267,21 @@ class PrimaryWS:
         login deja con cookies de sesión), no por uno sin autenticar. A
         diferencia de `get_json` (None-on-fail, para lecturas best-effort como
         instruments/detail), acá el error sube para que el blotter muestre el
-        motivo crudo del broker."""
+        motivo crudo del broker. Los fallos que ocurren DESPUÉS de que el
+        request llegó al broker (HTTP 5xx, cuerpo vacío o no-JSON) salen con
+        tipos propios: para una orden nueva son resultado DESCONOCIDO, no un
+        rechazo limpio."""
         if self._http is None:
             raise RuntimeError(f"{path} → sin sesión del broker (sin login). Conectá en /conexion.")
         r = await self._http.get(path, params=params or {})
         if r.status_code != 200:
-            raise RuntimeError(f"{path} → HTTP {r.status_code}: {r.text[:200]}")
+            raise BrokerHTTPError(path, r.status_code, r.text[:200])
         if not r.text.strip():
-            raise RuntimeError(f"{path} → respuesta vacía (¿sesión vencida? Reconectá en /conexion).")
+            raise BrokerRespuestaInvalida(f"{path} → respuesta vacía (¿sesión vencida? Reconectá en /conexion).")
         try:
             return r.json()
         except ValueError as e:
-            raise RuntimeError(f"{path} → no devolvió JSON: {r.text[:200]}") from e
+            raise BrokerRespuestaInvalida(f"{path} → no devolvió JSON: {r.text[:200]}") from e
 
     async def start(self, symbols: Iterable[str] = ()) -> None:
         """Spawn the reader loop. Idempotent."""

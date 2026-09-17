@@ -461,7 +461,6 @@ _save_lock = threading.Lock()
 # Backoff ante un xlsx lockeado (OneDrive sincronizando / abierto en Excel):
 # 3 reintentos, después sube el error (el autosave reintenta a los 10 min).
 _LOCK_ESPERAS = (2.0, 5.0, 15.0)
-_PQ_GRACIA_S = 2.0      # = historico_byma.PQ_GRACIA_S (misma regla de frescura del espejo)
 
 
 def append_and_save(df: "Any", xlsx_path: str, incluir_journal: bool = True) -> Dict[str, Any]:
@@ -520,17 +519,17 @@ def _leer_base(xlsx_path: str, pd) -> "Any":
     .corrupto-<fecha> (evidencia, nunca se borra) y la base sigue desde el
     espejo — el write de salida regenera un xlsx limpio. Sin espejo sano, el
     error sube con la instrucción de recuperación manual."""
-    # Espejo parquet FRESCO (no más viejo que el xlsx, misma regla que
-    # historico_byma._pick_source): leerlo en vez del Excel — 28 ms vs ~18 s de
-    # read_excel con un año de base, todo con el GIL tomado en plena app.
+    # Espejo parquet FIEL (misma regla que historico_byma._pick_source, en
+    # `espejo.espejo_valido`: firma del Excel en el sidecar, o mtime estricto
+    # si no hay firma): leerlo en vez del Excel — 28 ms vs ~18 s de read_excel
+    # con un año de base, todo con el GIL tomado en plena app. Antes había 2 s
+    # de gracia: una corrección a mano justo después del guardado (o un Excel
+    # sincronizado por OneDrive con mtime viejo) se ignoraba y el próximo
+    # guardado la pisaba (auditoría R06).
+    from backend.services import espejo
     pq_fresh = os.path.splitext(xlsx_path)[0] + ".parquet"
     try:
-        # Gracia de 2 s (antes 60): el writer re-estampa el mtime del espejo
-        # después del xlsx, así que en el tándem normal el parquet nunca es más
-        # viejo; sólo cubre el orden/mtime grueso de OneDrive. Con 60 s una
-        # corrección a mano en el Excel dentro del minuto se ignoraba y el
-        # próximo guardado la pisaba.
-        if os.path.isfile(pq_fresh) and os.path.getmtime(pq_fresh) >= os.path.getmtime(xlsx_path) - _PQ_GRACIA_S:
+        if espejo.espejo_valido(pq_fresh, xlsx_path):
             prev = pd.read_parquet(pq_fresh)
             prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
             _apartar_si_corrupto(xlsx_path)     # evidencia, como el camino lento
@@ -647,11 +646,17 @@ def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
         df_last.to_excel(tmp, index=False)
     os.replace(tmp, xlsx_path)
     # El espejo tiene que quedar NO más viejo que el xlsx (regla de lectura
-    # de _pick_source / _leer_base): re-estampar su mtime después del replace.
+    # sin firma de _pick_source / _leer_base): re-estampar su mtime después
+    # del replace…
     try:
         os.utime(pq_path, None)
     except OSError:
         pass
+    # …y dejar la FIRMA del xlsx recién escrito junto al espejo: la próxima
+    # lectura sabe que este parquet es copia de ESTE Excel; cualquier cambio
+    # posterior del Excel (mtime o tamaño) hace ganar al Excel.
+    from backend.services import espejo
+    espejo.marcar_espejo(pq_path, xlsx_path)
 
     return {"total_rows": len(df_last), "xlsx": xlsx_path, "parquet": pq_path,
             "consolidados": consolidados}
@@ -930,10 +935,111 @@ def build_fx_row() -> Optional[Dict[str, Any]]:
             "caucion_usd_monto": (cauc_usd or {}).get("monto")}
 
 
+# Columnas de la fila FX que van JUNTAS: una caución es (plazo, TNA, VWAP,
+# monto) de UN instrumento. Al mergear dos guardados del mismo día el grupo
+# se toma entero del guardado nuevo cuando trae la caución (plazo + TNA), o
+# se conserva entero del viejo — nunca columna por columna (auditoría R08:
+# el VWAP de la caución a 1 día quedaba pegado a la TNA de la de 3 días).
+_FX_GRUPOS = (("caucion_plazo_d", "caucion_tna", "caucion_tna_vwap", "caucion_monto"),
+              ("caucion_usd_plazo_d", "caucion_usd_tna", "caucion_usd_tna_vwap", "caucion_usd_monto"))
+_FX_EN_GRUPO = frozenset(c for g in _FX_GRUPOS for c in g)
+
+
+def _nulo(v: Any) -> bool:
+    """None / NaN / NaT / pd.NA (lo que venga de Excel o parquet)."""
+    if v is None:
+        return True
+    try:
+        import numpy as np
+        import pandas as pd
+        r = pd.isna(v)
+        return bool(r) if isinstance(r, (bool, np.bool_)) else False
+    except Exception:  # noqa: BLE001 — tipos raros: no es nulo
+        return False
+
+
+def _merge_fila_fx(vieja: Optional[Dict[str, Any]], nueva: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge de dos filas FX del MISMO día: escalares (CCL, MEP, canje, A3500,
+    base) por columna con el último valor no nulo; cada grupo de caución
+    entero desde la fila nueva si trae plazo + TNA, si no entero desde la
+    vieja. Un segundo guardado del día completa lo que falta y nunca pisa con
+    vacío lo ya guardado — ni mezcla plazos."""
+    if vieja is None:
+        return dict(nueva)
+    out = dict(vieja)
+    for col, v in nueva.items():
+        if col not in _FX_EN_GRUPO and not _nulo(v):
+            out[col] = v
+    for grupo in _FX_GRUPOS:
+        plazo, tna = grupo[0], grupo[1]
+        if not _nulo(nueva.get(plazo)) and not _nulo(nueva.get(tna)):
+            for col in grupo:
+                out[col] = nueva.get(col)
+        else:
+            for col in grupo:
+                if col not in out:
+                    out[col] = None
+    return out
+
+
+def _apartar_fx_ilegible(path: str, exc: BaseException) -> None:
+    """Copia ilegible del historial FX: se aparta como .corrupto-<fecha>
+    (evidencia, nunca se borra) para que el write de salida regenere una
+    limpia sin pisar lo que hubiera adentro."""
+    marca = _now().strftime("%Y%m%d-%H%M%S")
+    respaldo = f"{path}.corrupto-{marca}"
+    try:
+        os.replace(path, respaldo)
+        logger.warning("[historico_writer] historial FX ilegible (%s: %s) — apartado como %s",
+                       os.path.basename(path), exc, os.path.basename(respaldo))
+    except OSError as exc_mv:
+        raise RuntimeError(
+            f"El historial FX {path} está ilegible ({exc}) y no se pudo apartar ({exc_mv}) "
+            "— ¿archivo abierto en Excel? Cerralo y reintentá.") from exc_mv
+
+
+def _leer_fx_previo(xlsx: str, pq: str, pd) -> Optional["Any"]:
+    """Historial FX existente. Fuente: el espejo parquet si es copia fiel del
+    Excel (`espejo.espejo_valido`), si no el Excel (más nuevo / corregido a
+    mano: auditoría R06/B16); si la elegida no se puede leer, la otra. Si hay
+    archivos pero NINGUNO se puede leer → RuntimeError: guardar igual sería
+    pisar la historia con una sola fila (auditoría R07/B15)."""
+    from backend.services import espejo
+
+    hay_x, hay_p = os.path.isfile(xlsx), os.path.isfile(pq)
+    if not hay_x and not hay_p:
+        return None
+    if hay_p and espejo.espejo_valido(pq, xlsx):
+        orden = [(pq, pd.read_parquet), (xlsx, pd.read_excel)]
+    else:
+        orden = [(xlsx, pd.read_excel), (pq, pd.read_parquet)]
+    orden = [(p, r) for p, r in orden if os.path.isfile(p)]
+    errores = []
+    for path, reader in orden:
+        try:
+            prev = reader(path)
+        except Exception as exc:  # noqa: BLE001
+            errores.append((path, exc))
+            continue
+        for p_mal, e_mal in errores:
+            if p_mal == xlsx:
+                _apartar_fx_ilegible(p_mal, e_mal)     # el parquet ilegible se regenera al escribir
+        if len(errores):
+            logger.warning("[historico_writer] historial FX: %s ilegible — leído de %s",
+                           ", ".join(os.path.basename(p) for p, _ in errores), os.path.basename(path))
+        return prev
+    detalle = "; ".join(f"{os.path.basename(p)}: {e}" for p, e in errores)
+    raise RuntimeError(
+        f"El historial FX existe pero no se pudo leer ninguna copia ({detalle}). "
+        "NO guardo para no pisarlo: restaurá el xlsx desde el Historial de versiones "
+        "de OneDrive o apartá los archivos y reintentá.")
+
+
 def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
     """Appendea la fila FX del día a Delta - historico_fx (xlsx + espejo
-    parquet): dedup por fecha keep-last, escritura atómica y reintentos ante
-    lock — la misma solidez que la base grande, en miniatura."""
+    parquet firmado): merge por día (escalares por columna, caución por
+    grupo), escritura atómica y reintentos ante lock — la misma solidez que
+    la base grande, en miniatura. Con el historial ilegible NO escribe."""
     import pandas as pd
 
     fila = build_fx_row()
@@ -942,25 +1048,24 @@ def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
         return None
     xlsx = os.path.join(hist_dir, FX_FILENAME)
     pq = os.path.splitext(xlsx)[0] + ".parquet"
-    prev = None
-    for path, reader in ((pq, pd.read_parquet), (xlsx, pd.read_excel)):
-        if os.path.exists(path):
-            try:
-                prev = reader(path)
-                break
-            except Exception as exc:  # noqa: BLE001 — un FX ilegible no frena el cierre
-                logger.warning("[historico_writer] historial FX ilegible (%s): %s — "
-                               "pruebo la otra copia / re-arranco desde hoy", path, exc)
-    df = pd.DataFrame([fila])
+    prev = _leer_fx_previo(xlsx, pq, pd)
+    # Merge por día en orden (las filas previas pueden traer duplicados de
+    # versiones anteriores): dict fecha → fila mergeada.
+    acumulado: Dict[Any, Dict[str, Any]] = {}
     if prev is not None and len(prev):
+        prev = prev.copy()
         prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
-        df = pd.concat([prev, df], ignore_index=True)
-    # Dedup por fecha POR COLUMNA (último valor no nulo), no por fila: un
-    # segundo guardado del mismo día (recaptura, botón manual, reinicio)
-    # actualiza lo que trae y NO pisa con vacío lo que ya estaba — antes un
-    # autosave sin caución borraba la caución guardada más temprano.
-    df = (df.groupby("fecha_hoy", as_index=False, sort=True).last()
-            .sort_values("fecha_hoy").reset_index(drop=True))
+        for r in prev.to_dict("records"):
+            if _nulo(r.get("fecha_hoy")):          # fila sin fecha (Excel a mano): no es un día
+                continue
+            acumulado[r["fecha_hoy"]] = _merge_fila_fx(acumulado.get(r["fecha_hoy"]), r)
+    fila = dict(fila)
+    fila["fecha_hoy"] = pd.to_datetime(fila["fecha_hoy"]).date()
+    acumulado[fila["fecha_hoy"]] = _merge_fila_fx(acumulado.get(fila["fecha_hoy"]), fila)
+    columnas = list(fila.keys()) + [c for r in acumulado.values() for c in r if c not in fila]
+    columnas = list(dict.fromkeys(columnas))
+    df = pd.DataFrame([acumulado[k] for k in sorted(acumulado)], columns=columnas)
+    df = df.reset_index(drop=True)
     for i in range(len(_LOCK_ESPERAS) + 1):
         try:
             tmp = xlsx + ".tmp.xlsx"
@@ -973,14 +1078,18 @@ def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
             logger.warning("[historico_writer] FX lockeado (%s) — reintento en %.0f s",
                            exc, _LOCK_ESPERAS[i])
             time.sleep(_LOCK_ESPERAS[i])
+    from backend.services import espejo
     try:
         mirror = df.copy()
-        mirror["ccl_base"] = mirror["ccl_base"].astype("string")
+        if "ccl_base" in mirror.columns:
+            mirror["ccl_base"] = mirror["ccl_base"].astype("string")
         tmp_pq = pq + ".tmp"
         mirror.to_parquet(tmp_pq, index=False)
         os.replace(tmp_pq, pq)
+        espejo.marcar_espejo(pq, xlsx)
     except Exception as exc:  # noqa: BLE001 — el xlsx ya quedó bien
         logger.warning("[historico_writer] espejo parquet FX no guardado: %s", exc)
+        espejo.olvidar_firma(pq)              # el espejo viejo ya no es copia de este Excel
     return {"filas": len(df), "xlsx": xlsx}
 
 

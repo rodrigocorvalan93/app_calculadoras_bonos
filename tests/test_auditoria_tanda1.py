@@ -203,8 +203,22 @@ def test_f08_excel_corregido_gana_al_espejo(tmp_path) -> None:
     prev = hw._leer_base(xlsx, pd)
     assert set(prev["Last Price"]) == {555.0}
     assert hb._pick_source(xlsx)[1] == "xlsx"
-    os.utime(pq, (now - 1, now - 1))                  # tándem normal (1 s): el espejo sigue valiendo
+    # Tanda 4 (R06): ya no hay 2 s de gracia. Con el espejo 1 s más viejo que
+    # el Excel corregido sigue mandando el Excel; el espejo vuelve a valer
+    # recién cuando lleva la FIRMA de ese Excel (lo que hace el writer /
+    # _regen_parquet después de escribir los dos).
+    from backend.services import espejo
+    os.utime(pq, (now - 1, now - 1))
+    assert hb._pick_source(xlsx)[1] == "xlsx"
+    espejo.marcar_espejo(pq, xlsx)
     assert hb._pick_source(xlsx)[1] == "parquet"
+    # OneDrive trae un Excel editado en otra máquina con mtime VIEJO (preservado)
+    # pero distinto contenido: la firma (mtime + tamaño) no coincide → Excel.
+    df["Last Price"] = 777.0
+    df.to_excel(xlsx, index=False)
+    os.utime(xlsx, (now - 120, now - 120))
+    assert hb._pick_source(xlsx)[1] == "xlsx"
+    assert set(hw._leer_base(xlsx, pd)["Last Price"]) == {777.0}
 
 
 # ── F16 · entradas inválidas → 400 con explicación, no 500 ──────────────────

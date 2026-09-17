@@ -74,13 +74,22 @@ async def login_submit(request: Request, username: str = Form(...),
                        no_superuser=not auth.has_any_superuser())
     # PBKDF2 (~50 ms, GIL-bound) fuera del event loop: en el hilo del handler
     # bloquearía /market/seq y todos los paneles live de los demás usuarios.
+    # La versión de sesión y el uid se capturan ANTES de verificar: si la
+    # clave cambia mientras se verifica la vieja (reset simultáneo, auditoría
+    # R04/B17), la versión ya no coincide y el login se rechaza — antes se
+    # emitía una cookie con la versión NUEVA a partir de la clave VIEJA.
+    sv0, uid0 = auth.session_version(username), auth.session_uid(username)
     loop = asyncio.get_running_loop()
     ok = await loop.run_in_executor(None, auth.verify_password, username, password)
+    if ok and (auth.session_version(username) != sv0 or auth.session_uid(username) != uid0):
+        ok = False
     if ok:
         _login_fails.pop(ip, None)                 # sesión limpia: reset del contador
         request.session["user"] = username.strip().lower()
-        # versión de sesión: un cambio/reset de clave posterior la invalida
-        request.session["sv"] = auth.session_version(username)
+        # versión de sesión: un cambio/reset de clave posterior la invalida;
+        # uid: la cuenta concreta (borrar + recrear el nombre = otra cuenta)
+        request.session["sv"] = sv0
+        request.session["uid"] = uid0
         return RedirectResponse(url=_safe_next(next), status_code=303)
     _login_fails[ip].append(time.time())
     if len(_login_fails) > 256:

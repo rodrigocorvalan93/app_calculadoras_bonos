@@ -128,10 +128,26 @@ ret / vector_ref`; `historico_byma.ref_5d` (5D % de Mercado) lo usa cuando
 está cargado. Backfill desde la base: `cierres.importar_base()` (automático en
 el warmup del writer si no hay particiones). Nada de esto corre en un request.
 
+**Espejo parquet de una base Excel** (`services/espejo.py`, stdlib puro —
+también lo usa `bymaapi.py`): el `.parquet` vale SÓLO si es copia fiel del
+xlsx. El writer / `_regen_parquet` / bymaapi dejan un sidecar
+`<base>.parquet.src.json` con la firma (mtime ns + tamaño) del Excel del que
+salió; `espejo_valido(pq, xlsx)` exige que la firma actual coincida exacto y,
+sin sidecar, mtime ESTRICTO (ya no hay 2 s de gracia). Cualquier cambio del
+Excel (corrección a mano, OneDrive con mtime viejo) hace ganar al Excel y el
+espejo se regenera. Lectores: `historico_byma._pick_source`,
+`historico_writer._leer_base`, `fx_hist._path`, `_leer_fx_previo`.
+
 **Series diarias FX + caución** (`Delta - historico_fx`, `_guardar_fx`): UNA
-fila por día que se mergea POR COLUMNA (último valor no nulo) — un segundo
-guardado del día (recaptura, botón manual) completa lo que falta y nunca pisa
-con vacío lo ya guardado. La caución o/n sale de `cauciones.hist_row`: pick en
+fila por día que se mergea así: escalares (CCL, MEP, canje, A3500) POR COLUMNA
+(último valor no nulo); cada caución POR GRUPO (`_FX_GRUPOS`: plazo + TNA +
+VWAP + monto entran juntos desde el guardado que trae plazo+TNA, o se conserva
+entero el anterior — nunca se mezcla el VWAP de un plazo con la TNA de otro).
+Un segundo guardado del día (recaptura, botón manual) completa lo que falta y
+nunca pisa con vacío lo ya guardado. Fuente previa = espejo válido o el Excel
+(más nuevo); si hay archivos y NINGUNO se puede leer, `_guardar_fx` aborta
+con RuntimeError (no pisa la historia); un xlsx ilegible con espejo sano se
+aparta como `.corrupto-<fecha>`. La caución o/n sale de `cauciones.hist_row`: pick en
 vivo del riel o, si a la hora del autosave el store ya no la tiene como "de
 hoy", el último pick válido visto hoy (`_ULTIMO_HOY`, lo alimenta `rail_pick`
 en cada refresh del riel). El autosave loguea qué caución guardó y, si no hay,
@@ -234,20 +250,44 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
   para el actual y se publica (`primary_ws.set_ws_client`, bajo
   `conexion._swap_lock`); un login fallido no toca la conexión de la mesa.
   Cada swap sube `primary_ws.context_version()`: los tickets la guardan
-  (`ctx_version`) y `oms.place` rechaza los de otro contexto; los caches de
-  comitentes e instrumentos la llevan en la key.
+  (`ctx_version`, también en CADA hija de una multiorden) y `oms.place` la
+  re-chequea al entrar Y justo antes de transmitir (después del audit / del
+  resolve del instrumento) — un swap en el medio da `rechazada_contexto`; los
+  caches de comitentes e instrumentos la llevan en la key.
 - **Estados de orden** (`oms.place`): sólo `status == "OK"` + `order.clientId`
   es ENVIADA; un JSON de rechazo es `live_rechazo_broker` (RECHAZADA (broker));
-  un timeout/corte DESPUÉS de mandar es `live_desconocida` (DESCONOCIDA: la
-  orden PUDO entrar — no reenviar a ciegas) y se reconcilia contra
-  `rest/order/actives` (`_reconciliar_desconocida` → `live_estado` o
-  `live_desconocida_sin_rastro`). ConnectError = nunca salió = ERROR.
+  un timeout/corte DESPUÉS de mandar, un HTTP 5xx o un cuerpo vacío/no-JSON
+  (`primary_ws.BrokerHTTPError` ≥ 500 / `BrokerRespuestaInvalida`) es
+  `live_desconocida` (DESCONOCIDA: la orden PUDO entrar — no reenviar a
+  ciegas). ConnectError / 4xx = nunca se procesó = ERROR. La reconciliación
+  (`_reconciliar_desconocida`) sólo afirma lo que la evidencia permite:
+  consulta `rest/order/all` (lista completa del día) y `actives`; una orden con
+  los mismos términos cuenta como ESTE intento sólo si su `transactTime` es
+  posterior a `enviada_ts` (margen 5 s) → `live_estado`; igual pero sin hora →
+  `live_desconocida_posible` (sigue DESCONOCIDA, con el id); no está en la lista
+  COMPLETA → `live_desconocida_sin_rastro` ("NO ENTRÓ"); si `all` no respondió
+  → `live_desconocida_no_verificable` (DESCONOCIDA). `oms.cancel`: OK =
+  "CANCEL ACEPTADA" (el estado final lo confirma el seguimiento), JSON de
+  rechazo = "CANCEL RECHAZADA" (la orden sigue viva), excepción = "CANCEL
+  ERROR" — nunca CANCELADA sin confirmación del broker.
 - **Versión de sesión** (`auth.session_version`, campo `sv` del usuario): la
   cookie la lleva y el middleware la compara en cada request (~1 µs). Sube con
   cambio/reset de clave y con "cerrar sesiones" en /admin → las cookies
   anteriores dejan de autenticar. El token de Excel es independiente.
   `auth.reset_with_token` valida y cambia bajo el mismo lock (token de un uso
-  aun con dos POST simultáneos).
+  aun con dos POST simultáneos). **uid de cuenta** (`auth.session_uid`, campo
+  `uid`; `ensure_bootstrapped` lo completa en registros viejos): también viaja
+  en la cookie y se compara — borrar y recrear un usuario con el mismo nombre
+  es otra cuenta y las cookies del anterior no entran; cookies sin `uid` se
+  rechazan. El login captura `sv`/`uid` ANTES de verificar la clave y rechaza si
+  cambiaron durante la verificación (un reset simultáneo no regala la versión
+  nueva a una verificación contra la clave vieja).
+- **YAS single-flight** (`routes/yas._single_flight`): recálculos idénticos en
+  vuelo (mismo bono/modo/valor/settle/VN/overrides) comparten UN cálculo del
+  pool (Future con `shield`); la tenencia por fondos visibles sigue por request.
+  `curves._rows_en_seq` valida su cache por seq del feed Y
+  `pricing.indices_token()` (huella de A3500/CER/UVA/TAMAR/BADLAR + proyecciones):
+  un refresh de índices sin tick re-arma las filas de Mercado/Curvas.
 - **Readiness**: `/readyz` = 200/503 (universo cargado) y `/healthz` lleva
   `ready`; `deploy/deploy.ps1` espera `ready` y chequea `$LASTEXITCODE` de
   git/pip/nssm (un paso fallido aborta sin reiniciar el servicio).
