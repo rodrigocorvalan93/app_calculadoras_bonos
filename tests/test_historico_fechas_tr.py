@@ -162,6 +162,50 @@ async def test_http_tab_curva_fechas_y_metrica_precio(base_sintetica) -> None:
 
 
 @pytest.mark.asyncio
+async def test_presets_de_ventana_curva_fechas(base_sintetica) -> None:
+    """Chips 1 sem / 1 mes / … / 1 año: Fecha 1 = última rueda, Fecha 2 =
+    última rueda ≤ N atrás (rueda REAL, no un feriado), 3/4 vacías y TR en la
+    misma ventana; los que la base no alcanza salen deshabilitados; el activo
+    se infiere de las fechas (sin estado oculto). Sin JS: botones submit."""
+    from backend.main import app
+    from backend.routes.historico import _fecha_atras
+
+    # meses calendario con el día recortado al fin de mes; "1 sem" = 7 días
+    assert _fecha_atras("2026-03-31", meses=1) == "2026-02-28"
+    assert _fecha_atras("2026-05-31", meses=3) == "2026-02-28"
+    assert _fecha_atras("2028-02-29", meses=12) == "2027-02-28"
+    assert _fecha_atras("2026-01-15", meses=2) == "2025-11-15"
+    assert _fecha_atras("2026-09-16", dias=7) == "2026-09-09"
+    # rueda real ≤ objetivo (bisect sobre las ruedas de la base)
+    assert historico_byma.rueda_hasta(_HOY.isoformat()) == _HOY.isoformat()
+    assert historico_byma.rueda_hasta((_HOY - timedelta(days=7)).isoformat()) == _PREV.isoformat()
+    assert historico_byma.rueda_hasta((_PREV - timedelta(days=1)).isoformat()) is None
+    assert historico_byma.rueda_hasta(None) is None
+    hoy, prev = _HOY.isoformat(), _PREV.isoformat()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/historicos/curva-fechas", params={"curve": "lecap", "preset": "1s",
+                                                            "f3": hoy, "trd1": hoy, "trd2": hoy})
+        assert r.status_code == 200
+        assert f'name="f1" value="{hoy}"' in r.text and f'name="f2" value="{prev}"' in r.text
+        assert 'name="f3" value=""' in r.text and 'name="f4" value=""' in r.text   # el preset deja 2 curvas
+        assert f'name="trd1" value="{prev}"' in r.text and f'name="trd2" value="{hoy}"' in r.text
+        assert 'value="1s" class="hc-preset active"' in r.text                    # activo por coincidencia de fechas
+        assert 'value="1a" class="hc-preset" disabled' in r.text                  # la base (1 mes) no llega a 1 año
+        assert "TR realizado" in r.text and "<svg" in r.text
+        # las mismas fechas a mano (sin preset) siguen marcando el chip; un
+        # preset que la base no alcanza se ignora y quedan las fechas del form
+        r2 = await ac.get("/historicos/curva-fechas", params={"curve": "lecap", "f1": hoy, "f2": prev})
+        assert 'value="1s" class="hc-preset active"' in r2.text
+        r3 = await ac.get("/historicos/curva-fechas", params={"curve": "lecap", "preset": "1a", "f1": hoy, "f2": hoy})
+        assert r3.status_code == 200 and "hc-preset active" not in r3.text
+        assert f'name="f2" value="{hoy}"' in r3.text
+        # default sin fechas: última rueda vs 1 mes atrás (o la primera rueda si
+        # la base es más corta) — acá la base tiene 1 mes justo → la primera rueda
+        r4 = await ac.get("/historicos/curva-fechas", params={"curve": "lecap"})
+        assert f'name="f1" value="{hoy}"' in r4.text and f'name="f2" value="{prev}"' in r4.text
+
+
+@pytest.mark.asyncio
 async def test_csv_export_que_paso(base_sintetica) -> None:
     """Export CSV es-AR del resumen: ';' separador, coma decimal, BOM y
     attachment — sale del mismo cache de weekly_segments que la tabla."""

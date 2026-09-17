@@ -12,6 +12,7 @@ filtra por rango de fechas y arma el SVG — sin pandas en el path caliente.
 """
 from __future__ import annotations
 
+import bisect
 import logging
 import os
 import threading
@@ -139,7 +140,8 @@ def _build(df) -> Dict[str, Any]:
     bounds = (min(all_dates), max(all_dates)) if all_dates else (None, None)
     return {"loaded": bool(by_code), "error": None if by_code else "Excel sin filas válidas",
             "by_code": by_code, "bounds": bounds, "n_codes": len(by_code),
-            "n_dates": len(all_dates), "n_obs": n_obs, "last_update": bounds[1]}
+            "n_dates": len(all_dates), "n_obs": n_obs, "last_update": bounds[1],
+            "dates_all": sorted(all_dates)}          # ruedas de la base (ISO, ascendente)
 
 
 # Contador monótono de cargas: token de identidad para caches derivados
@@ -237,6 +239,19 @@ def meta() -> Dict[str, Any]:
     return {"loaded": c["loaded"], "error": c["error"], "n_codes": c["n_codes"],
             "n_dates": c["n_dates"], "n_obs": c["n_obs"], "last_update": c["last_update"],
             "dmin": c["bounds"][0], "dmax": c["bounds"][1]}
+
+
+def rueda_hasta(target_iso: Optional[str]) -> Optional[str]:
+    """Última rueda de la base ≤ `target_iso` (ISO), o None si la base empieza
+    después. bisect sobre la lista ordenada de ruedas: µs, sin recorrer bonos.
+    Lo usan los presets de "Curva por fecha" (1 sem / 1 mes / … atrás) para
+    caer en una rueda real y no en un fin de semana o feriado."""
+    c = ensure_loaded()
+    fechas = c.get("dates_all") or []
+    if not target_iso or not fechas:
+        return None
+    i = bisect.bisect_right(fechas, str(target_iso)[:10])
+    return fechas[i - 1] if i else None
 
 
 def curves_with_history(desde: Optional[str] = None, hasta: Optional[str] = None,

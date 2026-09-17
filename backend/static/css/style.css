@@ -1519,6 +1519,21 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 }
 .cmp-chip b { margin-left: 4px; opacity: .55; font-weight: 400; cursor: pointer; }
 .cmp-chip b:hover { opacity: 1; color: var(--red); }
+/* Históricos · curva por fecha: presets de ventana (1 sem … 1 año). Botones
+   submit del form (name=preset): el server fija Fecha 1/2 a ruedas reales. */
+.hc-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; font-size: 11px; }
+.hc-presets > .muted { margin-right: 2px; }
+.hc-preset {
+  font: inherit; font-size: 11px; line-height: 1.4; padding: 1px 8px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 10px; background: rgba(255, 255, 255, .03); color: var(--text);
+}
+.hc-preset:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.hc-preset.active {
+  border-color: var(--accent); color: var(--accent); font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.hc-preset:disabled { opacity: .38; cursor: not-allowed; }
+.hc-presets .hc-presets-hint { margin-left: 4px; font-size: 10.5px; }
 /* Históricos · curva por fecha: hover sutil (los demás bonos se atenúan, el
    elegido queda al frente con su línea punteada), etiquetas discretas de la
    última fecha, bonos apagados desde la leyenda. */
