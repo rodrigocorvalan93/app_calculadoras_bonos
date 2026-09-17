@@ -24,6 +24,17 @@
               {% for p, lbl in [("todos","Todos"),("base","Base"),("proy","Proy (j)")] %}<option value="{{ p }}" {% if p == proy %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
             </select></label>
         </div>
+        {# Presets de ventana: botones submit con name=preset (htmx manda el que
+           disparó el submit). El server pone Fecha 1 = última rueda y Fecha 2 =
+           última rueda ≤ N atrás (rueda real, no un feriado), vacía 3/4 y
+           alinea el TR. Activo = el preset cuyas fechas coinciden con el form. #}
+        <div class="hc-presets" role="group" aria-label="Ventana rápida">
+          <span class="muted">Ventana:</span>
+          {% for p in presets %}
+          <button type="submit" name="preset" value="{{ p.key }}" class="hc-preset{% if p.key == preset_activo %} active{% endif %}"{% if not p.f2 %} disabled title="La base empieza el {{ hist_meta.dmin | ar_date }}: no llega a {{ p.objetivo | ar_date }}"{% else %} title="Fecha 1 = última rueda ({{ hist_meta.dmax | ar_date }}) · Fecha 2 = última rueda ≤ {{ p.objetivo | ar_date }} → {{ p.f2 | ar_date }} · TR en la misma ventana"{% endif %}>{{ p.label }}</button>
+          {% endfor %}
+          <span class="muted hc-presets-hint">última rueda vs N atrás · con 3 o 4 curvas, cargá las fechas a mano</span>
+        </div>
         <div class="row-fields">
           {# Tramo de duration (como en Gráficos): el fit NSS y los puntos se
              limitan al rango — p. ej. 0,1 a 3 años. Excluir saca outliers del

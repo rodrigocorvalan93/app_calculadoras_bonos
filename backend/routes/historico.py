@@ -276,6 +276,39 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480,
             "width": width, "height": height, "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph}
 
 
+# Presets de ventana de "Curva por fecha": Fecha 1 = última rueda de la base,
+# Fecha 2 = última rueda ≤ (última − N) — meses calendario (mismo día del mes,
+# recortado al fin de mes), "1s" = 7 días. Son botones submit con name=preset
+# (htmx manda el botón que disparó el submit): cero JS, cero estado oculto.
+_HC_PRESETS = (("1s", "1 sem", 7, 0), ("1m", "1 mes", 0, 1), ("2m", "2 meses", 0, 2),
+               ("3m", "3 meses", 0, 3), ("6m", "6 meses", 0, 6), ("1a", "1 año", 0, 12))
+
+
+def _fecha_atras(iso: str, dias: int = 0, meses: int = 0) -> str:
+    """`iso` − (días | meses calendario). 31/03 − 1 mes = 28/02 (día recortado)."""
+    import calendar
+    from datetime import date as _date, timedelta
+
+    d = _date.fromisoformat(str(iso)[:10])
+    if meses:
+        y, m0 = divmod(d.year * 12 + d.month - 1 - meses, 12)
+        d = d.replace(year=y, month=m0 + 1, day=min(d.day, calendar.monthrange(y, m0 + 1)[1]))
+    if dias:
+        d -= timedelta(days=dias)
+    return d.isoformat()
+
+
+def _hc_presets(fecha_max: Optional[str]) -> List[Dict[str, Any]]:
+    """Chips con la rueda REAL que usaría cada preset como Fecha 2 (`f2` None =
+    la base no llega tan atrás → deshabilitado). 6 bisects: µs por request."""
+    out: List[Dict[str, Any]] = []
+    for key, label, dias, meses in _HC_PRESETS:
+        objetivo = _fecha_atras(fecha_max, dias, meses) if fecha_max else None
+        out.append({"key": key, "label": label, "objetivo": objetivo,
+                    "f2": historico_byma.rueda_hasta(objetivo) if objetivo else None})
+    return out
+
+
 @router.get("/historicos/curva-fechas", response_class=HTMLResponse)
 async def historicos_curva_fechas(
     request: Request,
@@ -283,6 +316,7 @@ async def historicos_curva_fechas(
     f1: str = "", f2: str = "", f3: str = "", f4: str = "",
     trd1: str = "", trd2: str = "",
     dmin: str = "", dmax: str = "", exclude: str = "",
+    preset: str = "",
 ) -> HTMLResponse:
     """Pestaña 'Curva por fecha': la misma curva fotografiada en hasta 4 fechas
     (Duration vs métrica, como el Excel del usuario) + total return REALIZADO
@@ -291,8 +325,6 @@ async def historicos_curva_fechas(
     (tramo de duration, es-AR) y `exclude` (códigos a sacar del fit) se
     aplican encima, como en Gráficos. La tabla TR corre en executor y se
     cachea (el pasado no cambia)."""
-    from datetime import timedelta
-
     from backend.locale_ar import parse_ar_num
     from backend.services import curves as curves_svc, tr_realizado
 
@@ -314,19 +346,29 @@ async def historicos_curva_fechas(
     labels = {cv.key: cv.label for cv in curves_svc.list_curves()}
     sel = curve if curve in keys else (keys[0] if keys else None)
 
-    # Defaults: hoy (última fecha de la base) y ~1 mes atrás; TR entre ambas.
-    # (`fecha_max`, no `dmax`: ese nombre es el tramo de duration del form.)
+    # Defaults: hoy (última rueda de la base) y 1 mes atrás (misma regla que el
+    # preset "1 mes", ajustada a rueda real; base más corta → su primera rueda);
+    # TR entre ambas. (`fecha_max`, no `dmax`: ese nombre es el tramo del form.)
     fecha_max = meta.get("dmax")
+    presets = _hc_presets(fecha_max)
+    elegido = next((p for p in presets if p["key"] == preset and p["f2"]), None)
+    if elegido:
+        # Preset: última rueda vs rueda ≤ N atrás — 2 curvas (las fechas 3/4 se
+        # vacían; para 3 o 4 curvas se cargan a mano) y TR en la misma ventana.
+        f1, f2, f3, f4 = fecha_max, elegido["f2"], "", ""
+        trd1, trd2 = f2, f1
     if fecha_max and not f1:
         f1 = fecha_max
     if fecha_max and not f2:
-        try:
-            from datetime import date as _date
-            f2 = (_date.fromisoformat(fecha_max) - timedelta(days=30)).isoformat()
-        except ValueError:
-            f2 = ""
+        f2 = next((p["f2"] for p in presets if p["key"] == "1m"), None) or meta.get("dmin") or ""
+        if f2 == f1:
+            f2 = ""                       # base de una sola rueda: una curva sola
     trd1 = trd1 or f2 or ""
     trd2 = trd2 or f1 or ""
+    # Chip activo = el preset cuyas fechas coinciden con las del form; si el
+    # usuario toca una fecha a mano, ninguno queda marcado (no hay estado oculto).
+    preset_activo = next((p["key"] for p in presets
+                          if p["f2"] and f1 == fecha_max and f2 == p["f2"] and not f3 and not f4), "")
 
     fechas = [f for f in (f1, f2, f3, f4) if f]
     scatter = tr_tabla = None
@@ -347,6 +389,7 @@ async def historicos_curva_fechas(
                    curve_sel=sel, metric=metric, proy=proy,
                    f1=f1, f2=f2, f3=f3, f4=f4, trd1=trd1, trd2=trd2,
                    dmin=dmin, dmax=dmax, exclude=" ".join(excl),
+                   presets=presets, preset_activo=preset_activo,
                    scatter=scatter, tr=tr_tabla, hist_meta=meta)
 
 
