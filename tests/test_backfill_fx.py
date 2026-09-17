@@ -118,6 +118,7 @@ def test_dry_run_no_toca_nada(hist_app, capsys) -> None:
     out = capsys.readouterr().out
     assert plan["insertadas"] == 5 and plan["dry_run"] and "backups" not in plan
     assert "entrarían 5 fechas" in out and "dry-run: no se escribió nada" in out and "empalme:" in out
+    assert f"historial: {xlsx}" in out and "todavía no existe" not in out   # muestra QUÉ archivo tocaría
     assert (xlsx.read_bytes(), pq.read_bytes(), sorted(os.listdir(hist_app["dir"]))) == antes
 
 
@@ -203,6 +204,7 @@ def test_main_argentinadatos_con_red_simulada(tmp_path, monkeypatch, capsys) -> 
     assert bf.main(["--argentinadatos", "--destino", str(tmp_path), "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "entrarían 4 fechas" in out and "dry-run" in out and not (tmp_path / hw.FX_FILENAME).exists()
+    assert f"carpeta: {tmp_path}" in out and "todavía no existe: se crea" in out   # dónde escribiría
     assert bf.main(["--argentinadatos", "--destino", str(tmp_path)]) == 0
     assert (tmp_path / hw.FX_FILENAME).exists()
     assert bf.main(["--destino", str(tmp_path)]) == 2                       # sin fuente: ayuda
