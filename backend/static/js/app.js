@@ -1362,14 +1362,46 @@ window.lsSet = function (k, v) {
     if (!src) return;
     deliver(withBg(src, src.width, src.height), name, btn);
   }
-  // SVG: serializar con las var(--x) resueltas → <img> → canvas 2× → copia.
+  // Una imagen suelta no ve el CSS de la página: todo lo que el SVG toma de
+  // clases (.fut-chart .pa-band1 { fill: var(--accent); opacity: .14 }, .hc-*,
+  // estado hover/apagado) o de var(--x) se pierde y cae al default de SVG
+  // (relleno NEGRO, sin stroke, fuente serif) — el price action salía como una
+  // banda negra sin línea. Se copia el estilo CALCULADO (colores ya resueltos
+  // al tema activo) como style inline en un clon, sólo pintura + tipografía.
+  // Corre únicamente al click (~1 ms por cada 100 nodos): no toca el motor live.
+  var PAINT = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linecap',
+               'stroke-linejoin', 'stroke-opacity', 'opacity'];
+  var TEXT = ['font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing', 'text-anchor',
+              'dominant-baseline'];
+  var NO_RENDER = { title: 1, desc: 1, metadata: 1, defs: 1, style: 1, script: 1 };
+  function inlineComputed(svg, clone) {
+    var src = svg.querySelectorAll('*'), dst = clone.querySelectorAll('*');
+    for (var i = 0; i < src.length && i < dst.length; i++) {
+      var el = src[i], tag = el.tagName.toLowerCase();
+      if (NO_RENDER[tag]) continue;
+      var cs = getComputedStyle(el), st = dst[i].style, j;
+      if (cs.display === 'none') { st.display = 'none'; continue; }       // etiquetas apagadas
+      if (cs.visibility === 'hidden') { st.visibility = 'hidden'; continue; }
+      for (j = 0; j < PAINT.length; j++) st.setProperty(PAINT[j], cs.getPropertyValue(PAINT[j]));
+      if (tag === 'text' || tag === 'tspan') for (j = 0; j < TEXT.length; j++) st.setProperty(TEXT[j], cs.getPropertyValue(TEXT[j]));
+    }
+    var rs = getComputedStyle(svg);
+    clone.style.fontFamily = rs.fontFamily;
+    clone.style.fontSize = rs.fontSize;
+    clone.style.fontVariantNumeric = rs.fontVariantNumeric;
+  }
+  // SVG: clon con estilos calculados + var(--x) resueltas → <img> → canvas 2× → copia.
   function copySvg(svg, name, btn) {
-    var s = new XMLSerializer().serializeToString(svg);
-    s = s.replace(/var\(--([\w-]+)\)/g, function (m, v) { return cssVar('--' + v, '#888'); });
-    if (!/xmlns=/.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
     var r = svg.getBoundingClientRect();
     var w = Math.max(1, Math.round(r.width || svg.clientWidth || 800));
     var h = Math.max(1, Math.round(r.height || svg.clientHeight || 400));
+    var clone = svg.cloneNode(true);
+    try { inlineComputed(svg, clone); } catch (e) { /* sin estilos calculados: igual se copia */ }
+    clone.setAttribute('width', w);
+    clone.setAttribute('height', h);
+    var s = new XMLSerializer().serializeToString(clone);
+    s = s.replace(/var\(--([\w-]+)(?:\s*,\s*([^()]*))?\)/g, function (m, v, fb) { return cssVar('--' + v, (fb || '#888').trim()); });
+    if (!/xmlns=/.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
     var img = new Image();
     img.onload = function () {
       var c = withBg(null, w * 2, h * 2);
