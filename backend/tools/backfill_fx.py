@@ -258,6 +258,8 @@ def aplicar(hist_dir: str, externo: "Any", fuente: str, desde: Optional[date] = 
     nuevas = plan["nuevas"]
     plan["insertadas"] = int(len(nuevas))
     plan["dry_run"] = dry_run
+    plan["archivo"] = xlsx                                   # qué archivo se tocaría (también en dry-run)
+    plan["existia"] = bool(previo is not None and len(previo))
     if dry_run or not len(nuevas):
         return plan
     # Respaldo antes de tocar nada (evidencia; nunca se borra).
@@ -289,6 +291,7 @@ def aplicar(hist_dir: str, externo: "Any", fuente: str, desde: Optional[date] = 
 
 def _print_plan(plan: Dict[str, Any], fuente: str) -> None:
     r0, r1 = plan["externo_rango"]
+    print(f"historial: {plan['archivo']}" + ("" if plan.get("existia") else "  (todavía no existe: se crea)"))
     print(f"fuente {fuente}: {r0} → {r1}")
     if plan["primera_app"]:
         print(f"la app grabó {plan['n_app']} días: {plan['primera_app']} → {plan['ultima_app']}")
@@ -332,6 +335,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not hist_dir or not os.path.isdir(hist_dir):
         print("no encuentro la carpeta 'Delta Bases' (DELTA_HISTORICO_DIR / DELTA_BASES_DIR en secrets.txt, o --destino)")
         return 1
+    print(f"carpeta: {hist_dir}")
     try:
         if a.csv:
             fuente, externo = "csv", importar_csv(a.csv)

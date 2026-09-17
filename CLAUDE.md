@@ -161,7 +161,9 @@ Delta Bases): sólo inserta fechas ANTERIORES a la primera fila de la app (o
 días hábiles faltantes con `--huecos`), nunca pisa una fila existente, respalda
 xlsx+parquet a `*.bak-<fecha>` y marca `ccl_base = ext:<fuente>`. Acciones /
 CEDEARs: `backend.tools.backfill_acciones --byma` (BYMA Open Data; las filas
-de la app ganan).
+de la app ganan). `backfill_historico.bat` (raíz) corre los dos con el venv
+de `run_backend (CORRER APP).bat` (`%LOCALAPPDATA%\venvs\bonos`), con menú
+plan / escribir / acciones.
 
 ## Visual style (FastAPI rewrite)
 
