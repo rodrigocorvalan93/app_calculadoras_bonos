@@ -53,6 +53,12 @@ _MAX_CACHE_ENTRIES = 32     # querys distintas de ?codes= reales son un puñado
 
 _cache: Dict[str, Tuple[int, float, bytes]] = {}
 _cache_lock = threading.Lock()
+# Un productor por key: `_cache_lock` protege el dict, no el build. Sin esto,
+# N libros que llegaban en la misma ventana con la entrada vencida
+# reconstruían y serializaban N veces el mismo universo (auditoría E08); con
+# 2.000 símbolos son ~30 ms de GIL por build. Los que esperan leen el
+# resultado del productor al soltarse el lock (double-check).
+_build_locks: Dict[str, threading.Lock] = {}
 
 
 def _q(snap: mds.MarketSnapshot) -> Dict[str, Any]:
@@ -84,23 +90,34 @@ def _build(codes: Optional[FrozenSet[str]]) -> Dict[str, Any]:
     seq = store.seq()
     quotes: Dict[str, Dict[str, Any]] = {}
     extras: Dict[str, Any] = {}
-    for sym, snap in store.get_many(store.symbols()).items():
-        if snap is None:
-            continue
-        if sym.startswith("DLR/"):
-            continue                      # futuros: sección propia con tasas
-        parts = sym.split(" - ")
-        if len(parts) == 4 and parts[0] == "MERV":
-            code, plazo = parts[2], parts[3]
+    if codes:
+        # Filtro ?codes=: lookup directo de los símbolos pedidos (2 por
+        # especie) en vez de recorrer y copiar los ~2k del store para
+        # quedarse con un puñado (auditoría: el filtro escalaba con el
+        # universo, no con lo pedido). Sin extras: igual que antes.
+        from backend.services import symbols as syms
+        for code in sorted(codes):
             if code in ("PESOS", "DOLAR"):
-                continue                  # cauciones: sección propia por plazo
-            if plazo in ("CI", "24hs"):
-                if codes and code not in codes:
-                    continue
-                quotes.setdefault(code, {})[plazo] = _q(snap)
                 continue
-        if not codes:
-            extras[sym] = _q(snap)        # índices y símbolos crudos no estándar
+            for plazo in ("CI", "24hs"):
+                snap = store.get(syms.md_symbol(code, plazo))
+                if snap is not None:
+                    quotes.setdefault(code, {})[plazo] = _q(snap)
+    else:
+        for sym, snap in store.get_many(store.symbols()).items():
+            if snap is None:
+                continue
+            if sym.startswith("DLR/"):
+                continue                      # futuros: sección propia con tasas
+            parts = sym.split(" - ")
+            if len(parts) == 4 and parts[0] == "MERV":
+                code, plazo = parts[2], parts[3]
+                if code in ("PESOS", "DOLAR"):
+                    continue                  # cauciones: sección propia por plazo
+                if plazo in ("CI", "24hs"):
+                    quotes.setdefault(code, {})[plazo] = _q(snap)
+                    continue
+            extras[sym] = _q(snap)            # índices y símbolos crudos no estándar
 
     out: Dict[str, Any] = {"seq": seq, "ts": time.time(),
                            "quotes": quotes, "extras": extras}
@@ -162,24 +179,43 @@ def _build(codes: Optional[FrozenSet[str]]) -> Dict[str, Any]:
     return out
 
 
-def _snapshot_bytes(codes_key: str) -> bytes:
-    store = mds.get_store()
-    cur_seq = store.seq()
+def _snapshot_vigente(codes_key: str) -> Optional[bytes]:
+    """Bytes cacheados si siguen valiendo (ventana mínima de build o misma seq
+    dentro del TTL de quietud); None si hay que reconstruir."""
+    cur_seq = mds.get_store().seq()
     now = time.monotonic()
     with _cache_lock:
         ent = _cache.get(codes_key)
-        if ent is not None:
-            seq_b, at, body = ent
-            if (now - at) < _MIN_BUILD_INTERVAL or (seq_b == cur_seq and (now - at) < _STALE_TTL):
-                return body
-    codes = frozenset(c for c in codes_key.split(",") if c) if codes_key else None
-    data = _build(codes)
-    body = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+    if ent is not None:
+        seq_b, at, body = ent
+        if (now - at) < _MIN_BUILD_INTERVAL or (seq_b == cur_seq and (now - at) < _STALE_TTL):
+            return body
+    return None
+
+
+def _snapshot_bytes(codes_key: str) -> bytes:
+    body = _snapshot_vigente(codes_key)
+    if body is not None:
+        return body
     with _cache_lock:
-        if len(_cache) >= _MAX_CACHE_ENTRIES:
-            _cache.pop(next(iter(_cache)))
-        _cache[codes_key] = (data["seq"], time.monotonic(), body)
-    return body
+        lk = _build_locks.get(codes_key)
+        if lk is None:
+            lk = _build_locks[codes_key] = threading.Lock()
+    with lk:
+        body = _snapshot_vigente(codes_key)   # otro libro lo acaba de armar
+        if body is not None:
+            return body
+        codes = frozenset(c for c in codes_key.split(",") if c) if codes_key else None
+        data = _build(codes)
+        body = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+        with _cache_lock:
+            if len(_cache) >= _MAX_CACHE_ENTRIES:
+                viejo = next(iter(_cache))
+                _cache.pop(viejo)
+                if viejo != codes_key:
+                    _build_locks.pop(viejo, None)     # se va con su entrada
+            _cache[codes_key] = (data["seq"], time.monotonic(), body)
+        return body
 
 
 _health_flag_cache = {"at": 0.0, "flag": ""}

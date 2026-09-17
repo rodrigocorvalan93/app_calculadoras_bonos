@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from backend.cache import LockedTTLCache
+from backend.cache import AsyncSingleFlight, LockedTTLCache
 from backend.locale_ar import hoy_ba, parse_ar_num
 from backend.routes.curves import _rows_for, _row_pool
 from backend.services import bond_universe, escenario as esc, escenario_prefs, total_return as tr_svc
@@ -31,6 +31,7 @@ logger = logging.getLogger("backend.escenario")
 router = APIRouter(tags=["escenario"])
 
 _cache = LockedTTLCache(maxsize=32, ttl=20)
+_vuelo = AsyncSingleFlight()      # un solo cómputo en vuelo por key (los demás esperan sin worker)
 
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
@@ -298,15 +299,15 @@ async def escenario_table(
                                      infl_path=infl_seq, a3500_path=a3500_seq, tamar_path=tamar_seq)
                 for (cat, rows, y1m, fx) in prepared]
 
-    loop = asyncio.get_running_loop()
-    # Pre-chequeo del cache ANTES de ocupar un worker: N requests con la misma
-    # key entraban todos al pool y N−1 quedaban DURMIENDO sobre el compute-lock
-    # de LockedTTLCache adentro de _row_pool (8 workers compartidos con
+    # Pre-chequeo del cache ANTES de ocupar un worker y, en el miss, UN solo
+    # Future por key en el loop (`_vuelo`): N requests con la misma key entraban
+    # todos al pool y N−1 quedaban DURMIENDO sobre el compute-lock de
+    # LockedTTLCache adentro de _row_pool (8 workers compartidos con
     # Curvas/Mercado/book) — con ≥8 Escenarios concurrentes los paneles live
-    # dejaban de renderizar hasta que terminara el cómputo.
+    # dejaban de renderizar hasta que terminara el cómputo (auditoría E02).
     cats = _cache.get(key)
     if cats is None:
-        cats = await loop.run_in_executor(_row_pool, lambda: _cache.get_or_compute(key, _compute))
+        cats = await _vuelo.run(key, _row_pool, lambda: _cache.get_or_compute(key, _compute))
     chart = esc.chart_from_categories(cats)
 
     tea = (1.0 + tna / 365.0) ** 365 - 1.0

@@ -620,9 +620,18 @@ _ROWS_LOCKS: Dict[tuple, asyncio.Lock] = {}
 _ROWS_MAX = 64
 
 
-def _order_hash(codes) -> str:
+def _order_hash(codes, idx: Any = None) -> str:
+    """Huella del conjunto/orden de filas Y de los índices con los que se
+    valuaron (`pricing.indices_token()`): el cliente la manda en cada delta y
+    si no coincide recibe X-Full=1 (swap completo). Así un refresh de índices
+    sin tick del feed (proyección CER nueva, A3500 de la tarde) llega a la
+    tabla aunque ningún símbolo haya cambiado de seq — el delta sólo manda
+    filas cuyo símbolo tickeó (auditoría E01)."""
     import hashlib
-    return hashlib.blake2b(",".join(codes).encode("utf-8"), digest_size=6).hexdigest()
+    h = hashlib.blake2b(",".join(codes).encode("utf-8"), digest_size=6)
+    if idx is not None:
+        h.update(b"|" + repr(idx).encode("utf-8"))
+    return h.hexdigest()
 
 
 async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fuente: str,
@@ -652,7 +661,7 @@ async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fue
         rows, meta = await _rows_for(curve, plazo, only_quoting, leg, book=True, fuente=fuente)
         if _es_corp(curve):
             rows, meta = _vista_corp(rows, meta, q, mas)
-        ent = (seq, rows, meta, _order_hash(r["code"] for r in rows))
+        ent = (seq, rows, meta, _order_hash([r["code"] for r in rows], idx))
         if len(_ROWS_CACHE) >= _ROWS_MAX:
             viejo = next(iter(_ROWS_CACHE))
             _ROWS_CACHE.pop(viejo, None)

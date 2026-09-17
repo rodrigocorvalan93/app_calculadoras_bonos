@@ -307,6 +307,39 @@
       ]
     },
     {
+      "id": "MARGEN",
+      "name": "MARGEN",
+      "description": "Margen TNA (decimal) sobre el benchmark TAMAR / BADLAR de un bono a tasa variable, a un precio dado — el mismo 'Margen TNA' de la ficha YAS. Ej: =OMS.MARGEN(\"TTM26\";99,8). En un bono a tasa fija devuelve #N/A con el motivo.",
+      "result": {
+        "type": "number"
+      },
+      "parameters": [
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker de un floater (TAMAR / BADLAR)"
+        },
+        {
+          "name": "precio",
+          "type": "number",
+          "description": "Precio (opcional: vacío = last del mercado, puntual)",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom",
+          "optional": true
+        }
+      ]
+    },
+    {
       "id": "TICKET",
       "name": "TICKET",
       "description": "Ticket de operación (spill): VN, monto total, principal, interés, TIREA, TNA, TEM, duration y liquidación.",

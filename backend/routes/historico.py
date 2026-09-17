@@ -8,10 +8,11 @@ bloquear el event loop; después es cache en memoria.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from backend.services import fx_hist, historico, historico_byma, nss
 
@@ -300,15 +301,45 @@ def _unix(iso: str) -> Optional[int]:
         return None
 
 
+# Cuerpo JSON de /historicos/data memoizado por (serie, rango, versión de la
+# carga macro): la serie CER completa son ~9k puntos y el armado (parseo de
+# fechas + json) corría inline en el handler async, 120-250 ms con el loop
+# tomado — /market/seq y los paneles de todos esperaban (auditoría E04). Ahora
+# cada fecha se convierte UNA vez, el armado va al pool y el resultado se
+# sirve de memoria hasta que cambie la carga (refresh del backup BCRA).
+_DATA_MEMO: Dict[tuple, bytes] = {}
+_DATA_MEMO_MAX = 64
+
+
+def _historicos_data_body(serie: str, days: Optional[int],
+                          desde: Optional[str], hasta: Optional[str]) -> bytes:
+    data = historico.series_points(serie, days, desde, hasta)
+    xs, ys = [], []
+    for d, v in data["points"]:
+        u = _unix(d)                      # una sola conversión por punto
+        if u is None:
+            continue
+        xs.append(u)
+        ys.append(v)
+    return json.dumps({"label": data["label"], "n": len(xs), "x": xs, "y": ys},
+                      ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+
+
 @router.get("/historicos/data")
 async def historicos_data(serie: str = "", rango: str = "1a",
-                          desde: Optional[str] = None, hasta: Optional[str] = None) -> JSONResponse:
+                          desde: Optional[str] = None, hasta: Optional[str] = None) -> Response:
     """Serie macro en JSON para uPlot: x = epoch (s), y = valor."""
     days = None if (desde or hasta) else _RANGOS.get(rango, 365)
-    data = historico.series_points(serie, days, desde, hasta)
-    pts = [(d, v) for d, v in data["points"] if _unix(d) is not None]
-    return JSONResponse({"label": data["label"], "n": len(pts),
-                         "x": [_unix(d) for d, _ in pts], "y": [v for _, v in pts]})
+    carga = historico.ensure_loaded()
+    key = (serie, days, desde or "", hasta or "", carga.get("ver") or id(carga))
+    body = _DATA_MEMO.get(key)
+    if body is None:
+        body = await asyncio.get_running_loop().run_in_executor(
+            None, _historicos_data_body, serie, days, desde, hasta)
+        if len(_DATA_MEMO) >= _DATA_MEMO_MAX:
+            _DATA_MEMO.clear()
+        _DATA_MEMO[key] = body
+    return Response(content=body, media_type="application/json")
 
 
 @router.get("/historicos/curva/data")

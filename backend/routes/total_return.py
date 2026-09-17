@@ -19,9 +19,12 @@ import numpy as np
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from backend.cache import AsyncSingleFlight
 from backend.locale_ar import hoy_ba, parse_ar_num
 from backend.routes.curves import _rows_for, _row_pool
 from backend.services import bond_universe, curves, total_return as tr_svc
+
+_vuelo = AsyncSingleFlight()      # un solo cómputo en vuelo por key (los demás esperan sin worker)
 
 router = APIRouter(tags=["total-return"])
 
@@ -148,13 +151,13 @@ async def total_return_table(
     def _compute():
         return tr_svc.compute_rows(rows, terminal, settle, y1_map)
 
-    loop = asyncio.get_running_loop()
-    # Mismo pre-chequeo que Escenario: el hit no ocupa worker del pool (los
-    # misses concurrentes de una misma key dormían sobre el compute-lock
-    # ADENTRO de _row_pool y ahogaban los paneles live).
+    # Mismo pre-chequeo que Escenario: el hit no ocupa worker del pool, y en el
+    # miss UN solo Future por key (`_vuelo`): los misses concurrentes de una
+    # misma key dormían sobre el compute-lock ADENTRO de _row_pool y ahogaban
+    # los paneles live (auditoría E02).
     hit = tr_svc._cache.get(key)
-    tr_rows, dias = hit if hit is not None else await loop.run_in_executor(
-        _row_pool, lambda: _cached_or(key, _compute))
+    tr_rows, dias = hit if hit is not None else await _vuelo.run(
+        key, _row_pool, lambda: _cached_or(key, _compute))
 
     chart = tr_svc.chart_from_tr_rows(tr_rows)
     ycurve = tr_svc.curve_chart(tr_rows)

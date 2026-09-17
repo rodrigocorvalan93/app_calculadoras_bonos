@@ -282,12 +282,32 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
   rechazan. El login captura `sv`/`uid` ANTES de verificar la clave y rechaza si
   cambiaron durante la verificación (un reset simultáneo no regala la versión
   nueva a una verificación contra la clave vieja).
-- **YAS single-flight** (`routes/yas._single_flight`): recálculos idénticos en
-  vuelo (mismo bono/modo/valor/settle/VN/overrides) comparten UN cálculo del
-  pool (Future con `shield`); la tenencia por fondos visibles sigue por request.
-  `curves._rows_en_seq` valida su cache por seq del feed Y
-  `pricing.indices_token()` (huella de A3500/CER/UVA/TAMAR/BADLAR + proyecciones):
-  un refresh de índices sin tick re-arma las filas de Mercado/Curvas.
+- **Single-flight async** (`cache.AsyncSingleFlight`): N requests con la
+  MISMA key fría comparten UN Future en el event loop (un solo worker calcula,
+  los demás hacen `await` sin ocupar el pool; `shield` contra la cancelación
+  de un request). Lo usan YAS (`routes/yas._INFLIGHT`), Escenario y Total
+  Return (`_vuelo`) ANTES de mandar al `_row_pool` — antes 8 pedidos
+  idénticos dormían sobre el compute-lock adentro del pool y dejaban sin
+  worker al libro/Mercado. Sólo se comparte el cálculo; tenencias y permisos
+  siguen por request. `LockedTTLCache` cuenta productor + esperadores por
+  lock (`_compute_locks[key] = [lock, usuarios]`): la poda nunca descarta un
+  lock en uso. `curves._rows_en_seq` valida su cache por seq del feed Y
+  `pricing.indices_token()` (huella de A3500/CER/UVA/TAMAR/BADLAR +
+  proyecciones), y la huella entra en el `order` hash del delta: un refresh de
+  índices sin tick re-arma las filas y fuerza `X-Full` en el cliente.
+- **Eficiencia (auditoría 17/09)**: `rentafija.calcula_intereses_corridos(
+  …, _flujos_generados=True)` reutiliza los cashflows que `calcula_tirea` /
+  `calcula_precio` acaban de generar (una valuación = 1 `generate_cashflows`,
+  antes 2; default False = comportamiento legacy). `excel._snapshot_bytes`
+  tiene un lock por key (un build por ventana) y `?codes=` hace lookup
+  directo. `oms.kill_switch_async` / `set_live_async`: flag inmediato + audit
+  en el executor (los handlers async NO llaman al `audit` síncrono).
+  `/historicos/data` convierte cada fecha una vez, arma en el pool y memoiza
+  el JSON por versión de la carga. Frontend: `app.js` sondea con UN request en
+  vuelo, plazo total (`fetchTexto`) y backoff; el delta libera `deltaBusy`
+  siempre (plazo 8 s → swap completo); `charts.js` descarta respuestas de una
+  selección anterior (contador de generación). Regresiones en
+  `tests/test_auditoria_eficiencia.py` + `tests/live_engine_harness.cjs`.
 - **Readiness**: `/readyz` = 200/503 (universo cargado) y `/healthz` lleva
   `ready`; `deploy/deploy.ps1` espera `ready` y chequea `$LASTEXITCODE` de
   git/pip/nssm (un paso fallido aborta sin reiniciar el servicio).

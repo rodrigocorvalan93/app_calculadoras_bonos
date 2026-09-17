@@ -557,7 +557,7 @@ class Bono:
 
         #return print(self.cashflow_cpn,"\n" ,self.cashflow_pmt)
 
-    def calcula_intereses_corridos(self, settlement_date=None):
+    def calcula_intereses_corridos(self, settlement_date=None, _flujos_generados=False):
         """
         Calcula los intereses corridos del bono desde el último pago de cupón hasta la fecha actual
         o una fecha de liquidación especificada.
@@ -565,11 +565,18 @@ class Bono:
         Parámetros:
         - settlement_date (opcional): La fecha hasta la cual se calcularán los intereses corridos.
           Si no se proporciona, se utilizará la fecha actual.
+        - _flujos_generados (interno): True cuando el caller ACABA de correr
+          generate_cashflows(settlement_date) sobre este mismo objeto (calcula_tirea /
+          calcula_precio): se reutilizan esos flujos en vez de regenerarlos. Cada
+          valuación generaba los cashflows dos veces (~la mitad del costo del
+          cálculo); el resultado es idéntico porque son los mismos flujos para la
+          misma fecha. Default False = comportamiento de siempre.
 
         Retorna:
         - Los intereses corridos del bono.
         """
-        self.generate_cashflows(settlement_date)
+        if not _flujos_generados:
+            self.generate_cashflows(settlement_date)
 
         fecha_ultimo_cpn = self.emision if self.fecha_settlement <= self.cashflow_cpn_full['Fechas'].min() else self.cashflow_cpn_full['Fechas'][self.cashflow_cpn_full['Fechas'] <= self.fecha_settlement].max()
         fecha_siguiente_cpn = self.cashflow_cpn_full['Fechas'][self.cashflow_cpn_full['Fechas'] > self.fecha_settlement].min()
@@ -653,7 +660,7 @@ class Bono:
         más detalles en: https://es.wikipedia.org/wiki/M%C3%A9todo_de_Newton
         """
         self.generate_cashflows(settlement_date)
-        self.calcula_intereses_corridos(settlement_date)
+        self.calcula_intereses_corridos(settlement_date, _flujos_generados=True)
         if precio <= 0:
             raise ValueError("No se ingresó un precio válido")
         if self.quote_price_cnv == 'CLEAN':
@@ -780,9 +787,9 @@ class Bono:
         Retorna:
         - El precio del instrumento financiero, basado en la tasa de descuento dada.
         '''
-        # Generar los flujos de caja
+        # Generar los flujos de caja (una sola vez: intereses corridos los reutiliza)
         self.generate_cashflows(settlement_date)
-        self.calcula_intereses_corridos(settlement_date)
+        self.calcula_intereses_corridos(settlement_date, _flujos_generados=True)
 
         # Almacena nueva tasa:
         self.tirea = tasa_descuento.real
