@@ -171,19 +171,53 @@ window.lsSet = function (k, v) {
     lastSeq = seq;
   }
 
+  // fetch con plazo TOTAL (headers + cuerpo): carrera contra un timer y
+  // AbortController donde existe. Un request colgado (proxy, red que se
+  // cae a mitad de respuesta) rechaza en `ms` en vez de quedar pendiente
+  // para siempre — y con él quedaba pegado el flag "en vuelo" del que lo
+  // esperaba (auditoría E03). Resuelve el texto del cuerpo.
+  function fetchTexto(url, opts, ms) {
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    opts = opts || {};
+    if (ctrl) opts.signal = ctrl.signal;
+    var tm = null;
+    var guard = new Promise(function (_resolve, reject) {
+      tm = setTimeout(function () {
+        try { if (ctrl) ctrl.abort(); } catch (e) { /* noop */ }
+        reject(new Error('timeout ' + ms + ' ms: ' + url));
+      }, ms);
+    });
+    var work = fetch(url, opts).then(function (r) {
+      return r.text().then(function (txt) { return { r: r, txt: txt }; });
+    });
+    return Promise.race([work, guard]).then(function (v) { clearTimeout(tm); return v; },
+                                            function (e) { clearTimeout(tm); throw e; });
+  }
+
+  // Fallback de polling: UN solo sondeo en vuelo, con plazo y backoff tras
+  // errores seguidos. Antes cada intervalo disparaba otro fetch aunque el
+  // anterior no hubiera vuelto (con la red colgada, 1 request pendiente por
+  // segundo) y dos respuestas cruzadas podían llegar en desorden.
+  var POLL_TIMEOUT_MS = 6000, POLL_BACKOFF_MAX_MS = 30000;
+  var pollBusy = false, nextPollAt = 0;
   function poll() {
     if (document.hidden) return; // visibilitychange re-arma
+    if (pollBusy) return;
+    if (failures > 0 && Date.now() < nextPollAt) return;
+    pollBusy = true;
     var t0 = performance.now();
-    fetch('/market/seq', { cache: 'no-store' })
-      .then(function (r) { return r.text(); })
-      .then(function (txt) {
+    function done() { pollBusy = false; }
+    fetchTexto('/market/seq', { cache: 'no-store' }, POLL_TIMEOUT_MS)
+      .then(function (v) {
         failures = 0;
-        handleSeq(parseInt(txt, 10), performance.now() - t0);
+        handleSeq(parseInt(v.txt, 10), performance.now() - t0);
       })
       .catch(function () {
         failures += 1;
+        nextPollAt = Date.now() + Math.min(POLL_BACKOFF_MAX_MS, POLL_MS * Math.pow(2, failures - 1));
         if (failures >= 3) dot('off', 'Sin conexión con el feed');
-      });
+      })
+      .then(done, done);
   }
 
   function stopAll() {
@@ -405,6 +439,11 @@ window.lsSet = function (k, v) {
     flashFlush();
     return true;
   }
+  // Plazo total del delta (headers + cuerpo): un fetch que nunca vuelve
+  // dejaba `deltaBusy` en true para siempre y ese panel no se actualizaba
+  // más (ni el swap de la tabla lo liberaba). Con plazo, el tick vencido
+  // pide el swap completo y el flag se libera SIEMPRE (auditoría E03).
+  var DELTA_TIMEOUT_MS = 8000;
   function deltaTick(scope) {
     var tbl = scope.querySelector('table[data-delta]');
     if (!tbl) { deltaFull(scope); return; }          // panel sin delta (acciones, MAE)
@@ -414,9 +453,9 @@ window.lsSet = function (k, v) {
     var seq = tbl.getAttribute('data-seq') || '0', order = tbl.getAttribute('data-order') || '';
     if (!url) { deltaFull(scope); return; }
     deltaBusy[id] = true;
-    fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'since=' + encodeURIComponent(seq) + '&order=' + encodeURIComponent(order),
-          { credentials: 'same-origin', headers: { 'X-Delta': '1' } })
-      .then(function (r) { return r.text().then(function (html) { return { r: r, html: html }; }); })
+    function done() { deltaBusy[id] = false; }
+    fetchTexto(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'since=' + encodeURIComponent(seq) + '&order=' + encodeURIComponent(order),
+               { credentials: 'same-origin', headers: { 'X-Delta': '1' } }, DELTA_TIMEOUT_MS)
       .then(function (x) {
         var t2 = scope.querySelector('table[data-delta]');   // puede haber sido swapeada
         if (!t2) return;
@@ -424,11 +463,11 @@ window.lsSet = function (k, v) {
         var newSeq = parseInt(x.r.headers.get('X-Seq') || '0', 10);
         var curSeq = parseInt(t2.getAttribute('data-seq') || '0', 10);
         if (newSeq && newSeq < curSeq) return;             // llegó una tabla más nueva mientras tanto
-        if (x.html && x.html.trim() && !deltaApply(t2, x.html)) { deltaFull(scope); return; }
+        if (x.txt && x.txt.trim() && !deltaApply(t2, x.txt)) { deltaFull(scope); return; }
         if (newSeq) t2.setAttribute('data-seq', String(newSeq));
       })
       .catch(function () { deltaFull(scope); })
-      .then(function () { deltaBusy[id] = false; });
+      .then(done, done);
   }
   document.body.addEventListener('md-update', function () {
     if (document.hidden) return;

@@ -8,11 +8,12 @@ Layout:
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
+from backend.cache import AsyncSingleFlight
 from backend.config import settings
 from backend.locale_ar import parse_ar_num
 from backend.services import auth as auth_svc, bond_universe, curves as curves_svc, delta_especies, marketdata_store, positions, pricing, symbols as syms
@@ -35,26 +36,15 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 
 # Single-flight de recálculos IDÉNTICOS en vuelo (auditoría R10): N usuarios
 # pidiendo el mismo bono / modo / valor / settle / VN al mismo tiempo → UN
-# cálculo en el pool; los demás esperan ese mismo Future. Sólo se comparte el
-# cálculo (métricas + ticket, de sólo lectura en el template); la tenencia por
-# fondos visibles y el render siguen por request. Costo: un lookup de dict.
-_INFLIGHT: Dict[tuple, "asyncio.Future"] = {}
+# cálculo en el pool; los demás esperan ese mismo Future (cache.AsyncSingleFlight,
+# el mismo helper de Escenario / Total Return). Sólo se comparte el cálculo
+# (métricas + ticket, de sólo lectura en el template); la tenencia por fondos
+# visibles y el render siguen por request. Costo: un lookup de dict.
+_INFLIGHT = AsyncSingleFlight()
 
 
 def _single_flight(key: tuple, fn) -> "asyncio.Future":
-    fut = _INFLIGHT.get(key)
-    if fut is None:
-        fut = asyncio.get_running_loop().run_in_executor(None, fn)
-        _INFLIGHT[key] = fut
-
-        def _limpiar(f, k=key):
-            if _INFLIGHT.get(k) is f:
-                _INFLIGHT.pop(k, None)
-
-        fut.add_done_callback(_limpiar)
-    # shield: si un request se cancela (cliente que cerró), no cancela el
-    # Future compartido que los otros siguen esperando.
-    return asyncio.shield(fut)
+    return _INFLIGHT.run(key, None, fn)
 
 
 @router.get("", response_class=HTMLResponse)

@@ -64,6 +64,15 @@ def set_live(on: Optional[bool], user: str = "") -> bool:
     audit("oms_live_switch", {"on": is_live(), "user": user})
     return is_live()
 
+
+async def set_live_async(on: Optional[bool], user: str = "") -> bool:
+    """Versión para handlers async: el modo cambia YA (en memoria, en el loop)
+    y el audit va al executor — el write al JSONL (OneDrive, lock) no frena a
+    los demás usuarios."""
+    _live_override["v"] = None if on is None else bool(on)
+    await audit_async("oms_live_switch", {"on": is_live(), "user": user})
+    return is_live()
+
 # Tokens de confirmación: token → (payload, expira). Un solo uso.
 _pending: Dict[str, tuple] = {}
 _pending_lock = threading.Lock()
@@ -74,6 +83,18 @@ def kill_switch(on: Optional[bool] = None, user: str = "") -> bool:
     if on is not None:
         _kill["on"] = bool(on)
         audit("kill_switch", {"on": _kill["on"], "user": user})
+    return _kill["on"]
+
+
+async def kill_switch_async(on: bool, user: str = "") -> bool:
+    """Freno de emergencia desde un handler async: el flag se activa PRIMERO
+    (en memoria, sin esperar nada) y recién después se persiste en el audit
+    vía executor. Antes el write síncrono del JSONL (disco lento / OneDrive /
+    lock ocupado) bloqueaba el event loop — y con él /market/seq y todos los
+    paneles — justo en el momento en que alguien frena la mesa (auditoría E06).
+    El orden flag→audit es el que importa: nada nuevo sale mientras se escribe."""
+    _kill["on"] = bool(on)
+    await audit_async("kill_switch", {"on": _kill["on"], "user": user})
     return _kill["on"]
 
 

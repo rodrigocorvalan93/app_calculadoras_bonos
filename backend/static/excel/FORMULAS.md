@@ -185,7 +185,7 @@ No es streaming: se recalcula al abrir el libro o con F9. Reemplaza los
 
 ---
 
-## Calculadora YAS en celdas — OMS.TIREA / PRECIO / TNA / TICKET / CALC / TR
+## Calculadora YAS en celdas — OMS.TIREA / PRECIO / TNA / MARGEN / TICKET / CALC / TR
 
 El mismo motor de cálculo del YAS web (`genera_ticket` / `calcula_tirea` /
 `calcula_precio` de rentafija), en la celda. **No streamean**: son llamadas
@@ -203,6 +203,7 @@ resultado queda memoizado.
                                            dirty para CER/lecaps/DLK) — inverso
                                            exacto de OMS.TIREA
     =OMS.TNA("TTM26";99,8)               → TNA bajo la convención del bono
+    =OMS.MARGEN("TTM26";99,8)            → margen TNA sobre TAMAR/BADLAR (floaters)
     =OMS.TICKET("GD30";78,5;1000000)     → spill: VN, monto, principal, interés…
     =OMS.CALC("TX26";"duration";105)     → cualquier métrica del YAS
     =OMS.TR("GD30";78,5;0,12;"30/12/2026";1000000)   → total return puntual (spill)
@@ -233,6 +234,14 @@ Inverso: precio **clean % del par** a la TIREA dada (decimal: `0,14` = 14%).
 TNA bajo la convención del bono (dual TAMAR 32/365 · variable 90/365 ·
 CER/UVA 180/360 · DLK corp 90/360 · DLK soberano 90/365 ·
 hard-dollar 180/360 · LECAP días/365).
+
+### OMS.MARGEN(especie; precio; [plazo_o_fecha]; [fx])
+Margen TNA sobre el benchmark de un bono a **tasa variable** (TAMAR / BADLAR:
+promedio de las últimas 5 observaciones del BCRA), al precio dado — el mismo
+"Margen TNA" de la ficha YAS. Decimal: `0,05` = +500 pb sobre el índice
+(formatear como %). En un bono a tasa fija no hay margen: devuelve `#N/A` con
+el motivo. El inverso (precio a un margen dado) sale con
+`=OMS.CALC("TTM26";"precio_mercado_pct";0,05;"margen")`.
 
 ### OMS.TICKET(especie; precio; [nominales]; [plazo_o_fecha]; [fx])
 Ticket de operación (spill, 2 columnas): VN, monto total, principal, interés,

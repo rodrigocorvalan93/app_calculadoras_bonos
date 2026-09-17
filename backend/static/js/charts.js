@@ -447,10 +447,15 @@
       }
     }
 
+    // Generación por pedido: sólo la respuesta del ÚLTIMO load() se dibuja.
+    // Sin esto, dos cambios de filtro seguidos con respuestas que llegaban
+    // invertidas dejaban el gráfico de la selección anterior (auditoría E05).
+    var loadGen = 0;
     function load(recreate) {
+      var mine = ++loadGen;
       fetch("/graficos/data?" + params())
         .then(function (r) { return r.json(); })
-        .then(function (j) { lastJ = j; render(j, recreate); })
+        .then(function (j) { if (mine !== loadGen) return; lastJ = j; render(j, recreate); })
         .catch(function () { /* sin red → mantiene el último chart */ });
     }
 
@@ -674,8 +679,13 @@
       document.body.dispatchEvent(new CustomEvent("tables:injected", { detail: { root: body } }));
     }
 
+    // Generación por pedido: una respuesta lenta de la selección ANTERIOR
+    // (CER) que llega después de la vigente (TAMAR) no pisa el gráfico.
+    var hmGen = 0;
     function load() {
+      var mine = ++hmGen;
       fetch("/historicos/data?" + paramsOf(ctrls)).then(function (r) { return r.json(); }).then(function (j) {
+        if (mine !== hmGen) return;
         lastJ = j;
         draw();
         renderDatos();
@@ -695,8 +705,11 @@
     if (!box || !ctrls || typeof uPlot === "undefined") return;
     var PAL = palette(), MUT = cssVar("--text-muted", "#8a8a8a"), BORD = cssVar("--border", "#333");
     box.style.position = "relative";
+    var hcGen = 0;                       // sólo se dibuja la respuesta del último pedido
     function draw() {
+      var mine = ++hcGen;
       fetch("/historicos/curva/data?" + paramsOf(ctrls)).then(function (r) { return r.json(); }).then(function (j) {
+        if (mine !== hcGen) return;
         clearBox(box);
         if (!j || !j.loaded || !j.series || !j.series.length) {
           if (box._u) { box._u.destroy(); box._u = null; }

@@ -8,6 +8,7 @@ Series: a3500 (FX mayorista), BADLAR, TAMAR, CER, UVA, inflación mensual.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import os
@@ -45,6 +46,9 @@ _SERIES_META: Dict[str, Tuple[str, str]] = {
 
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Any]] = None
+# Versión de carga (monótona): key de los memos derivados (/historicos/data).
+# id(dict) no sirve: CPython reusa direcciones.
+_load_ver = itertools.count(1)
 
 
 def _json_path() -> str:
@@ -96,6 +100,7 @@ def _load() -> Dict[str, Any]:
             series[key] = {"label": label, "points": pts}
     out["series"] = series
     out["loaded"] = bool(series)
+    out["ver"] = next(_load_ver)
     if not series:
         out["error"] = out["error"] or "Sin series macro en el json."
     logger.info("[historico] %d series macro cargadas", len(series))

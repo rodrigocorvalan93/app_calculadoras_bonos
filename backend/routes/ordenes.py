@@ -329,7 +329,9 @@ async def ordenes_kill(request: Request, on: str = Form("1")) -> HTMLResponse:
     blocked = _role_block(request, superuser=True)
     if blocked is not None:
         return blocked
-    oms.kill_switch(on == "1", user=_req_user(request))
+    # Flag inmediato + audit fuera del loop (un disco lento no frena la app
+    # mientras alguien frena la mesa).
+    await oms.kill_switch_async(on == "1", user=_req_user(request))
     return _render(request, "partials/oms_status.html", trigger="orden-done", **_base_ctx())
 
 
@@ -346,9 +348,9 @@ async def ordenes_live(request: Request, arm: str = Form("0"),
             return _render(request, "partials/oms_status.html",
                            live_msg="Para activar LIVE escribí exactamente LIVE y confirmá.",
                            **_base_ctx())
-        oms.set_live(True, user=_req_user(request))
+        await oms.set_live_async(True, user=_req_user(request))
     else:
-        oms.set_live(False, user=_req_user(request))
+        await oms.set_live_async(False, user=_req_user(request))
     return _render(request, "partials/oms_status.html", trigger="orden-done",
                    live_msg=("⚠️ MODO LIVE activado — las órdenes viajan al broker."
                              if oms.is_live() else "Modo PAPER — nada viaja al broker."),

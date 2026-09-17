@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v18 · 2026-09-17 (poller: el timeout cubre también el cuerpo de la respuesta y el rescate one-shot; un solo sondeo en vuelo con backoff; refresco cada 30 s aunque el seq no avance; estado stale/down desde /seq)";
+var OMS_BUILD = "v19 · 2026-09-17 (OMS.MARGEN: margen TNA sobre TAMAR/BADLAR de un floater; poller: el timeout cubre también el cuerpo de la respuesta y el rescate one-shot; un solo sondeo en vuelo con backoff; refresco cada 30 s aunque el seq no avance; estado stale/down desde /seq)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -750,6 +750,22 @@ function tnaFn(especie, precio, plazo, fx) {
   return calcField(calcItem(especie, "precio", precio, plazo, null, fx), "tna");
 }
 
+// Margen TNA sobre el benchmark (TAMAR / BADLAR: promedio de las últimas 5
+// obs. del BCRA) de un bono a tasa variable, a un precio dado. Decimal:
+// 0,05 = +500 pb sobre el índice. Mismo `margen_tna` de la ficha YAS. Un bono
+// a tasa fija no tiene margen → #N/A con el motivo (no un #¡VALOR! mudo).
+function margenFn(especie, precio, plazo, fx) {
+  var it = calcItem(especie, "precio", precio, plazo, null, fx);
+  return OMSCalc.request(it).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    var v = m.margen_tna;
+    if (v === undefined || v === null) {
+      throw naError("Sin margen para " + it.code + ": OMS.MARGEN es sólo para bonos a tasa variable (TAMAR / BADLAR)");
+    }
+    return v;
+  });
+}
+
 var CALC_MODOS = { "": "precio", "precio": "precio", "px": "precio",
                    "tir": "tir", "tirea": "tir", "tna": "tna", "margen": "margen" };
 
@@ -853,6 +869,7 @@ function registerFunctions() {
   CustomFunctions.associate("TIREA", guard(tireaFn));
   CustomFunctions.associate("PRECIO", guard(precioFn));
   CustomFunctions.associate("TNA", guard(tnaFn));
+  CustomFunctions.associate("MARGEN", guard(margenFn));
   CustomFunctions.associate("TICKET", guard(ticketFn));
   CustomFunctions.associate("CALC", guard(calcFn));
   CustomFunctions.associate("TR", guard(trFn));
