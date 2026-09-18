@@ -204,6 +204,9 @@ resultado queda memoizado.
                                            exacto de OMS.TIREA
     =OMS.TNA("TTM26";99,8)               → TNA bajo la convención del bono
     =OMS.MARGEN("TTM26";99,8)            → margen TNA sobre TAMAR/BADLAR (floaters)
+    =OMS.DURATION("GD30";78,5)           → modified duration (años) a ese precio
+    =OMS.VENCIMIENTO("GD30")             → "09/07/2030" (ficha; sin precio)
+    =OMS.VENCIMIENTO("GD30";"fecha")     → fecha de Excel (formatear la celda como fecha)
     =OMS.TICKET("GD30";78,5;1000000)     → spill: VN, monto, principal, interés…
     =OMS.CALC("TX26";"duration";105)     → cualquier métrica del YAS
     =OMS.TR("GD30";78,5;0,12;"30/12/2026";1000000)   → total return puntual (spill)
@@ -242,6 +245,18 @@ promedio de las últimas 5 observaciones del BCRA), al precio dado — el mismo
 (formatear como %). En un bono a tasa fija no hay margen: devuelve `#N/A` con
 el motivo. El inverso (precio a un margen dado) sale con
 `=OMS.CALC("TTM26";"precio_mercado_pct";0,05;"margen")`.
+
+### OMS.DURATION(especie; precio; [plazo_o_fecha]; [fx])
+Modified duration en años al precio dado — la misma que muestran el YAS y
+Mercado (es `=OMS.CALC(especie;"duration";precio)` con nombre propio). Sin
+precio usa el último del mercado, puntual.
+
+### OMS.VENCIMIENTO(especie; [formato])
+Fecha de vencimiento de la **ficha** del bono: no necesita precio ni que el
+bono haya operado hoy. Default texto `DD/MM/AAAA`. Con `"fecha"` devuelve la
+fecha como **número de Excel** (formateá la celda como fecha): sirve para
+restar contra `HOY()`, `DIAS` o `FRAC.AÑO`:
+`=OMS.VENCIMIENTO("GD30";"fecha")-HOY()` → días al vencimiento.
 
 ### OMS.TICKET(especie; precio; [nominales]; [plazo_o_fecha]; [fx])
 Ticket de operación (spill, 2 columnas): VN, monto total, principal, interés,

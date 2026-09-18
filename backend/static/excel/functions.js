@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v19 · 2026-09-17 (OMS.MARGEN: margen TNA sobre TAMAR/BADLAR de un floater; poller: el timeout cubre también el cuerpo de la respuesta y el rescate one-shot; un solo sondeo en vuelo con backoff; refresco cada 30 s aunque el seq no avance; estado stale/down desde /seq)";
+var OMS_BUILD = "v20 · 2026-09-18 (OMS.DURATION: modified duration a un precio; OMS.VENCIMIENTO: fecha de vencimiento de la ficha, texto DD/MM/AAAA o fecha de Excel con formato 'fecha'; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -569,7 +569,9 @@ var OMSCalc = (function () {
     var k = keyOf(it);
     // Sin precio explícito el server resuelve el last del MOMENTO: no se
     // memoiza (cada F9 re-pide); el dedup en vuelo del mismo tick sí corre.
-    var live = (it.valor == null);
+    // La ficha estática (tipo "meta": OMS.VENCIMIENTO) no depende del mercado
+    // y sí se memoiza (con el TTL de siempre).
+    var live = (it.valor == null) && it.tipo !== "meta";
     if (!live && Object.prototype.hasOwnProperty.call(memo, k)) {
       var m = memo[k];
       if ((Date.now() - m.t) < MEMO_TTL_MS) { return Promise.resolve(m.v); }
@@ -766,6 +768,38 @@ function margenFn(especie, precio, plazo, fx) {
   });
 }
 
+// Modified duration (años) a un precio dado — la misma del YAS / Mercado.
+// Sin precio usa el last del mercado (puntual, como TIREA).
+function durationFn(especie, precio, plazo, fx) {
+  return calcField(calcItem(especie, "precio", precio, plazo, null, fx), "duration");
+}
+
+// Fecha de vencimiento de la FICHA del bono: no necesita precio ni mercado
+// (un bono sin cotización hoy también tiene vencimiento). Default: texto
+// DD/MM/AAAA. Con formato "fecha" devuelve la fecha como número de Excel
+// (serial: formatear la celda como fecha) — así se puede restar contra HOY()
+// o usar en FRAC.AÑO / DIAS.
+function vencimientoFn(especie, formato) {
+  var code = String(especie == null ? "" : especie).trim().toUpperCase();
+  if (!code) { throw naError("Especie vacía"); }
+  var fmt = String(formato == null ? "" : formato).trim().toLowerCase();
+  if (fmt && fmt !== "texto" && fmt !== "fecha" && fmt !== "serial") {
+    throw naError("Formato inválido: " + formato + " (texto | fecha)");
+  }
+  return OMSCalc.request({ code: code, tipo: "meta" }).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    var iso = m.vencimiento;
+    if (!iso || String(iso).length < 10) { throw naError("Sin vencimiento en la ficha de " + code); }
+    var y = +String(iso).slice(0, 4), mo = +String(iso).slice(5, 7), d = +String(iso).slice(8, 10);
+    if (!(y > 1900 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31)) { throw naError("Vencimiento inválido en la ficha: " + iso); }
+    if (fmt === "fecha" || fmt === "serial") {
+      // Serial de Excel (sistema 1900): días desde el 30/12/1899.
+      return Math.round((Date.UTC(y, mo - 1, d) - Date.UTC(1899, 11, 30)) / 86400000);
+    }
+    return pad2(d) + "/" + pad2(mo) + "/" + y;
+  });
+}
+
 var CALC_MODOS = { "": "precio", "precio": "precio", "px": "precio",
                    "tir": "tir", "tirea": "tir", "tna": "tna", "margen": "margen" };
 
@@ -870,6 +904,8 @@ function registerFunctions() {
   CustomFunctions.associate("PRECIO", guard(precioFn));
   CustomFunctions.associate("TNA", guard(tnaFn));
   CustomFunctions.associate("MARGEN", guard(margenFn));
+  CustomFunctions.associate("DURATION", guard(durationFn));
+  CustomFunctions.associate("VENCIMIENTO", guard(vencimientoFn));
   CustomFunctions.associate("TICKET", guard(ticketFn));
   CustomFunctions.associate("CALC", guard(calcFn));
   CustomFunctions.associate("TR", guard(trFn));
