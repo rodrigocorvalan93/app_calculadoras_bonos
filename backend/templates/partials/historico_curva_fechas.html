@@ -113,11 +113,32 @@
         <span class="muted hc-excluded" style="font-size:11px;align-self:center">excluidos:
           {% for c in scatter.excluded %}<span class="hc-restore lnk" data-code="{{ c }}" title="Volver a incluir">{{ c }} ↺</span>{% if not loop.last %}, {% endif %}{% endfor %}</span>
         {% endif %}
+        {% if scatter.fuera_tramo %}
+        {# Bonos con dato que el tramo de duration deja afuera: se ven y se
+           vuelve al total con un click (vacía Dur mín/máx y re-pide). #}
+        <span class="muted hc-fuera" style="font-size:11px;align-self:center">fuera del tramo {{ scatter.tramo_txt }}:
+          {{ scatter.fuera_tramo | join(', ') }} · <span class="lnk" onclick="hcQuitar(this, ['dmin','dmax'])" title="Sacar el tramo de duration y recalcular">quitar tramo</span></span>
+        {% endif %}
       </div>
     </div>
   </div>
   {% elif scatter %}
-  <div class="alert" style="margin-top:12px">Sin puntos para esas fechas{% if scatter.excluded or scatter.dmin is not none or scatter.dmax is not none %} con ese tramo / esas exclusiones{% endif %} (¿la base tiene datos ahí?).</div>
+  {# Vacío por el FILTRO (la base sí tiene historia) vs. vacío por falta de
+     datos: decir cuál, y arreglar el primero con un click. #}
+  <div class="alert" style="margin-top:12px">
+    {% if scatter.vacio %}
+      <strong>Sin puntos por el filtro, no por falta de datos.</strong>
+      La base tiene {{ scatter.vacio.n }} bono{{ 's' if scatter.vacio.n != 1 else '' }} de {{ scatter.curve_label }} con dato en esas fechas
+      (duration entre {{ scatter.vacio.dur_min | ar_num(2) }} y {{ scatter.vacio.dur_max | ar_num(2) }}),
+      {% if scatter.vacio.tramo and scatter.vacio.exclusiones %}pero el tramo de duration {{ scatter.tramo_txt }} y las exclusiones los dejan a todos afuera.
+      {% elif scatter.vacio.tramo %}pero el tramo de duration {{ scatter.tramo_txt }} los deja a todos afuera.
+      {% else %}pero las exclusiones los sacan a todos.{% endif %}
+      {% if scatter.vacio.tramo %}<button type="button" class="btn" style="margin-left:8px" onclick="hcQuitar(this, ['dmin','dmax'])">Quitar el tramo</button>{% endif %}
+      {% if scatter.vacio.exclusiones %}<button type="button" class="btn" style="margin-left:8px" onclick="hcQuitar(this, ['exclude'])">Quitar exclusiones</button>{% endif %}
+    {% else %}
+      Sin puntos para esas fechas: la base no tiene datos de {{ scatter.curve_label }} ahí. Probá otra fecha (los presets de arriba caen en ruedas reales) o mirá en "Tasas por curva" desde cuándo hay historia.
+    {% endif %}
+  </div>
   {% endif %}
 
   {% if tr and tr.rows %}

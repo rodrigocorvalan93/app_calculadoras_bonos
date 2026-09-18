@@ -786,6 +786,16 @@
   // prender por bono (recordado por curva) y × para excluirlo del fit (viaja
   // en "Excluir bonos" y re-arma la foto); etiquetas de la última fecha
   // prendibles. Todo vanilla, O(puntos) por hover.
+  // "Quitar el tramo" / "Quitar exclusiones" (Curva por fecha): vacía esos
+  // campos del form y re-pide el partial. Va en window porque el alert de
+  // "sin puntos" se renderiza sin el wrap del gráfico (no pasa por initHistFechas).
+  window.hcQuitar = function (el, campos) {
+    var f = document.getElementById("hc-fechas-form");
+    if (!f) return;
+    (campos || []).forEach(function (n) { var i = f.querySelector("[name=" + n + "]"); if (i) i.value = ""; });
+    if (window.htmx) window.htmx.trigger(f, "submit");
+  };
+
   function initHistFechas() {
     var wrap = document.querySelector("#hist-fechas .hc-wrap");
     if (!wrap || wrap._hcInit) return;

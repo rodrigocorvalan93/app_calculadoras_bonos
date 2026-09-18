@@ -207,6 +207,13 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480,
     a la última fecha, para la leyenda) y `excluded` (los que se sacaron)."""
     series = sc.get("series") or []
     excl = {c.upper() for c in (exclude or [])}
+    # Bonos con dato en esas fechas ANTES de filtrar (duration a la última fecha
+    # en que aparecen): para decir POR QUÉ queda vacío o quiénes quedan afuera.
+    crudos: Dict[str, float] = {}
+    for s in sorted(series, key=lambda s: s["fecha"]):
+        for p in s["points"]:
+            crudos[str(p["code"])] = p["dur"]
+    fuera_tramo: List[str] = []
     if series and (excl or dmin is not None or dmax is not None):
         filtradas = []
         for s in series:
@@ -216,15 +223,27 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480,
                    and (dmax is None or p["dur"] <= dmax)]
             if pts:
                 filtradas.append({**s, "points": pts})
-        presentes = {str(p["code"]).upper() for s in series for p in s["points"]}
+        presentes = {c.upper() for c in crudos}
         excluded = [c for c in (exclude or []) if c.upper() in presentes]
+        quedan = {str(p["code"]) for s in filtradas for p in s["points"]}
+        fuera_tramo = sorted(c for c in crudos if c.upper() not in excl and c not in quedan)
         series = filtradas
     else:
         excluded = []
+    tramo_txt = _tramo_txt(dmin, dmax)
     if not series:
+        # Vacío POR EL FILTRO (la base sí tiene historia: un tramo 0,05–1 que
+        # quedó de otra curva deja afuera a todos los globales) vs. vacío por
+        # falta de datos: el alert tiene que decir cuál es.
+        vacio = None
+        if crudos:
+            durs = list(crudos.values())
+            vacio = {"n": len(crudos), "dur_min": min(durs), "dur_max": max(durs),
+                     "tramo": bool(fuera_tramo), "exclusiones": bool(excluded)}
         return {"loaded": sc.get("loaded", False), "n": 0, "metric": sc.get("metric"),
                 "curve_label": sc.get("curve_label"), "excluded": excluded,
-                "dmin": dmin, "dmax": dmax, "codes": []}
+                "dmin": dmin, "dmax": dmax, "codes": [], "fuera_tramo": fuera_tramo,
+                "tramo_txt": tramo_txt, "vacio": vacio}
     # Separar por población y fitear POR GRUPO antes de fijar los ejes: el
     # rango Y contempla los puntos Y las curvas ajustadas (sin esto, un valle
     # de la NSS entre puntos quedaba planchado contra el piso). Guardia
@@ -299,7 +318,21 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480,
             "metric": sc.get("metric"), "curve_label": sc.get("curve_label"),
             "yticks": yticks, "xticks": xticks, "ultima": ultima,
             "codes": codes, "excluded": excluded, "dmin": dmin, "dmax": dmax,
+            "fuera_tramo": fuera_tramo, "tramo_txt": tramo_txt, "vacio": None,
             "width": width, "height": height, "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph}
+
+
+def _tramo_txt(dmin: Optional[float], dmax: Optional[float]) -> str:
+    """'0,05 a 1' / 'desde 0,5' / 'hasta 3' — el tramo como lo tipeó el usuario."""
+    def f(x: float) -> str:
+        return f"{x:g}".replace(".", ",")
+    if dmin is not None and dmax is not None:
+        return f"{f(dmin)} a {f(dmax)}"
+    if dmin is not None:
+        return f"desde {f(dmin)}"
+    if dmax is not None:
+        return f"hasta {f(dmax)}"
+    return ""
 
 
 # Presets de ventana de "Curva por fecha": Fecha 1 = última rueda de la base,
