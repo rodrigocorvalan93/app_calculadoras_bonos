@@ -206,6 +206,41 @@ async def test_presets_de_ventana_curva_fechas(base_sintetica) -> None:
 
 
 @pytest.mark.asyncio
+async def test_tramo_que_deja_todo_afuera_dice_por_que(base_sintetica) -> None:
+    """Globales con un tramo 0,05–1 heredado de CER: la base TIENE historia pero
+    el tramo saca a todos → el alert dice el motivo (n bonos, rango de duration)
+    y ofrece quitar el tramo; con un tramo parcial, la leyenda lista los de
+    afuera. Sin datos de verdad, el mensaje sigue siendo "no hay datos"."""
+    from backend.main import app
+    from backend.routes.historico import _scatter_chart, _tramo_txt
+
+    assert _tramo_txt(0.05, 1.0) == "0,05 a 1" and _tramo_txt(None, 3.0) == "hasta 3"
+    assert _tramo_txt(0.5, None) == "desde 0,5" and _tramo_txt(None, None) == ""
+    hoy, prev = _HOY.isoformat(), _PREV.isoformat()
+    sc = historico_byma.scatter_by_dates("lecap", [prev, hoy], "TEM", "todos")
+    ch = _scatter_chart(sc, dmin=5.0, dmax=8.0)                  # lecaps: dur 0,47–0,82
+    assert ch["n"] == 0 and ch["vacio"] == {"n": 2, "dur_min": 0.47, "dur_max": 0.82, "tramo": True, "exclusiones": False}
+    ch2 = _scatter_chart(sc, dmax=0.6)                           # queda c1 (0,47); c2 (0,82) afuera
+    assert ch2["n"] == 2 and ch2["fuera_tramo"] == [base_sintetica["c2"]] and ch2["tramo_txt"] == "hasta 0,6"
+    ch3 = _scatter_chart(sc, exclude=[base_sintetica["c1"], base_sintetica["c2"]])
+    assert ch3["n"] == 0 and ch3["vacio"]["exclusiones"] and not ch3["vacio"]["tramo"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/historicos/curva-fechas", params={
+            "curve": "lecap", "f1": hoy, "f2": prev, "dmin": "5", "dmax": "8"})
+        assert r.status_code == 200
+        assert "Sin puntos por el filtro, no por falta de datos" in r.text and "2 bonos" in r.text
+        assert "tramo de duration 5 a 8" in r.text and "Quitar el tramo" in r.text
+        assert "hcQuitar(this, ['dmin','dmax'])" in r.text and "Quitar exclusiones" not in r.text
+        r2 = await ac.get("/historicos/curva-fechas", params={"curve": "lecap", "f1": hoy, "f2": prev, "dmax": "0,6"})
+        cola = r2.text.split("fuera del tramo hasta 0,6", 1)
+        assert len(cola) == 2 and base_sintetica["c2"] in cola[1][:200] and "quitar tramo" in cola[1][:400]
+        r3 = await ac.get("/historicos/curva-fechas", params={"curve": "lecap", "f1": "2001-01-05", "f2": "2001-01-12"})
+        assert "la base no tiene datos de" in r3.text and "Quitar el tramo" not in r3.text
+        js = await ac.get("/static/js/charts.js")
+        assert "window.hcQuitar = function" in js.text
+
+
+@pytest.mark.asyncio
 async def test_csv_export_que_paso(base_sintetica) -> None:
     """Export CSV es-AR del resumen: ';' separador, coma decimal, BOM y
     attachment — sale del mismo cache de weekly_segments que la tabla."""
