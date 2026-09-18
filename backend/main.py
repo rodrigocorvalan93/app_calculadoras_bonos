@@ -57,10 +57,9 @@ from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, 
 from backend.services.primary_ws import get_ws_client
 from backend.services.warmup import get_daemon as get_warmup_daemon
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(message)s",
-)
+from backend import consola  # noqa: E402 — formato de consola antes de cualquier log
+
+consola.instalar(logging.INFO)          # HH:MM:SS · módulo · mensaje (también uvicorn)
 logger = logging.getLogger("backend.main")
 
 
@@ -148,15 +147,20 @@ def _initial_symbols() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("[main] starting up")
+    import time as _time
+    t0 = _time.monotonic()
+    # Bienvenida en la terminal (qué app es, de quién, para quién, dónde escucha
+    # y qué versión corre) antes de la secuencia de arranque.
+    consola.imprimir_banner(consola.url_app(),
+                            f"https://localhost:{settings.tls_port}" if settings.tls_bridge else "")
+    logger.info("[main] arrancando…")
     # Auth: sembrar el superuser desde env si el store está vacío (login wall).
     try:
         from backend.services import auth
         b = auth.ensure_bootstrapped()
         if b.get("created"):
             logger.info("[main] auth: superuser '%s' bootstrapped from env", b["user"])
-        elif b.get("warning"):
-            logger.warning("[main] auth: %s", b["warning"])
+        # (el warning de "sin superuser" ya lo loguea auth: no se repite acá)
     except Exception:  # noqa: BLE001
         logger.exception("[main] auth bootstrap failed")
 
@@ -216,12 +220,14 @@ async def lifespan(app: FastAPI):
         logger.exception("[main] market snapshot restore failed")
 
     ws = get_ws_client()
+    feed_txt = "sin broker (PRIMARY_USER no seteado)"
     if settings.primary_user and settings.primary_pass:
         try:
             ok = await ws.login(settings.primary_user, settings.primary_pass)
         except Exception:  # noqa: BLE001
             logger.exception("[main] broker login raised; continuing without live data")
             ok = False
+        feed_txt = "login al broker falló (sin datos vivos)"
         if ok:
             seed = _initial_symbols()
             # Índices: además de las variantes conocidas de I.MERVAL (ya en el
@@ -240,6 +246,7 @@ async def lifespan(app: FastAPI):
                 logger.exception("[main] índice seed failed (sigo con el seed base)")
             await ws.start(symbols=seed)
             logger.info("[main] primary WS started, %d symbols subscribed", len(seed))
+            feed_txt = f"broker conectado ({len(seed)} símbolos)"
         else:
             logger.warning("[main] broker login returned False; WS not started")
     else:
@@ -408,9 +415,20 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] tls bridge start failed (la app sigue por http)")
 
+    # Resumen de una línea: lo que quedó armado y en cuánto tiempo.
+    try:
+        n_bonos = len(bond_universe.all_codes())
+        tls_p = tls_bridge.active_port()
+        logger.info("[main] listo en %.1f s · %s bonos · %s · add-in %s · autosave del cierre %s",
+                    _time.monotonic() - t0, f"{n_bonos:,}".replace(",", "."), feed_txt,
+                    f"https://localhost:{tls_p}" if tls_p else "apagado (sin certs)",
+                    settings.historico_autosave_hhmm if autosave is not None else "off")
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] resumen de arranque falló")
+
     yield
 
-    logger.info("[main] shutting down")
+    logger.info("[main] cerrando…")
     try:
         # wait_for de cinturón: stop() ya está acotado adentro, pero el
         # shutdown del auto-reload NUNCA puede quedar rehén de esta pieza

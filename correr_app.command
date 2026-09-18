@@ -15,6 +15,7 @@
 cd "$(dirname "$0")"
 
 PORT="${PORT:-8000}"
+export PORT        # el banner de la app muestra el puerto real
 # Host de escucha: 127.0.0.1 (solo esta Mac) por default. Para entrar desde
 # el celular via Tailscale, agregar en secrets.txt:  APP_HOST=0.0.0.0
 if [ -z "${HOST:-}" ] && [ -f secrets.txt ]; then
@@ -80,8 +81,11 @@ if ! cmp -s backend/requirements.txt "$VENVDIR/requirements.instalado"; then
   }
   cp backend/requirements.txt "$VENVDIR/requirements.instalado"
 fi
-echo "Usando Python: $("$PY" --version)"
-echo
+echo "============================================================"
+echo "  YieldVertex  -  arranque local (macOS)"
+echo "============================================================"
+echo "  Carpeta : $(pwd)"
+echo "  Python  : $("$PY" --version)  (entorno $VENVDIR)"
 # --- Certificado HTTPS local para el add-in de Excel (puente TLS :8443) ---
 # Mismo generador que en Windows (cryptography puro). La primera vez pide la
 # clave del usuario para confiar la CA en el keychain de login (Safari,
@@ -101,15 +105,15 @@ case "${1:-}" in
   dev|DEV|reload|RELOAD) RELOAD="--reload";;
 esac
 if [ -n "$RELOAD" ]; then
-  echo "Iniciando FastAPI en ${URL} ... [modo DEV: auto-reload al tocar un .py]"
+  echo "  Modo    : DEV, auto-reload al tocar un .py"
 else
-  echo "Iniciando FastAPI en ${URL} ... [estable: sin auto-reload]"
-  echo "  - un git pull / sync de OneDrive ya NO reinicia la app sola"
-  echo "  - tras actualizar el codigo o especies.py: Ctrl+C y volver a abrir"
-  echo "  - para desarrollar con auto-reload:  ./correr_app.command dev"
+  echo "  Modo    : estable, sin auto-reload  (dev: ./correr_app.command dev)"
+  echo "            tras un git pull o un cambio en especies.py: Ctrl+C y volver a abrir"
 fi
-echo "(Ctrl+C para detener)"
-echo
+echo "  App     : ${URL}  (se abre solo cuando levanta)"
+echo "  Add-in  : https://localhost:8443  (Excel =OMS.*, solo si hay certs)"
+echo "  Ctrl+C para detener"
+echo "------------------------------------------------------------"
 
 # Abrir el navegador apenas el server responda (hasta ~30 s).
 (
