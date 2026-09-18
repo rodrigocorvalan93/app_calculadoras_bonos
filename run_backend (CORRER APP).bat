@@ -15,10 +15,12 @@ setlocal
 
 REM Carpeta donde vive este .bat (raiz del proyecto)
 cd /d "%~dp0"
+title YieldVertex
 
-echo Directorio actual:
-cd
-echo.
+echo ============================================================
+echo   YieldVertex  -  arranque local (Windows)
+echo ============================================================
+echo   Carpeta : %CD%
 
 REM --- 1) Python base: py launcher (instalador oficial) o python del PATH ---
 set "PYBASE="
@@ -66,16 +68,8 @@ if errorlevel 1 (
   copy /y "backend\requirements.txt" "%VENVDIR%\requirements.instalado" >nul
 )
 
-echo Usando Python:
-"%PY%" --version
-echo.
-
-REM --- Certificado HTTPS local (funciones =OMS.* de Excel) ---
-REM Idempotente: si el cert esta vigente no hace nada y sigue al toque.
-REM Primera vez: genera certs\ y confia la CA en el usuario actual
-REM (certutil, sin admin).
-"%PY%" -m backend.tools.https_local
-echo.
+for /f "delims=" %%v in ('"%PY%" --version') do set "PYVER=%%v"
+echo   Python  : %PYVER%  ^(entorno %VENVDIR%^)
 
 REM --- Modo de ejecucion ---
 REM Default: ESTABLE, sin auto-reload. Con la carpeta compartida por OneDrive,
@@ -88,17 +82,25 @@ if /i "%~1"=="dev" set "RELOAD=--reload"
 if /i "%~1"=="reload" set "RELOAD=--reload"
 
 if defined RELOAD (
-  echo Iniciando FastAPI en http://127.0.0.1:8000 ... [modo DEV: auto-reload al tocar un .py]
+  echo   Modo    : DEV, auto-reload al tocar un .py
 ) else (
-  echo Iniciando FastAPI en http://127.0.0.1:8000 ... [estable: sin auto-reload]
-  echo   - un git pull / sync de OneDrive ya NO reinicia la app sola
-  echo   - tras actualizar el codigo o especies.py: cerrar con Ctrl+C y volver a abrir
-  echo   - para desarrollar con auto-reload: "run_backend ^(CORRER APP^).bat" dev
+  echo   Modo    : estable, sin auto-reload  ^(dev: "run_backend ^(CORRER APP^).bat" dev^)
+  echo             tras un git pull o un cambio en especies.py: Ctrl+C y volver a abrir
 )
-echo (el puente HTTPS del add-in arranca solo si hay certs)
-echo (Ctrl+C para detener)
-echo.
-"%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 %RELOAD% --timeout-graceful-shutdown 10
+echo   App     : http://127.0.0.1:8000
+echo   Add-in  : https://localhost:8443  ^(Excel =OMS.*, solo si hay certs^)
+echo   Ctrl+C para detener
+echo ------------------------------------------------------------
+
+REM --- Certificado HTTPS local (funciones =OMS.* de Excel) ---
+REM Idempotente: si el cert esta vigente no hace nada y sigue al toque.
+REM Primera vez: genera certs\ y confia la CA en el usuario actual
+REM (certutil, sin admin).
+"%PY%" -m backend.tools.https_local
+
+REM PORT viaja al proceso para que el banner de la app muestre el puerto real.
+set "PORT=8000"
+"%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port %PORT% %RELOAD% --timeout-graceful-shutdown 10
 
 echo.
 echo Backend se cerro. Codigo de salida: %ERRORLEVEL%

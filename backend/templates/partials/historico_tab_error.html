@@ -1,0 +1,8 @@
+{# Pestaña lazy de Históricos que falló (ver routes.historico._pestana_resiliente):
+   en vez de un "Cargando…" eterno, el error a la vista y un botón que vuelve a
+   disparar el 'reveal' del contenedor (re-pide el partial). #}
+<div class="alert hist-tab-error">
+  <strong>{{ titulo }}.</strong> <code>{{ detalle }}</code>
+  <div class="muted" style="font-size:11px;margin-top:4px">El detalle completo (traceback) quedó en la terminal donde corre la app.</div>
+  <button type="button" class="btn" style="margin-top:8px" onclick="htmx.trigger(this.closest('[hx-trigger]'), 'reveal')">↻ Reintentar</button>
+</div>

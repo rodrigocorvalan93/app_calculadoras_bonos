@@ -95,21 +95,24 @@
 
   {# ── Tasas por curva (BYMA) — lazy: carga al abrir la pestaña ── #}
   <div x-show="tab==='curvas'" x-cloak>
-    <div id="hist-curva" hx-get="/historicos/curva" hx-trigger="reveal" hx-swap="innerHTML">
+    {# hx-request timeout: un request colgado (archivo de OneDrive que no baja,
+       server trabado) dispara htmx:timeout → app.js muestra el error con
+       "Reintentar" en vez de dejar "Cargando…" para siempre. #}
+    <div id="hist-curva" hx-get="/historicos/curva" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
       <p class="muted" style="padding:10px">Cargando histórico BYMA…</p>
     </div>
   </div>
 
   {# ── Curva por fecha + TR realizado (lazy: carga al abrir el tab) ── #}
   <div x-show="tab==='fechas'" x-cloak>
-    <div id="hist-fechas" hx-get="/historicos/curva-fechas" hx-trigger="reveal" hx-swap="innerHTML">
+    <div id="hist-fechas" hx-get="/historicos/curva-fechas" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
       <p class="muted" style="padding:10px">Cargando curvas por fecha…</p>
     </div>
   </div>
 
   {# ── Series diarias FX + caución (lazy: archivo de 1 fila/día, cache mtime) ── #}
   <div x-show="tab==='series'" x-cloak>
-    <div id="hist-series" hx-get="/historicos/series-diarias" hx-trigger="reveal" hx-swap="innerHTML">
+    <div id="hist-series" hx-get="/historicos/series-diarias" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
       <p class="muted" style="padding:10px">Cargando series diarias…</p>
     </div>
   </div>
@@ -117,7 +120,7 @@
   {# ── Acciones / CEDEARs / Merval: price action sobre el cierre diario propio
      (lazy: parquet cacheado por mtime, análisis numpy ~1 ms, HTML cacheado) ── #}
   <div x-show="tab==='acciones'" x-cloak>
-    <div id="hist-acciones" hx-get="/historicos/acciones" hx-trigger="reveal" hx-swap="innerHTML">
+    <div id="hist-acciones" hx-get="/historicos/acciones" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
       <p class="muted" style="padding:10px">Cargando price action…</p>
     </div>
   </div>

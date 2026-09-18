@@ -165,6 +165,28 @@ de la app ganan). `backfill_historico.bat` (raíz) corre los dos con el venv
 de `run_backend (CORRER APP).bat` (`%LOCALAPPDATA%\venvs\bonos`), con menú
 plan / escribir / acciones.
 
+## Consola de arranque
+
+`backend/consola.py`: `instalar()` (lo llama `main.py` al importar) pone UN
+formato para la terminal — `HH:MM:SS  ·  módulo  mensaje` (`!` warning, `x`
+error, traceback debajo) — en el root y en los handlers de uvicorn (access log
+`GET /ruta → 200 · cliente`, con el filtro `_QuietPolls` intacto); sólo toca
+handlers de consola (no el de pytest ni el ring de /admin) y cae a ASCII si
+stderr no puede con `·`/`→`. `imprimir_banner()` al inicio del lifespan:
+recuadro con app, autor, para quién, URL (`APP_HOST`/`PORT`), add-in y
+versión (`version()` = git o `.git` a mano, nunca tira); y una línea `listo en
+N s · bonos · feed · add-in · autosave` al final del arranque. Los launchers
+(`run_backend (CORRER APP).bat`, `correr_app.command`) imprimen un encabezado
+ASCII alineado y exportan `PORT`. Los `print` legacy de `indices.py` quedan
+como están.
+
+**Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las 4 rutas llevan
+`@_pestana_resiliente(...)` — una excepción responde 200 con
+`partials/historico_tab_error.html` (qué falló + Reintentar) en vez de un 500
+que htmx no swapea (el tab quedaba en "Cargando…" para siempre); los
+contenedores llevan `hx-request='{"timeout":90000}'` y `app.js` (`lazyFail`)
+muestra el mismo alert ante error de red / timeout.
+
 ## Visual style (FastAPI rewrite)
 
 Bloomberg palette + Notion/Apple/Linear typography. System sans

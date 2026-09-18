@@ -8,16 +8,19 @@ bloquear el event loop; después es cache en memoria.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from backend.services import fx_hist, historico, historico_byma, nss
 
 router = APIRouter(tags=["historicos"])
+logger = logging.getLogger(__name__)
 
 _RANGOS = {"1m": 30, "3m": 90, "6m": 180, "1a": 365, "3a": 1095, "5a": 1825, "todo": None}
 # paleta para las líneas de la vista "tasas por curva" (una por bono)
@@ -28,6 +31,28 @@ _PALETTE = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c",
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
+
+
+def _pestana_resiliente(titulo: str):
+    """Las pestañas lazy de Históricos se piden con hx-get al abrir el tab: si
+    el handler tira una excepción, el 500 NO se swapea (htmx deja el
+    placeholder "Cargando…" para siempre) y el flag de Alpine no vuelve a
+    pedirla — así quedó Acciones en una Mac. Acá cualquier excepción se loguea
+    con traceback y se responde 200 con un alert que dice QUÉ falló y un botón
+    para reintentar en el lugar. Los HTTPException deliberados siguen igual."""
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(request: Request, *args, **kwargs):
+            try:
+                return await fn(request, *args, **kwargs)
+            except HTTPException:
+                raise
+            except Exception as exc:  # noqa: BLE001 — el error a la vista, no un spinner eterno
+                logger.exception("[historico] %s falló (%s)", titulo, request.url.path)
+                return _render(request, "partials/historico_tab_error.html", titulo=titulo,
+                               detalle=f"{type(exc).__name__}: {exc}"[:300])
+        return wrapper
+    return deco
 
 
 @router.get("/cierre/chip", response_class=HTMLResponse)
@@ -131,6 +156,7 @@ async def historicos_page(
 
 
 @router.get("/historicos/curva", response_class=HTMLResponse)
+@_pestana_resiliente("No se pudo cargar el histórico por curva")
 async def historicos_curva(request: Request, curve: str = "", metric: str = "TIREA",
                            desde: Optional[str] = None, hasta: Optional[str] = None,
                            proy: str = "todos") -> HTMLResponse:
@@ -310,6 +336,7 @@ def _hc_presets(fecha_max: Optional[str]) -> List[Dict[str, Any]]:
 
 
 @router.get("/historicos/curva-fechas", response_class=HTMLResponse)
+@_pestana_resiliente("No se pudo armar la curva por fecha")
 async def historicos_curva_fechas(
     request: Request,
     curve: str = "", metric: str = "TEM", proy: str = "todos",
@@ -741,6 +768,7 @@ def _grupos_especies() -> tuple:
 
 
 @router.get("/historicos/acciones", response_class=HTMLResponse)
+@_pestana_resiliente("No se pudo armar el price action")
 async def historicos_acciones(
     request: Request, ticker: str = "", base: str = "ars", modo: str = "precio",
     dias: str = "90", desde: Optional[str] = None, hasta: Optional[str] = None,
@@ -803,6 +831,7 @@ async def historicos_acciones(
 
 
 @router.get("/historicos/series-diarias", response_class=HTMLResponse)
+@_pestana_resiliente("No se pudieron cargar las series diarias")
 async def historicos_series_diarias(
     request: Request, serie: str = "", chart: str = "linea", dias: str = "90",
     desde: Optional[str] = None, hasta: Optional[str] = None,

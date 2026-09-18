@@ -1648,16 +1648,33 @@ window.lsSet = function (k, v) {
     var txt = ttl ? ttl.textContent.replace(/\s+/g, ' ').trim() : '';
     return txt ? '«' + txt.slice(0, 40) + '»' : (p || 'el panel');
   }
+  // Pestañas lazy (Históricos: hx-trigger="reveal"): un 500, un corte o un
+  // timeout dejaban "Cargando…" para siempre (htmx no swapea en error y el
+  // tab no vuelve a pedir el partial). Error a la vista + reintentar en el
+  // lugar: el botón re-dispara el 'reveal' del contenedor.
+  function lazyFail(evt, msg) {
+    var el = evt.detail && evt.detail.elt;
+    if (!el || !el.getAttribute || el.getAttribute('hx-trigger') !== 'reveal') return false;
+    el.innerHTML = '<div class="alert hist-tab-error"><strong>No se pudo cargar esta pestaña.</strong> ' + msg +
+      '<div class="muted" style="font-size:11px;margin-top:4px">Si vuelve a pasar, mirá la terminal donde corre la app.</div>' +
+      '<button type="button" class="btn" style="margin-top:8px" onclick="htmx.trigger(this.closest(\'[hx-trigger]\'), \'reveal\')">↻ Reintentar</button></div>';
+    return true;
+  }
   document.body.addEventListener('htmx:responseError', function (evt) {
+    var st = evt.detail.xhr ? evt.detail.xhr.status : 0;
+    if (lazyFail(evt, 'El server respondió HTTP ' + st + '.')) return;
     var p = evt.detail.requestConfig && evt.detail.requestConfig.path;
     if (skip(p)) return;
-    var st = evt.detail.xhr ? evt.detail.xhr.status : 0;
     show('No se pudo actualizar ' + nombre(evt) + ' (HTTP ' + st + '). Se reintenta solo.');
   });
   document.body.addEventListener('htmx:sendError', function (evt) {
+    if (lazyFail(evt, 'Sin conexión con el server.')) return;
     var p = evt.detail.requestConfig && evt.detail.requestConfig.path;
     if (skip(p)) return;
     show('Sin conexión con el server: ' + nombre(evt) + ' quedó con datos viejos.');
+  });
+  document.body.addEventListener('htmx:timeout', function (evt) {
+    lazyFail(evt, 'El server no respondió en 90 s.');
   });
   window.__toast = show;
 })();
