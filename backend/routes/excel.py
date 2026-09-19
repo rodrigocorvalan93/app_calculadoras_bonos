@@ -640,11 +640,48 @@ def _px_mercado(code: str, plazo: str) -> Optional[float]:
     return snap.last if snap.last is not None else snap.close
 
 
+def _calc_meta(code: str) -> Dict[str, Any]:
+    """Ficha ESTÁTICA del bono para =OMS.VENCIMIENTO (sin precio ni mercado:
+    un bono sin cotización hoy también tiene vencimiento). bond_meta está
+    memoizado → µs; fechas en ISO (el add-in las muestra DD/MM/AAAA o como
+    fecha de Excel)."""
+    from backend.services import pricing
+
+    if not code:
+        return {"error": "Especie vacía"}
+    meta = pricing.bond_meta(code)
+    if not meta:
+        return {"error": f"Especie desconocida: {code}"}
+
+    def _iso(d: Any) -> Optional[str]:
+        if d is None:
+            return None
+        try:
+            return (d.date() if hasattr(d, "date") else d).isoformat()[:10]
+        except Exception:  # noqa: BLE001
+            return str(d)[:10] or None
+
+    out: Dict[str, Any] = {"codigo": str(meta.get("codigo") or code), "nombre": str(meta.get("nombre") or "")}
+    for k in ("vencimiento", "emision"):
+        v = _iso(meta.get(k))
+        if v:
+            out[k] = v
+    for k in ("moneda", "tipo_tasa_interes", "index", "ajuste_sobre_capital",
+              "legislacion", "calificacion", "frecuencia"):
+        if meta.get(k):
+            out[k] = str(meta[k])
+    out["callable"] = bool(meta.get("callable"))
+    return out
+
+
 def _calc_batch(items: list) -> list:
     out = []
     for it in items:
         try:
             code = str(it.get("code") or "").strip().upper()
+            if it.get("tipo") == "meta":               # ficha estática: no necesita modo ni valor
+                out.append(_calc_meta(code))
+                continue
             modo = str(it.get("modo") or "precio").strip().lower()
             plazo = "CI" if str(it.get("plazo") or "").upper().startswith("CI") else "24hs"
             valor_raw = it.get("valor")

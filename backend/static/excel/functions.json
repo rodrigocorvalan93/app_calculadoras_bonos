@@ -340,6 +340,60 @@
       ]
     },
     {
+      "id": "DURATION",
+      "name": "DURATION",
+      "description": "Modified duration (años) de un bono a un precio dado — la misma del YAS y de Mercado. Ej: =OMS.DURATION(\"GD30\";78,5). Sin precio usa el último del mercado (puntual).",
+      "result": {
+        "type": "number"
+      },
+      "parameters": [
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "precio",
+          "type": "number",
+          "description": "Precio (opcional: vacío = last del mercado, puntual)",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha)",
+          "optional": true
+        },
+        {
+          "name": "fx",
+          "type": "number",
+          "description": "FX custom",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "VENCIMIENTO",
+      "name": "VENCIMIENTO",
+      "description": "Fecha de vencimiento de la ficha del bono (no necesita precio). Texto DD/MM/AAAA; con formato \"fecha\" devuelve la fecha como número de Excel (formateá la celda como fecha; sirve para restar contra HOY()). Ej: =OMS.VENCIMIENTO(\"GD30\").",
+      "result": {
+        "type": "any"
+      },
+      "parameters": [
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "formato",
+          "type": "string",
+          "description": "texto (default, DD/MM/AAAA) | fecha (número de Excel, formatear como fecha)",
+          "optional": true
+        }
+      ]
+    },
+    {
       "id": "TICKET",
       "name": "TICKET",
       "description": "Ticket de operación (spill): VN, monto total, principal, interés, TIREA, TNA, TEM, duration y liquidación.",

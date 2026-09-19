@@ -412,5 +412,5 @@ async def test_margen_en_excel_calc(tmp_path, monkeypatch) -> None:
     fj = json.loads((ROOT / "backend/static/excel/functions.json").read_text(encoding="utf-8"))
     assert any(f["id"] == "MARGEN" for f in fj["functions"])
     js = (ROOT / "backend/static/excel/functions.js").read_text(encoding="utf-8")
-    assert 'CustomFunctions.associate("MARGEN", guard(margenFn))' in js and "v19" in js
+    assert 'CustomFunctions.associate("MARGEN", guard(margenFn))' in js and "OMS.MARGEN" in js
     assert "OMS.MARGEN" in (ROOT / "backend/static/excel/FORMULAS.md").read_text(encoding="utf-8")
