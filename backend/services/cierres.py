@@ -25,6 +25,7 @@ import bisect
 import logging
 import os
 import threading
+import warnings
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -113,8 +114,18 @@ def _build(df: pd.DataFrame) -> Optional[Matriz]:
     for c in CAMPOS:
         if c not in df.columns:
             continue
-        m = np.full((nf, ns), np.nan, dtype=(np.float64 if c in _F64 else np.float32))
-        m[fi, si] = pd.to_numeric(df[c], errors="coerce").to_numpy(dtype=float)
+        dt = np.float64 if c in _F64 else np.float32
+        m = np.full((nf, ns), np.nan, dtype=dt)
+        # Un valor basura en UNA celda (1e39 en una columna float32, ±inf) no
+        # puede voltear la matriz entera: rentafija.py sube TODO RuntimeWarning
+        # a error a nivel proceso, y el "overflow encountered in cast" del
+        # float64 → float32 pasaba a excepción → cierres sin matriz (5D de
+        # Mercado y price action de bonos vacíos). Lo que no entra queda NaN.
+        with np.errstate(all="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            vals = pd.to_numeric(df[c], errors="coerce").to_numpy(dtype=np.float64)
+            vals = np.where(np.isfinite(vals) & (np.abs(vals) <= np.finfo(dt).max), vals, np.nan)
+            m[fi, si] = vals.astype(dt)
         mat[c] = m
     opero = np.zeros((nf, ns), dtype=bool)
     if "opero" in df.columns:

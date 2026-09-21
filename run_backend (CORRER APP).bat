@@ -17,6 +17,23 @@ REM Carpeta donde vive este .bat (raiz del proyecto)
 cd /d "%~dp0"
 title YieldVertex
 
+REM PORT viaja al proceso: el banner muestra el puerto real y la app chequea
+REM que no haya otra instancia antes de cargar nada.
+set "PORT=8000"
+
+REM --- Si la app YA esta corriendo (otra ventana / servicio), no arrancar una
+REM segunda: uvicorn moriria al final del arranque con "solo se permite un
+REM uso de cada direccion de socket". Solo se abre el navegador (igual que el
+REM .command de Mac). curl viene con Windows 10+; sin curl se sigue normal. ---
+curl -s -o NUL --max-time 1 http://127.0.0.1:%PORT%/healthz >NUL 2>&1
+if not errorlevel 1 (
+  echo La app ya esta corriendo en http://127.0.0.1:%PORT% - abriendo el navegador.
+  echo ^(para reiniciarla: Ctrl+C en la ventana donde corre y volver a abrir este .bat^)
+  start "" http://127.0.0.1:%PORT%
+  timeout /t 3 >nul
+  exit /b 0
+)
+
 echo ============================================================
 echo   YieldVertex  -  arranque local (Windows)
 echo ============================================================
@@ -78,8 +95,10 @@ REM reiniciaba la app (~1 min de arranque) una y otra vez, en plena rueda.
 REM Para DESARROLLAR (auto-reload al editar especies.py, backend\, etc.):
 REM   "run_backend (CORRER APP).bat" dev
 set "RELOAD="
+set "OMS_RELOAD="
 if /i "%~1"=="dev" set "RELOAD=--reload"
 if /i "%~1"=="reload" set "RELOAD=--reload"
+if defined RELOAD set "OMS_RELOAD=1"
 
 if defined RELOAD (
   echo   Modo    : DEV, auto-reload al tocar un .py
@@ -98,8 +117,6 @@ REM Primera vez: genera certs\ y confia la CA en el usuario actual
 REM (certutil, sin admin).
 "%PY%" -m backend.tools.https_local
 
-REM PORT viaja al proceso para que el banner de la app muestre el puerto real.
-set "PORT=8000"
 "%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port %PORT% %RELOAD% --timeout-graceful-shutdown 10
 
 echo.

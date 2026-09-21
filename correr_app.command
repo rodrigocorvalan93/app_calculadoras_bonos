@@ -102,7 +102,7 @@ export SSL_CERT_FILE="${SSL_CERT_FILE:-$("$PY" -c 'import certifi,sys;sys.stdout
 # vez, en plena rueda. Igual que el .bat: estable salvo pedido explicito.
 RELOAD=""
 case "${1:-}" in
-  dev|DEV|reload|RELOAD) RELOAD="--reload";;
+  dev|DEV|reload|RELOAD) RELOAD="--reload"; export OMS_RELOAD=1;;   # la app no chequea el puerto: lo tiene el supervisor
 esac
 if [ -n "$RELOAD" ]; then
   echo "  Modo    : DEV, auto-reload al tocar un .py"
