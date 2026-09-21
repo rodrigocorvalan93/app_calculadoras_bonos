@@ -282,10 +282,23 @@ async def admin_especies_faltantes(request: Request) -> HTMLResponse:
     costo en el hot path; el cómputo (sets en memoria) corre en el pool."""
     if not _guard(request):
         return HTMLResponse("<h1>403</h1>", status_code=403)
+    from backend.routes import posiciones as P
     from backend.services import positions as pos
 
+    def _build():
+        rep = pos.especies_faltantes()
+        # qué pulir en Delta - Especies para que Posiciones clasifique por dato
+        # (Ajuste/Tasa/Subclase) y no por la descripción — misma tarjeta
+        try:
+            rep["clasif"] = P.reporte_clasificacion()
+        except Exception:  # noqa: BLE001 — el reporte de fichas sale igual
+            import logging
+            logging.getLogger("backend.admin").exception("[admin] reporte de clasificación de Posiciones falló")
+            rep["clasif"] = None
+        return rep
+
     loop = asyncio.get_running_loop()
-    rep = await loop.run_in_executor(None, pos.especies_faltantes)
+    rep = await loop.run_in_executor(None, _build)
     return request.app.state.templates.TemplateResponse(
         request, "partials/admin_especies_faltantes.html", {"rep": rep})
 

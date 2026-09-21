@@ -30,6 +30,7 @@ la base. Strings cortos + regex precompiladas: ~µs por tenencia.
 """
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from typing import Any, Dict, Optional, Tuple
@@ -76,6 +77,16 @@ _FIJA_POR_NATURALEZA = frozenset({
     "Plazos Fijos", "Plazos Fijos UVA", "Caución", "Cheques", "Cheques Garantizados",
     "Cheques No Garantizados", "Pagarés", "Pagarés Garantizados", "Pagarés No Garantizados",
 })
+
+# Categorías de BONO que llevan el prefijo del emisor ('ON ARS TAMAR',
+# 'Soberano CER', 'Sub-soberano USD'…). Las de instrumento (PF, FF, cheques,
+# FCI…) ya dicen qué son y quedan sin prefijo.
+_CATS_BONO = frozenset({"CER", "UVA", "USD-Linked", "USD", "USB", "ARS Fija", "ARS TAMAR",
+                        "ARS BADLAR", "ARS Step Up", "ARS (s/tasa)"})
+_RE_SUB = re.compile(r"\bSUB ?SOBERANOS?\b|\bPROVINCIAS?\b|\bPROVINCIAL(ES)?\b|\bMUNICIP[A-Z]*\b|\bCABA\b")
+_RE_SOB = re.compile(r"\bSOBERANOS?\b|\bTESORO\b|\bTITULOS? PUBLICOS?\b|\bLETRAS? DEL TESORO\b"
+                     r"|\bLETES?\b|\bLECAPS?\b|\bLECER\b|\bBONCAPS?\b|\bBONTES?\b|\bBONCER\b|\bBOPREAL\b|\bBCRA\b")
+_RE_ON = re.compile(r"\bON\b|\bOBLIGACION(ES)? NEGOCIABLES?\b|\bCORPORATIV[OA]S?\b")
 
 
 def _s(v: Any) -> str:
@@ -239,6 +250,60 @@ def calificacion_base(info: Optional[Dict[str, Any]]) -> Optional[str]:
     return _s((info or {}).get("Califica_Local")) or None
 
 
+@functools.lru_cache(maxsize=256)
+def tipo_emisor_ficha(clasificacion: Optional[str]) -> Optional[str]:
+    """'Soberano' / 'Sub-soberano' / 'ON' según la Clasificación de la ficha de
+    especies.py ('Soberano', 'Sub-soberano', 'Corporativo …'). None si no dice.
+    'Sub-soberano' se chequea ANTES: contiene 'soberano'."""
+    cf = _norm(clasificacion).strip()
+    if not cf:
+        return None
+    if cf.startswith("SUB"):
+        return "Sub-soberano"
+    if cf.startswith("SOBERANO"):
+        return "Soberano"
+    if cf.startswith("CORPORATIVO"):
+        return "ON"
+    return None
+
+
+def _tipo_emisor_texto(t_base: str, t_desc: str, t_clase: str) -> Optional[str]:
+    """Sin ficha: taxonomía de la base (Subclase / Clase / Industria / Sector
+    Delta) → descripción de la cartera → Clase de Activo del Excel ('Títulos
+    Públicos' = soberano; la 'Renta Fija' de Delta son las ONs). En la
+    descripción el token ON manda ('ON BANCO PROVINCIA …' es una ON)."""
+    if t_base:
+        if _RE_SUB.search(t_base):
+            return "Sub-soberano"
+        if _RE_SOB.search(t_base):
+            return "Soberano"
+        if _RE_ON.search(t_base):
+            return "ON"
+    if t_desc:
+        if _RE_ON.search(t_desc):
+            return "ON"
+        if _RE_SUB.search(t_desc):
+            return "Sub-soberano"
+        if _RE_SOB.search(t_desc):
+            return "Soberano"
+    if t_clase:
+        if _RE_SUB.search(t_clase):
+            return "Sub-soberano"
+        if _RE_SOB.search(t_clase):
+            return "Soberano"
+        if " RENTA FIJA " in t_clase or _RE_ON.search(t_clase):
+            return "ON"
+    return None
+
+
+def con_emisor(categoria: str, tipo: Optional[str]) -> str:
+    """'ON ARS TAMAR' / 'Soberano CER' / 'Sub-soberano USD'… sólo para las
+    categorías de bono (y los duales); PF, FF, cheques, FCI… quedan igual."""
+    if tipo and (categoria in _CATS_BONO or categoria.startswith("Dual")):
+        return f"{tipo} {categoria}"
+    return categoria
+
+
 # Memo por (descripción, clase, código, campos usados de la base): Posiciones
 # clasifica cada tenencia 2-3 veces por request (composición + tabla + targets)
 # y la cartera no cambia entre refrescos — el regex corre una vez por tenencia
@@ -282,7 +347,7 @@ def _clasificar(especie: Any, clase: Any, info: Optional[Dict[str, Any]],
             if lab:
                 return lab, fuente
     if cat_tasa:
-        return cat_tasa, "base"
+        return con_emisor(cat_tasa, _tipo_emisor_texto(t_base, t_desc, t_clase)), "base"
     # Clase de Activo inferida (lo de siempre) o cruda.
     if " CEDEAR" in t_clase:
         return "CEDEARs", "clase"

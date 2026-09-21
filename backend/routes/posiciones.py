@@ -164,13 +164,82 @@ def _clasif(h: Dict[str, Any], obj) -> Tuple[str, str]:
     'Renta Fija' juntaba ONs sin ficha, fideicomisos, plazos fijos, cauciones,
     cheques y pagarés en una sola línea."""
     if obj is not None:
-        return _categoria(obj), "ficha"
+        # prefijo del emisor por la Clasificación de la ficha: 'ON ARS TAMAR' /
+        # 'Soberano CER' / 'Sub-soberano USD' — el desk lee soberano vs ON
+        tipo = clasificacion.tipo_emisor_ficha(getattr(obj, "clasificacion", None))
+        return clasificacion.con_emisor(_categoria(obj), tipo), "ficha"
     code = h.get("cod_delta")
     return clasificacion.clasificar(h.get("especie"), h.get("clase"), _info(code), code)
 
 
 def _cat_for(h: Dict[str, Any], obj) -> str:
     return _clasif(h, obj)[0]
+
+
+# Categorías que están bien como están y no tienen nada que cargar en una base
+# de bonos: acciones / CEDEARs (viven en los paneles), la caja ('$', 'USD'…
+# queda 'Liquidez') y la línea contable 'Otros Activos Netos'.
+_SIN_NADA_QUE_CARGAR = frozenset({"Acciones", "CEDEARs", "Liquidez", "Otros Activos Netos"})
+
+
+def reporte_clasificacion() -> Dict[str, Any]:
+    """Para /admin: qué pulir en 'Delta - Especies' para que Posiciones
+    clasifique por DATO y no por texto. Recorre las tenencias Delta (Galileo
+    tiene su propio reporte de fichas) y junta, por ticker, las que NO salieron
+    de una ficha ni de la base:
+      - `con_ticker`: categoría por descripción / Clase de Activo / sin regla →
+        cargar Ajuste + Tasa (y Subclase para fideicomisos / FCI) en la base, o
+        la ficha en especies.py. Acciones, CEDEARs, caja y 'Otros Activos
+        Netos' no entran (no hay nada que cargar).
+      - `sin_ticker`: sin código y sin regla → la descripción no dice qué es:
+        pasarla para sumar la regla (o corregirla en la cartera).
+    Corre sobre el cache de holdings con el memo de clasificación: ms."""
+    c = positions.ensure_loaded()
+    con_ticker: Dict[str, Dict[str, Any]] = {}
+    sin_ticker: Dict[str, Dict[str, Any]] = {}
+    n_total = n_ficha = n_base = 0
+    for h in c["holdings"]:
+        if positions.es_galileo(h["cod_fondo"]):
+            continue
+        code = h.get("cod_delta")
+        cat, src = _clasif(h, _bono(code))
+        n_total += 1
+        if src == "ficha":
+            n_ficha += 1
+            continue
+        if src == "base":
+            n_base += 1
+            continue
+        if cat in _SIN_NADA_QUE_CARGAR:
+            continue
+        if code:
+            d = con_ticker.setdefault(code, {
+                "code": code, "especie": h.get("especie"), "clase": h.get("clase"),
+                "categoria": cat, "fuente": src, "n_filas": 0, "valor": 0.0, "fondos": set()})
+        elif src == "sin_regla":
+            d = sin_ticker.setdefault(str(h.get("especie") or ""), {
+                "code": None, "especie": h.get("especie"), "clase": h.get("clase"),
+                "categoria": cat, "fuente": src, "n_filas": 0, "valor": 0.0, "fondos": set()})
+        else:
+            continue                    # sin ticker pero reconocido por la descripción: nada que cargar
+        d["n_filas"] += 1
+        d["valor"] += h.get("valor") or 0.0
+        d["fondos"].add(h["cod_fondo"])
+
+    _FUENTE = {"texto": "descripción", "clase": "Clase de Activo", "sin_regla": "sin regla"}
+
+    def _fin(dd: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        rows = sorted(dd.values(), key=lambda x: -abs(x["valor"]))
+        for r in rows:
+            fs = sorted(r["fondos"])
+            r["n_fondos"] = len(fs)
+            r["fondos"] = ", ".join(positions.fondo_label(f) for f in fs[:3]) + (" …" if len(fs) > 3 else "")
+            r["fuente_txt"] = _FUENTE.get(r["fuente"], r["fuente"])
+        return rows
+
+    return {"con_ticker": _fin(con_ticker), "sin_ticker": _fin(sin_ticker),
+            "n_con_ticker": len(con_ticker), "n_sin_ticker": len(sin_ticker),
+            "n_total": n_total, "n_ficha": n_ficha, "n_base": n_base}
 
 
 def _tasa_for(h: Dict[str, Any], obj, categoria: str) -> str:

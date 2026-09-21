@@ -208,11 +208,22 @@ Clase de Activo inferida (CEDEARs / Acciones) o cruda (`fuente = sin_regla`;
 una fila `Liquidez` con ticker que no es caja se lee como FCI Money Markets).
 Tasa y Calificación de los sin ficha también salen de la base
 (`tasa_para` / `calificacion_base`; PF, caución, cheques y pagarés son Fija por
-naturaleza). La celda Categoría lleva la fuente como tooltip y el título de la
-tabla cuenta las filas `sin regla fina`: eso es lo que falta cargar en la base
-(Ajuste/Tasa) o una descripción nueva para sumar a las regex. Antes todo lo
-sin ficha caía a la Clase cruda: en Delta Ahorro, "Renta Fija" 47 % del PN
-en una línea. Regresión: `tests/test_posiciones_clasificacion.py`.
+naturaleza). **Prefijo del emisor** (`con_emisor`): las categorías de bono
+(CER / UVA / USD-Linked / USD / USB / ARS … / Dual …) llevan `Soberano` /
+`Sub-soberano` / `ON` adelante — con ficha por su `Clasificación`
+(`tipo_emisor_ficha`: "Soberano", "Sub-soberano", "Corporativo …"); sin ficha
+por la taxonomía de la base, la descripción (el token `ON` manda: "ON BANCO
+PROVINCIA" es una ON) o la Clase de Activo del Excel ("Títulos Públicos" =
+soberano, la "Renta Fija" de Delta son las ONs). Sin dato de emisor la
+categoría queda sin prefijo. PF / FF / cheques / FCI no llevan prefijo. La
+celda Categoría lleva la fuente como tooltip y el título de la tabla cuenta
+las filas `sin regla fina`. **Qué pulir en la base**: la tarjeta "Especies
+faltantes" de /admin suma `routes.posiciones.reporte_clasificacion()` — las
+tenencias Delta cuya categoría NO salió de ficha ni de la base, con ticker
+(cargar Ajuste + Tasa, y Subclase para FF / FCI, en `Delta - Especies` o la
+ficha en `especies.py`) y sin ticker sin regla (pasar la descripción). Antes
+todo lo sin ficha caía a la Clase cruda: en Delta Ahorro, "Renta Fija" 47 %
+del PN en una línea. Regresión: `tests/test_posiciones_clasificacion.py`.
 
 **Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las 4 rutas llevan
 `@_pestana_resiliente(...)` — una excepción responde 200 con
