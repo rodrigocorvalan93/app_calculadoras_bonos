@@ -95,6 +95,41 @@ def test_url_app_desde_env(monkeypatch) -> None:
     assert consola.url_app().startswith("http://127.0.0.1:8001") and "0.0.0.0" in consola.url_app()
 
 
+def test_app_ya_corriendo_sonda_http(monkeypatch) -> None:
+    """Segunda instancia: sólo una respuesta HTTP real cuenta. Un socket que
+    acepta y no contesta (supervisor de --reload) da False; puerto cerrado,
+    False. PORT/APP_PORT inválidos → None (no se chequea)."""
+    import socket
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+
+        def log_message(self, *a):  # noqa: D102
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), _H)
+    t = threading.Thread(target=srv.serve_forever, daemon=True); t.start()
+    try:
+        assert consola.app_ya_corriendo(srv.server_address[1], timeout=2.0) is True
+    finally:
+        srv.shutdown(); srv.server_close()
+    mudo = socket.socket(); mudo.bind(("127.0.0.1", 0)); mudo.listen(1)
+    try:
+        assert consola.app_ya_corriendo(mudo.getsockname()[1], timeout=0.3) is False
+    finally:
+        mudo.close()
+    libre = socket.socket(); libre.bind(("127.0.0.1", 0)); puerto_libre = libre.getsockname()[1]; libre.close()
+    assert consola.app_ya_corriendo(puerto_libre, timeout=0.3) is False
+    monkeypatch.delenv("PORT", raising=False); monkeypatch.delenv("APP_PORT", raising=False)
+    assert consola.puerto_configurado() is None
+    monkeypatch.setenv("PORT", "8000"); assert consola.puerto_configurado() == 8000
+    monkeypatch.setenv("PORT", "abc"); assert consola.puerto_configurado() is None
+    monkeypatch.setenv("PORT", "0"); assert consola.puerto_configurado() is None
+
+
 def test_main_usa_consola_y_los_launchers_estan_ordenados() -> None:
     main = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
     assert "consola.instalar(" in main and "consola.imprimir_banner(" in main and "logging.basicConfig" not in main
@@ -104,4 +139,6 @@ def test_main_usa_consola_y_los_launchers_estan_ordenados() -> None:
     for launcher in (bat, cmd):
         assert "arranque local" in launcher and "Carpeta :" in launcher and "Python  :" in launcher
         assert "Add-in  :" in launcher and "Ctrl+C para detener" in launcher
+        assert "/healthz" in launcher and "OMS_RELOAD=1" in launcher     # 2ª instancia → sólo el navegador; dev sin chequeo
     assert bat.isascii()                                                # cmd.exe sin sorpresas de code page
+    assert "consola.app_ya_corriendo(" in main and 'os.environ.get("OMS_RELOAD") != "1"' in main

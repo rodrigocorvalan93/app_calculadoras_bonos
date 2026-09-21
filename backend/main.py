@@ -153,6 +153,21 @@ async def lifespan(app: FastAPI):
     # y qué versión corre) antes de la secuencia de arranque.
     consola.imprimir_banner(consola.url_app(),
                             f"https://localhost:{settings.tls_port}" if settings.tls_bridge else "")
+    # Segunda instancia (la app ya abierta en otra ventana): uvicorn bindea
+    # el puerto recién DESPUÉS del arranque (~15 s) y moría con "solo se
+    # permite un uso de cada dirección de socket" al final. Con PORT (lo
+    # exportan los launchers) se pregunta ANTES de cargar nada; en modo
+    # --reload (OMS_RELOAD=1) no aplica: el puerto lo tiene el supervisor.
+    puerto = consola.puerto_configurado()
+    if puerto and os.environ.get("OMS_RELOAD") != "1" and consola.app_ya_corriendo(puerto):
+        logger.error("[main] el puerto %s ya está en uso: la app YA está corriendo en esta PC "
+                     "(otra ventana o el servicio). Cerrá esa instancia o usá la que está: "
+                     "http://127.0.0.1:%s — no se arranca una segunda.", puerto, puerto)
+        # Salida directa (código 3, el mismo de uvicorn ante un bind fallido):
+        # todavía no hay nada cargado ni escrito, y un raise acá imprimiría
+        # 20 líneas de traceback de uvicorn debajo del mensaje.
+        logging.shutdown()
+        os._exit(3)
     logger.info("[main] arrancando…")
     # Auth: sembrar el superuser desde env si el store está vacío (login wall).
     try:

@@ -157,6 +157,36 @@ def _ascii(texto: str) -> str:
     return "".join(c for c in t if not unicodedata.combining(c)).encode("ascii", "replace").decode("ascii")
 
 
+def puerto_configurado() -> Optional[int]:
+    """Puerto que exportan los launchers (PORT / APP_PORT); None si nadie lo
+    fijó (uvicorn a mano, servicio) — en ese caso no se chequea nada."""
+    raw = (os.environ.get("PORT") or os.environ.get("APP_PORT") or "").strip()
+    try:
+        p = int(raw)
+        return p if 0 < p < 65536 else None
+    except ValueError:
+        return None
+
+
+def app_ya_corriendo(port: int, host: str = "127.0.0.1", timeout: float = 0.8) -> bool:
+    """¿Hay OTRA instancia de la app respondiendo en host:port? Sonda HTTP a
+    /healthz (stdlib): sólo cuenta una respuesta HTTP real. Un socket que
+    acepta pero no contesta (el supervisor de `--reload` ya tiene el puerto
+    bindeado cuando arranca el worker) da timeout → False, no falso positivo.
+    Sin servidor → False. Nunca tira."""
+    import http.client
+    try:
+        c = http.client.HTTPConnection(host, port, timeout=timeout)
+        try:
+            c.request("GET", "/healthz")
+            r = c.getresponse()
+            return 100 <= r.status < 600
+        finally:
+            c.close()
+    except Exception:  # noqa: BLE001 — ConnectionRefused, timeout, reset…
+        return False
+
+
 def url_app() -> str:
     """Dónde escucha, según APP_HOST / PORT de secrets.txt (los launchers usan
     127.0.0.1:8000). uvicorn imprime la URL exacta justo después."""

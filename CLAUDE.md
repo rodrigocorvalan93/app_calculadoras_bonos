@@ -178,7 +178,17 @@ versión (`version()` = git o `.git` a mano, nunca tira); y una línea `listo en
 N s · bonos · feed · add-in · autosave` al final del arranque. Los launchers
 (`run_backend (CORRER APP).bat`, `correr_app.command`) imprimen un encabezado
 ASCII alineado y exportan `PORT`. Los `print` legacy de `indices.py` quedan
-como están.
+como están. **Segunda instancia**: uvicorn bindea el puerto recién DESPUÉS
+del arranque (~15 s) y moría al final con WinError 10048; los dos launchers
+sondean `/healthz` con curl antes de arrancar (si responde, abren el
+navegador y salen) y el lifespan, con `PORT` seteado y sin `OMS_RELOAD=1`
+(dev: el supervisor de `--reload` ya tiene el puerto), hace
+`consola.app_ya_corriendo()` (GET /healthz, stdlib: sólo cuenta una respuesta
+HTTP real) y sale con código 3 y un mensaje claro antes de cargar nada.
+`rentafija.py` sube TODO `RuntimeWarning` a error a nivel proceso: cualquier
+cast numpy sobre data externa (p. ej. `cierres._build`, float64 → float32)
+va bajo `np.errstate` + `warnings.catch_warnings()` y lo que no entra queda
+NaN — un valor basura en una celda no puede voltear una matriz entera.
 
 **Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las 4 rutas llevan
 `@_pestana_resiliente(...)` — una excepción responde 200 con
