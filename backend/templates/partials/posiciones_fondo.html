@@ -7,7 +7,7 @@
       <span>{{ nombre }} · tenencias</span>
       <span class="card-title-aux">
         <button type="button" class="lnk" data-csv-of="#pos-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · 
-        {{ rows | length }} especies · Valor {{ total_valor | ar_int }}{% if pn %} · {{ (total_valor / pn * 100) | ar_pct_pp(1) }} del PN{% endif %}
+        {{ rows | length }} especies · Valor {{ total_valor | ar_int }}{% if pn %} · {{ (total_valor / pn * 100) | ar_pct_pp(1) }} del PN{% endif %}{% if n_sin_regla %} · <span class="muted" title="Tenencias cuya Categoría es la Clase de Activo cruda del Excel: sin ficha en especies.py, sin Ajuste/Tasa en Delta - Especies y sin una descripción reconocida (plazo fijo, caución, cheque, pagaré, fideicomiso, FCI). Pasá el mouse por la columna Categoría para ver de dónde salió cada una.">{{ n_sin_regla }} sin regla fina</span>{% endif %}
         · <span id="pos-day-ret" class="pos-day-ret" title="Σ (peso por valor × retorno Last vs Px val). Editá un Last para simular.">Ret. día —</span>
         · <span id="pos-fondo-tirdur" class="pos-day-ret" data-fondo="{{ fondo or '' }}" title="TIR y duration del FONDO ponderadas por valor de mercado (Σ w·TIR / Σ w). Entre paréntesis, la cobertura: % del valor del fondo que aporta dato. TODAS las tasas de la tabla son editables — lo tipeado alimenta SOLO este ponderado (no toca precios ni recalcula nada) y sobrevive a los refresh.">TIR — · Dur —</span>
         <label class="lnk" style="cursor:pointer" title="PROYECTADO: los CER usan su ficha hermana j (TIR nominal con la inflación proyectada) y los DLK componen con la deva implícita de ROFEX a la duration — para leer un fondo en PESOS. Sin tildar: la versión real/actual (p. ej. un fondo CER puro). El default de cada modo siempre es el valor calculado."><input type="checkbox" id="pos-proy" style="vertical-align:-2px"> proy.</label>
@@ -77,7 +77,7 @@
               <td style="text-align:left;font-size:11px;color:var(--text-soft);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.emisor or '' }}">{{ r.emisor or "—" }}</td>
               {# data-sort = ordinal del date → el sort es cronológico, no "por día del mes" #}
               <td style="font-size:11px" data-sort="{{ r.vencimiento.toordinal() if r.vencimiento else '' }}">{{ r.vencimiento | ar_date }}</td>
-              <td style="text-align:left;font-size:11px">{{ r.categoria }}</td>
+              <td style="text-align:left;font-size:11px" title="{{ r.cat_src_txt }}">{{ r.categoria }}</td>
               <td style="font-size:11px;color:var(--text-muted)">{{ r.rating }}</td>
               <td>{{ r.cantidad | ar_int }}</td>
               <td>{{ r.valor | ar_int }}</td>

@@ -10,13 +10,13 @@ from __future__ import annotations
 import asyncio
 import threading
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _row_for_code
-from backend.services import auth, bond_universe, positions, pricing
+from backend.services import auth, bond_universe, clasificacion, delta_especies, positions, pricing
 
 router = APIRouter(tags=["posiciones"])
 
@@ -150,22 +150,42 @@ def _calif(obj) -> str:
     return "Soberano" if "Soberano" in clas else "(sin clasif.)"
 
 
-def _cat_for(h: Dict[str, Any], obj) -> str:
-    """Categoría de la tenencia. Bonos → `_categoria(obj)`; especies fuera del
-    universo (acciones, CEDEARs, FCI…) → se infiere de la 'Clase de Activo' del
-    Excel de cartera, así no caen en '(sin clasif.)'."""
+def _info(code: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Fila de 'Delta - Especies' del ticker (cache en memoria, lookup µs)."""
+    return delta_especies.info(code) if code else None
+
+
+def _clasif(h: Dict[str, Any], obj) -> Tuple[str, str]:
+    """(Categoría, fuente) de la tenencia. Con ficha en especies.py manda la
+    ficha (`_categoria`). Sin ficha, la cadena de `services.clasificacion`:
+    tipo de instrumento por texto (base Delta - Especies → descripción de la
+    cartera → Clase de Activo), Ajuste × Tasa de la base, Clase inferida o
+    cruda. Antes todo lo sin ficha caía a la Clase cruda del Excel: en Delta
+    'Renta Fija' juntaba ONs sin ficha, fideicomisos, plazos fijos, cauciones,
+    cheques y pagarés en una sola línea."""
     if obj is not None:
-        return _categoria(obj)
-    cl = (h.get("clase") or "").lower()
-    if "cedear" in cl:
-        return "CEDEARs"
-    if "accion" in cl or "acción" in cl or "equity" in cl:
-        return "Acciones"
-    if "fondo" in cl or "fci" in cl:
-        return "FCI"
-    if "caucion" in cl or "caución" in cl or "plazo fijo" in cl:
-        return "Liquidez"
-    return h.get("clase") or "(sin clasif.)"
+        return _categoria(obj), "ficha"
+    code = h.get("cod_delta")
+    return clasificacion.clasificar(h.get("especie"), h.get("clase"), _info(code), code)
+
+
+def _cat_for(h: Dict[str, Any], obj) -> str:
+    return _clasif(h, obj)[0]
+
+
+def _tasa_for(h: Dict[str, Any], obj, categoria: str) -> str:
+    """Tasa (cuadro de composición): la ficha si la hay; si no, la columna
+    Tasa de la base o la que el instrumento tiene por naturaleza."""
+    if obj is not None:
+        return _tasa(obj)
+    return clasificacion.tasa_para(categoria, _info(h.get("cod_delta")))
+
+
+def _calif_for(h: Dict[str, Any], obj) -> str:
+    """Calificación: la ficha; sin ficha, `Califica_Local` de la base."""
+    if obj is not None:
+        return _calif(obj)
+    return clasificacion.calificacion_base(_info(h.get("cod_delta"))) or "(sin clasif.)"
 
 
 def _emisor_for(code: Optional[str], obj) -> Optional[str]:
@@ -231,11 +251,12 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float],
         valor = h.get("valor") or 0.0
         code = h.get("cod_delta")
         obj = _bono(code)
+        cat = _cat_for(h, obj)
         keys = {
             "Clase de Activo": h.get("clase") or "(sin clasif.)",
-            "Categoría": _cat_for(h, obj),
-            "Tasa": _tasa(obj),
-            "Calificación": _calif(obj),
+            "Categoría": cat,
+            "Tasa": _tasa_for(h, obj, cat),
+            "Calificación": _calif_for(h, obj),
             # mismo fallback de ficha que la columna Vto de la tabla (patas FX)
             "Vencimiento": _venc_bucket(obj if obj is not None else _ficha_leg(code)),
         }
@@ -364,6 +385,7 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
                 tea = _tea_rofex(duration)
                 if tea is not None:
                     tirea_p = (1.0 + tirea) * (1.0 + tea) - 1.0
+        cat, cat_src = _clasif(h, obj)
         rows.append({
             **h,
             "abrev": code or "—",
@@ -371,8 +393,12 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             "in_universe": m is not None,
             "pct_pn": (valor / denom) if (valor is not None and denom) else None,
             "emisor": _emisor_for(code, obj),
-            "categoria": _cat_for(h, obj),
-            "rating": _calif(obj) if obj is not None else "—",
+            "categoria": cat,
+            # de dónde salió la categoría (tooltip): ficha / base / texto / clase / sin_regla
+            "cat_src": cat_src,
+            "cat_src_txt": clasificacion.FUENTES.get(cat_src, ""),
+            "rating": _calif(obj) if obj is not None
+            else (clasificacion.calificacion_base(_info(code)) or "—"),
             "px_val": px_val,
             "tirea": tirea,
             "tna": (m or {}).get("tna"),
@@ -467,6 +493,9 @@ def _fondo_ctx(selected: Optional[int], plazo: str,
         "total_valor": sum((r.get("valor") or 0.0) for r in rows),
         "nombre": nombre,
         "fondo": selected,
+        # filas cuya Categoría es la Clase de Activo cruda (ni ficha, ni base,
+        # ni descripción reconocida): lo que falta cargar en la base
+        "n_sin_regla": sum(1 for r in rows if r.get("cat_src") == "sin_regla"),
     }
 
 
