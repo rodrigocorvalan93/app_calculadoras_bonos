@@ -190,6 +190,30 @@ cast numpy sobre data externa (p. ej. `cierres._build`, float64 → float32)
 va bajo `np.errstate` + `warnings.catch_warnings()` y lo que no entra queda
 NaN — un valor basura en una celda no puede voltear una matriz entera.
 
+## Posiciones — Categoría de las tenencias
+
+`routes/posiciones._clasif(h, obj)` → `(categoría, fuente)`. Con ficha en
+`especies.py` manda la ficha (`_categoria`: Dual → CER/UVA → USD-Linked →
+USD/USB → ARS Fija/TAMAR/BADLAR/Step Up). SIN ficha entra
+`services/clasificacion.py` (stdlib puro, ~µs por fila), primer match gana:
+(1) **tipo de instrumento por texto** — fila de `Delta - Especies` si el ticker
+está (Subclase / Clase de Activo / Industria / Sector Delta), descripción de
+la cartera (columna `Especie`) y Clase de Activo del Excel: Plazos Fijos ·
+Caución · Cheques (No) Garantizados · Pagarés (No) Garantizados ·
+Fideicomisos TAMAR/BADLAR | CER/UVA | Tasa Fija | USD-Linked | USD |
+Financieros · FCI Money Markets | FCI Cerrados | FCI; (2) **Ajuste × Tasa de
+la base** (regla del legacy `OMSposiciones._categoria_bono`) con las MISMAS
+etiquetas que las fichas — un ON TAMAR sin ficha suma a `ARS TAMAR`; (3)
+Clase de Activo inferida (CEDEARs / Acciones) o cruda (`fuente = sin_regla`;
+una fila `Liquidez` con ticker que no es caja se lee como FCI Money Markets).
+Tasa y Calificación de los sin ficha también salen de la base
+(`tasa_para` / `calificacion_base`; PF, caución, cheques y pagarés son Fija por
+naturaleza). La celda Categoría lleva la fuente como tooltip y el título de la
+tabla cuenta las filas `sin regla fina`: eso es lo que falta cargar en la base
+(Ajuste/Tasa) o una descripción nueva para sumar a las regex. Antes todo lo
+sin ficha caía a la Clase cruda: en Delta Ahorro, "Renta Fija" 47 % del PN
+en una línea. Regresión: `tests/test_posiciones_clasificacion.py`.
+
 **Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las 4 rutas llevan
 `@_pestana_resiliente(...)` — una excepción responde 200 con
 `partials/historico_tab_error.html` (qué falló + Reintentar) en vez de un 500
