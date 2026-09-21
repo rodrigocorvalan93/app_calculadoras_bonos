@@ -846,7 +846,12 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .mae-tag { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: #0a0a0a; background: var(--cyan); border-radius: 5px; padding: 2px 7px; }
 
 /* Resumen de composición (Posiciones) */
-.resumen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+/* Un cuadro más ancho que su columna (etiquetas largas: "Fideicomisos
+   TAMAR/BADLAR", "Cheques No Garantizados") antes desbordaba y se pisaba con el
+   cuadro de al lado (min-width:auto de los ítems de grid): ahora la columna es
+   más ancha, el ítem puede achicarse y, si igual no entra, scrollea adentro. */
+.resumen-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.resumen-grid > div { min-width: 0; overflow-x: auto; }
 .resumen-h { font-weight: 600; color: var(--text-muted); font-size: 12px; margin-bottom: 5px; text-transform: none; }
 
 /* Posición por fondo (Comparador) */
