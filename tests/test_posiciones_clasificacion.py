@@ -252,12 +252,13 @@ def test_reporte_que_pulir_en_la_base(monkeypatch) -> None:
             {"cod_fondo": 2, "cod_delta": None, "especie": "PLAZO FIJO MACRO", "valor": 8.0, "clase": "Renta Fija"},
             {"cod_fondo": 2, "cod_delta": None, "especie": "OTROS ACTIVOS NETOS", "valor": 7.0, "clase": "Otros Activos Netos"},
             {"cod_fondo": 2, "cod_delta": None, "especie": "COSA RARA", "valor": 6.0, "clase": "Renta Fija"},
+            {"cod_fondo": 2, "cod_delta": "$", "especie": "CAJA PESOS", "valor": 4.0, "clase": "Liquidez"},
             {"cod_fondo": G + 8, "cod_delta": None, "especie": "*BIS1", "valor": 5.0, "clase": "Cheques Garantizados",
              "es_especie": False},
         ],
     })
     rep = P.reporte_clasificacion()
-    assert (rep["n_total"], rep["n_ficha"], rep["n_base"]) == (10, 1, 1)
+    assert (rep["n_total"], rep["n_ficha"], rep["n_base"]) == (11, 1, 1)
     con = {r["code"]: r for r in rep["con_ticker"]}
     assert list(con) == ["FFTX1", "ZZZZ9", "DELPESB"]                      # por valor desc
     assert con["FFTX1"]["categoria"] == "Fideicomisos TAMAR/BADLAR" and con["FFTX1"]["fuente_txt"] == "descripción"
@@ -266,8 +267,8 @@ def test_reporte_que_pulir_en_la_base(monkeypatch) -> None:
     assert con["ZZZZ9"]["categoria"] == "Renta Fija" and con["ZZZZ9"]["fuente_txt"] == "sin regla"
     assert con["DELPESB"]["categoria"] == "FCI Money Markets" and con["DELPESB"]["fuente_txt"] == "Clase de Activo"
     sin = [r["especie"] for r in rep["sin_ticker"]]
-    assert sin == ["OTROS ACTIVOS NETOS", "COSA RARA"]                       # PF reconocido y Galileo: afuera
-    assert rep["n_con_ticker"] == 3 and rep["n_sin_ticker"] == 2
+    assert sin == ["COSA RARA"]           # PF reconocido, 'Otros Activos Netos' (contable) y Galileo: afuera
+    assert rep["n_con_ticker"] == 3 and rep["n_sin_ticker"] == 1
 
 
 @pytest.mark.asyncio

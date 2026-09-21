@@ -176,6 +176,12 @@ def _cat_for(h: Dict[str, Any], obj) -> str:
     return _clasif(h, obj)[0]
 
 
+# Categorías que están bien como están y no tienen nada que cargar en una base
+# de bonos: acciones / CEDEARs (viven en los paneles), la caja ('$', 'USD'…
+# queda 'Liquidez') y la línea contable 'Otros Activos Netos'.
+_SIN_NADA_QUE_CARGAR = frozenset({"Acciones", "CEDEARs", "Liquidez", "Otros Activos Netos"})
+
+
 def reporte_clasificacion() -> Dict[str, Any]:
     """Para /admin: qué pulir en 'Delta - Especies' para que Posiciones
     clasifique por DATO y no por texto. Recorre las tenencias Delta (Galileo
@@ -183,8 +189,8 @@ def reporte_clasificacion() -> Dict[str, Any]:
     de una ficha ni de la base:
       - `con_ticker`: categoría por descripción / Clase de Activo / sin regla →
         cargar Ajuste + Tasa (y Subclase para fideicomisos / FCI) en la base, o
-        la ficha en especies.py. Acciones y CEDEARs no entran (no van en la
-        base de bonos).
+        la ficha en especies.py. Acciones, CEDEARs, caja y 'Otros Activos
+        Netos' no entran (no hay nada que cargar).
       - `sin_ticker`: sin código y sin regla → la descripción no dice qué es:
         pasarla para sumar la regla (o corregirla en la cartera).
     Corre sobre el cache de holdings con el memo de clasificación: ms."""
@@ -204,7 +210,7 @@ def reporte_clasificacion() -> Dict[str, Any]:
         if src == "base":
             n_base += 1
             continue
-        if cat in ("Acciones", "CEDEARs"):
+        if cat in _SIN_NADA_QUE_CARGAR:
             continue
         if code:
             d = con_ticker.setdefault(code, {
