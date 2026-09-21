@@ -1,9 +1,12 @@
 {# Reporte de especies de las carteras que faltan en la base + filas Galileo
    sin normalizar. Ordenado por valor (lo que más duele primero), cap 40 filas
    por tabla — el resto se resume en el contador. #}
-{% if not rep or (rep.n_faltantes == 0 and rep.n_sin_map == 0) %}
+{% set cl = rep.clasif if rep else none %}
+{% set pendientes_clasif = cl and (cl.n_con_ticker or cl.n_sin_ticker) %}
+{% if not rep or (rep.n_faltantes == 0 and rep.n_sin_map == 0 and not pendientes_clasif) %}
   <p class="muted" style="font-size:12px">✅ Todas las especies de las carteras están en la base
-    (bonos en <code>especies.py</code>, acciones/CEDEARs en los paneles) y Galileo quedó 100% normalizado.</p>
+    (bonos en <code>especies.py</code>, acciones/CEDEARs en los paneles), Galileo quedó 100% normalizado
+    y Posiciones clasifica todo por ficha o por <code>Delta - Especies</code>.</p>
 {% else %}
   {% if rep.n_faltantes %}
   <p class="muted" style="font-size:12px;margin-bottom:6px">
@@ -54,5 +57,61 @@
     </table>
     {% if rep.n_sin_map > 40 %}<p class="muted" style="font-size:11px">… y {{ rep.n_sin_map - 40 }} más (ordenado por valor).</p>{% endif %}
   </div>
+  {% endif %}
+
+  {# ── Qué pulir en Delta - Especies para que Posiciones clasifique por dato ── #}
+  {% if pendientes_clasif %}
+  <p class="muted" style="font-size:12px;margin:10px 0 6px">
+    <strong>Clasificación de Posiciones</strong> · {{ cl.n_ficha }} tenencias por ficha, {{ cl.n_base }} por
+    <code>Delta - Especies</code>{% if cl.n_con_ticker %} · <strong>{{ cl.n_con_ticker }}</strong> ticker(s) se clasifican
+    por la descripción o quedan con la Clase de Activo cruda: cargales <code>Ajuste</code> + <code>Tasa</code>
+    (y <code>Subclase de Activo</code> si es fideicomiso / FCI) en <code>Delta - Especies</code>, o la ficha en
+    <code>especies.py</code>{% endif %}:
+  </p>
+  {% if cl.n_con_ticker %}
+  <div class="table-scroll" style="margin-bottom:12px">
+    <table class="cashflows curve-table mercado-table" data-sortable>
+      <thead><tr><th style="text-align:left" data-sort>Ticker</th><th style="text-align:left" data-sort>Descripción</th><th style="text-align:left" data-sort>Clase</th><th style="text-align:left" data-sort>Categoría hoy</th><th data-sort title="De dónde salió la categoría: descripción de la cartera, Clase de Activo del Excel, o sin regla (Clase cruda)">Por</th><th style="text-align:left" data-sort>Fondos</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
+      <tbody>
+        {% for r in cl.con_ticker[:40] %}
+        <tr>
+          <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
+          <td style="text-align:left;font-size:11.5px">{{ r.especie }}</td>
+          <td style="text-align:left;font-size:11px">{{ r.clase or "—" }}</td>
+          <td style="text-align:left;font-size:11px">{{ r.categoria }}</td>
+          <td style="font-size:11px;color:var(--text-muted)">{{ r.fuente_txt }}</td>
+          <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ r.fondos }}</td>
+          <td>{{ r.n_filas }}</td>
+          <td>{{ r.valor | ar_hum }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if cl.n_con_ticker > 40 %}<p class="muted" style="font-size:11px">… y {{ cl.n_con_ticker - 40 }} más (ordenado por valor).</p>{% endif %}
+  </div>
+  {% endif %}
+  {% if cl.n_sin_ticker %}
+  <p class="muted" style="font-size:12px;margin-bottom:6px">
+    <strong>{{ cl.n_sin_ticker }}</strong> descripción(es) SIN ticker que no se reconocen (plazo fijo, caución,
+    cheque, pagaré, fideicomiso, FCI…) y quedan con la Clase cruda — pasámelas para sumar la regla:
+  </p>
+  <div class="table-scroll">
+    <table class="cashflows curve-table mercado-table" data-sortable>
+      <thead><tr><th style="text-align:left" data-sort>Descripción</th><th style="text-align:left" data-sort>Clase</th><th style="text-align:left" data-sort>Fondos</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
+      <tbody>
+        {% for r in cl.sin_ticker[:40] %}
+        <tr>
+          <td style="text-align:left;font-size:11.5px">{{ r.especie }}</td>
+          <td style="text-align:left;font-size:11px">{{ r.clase or "—" }}</td>
+          <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ r.fondos }}</td>
+          <td>{{ r.n_filas }}</td>
+          <td>{{ r.valor | ar_hum }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if cl.n_sin_ticker > 40 %}<p class="muted" style="font-size:11px">… y {{ cl.n_sin_ticker - 40 }} más (ordenado por valor).</p>{% endif %}
+  </div>
+  {% endif %}
   {% endif %}
 {% endif %}
