@@ -224,6 +224,9 @@ tenencias Delta cuya categoría NO salió de ficha ni de la base, con ticker
 ficha en `especies.py`) y sin ticker sin regla (pasar la descripción). Antes
 todo lo sin ficha caía a la Clase cruda: en Delta Ahorro, "Renta Fija" 47 %
 del PN en una línea. Regresión: `tests/test_posiciones_clasificacion.py`.
+Manual para el desk (orden de decisión, tokens, qué cargar en la base):
+`backend/docs/posiciones_clasificacion.md` (el `.gitignore` es una allowlist:
+`docs/` en la raíz queda afuera) — si cambia una regla, cambia el manual.
 
 **Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las 4 rutas llevan
 `@_pestana_resiliente(...)` — una excepción responde 200 con
