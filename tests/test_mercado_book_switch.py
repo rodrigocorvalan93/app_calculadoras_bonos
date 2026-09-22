@@ -82,6 +82,9 @@ def test_front_no_apila_ni_parpadea() -> None:
     assert "w.className = 'tbl-wrap'" in js and "getComputedStyle(parent).display" in js
     assert "hasAttribute('data-noflash')" in js
     assert "'book-y'" in js and "/mercado/book/" in js and "/ordenes/quote" in js and "htmx:configRequest" in js
+    # la elección se guarda en pointerdown: antes del blur del input de la
+    # especie en Órdenes, cuyo `change` vuelve a pedir el libro
+    assert "addEventListener('pointerdown', guardar)" in js
     assert '[data-flash-scope]:not([hx-trigger*="md-update"]).htmx-request' in css
     assert "[data-flash-scope].htmx-request {" not in css
     assert ".tbl-wrap" in css

@@ -1236,11 +1236,18 @@ window.lsSet = function (k, v) {
   function saved() {
     try { return window.localStorage.getItem(KEY) || ''; } catch (e) { return ''; }
   }
-  document.body.addEventListener('click', function (evt) {
+  // Se guarda en pointerdown, ANTES del blur: en Órdenes el input de la
+  // especie pierde el foco con el click y dispara su `change` → un pedido
+  // nuevo de /ordenes/quote que se lleva la elección recién guardada (y que,
+  // si llega después, pisa el swap del chip con la misma métrica). `click`
+  // queda para la activación por teclado.
+  function guardar(evt) {
     var b = evt.target.closest && evt.target.closest('[data-book-y]');
     if (!b) return;
     try { window.localStorage.setItem(KEY, b.getAttribute('data-book-y') || 'tirea'); } catch (e) { /* privado */ }
-  });
+  }
+  document.body.addEventListener('pointerdown', guardar);
+  document.body.addEventListener('click', guardar);
   document.body.addEventListener('htmx:configRequest', function (evt) {
     var d = evt.detail;
     if (!d || d.verb !== 'get') return;
