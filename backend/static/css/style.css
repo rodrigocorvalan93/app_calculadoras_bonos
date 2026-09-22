@@ -803,6 +803,9 @@ select {
 }
 .tbl-copy:hover { opacity: 0.9; }
 .tbl-copy.ok { color: var(--green); opacity: 0.9; }
+/* Botón + tabla juntos cuando la tabla es hija de un grid/flex (app.js): el
+   wrapper es el único ítem de la grilla, así bid y offer quedan lado a lado. */
+.tbl-wrap { min-width: 0; }
 /* Celdas clickeables de la matriz de forwards (cargan el histórico del par). */
 td[data-fwc] { cursor: pointer; }
 td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -832,6 +835,8 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .matriz tbody tr:hover td.m-esp, .matriz tbody tr:hover td.m-nom { background: var(--panel-2); }
 /* Libro (profundidad) en Mercado */
 .book-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 8px; }
+/* Switch de métrica por nivel (TIREA / TEM / TNA / Margen) en el título del libro */
+.book-y { display: inline-flex; gap: 4px; align-items: center; margin-left: 10px; vertical-align: middle; }
 .mercado-book { margin-top: 4px; }
 /* Panel de datos de la fila, junto al libro */
 .book-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(94px, 1fr)); gap: 8px 14px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
@@ -1037,7 +1042,10 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 }
 
 /* Mientras un panel vivo está re-renderizando, atenuación sutil (sin layout). */
-[data-flash-scope].htmx-request { opacity: 0.93; transition: opacity 0.12s ease; }
+/* Atenuar el panel mientras carga: sólo en paneles que se piden A MANO. Los
+   que se refrescan con el motor live (md-update, ~1 request por tick) y se
+   swapean enteros — el libro — parpadeaban a 1 Hz con este dim. */
+[data-flash-scope]:not([hx-trigger*="md-update"]).htmx-request { opacity: 0.93; transition: opacity 0.12s ease; }
 
 /* ── Micro-polish (hover/transiciones, costo cero) ──────────────────── */
 .card { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
