@@ -796,6 +796,19 @@ async def mercado_table_partial(
         ))
 
 
+# Métrica por nivel del libro (?y=): etiqueta de cabecera. TNA lleva la
+# convención del bono (la misma de la tabla de Mercado); Margen sólo si el
+# bono tiene benchmark (TAMAR/BADLAR) — si no, se cae a TIREA.
+_BOOK_Y = ("tirea", "tem", "tna", "margen")
+
+
+def _finito(v) -> bool:
+    try:
+        return v is not None and float(v) == float(v)
+    except (TypeError, ValueError):
+        return False
+
+
 @mercado_router.get("/mercado/book/{code}", response_class=HTMLResponse)
 @seq_cached(ttl=2.0, per_user=True)   # el book trae TENENCIA filtrada por usuario
 async def mercado_book(
@@ -804,9 +817,13 @@ async def mercado_book(
     plazo: str = "24hs",
     leg: str = "native",
     fuente: str = "byma",
+    y: str = "tirea",
 ) -> HTMLResponse:
-    """Libro (profundidad) de un instrumento — se carga al clickear su fila."""
+    """Libro (profundidad) de un instrumento — se carga al clickear su fila.
+    `y` = métrica por nivel (tirea | tem | tna | margen): salen del MISMO dict
+    de métricas cacheado que ya daba la TIREA por nivel, costo cero extra."""
     bond_universe.ensure_loaded()
+    y = y if y in _BOOK_Y else "tirea"
     store = marketdata_store.get_store()
     symbol, leg_basis = _leg_symbol(code, plazo, leg, store)
     snap = store.get(symbol)
@@ -833,7 +850,11 @@ async def mercado_book(
         for lvl in (levels or []):
             px, sz = lvl.get("price"), lvl.get("size")
             cum += (sz or 0.0)
-            out.append({"price": px, "size": sz, "cum": cum, "tirea": _tirea_at(calc, cp(px), settle)})
+            pxn = cp(px)
+            m = (pricing.metrics_for_market_price(calc, pxn, settle) or {}) if pxn is not None else {}
+            out.append({"price": px, "size": sz, "cum": cum, "tirea": m.get("tirea"),
+                        "tem": m.get("tem"), "tna": m.get("tna"), "margen": m.get("margen_tna"),
+                        "tna_conv": m.get("tna_convention_label")})
         # Fracción del acumulado (se normaliza después contra el máx de ambas
         # puntas) → degradé de profundidad estilo DOM en el template.
         return out
@@ -857,6 +878,14 @@ async def mercado_book(
         return r, bids, offers
 
     row, bids, offers = await loop.run_in_executor(_row_pool, _build_book)
+    niveles = bids + offers
+    margen_ok = _finito((row or {}).get("margen_tna")) or any(_finito(lv.get("margen")) for lv in niveles)
+    if y == "margen" and not margen_ok:
+        y = "tirea"
+    conv = next((lv.get("tna_conv") for lv in niveles if lv.get("tna_conv")), None) \
+        or (row or {}).get("tna_convention_label") or ""
+    y_label = {"tirea": "TIREA", "tem": "TEM", "margen": "Margen",
+               "tna": f"TNA {conv}".strip() if conv and conv != "—" else "TNA"}[y]
     return _render(
         request,
         "partials/mercado_book.html",
@@ -873,6 +902,9 @@ async def mercado_book(
         fuente=fuente,
         plazo=plazo,                                            # para el auto-refresh del book
         leg=leg,
+        y=y,                                                    # métrica por nivel elegida
+        y_label=y_label,
+        margen_ok=margen_ok,
     )
 
 

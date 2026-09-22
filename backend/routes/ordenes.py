@@ -132,7 +132,8 @@ async def ordenes_quote(request: Request, code: str = "", plazo: str = "24hs") -
     if not code:
         return HTMLResponse("")
     from backend.routes.curves import mercado_book   # mismo libro que Mercado
-    return await mercado_book(request, code, plazo)
+    # ?y= (métrica por nivel) viaja tal cual: app.js lo agrega desde localStorage
+    return await mercado_book(request, code, plazo, y=request.query_params.get("y", "tirea"))
 
 
 @router.get("/ordenes/blotter", response_class=HTMLResponse)
