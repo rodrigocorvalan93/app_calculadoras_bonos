@@ -563,9 +563,12 @@ class Bono:
 
         # Días desde la liquidación hasta el PAGO hábil del último flujo remanente:
         # es el plazo que anualiza la TNA "plazo remanente" (LECAPs / bullets),
-        # consistente con la TIR que descuenta a FechaPago.
-        _fp = self.cashflow_cpn['FechaPago']
-        self.dias_al_pago = int((_fp.max() - self.fecha_settlement).days) if len(_fp) else int((self.vencimiento - self.fecha_settlement).days)
+        # consistente con la TIR que descuenta a FechaPago. Los flujos remanentes
+        # son la cola cronológica del cronograma, así que el último pago es el
+        # último del array (numpy directo: el .max() del Series de objetos
+        # costaba ~25 µs por cálculo).
+        self.dias_al_pago = (int((self.fechas_pago_cupon_habil[-1] - self.fecha_settlement).days) if len(self.cashflow_cpn)
+                             else int((self.vencimiento - self.fecha_settlement).days))
 
         #return print(self.cashflow_cpn,"\n" ,self.cashflow_pmt)
 
@@ -590,8 +593,24 @@ class Bono:
         if not _flujos_generados:
             self.generate_cashflows(settlement_date)
 
-        fecha_ultimo_cpn = self.emision if self.fecha_settlement <= self.cashflow_cpn_full['Fechas'].min() else self.cashflow_cpn_full['Fechas'][self.cashflow_cpn_full['Fechas'] <= self.fecha_settlement].max()
-        fecha_siguiente_cpn = self.cashflow_cpn_full['Fechas'][self.cashflow_cpn_full['Fechas'] > self.fecha_settlement].min()
+        # Sobre los arrays que armaron cashflow_cpn_full (mismos valores): cada
+        # máscara + .loc de pandas costaba ~150 µs por cálculo, y acá había tres
+        # (más el min/max). Semántica idéntica: emisión si la liquidación es
+        # anterior o igual al primer cupón; si no, el último cupón <= liquidación;
+        # siguiente = el primer cupón > liquidación (NaT si no queda ninguno,
+        # como el .min() vacío de antes).
+        _fechas = np.asarray(self.fechas_cupon)
+        _s = self.fecha_settlement
+        _pas = _fechas[_fechas <= _s]
+        _fut = _fechas[_fechas > _s]
+        fecha_ultimo_cpn = self.emision if _s <= min(_fechas) else max(_pas)
+        if not len(_fut):
+            # Antes esto moría más abajo con un AttributeError críptico
+            # ('float' object has no attribute 'day'): el bono ya venció a esa
+            # liquidación. Mismo efecto (excepción → error por item / #N/A en
+            # el add-in), mensaje legible.
+            raise ValueError(f"Sin flujos remanentes: {self.codigo} ya venció a la liquidación {_s:%d/%m/%Y}")
+        fecha_siguiente_cpn = min(_fut)
 
         # Calcular días transcurridos desde el último pago de cupón según la convención que corresponda
         if self.convencion_devengamiento == "Actual":
@@ -613,8 +632,7 @@ class Bono:
         if self.cupones == 1:
             # Bullet / LECAP: hasta el PAGO hábil, no la fecha nominal — es el
             # plazo de la TNA días/365 y el que descuenta la TIR (FechaPago).
-            _fila_sig = self.cashflow_cpn_full['Fechas'] == fecha_siguiente_cpn
-            _fecha_pago_sig = self.cashflow_cpn_full.loc[_fila_sig, 'FechaPago'].iloc[0]
+            _fecha_pago_sig = self.fechas_pago_cupon_habil[int(np.flatnonzero(_fechas == fecha_siguiente_cpn)[0])]
             dias_remanentes = (_fecha_pago_sig - self.fecha_settlement).days
         else:
             if self.convencion_devengamiento == "Actual":
@@ -624,8 +642,10 @@ class Bono:
             elif self.convencion_devengamiento == "NASD-30":
                 dias_remanentes = days360(self.fecha_settlement, fecha_siguiente_cpn, 'US_NASD')
 
-        interes_aplicable_corrido = self.cashflow_cpn_full.loc[self.cashflow_cpn_full['Fechas'] == fecha_siguiente_cpn, 'Intereses'].iloc[0]
-        ajuste_aplicable_corrido = self.cashflow_cpn_full.loc[self.cashflow_cpn_full['Fechas'] == fecha_siguiente_cpn, 'Ajuste'].iloc[0]
+        # Fila del próximo cupón (la primera con esa fecha, como el .loc[].iloc[0])
+        _idx_sig = int(np.flatnonzero(_fechas == fecha_siguiente_cpn)[0])
+        interes_aplicable_corrido = self.intereses[_idx_sig]
+        ajuste_aplicable_corrido = self.numero_ajuste_sobre_capital[_idx_sig]
 
         # Calcular los intereses corridos
         intereses_corridos = interes_aplicable_corrido * (dias_transcurridos / dias_entre_cpn_total) * ajuste_aplicable_corrido * self.factor_capitalizacion / self.valor_nominal  # dias pasados/dias año
