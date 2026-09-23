@@ -21,7 +21,9 @@ _additional_holidays = {
     "2025-11-06": "Día del bancario",
     "2025-11-21": "Feriado Puente",
     "2026-11-06": "Día del bancario",
-    "2026-12-31": "Día no hábil de fin de año"
+    "2026-11-09": "Feriado Puente (visita del Papa)",
+    "2026-12-31": "Día no hábil de fin de año",
+    "2027-11-06": "Día del bancario"
 }
 
 
