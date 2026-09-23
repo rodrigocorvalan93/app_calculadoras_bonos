@@ -193,6 +193,31 @@
       $("cruda-status").textContent = crudaOn ? "activado — esperando tick…" : "";
       if (crudaOn) { crudaLastSeq = null; crudaTick(OMSFeed.snapshot()); }
     };
+
+    // ── Recalcular las funciones PUNTUALES (HIST / MACRO / calculadora YAS) ──
+    // No son volátiles: F9 solo no las vuelve a correr si los argumentos no
+    // cambiaron. Esto es el Ctrl+Alt+F9 (recálculo completo) desde el panel,
+    // vaciando antes el memo del add-in para que vuelvan a pedir al server.
+    var recalcBtn = $("recalc");
+    if (recalcBtn) {
+      recalcBtn.onclick = function () {
+        var st = $("recalc-status");
+        st.textContent = "recalculando…";
+        try { if (typeof OMSCalc !== "undefined" && OMSCalc.reset) { OMSCalc.reset(); } } catch (e) { /* noop */ }
+        if (typeof Excel === "undefined" || !Excel.run) {
+          st.textContent = "sin API de Excel acá: usá Ctrl+Alt+F9";
+          return;
+        }
+        Excel.run(function (ctx) {
+          ctx.workbook.application.calculate("Full");
+          return ctx.sync();
+        }).then(function () {
+          st.textContent = "listo · " + new Date().toLocaleTimeString();
+        }).catch(function (e) {
+          st.textContent = "error: " + (e && e.message || e) + " — usá Ctrl+Alt+F9";
+        });
+      };
+    }
   }
 
   if (typeof Office !== "undefined" && Office.onReady) {

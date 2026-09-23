@@ -72,7 +72,7 @@ def test_addin_mapea_a3500_oficial_y_docs() -> None:
     assert '"a3500_fecha"' in js and "isoToSerial(a35.date)" in js
     assert '"a3500_ant"' in js and '"a3500_var"' in js
     assert 'if (t === "cierre") { return may.close' in js         # el cierre del feed sigue disponible
-    assert '["A3500 fecha"' in js and "v22" in js
+    assert '["A3500 fecha"' in js and "v23" in js
     fj = json.loads((ROOT / "backend/static/excel/functions.json").read_text(encoding="utf-8"))
     fx = next(f for f in fj["functions"] if f["id"] == "FX")
     assert "a3500_fecha" in fx["parameters"][0]["description"] and "OFICIAL" in fx["description"]

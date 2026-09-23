@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v22 · 2026-09-23 (OMS.FX('a3500') = A3500 OFICIAL del BCRA con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.MACRO: último dato macro del BCRA — a3500 / badlar / tamar / cer / uva / inflamom, tamar5 / badlar5 = promedio 5 ruedas — valor o, con VERDADERO, la fecha del dato como fecha de Excel; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
+var OMS_BUILD = "v23 · 2026-09-23 (ayuda completa en el panel + botón Recalcular puntuales (OMSCalc.reset + recálculo completo); OMS.FX('a3500') = A3500 OFICIAL del BCRA con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.MACRO: último dato macro del BCRA — a3500 / badlar / tamar / cer / uva / inflamom, tamar5 / badlar5 = promedio 5 ruedas — valor o, con VERDADERO, la fecha del dato como fecha de Excel; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -656,7 +656,12 @@ var OMSCalc = (function () {
     while (items.length) { sendChunk(items.splice(0, CHUNK)); }
   }
 
-  return { request: request };
+  // Vacía el memo: lo usa el botón «Recalcular puntuales» del panel antes del
+  // recálculo completo, así HIST / MACRO / calculadora vuelven a pedir al
+  // server aunque no hayan pasado los 5 min del TTL.
+  function reset() { memo = {}; memoN = 0; }
+
+  return { request: request, reset: reset };
 })();
 
 var FECHA_RE = /^\s*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\s*$/;

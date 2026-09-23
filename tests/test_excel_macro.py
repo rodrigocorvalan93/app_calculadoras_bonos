@@ -99,7 +99,7 @@ def test_metadata_js_y_docs_de_macro() -> None:
     assert [p["name"] for p in por_id["MACRO"]["parameters"]] == ["serie", "fecha"]
     assert por_id["MACRO"]["parameters"][1]["optional"] is True
     js = (ROOT / "backend/static/excel/functions.js").read_text(encoding="utf-8")
-    assert 'CustomFunctions.associate("MACRO", guard(macroFn))' in js and "v22" in js
+    assert 'CustomFunctions.associate("MACRO", guard(macroFn))' in js and "v23" in js
     assert 'it.tipo !== "macro"' in js                      # no es "a precio de mercado": se memoiza (TTL 5 min)
     assert "function isoToSerial" in js and "Date.UTC(1899, 11, 30)" in js
     assert "function wantsDate" in js and '"verdadero"' in js

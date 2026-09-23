@@ -3,7 +3,11 @@
 Las funciones de mercado (`QUOTE`, `FX`, `ROFEX`, `CAUCION`, `TABLA`) son
 *streaming*: se actualizan solas ~1 s después de cada tick de mercado, sin
 recalcular a mano. `HIST`, `MACRO` y la calculadora YAS (`TIREA`…) son
-puntuales: corren al abrir el libro, al cambiar sus argumentos o con F9. Si un dato no existe
+puntuales: corren al abrir el libro, al cambiar sus argumentos o con un
+**recálculo completo** (`Ctrl+Alt+F9`, o el botón «Recalcular puntuales» del
+panel, que además vacía el memo del add-in). F9 solo NO las vuelve a correr
+si los argumentos no cambiaron (no son volátiles a propósito: una función
+volátil se dispararía con cada edición del libro). Si un dato no existe
 todavía (sin operaciones, especie sin cotizar) la celda muestra vacío; si la
 especie/el campo no existen, `#N/A` con el detalle en el tooltip.
 
@@ -172,8 +176,8 @@ abajo/derecha; necesita espacio libre).
 ## OMS.HIST(serie; [dias])
 
 Serie histórica macro en dos columnas (Fecha · Valor) con encabezado.
-No es streaming: se recalcula al abrir el libro o con F9. Reemplaza los
-`RHistory` del modelo Reuters.
+No es streaming: se recalcula al abrir el libro, al cambiar los argumentos o
+con `Ctrl+Alt+F9`. Reemplaza los `RHistory` del modelo Reuters.
 
     =OMS.HIST("a3500";365)       =OMS.HIST("tamar";90)        =OMS.HIST("cer")
 
@@ -196,8 +200,9 @@ No es streaming: se recalcula al abrir el libro o con F9. Reemplaza los
 spill): el valor, o la fecha de ese dato. Misma fuente que `HIST` y que el
 riel del dólar de la web (el backup BCRA que la app refresca 1×/día), así la
 celda muestra lo mismo que la pantalla. No streamea: se recalcula al abrir el
-libro o con F9 (memo de 5 min en el add-in; valor y fecha de la misma serie
-comparten un solo request).
+libro, al cambiar los argumentos o con `Ctrl+Alt+F9` (memo de 5 min en el
+add-in, que el botón «Recalcular puntuales» del panel vacía; valor y fecha de
+la misma serie comparten un solo request).
 
     =OMS.MACRO("a3500")               → 1515,11    (último A3500)
     =OMS.MACRO("a3500";VERDADERO)     → 09/09/2026 (fecha del dato — formatear la celda como fecha)
@@ -226,7 +231,8 @@ desconocida da `#N/A` con la lista de series válidas.
 
 El mismo motor de cálculo del YAS web (`genera_ticket` / `calcula_tirea` /
 `calcula_precio` de rentafija), en la celda. **No streamean**: son llamadas
-PUNTUALES que corren sólo cuando cambian sus argumentos o con F9 — el diseño
+PUNTUALES que corren sólo cuando cambian sus argumentos o con `Ctrl+Alt+F9`
+(F9 solo no las repite) — el diseño
 esperado es tipear el precio a mano, no engancharlas a un precio vivo. Todas
 las celdas que recalculan juntas viajan en UN solo request batch y el
 resultado queda memoizado.
@@ -241,7 +247,7 @@ resultado queda memoizado.
                                            exacto de OMS.TIREA
     =OMS.TNA("TTM26";99,8)               → TNA bajo la convención del bono
     =OMS.MARGEN("TTM26";99,8)            → margen TNA sobre TAMAR/BADLAR (floaters)
-    =OMS.DURATION("GD30";78,5)           → modified duration (años) a ese precio
+    =OMS.DURATION("GD30";78,5)           → duration (Macaulay, años) a ese precio
     =OMS.VENCIMIENTO("GD30")             → "09/07/2030" (ficha; sin precio)
     =OMS.VENCIMIENTO("GD30";"fecha")     → fecha de Excel (formatear la celda como fecha)
     =OMS.TICKET("GD30";78,5;1000000)     → spill: VN, monto, principal, interés…
@@ -258,7 +264,8 @@ argumento opcional es un **FX custom** (el de la ficha YAS).
 
 **Precio omitido = last del mercado.** Dejando el precio vacío, el server
 resuelve el último precio del store en ese momento (last → cierre) y calcula
-UNA vez — se actualiza sólo al recalcular (F9), no streamea. Importante:
+UNA vez — se actualiza sólo con un recálculo completo (`Ctrl+Alt+F9` o el
+botón del panel), no streamea. Importante:
 **no anides `OMS.QUOTE` adentro de estas funciones** — las funciones
 streaming no pueden ser argumento de otra función custom (Office devuelve
 `#¡VALOR!`); el precio-de-mercado omitido reemplaza ese patrón.
@@ -284,7 +291,7 @@ el motivo. El inverso (precio a un margen dado) sale con
 `=OMS.CALC("TTM26";"precio_mercado_pct";0,05;"margen")`.
 
 ### OMS.DURATION(especie; precio; [plazo_o_fecha]; [fx])
-Modified duration en años al precio dado — la misma que muestran el YAS y
+Duration (Macaulay) en años al precio dado — la misma que muestran el YAS y
 Mercado (es `=OMS.CALC(especie;"duration";precio)` con nombre propio). Sin
 precio usa el último del mercado, puntual.
 

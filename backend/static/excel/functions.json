@@ -363,7 +363,7 @@
     {
       "id": "DURATION",
       "name": "DURATION",
-      "description": "Modified duration (años) de un bono a un precio dado — la misma del YAS y de Mercado. Ej: =OMS.DURATION(\"GD30\";78,5). Sin precio usa el último del mercado (puntual).",
+      "description": "Duration (Macaulay, años) de un bono a un precio dado — la misma del YAS y de Mercado. Ej: =OMS.DURATION(\"GD30\";78,5). Sin precio usa el último del mercado (puntual).",
       "result": {
         "type": "number"
       },
