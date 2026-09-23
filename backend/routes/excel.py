@@ -674,6 +674,49 @@ def _calc_meta(code: str) -> Dict[str, Any]:
     return out
 
 
+# Series macro para =OMS.MACRO: alias (case-insensitive, sin espacios ni
+# guiones bajos) → key del backup BCRA en services.historico. `tamar5` /
+# `badlar5` (o `tamar aplicable`) = promedio de las últimas 5 ruedas: el mismo
+# benchmark "aplicable" de la ficha YAS y de OMS.MARGEN.
+_MACRO_ALIAS = {
+    "a3500": "a3500", "mayorista": "a3500", "oficial": "a3500", "dolar": "a3500", "dólar": "a3500",
+    "badlar": "badlar", "tamar": "tamar", "cer": "CER", "uva": "UVA",
+    "inflamom": "inflamom", "inflacion": "inflamom", "inflación": "inflamom", "ipc": "inflamom",
+}
+_MACRO_SERIES_TXT = "a3500 | badlar | tamar | cer | uva | inflamom | tamar5 | badlar5"
+
+
+def _calc_macro(serie: str) -> Dict[str, Any]:
+    """Último dato macro del BCRA para =OMS.MACRO (valor + fecha ISO; el add-in
+    elige cuál mostrar). Fuente: services.historico — el MISMO backup en
+    memoria que alimenta OMS.HIST y el riel del dólar de la web (µs, sin red),
+    así la celda muestra lo mismo que la pantalla. La re-lectura diaria del
+    backup la dispara macro_maybe_refresh (11:00 / 15:30 BA), igual que el
+    riel: un desk con sólo Excel abierto también ve el dato nuevo."""
+    s = str(serie or "").strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+    if not s:
+        return {"error": f"Serie vacía ({_MACRO_SERIES_TXT})"}
+    prom = 0
+    if s.endswith("5") and s[:-1] in ("tamar", "badlar"):
+        s, prom = s[:-1], 5
+    elif s in ("tamaraplicable", "badlaraplicable"):
+        s, prom = s.replace("aplicable", ""), 5
+    key = _MACRO_ALIAS.get(s)
+    if key is None:
+        return {"error": f"Serie desconocida: {serie!r} ({_MACRO_SERIES_TXT})"}
+    historico_svc.macro_maybe_refresh()
+    ser = historico_svc.ensure_loaded()["series"].get(key) or {}
+    pts = ser.get("points") or []
+    if not pts:
+        return {"error": f"Sin datos de {key} en el backup BCRA"}
+    fecha, valor = pts[-1][0], pts[-1][1]
+    if prom:
+        vals = [float(v) for _, v in pts[-prom:]]
+        valor = sum(vals) / len(vals)
+    return {"serie": key.lower() + (str(prom) if prom else ""), "label": str(ser.get("label") or key),
+            "valor": float(valor), "fecha": str(fecha)[:10], "n": len(pts)}
+
+
 def _calc_batch(items: list) -> list:
     out = []
     for it in items:
@@ -681,6 +724,9 @@ def _calc_batch(items: list) -> list:
             code = str(it.get("code") or "").strip().upper()
             if it.get("tipo") == "meta":               # ficha estática: no necesita modo ni valor
                 out.append(_calc_meta(code))
+                continue
+            if it.get("tipo") == "macro":              # último dato macro (OMS.MACRO): sin especie ni precio
+                out.append(_calc_macro(str(it.get("serie") or code)))
                 continue
             modo = str(it.get("modo") or "precio").strip().lower()
             plazo = "CI" if str(it.get("plazo") or "").upper().startswith("CI") else "24hs"

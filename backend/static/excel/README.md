@@ -17,6 +17,7 @@ tick y todos los libros conectados comparten ese único build.
 | `=OMS.CAUCION(7;"tasa")` | `RtGet("IDN";"ARS…RP=BA";…)` |
 | `=OMS.TABLA("futuros")` (spill) | hoja Rofex completa |
 | `=OMS.HIST("a3500";365)` (spill) | `RHistory("ARS=BCRA";…)` |
+| `=OMS.MACRO("tamar")` / `=OMS.MACRO("a3500";VERDADERO)` | último dato BCRA en una celda (valor / fecha del dato); `tamar5` = promedio 5 ruedas |
 | `=OMS.TIREA("GD30";78,5)` / `=OMS.PRECIO("GD30";0,14)` / `=OMS.TNA(…)` / `=OMS.MARGEN("TTM26";99,8)` | calculadora YAS en la celda (MARGEN: floaters TAMAR/BADLAR) |
 | `=OMS.DURATION("GD30";78,5)` / `=OMS.VENCIMIENTO("GD30")` / `=OMS.VENCIMIENTO("GD30";"fecha")` | duration a un precio · vencimiento de la ficha (texto o fecha de Excel) |
 | `=OMS.TICKET("GD30";78,5;1000000)` (spill) / `=OMS.CALC(…;"duration";…)` | ticket + cualquier métrica YAS |
