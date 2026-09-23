@@ -6,12 +6,25 @@
    OJO: el code va en el PATH (/mercado/book/GD30) — la única ruta es
    /mercado/book/{code}; la forma ?code= devolvía 404 silencioso y el libro
    quedaba freezado en Mercado y en Órdenes. #}
+{% set _base = "/mercado/book/" ~ (code | urlencode) ~ "?plazo=" ~ plazo ~ "&leg=" ~ leg ~ "&fuente=" ~ fuente %}
 <div class="card" data-flash-scope
-     hx-get="/mercado/book/{{ code | urlencode }}?plazo={{ plazo }}&leg={{ leg }}&fuente={{ fuente }}"
+     hx-get="{{ _base }}&y={{ y }}"
      hx-trigger="md-update from:body, every 30s"
      hx-target="this" hx-swap="outerHTML">
   <div class="card-title">
-    <span>Libro · {{ code }}</span>
+    <span>Libro · {{ code }}
+      {# Métrica por nivel: cada chip pide el mismo partial con otro y=; app.js
+         guarda la elección (localStorage) y la agrega a los próximos libros. #}
+      <span class="book-y">
+        {% for k, lbl in [("tirea", "TIREA"), ("tem", "TEM"), ("tna", "TNA"), ("margen", "Margen")] %}
+          {% if k != "margen" or margen_ok %}
+          <button type="button" class="hc-preset{% if y == k %} active{% endif %}" data-book-y="{{ k }}"
+                  hx-get="{{ _base }}&y={{ k }}" hx-target="closest .card" hx-swap="outerHTML"
+                  title="{% if k == 'tna' %}TNA según la convención del bono{% elif k == 'margen' %}Margen TNA sobre el benchmark (TAMAR / BADLAR){% elif k == 'tem' %}Tasa efectiva mensual{% else %}TIR efectiva anual{% endif %}">{{ lbl }}</button>
+          {% endif %}
+        {% endfor %}
+      </span>
+    </span>
     <span class="card-title-aux">{{ nombre }} · {{ symbol }}</span>
   </div>
   <div class="card-body">
@@ -57,14 +70,16 @@
     {% if not bids and not offers %}
       <div class="alert">Sin profundidad en el store para este instrumento (¿no operó / broker offline?).</div>
     {% else %}
+    {# Columna de tasa = la métrica elegida (y). El Acum lleva data-noflash:
+       corre con cada nivel nuevo y flashearlo era puro ruido. #}
     <div class="book-grid">
       <table class="cashflows">
-        <thead><tr><th>Bid TIREA</th><th>Acum</th><th>Cant</th><th>Bid</th></tr></thead>
+        <thead><tr><th>Bid {{ y_label }}</th><th>Acum</th><th>Cant</th><th>Bid</th></tr></thead>
         <tbody>
           {% for l in bids %}
           <tr class="depth-bid" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
-            <td style="color:var(--cyan)">{{ l.tirea | ar_pct(2) }}</td>
-            <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
+            <td style="color:var(--cyan)">{{ l[y] | ar_pct(2) }}</td>
+            <td style="color:var(--text-muted)" data-noflash>{{ l.cum | ar_int }}</td>
             <td>{{ l.size | ar_int }}</td>
             <td class="px-up" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
           </tr>
@@ -72,14 +87,14 @@
         </tbody>
       </table>
       <table class="cashflows">
-        <thead><tr><th>Offer</th><th>Cant</th><th>Acum</th><th>Offer TIREA</th></tr></thead>
+        <thead><tr><th>Offer</th><th>Cant</th><th>Acum</th><th>Offer {{ y_label }}</th></tr></thead>
         <tbody>
           {% for l in offers %}
           <tr class="depth-ask" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
             <td class="px-down" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
             <td>{{ l.size | ar_int }}</td>
-            <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
-            <td style="color:var(--cyan)">{{ l.tirea | ar_pct(2) }}</td>
+            <td style="color:var(--text-muted)" data-noflash>{{ l.cum | ar_int }}</td>
+            <td style="color:var(--cyan)">{{ l[y] | ar_pct(2) }}</td>
           </tr>
           {% else %}<tr><td colspan="4" style="color:var(--text-muted)">— sin offers —</td></tr>{% endfor %}
         </tbody>

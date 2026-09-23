@@ -260,6 +260,20 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `.tick-up` / `.tick-down` (flash CSS verde/rojo estilo terminal).
 - El dot `#live-dot` de la topbar muestra el estado del feed
   (live/idle/off). Todo vanilla JS — sin librerías nuevas.
+- **Libro** (`partials/mercado_book.html`, `/mercado/book/{code}`, también
+  embebido en Órdenes vía `/ordenes/quote`): se swapea entero en cada
+  `md-update`. Por eso el dim de carga
+  (`[data-flash-scope]:not([hx-trigger*="md-update"]).htmx-request`) EXCLUYE
+  los paneles live — a 1 request/s parpadeaba. El botón ⧉ de copiar tabla
+  que inyecta `app.js` va dentro de un `.tbl-wrap` cuando el padre es
+  grid/flex (`.book-grid`): un hermano suelto ocupaba una celda de la grilla y
+  apilaba bid y offer. Celdas `data-noflash` (Acum) no entran al diff de
+  flashes. **Métrica por nivel** `?y=tirea|tem|tna|margen`: sale del mismo
+  dict de `pricing.metrics_for_market_price` que ya daba la TIREA (costo
+  cero); chips `data-book-y` en el título, elección en `localStorage`
+  (`book-y`) que `app.js` agrega en `htmx:configRequest` a todo pedido del
+  libro sin `y=`; Margen sólo si el bono tiene benchmark (si no, cae a
+  TIREA). Regresión: `tests/test_mercado_book_switch.py`.
 - **Copiar gráfico (⧉)** (`app.js`, `copySvg`): un SVG del server que pinta
   por CLASES (`.fut-chart .pa-*`, `.fc-*`, `.hc-*`) o con `var(--x)` no puede
   serializarse a secas — la imagen suelta no ve el CSS de la página y cae al

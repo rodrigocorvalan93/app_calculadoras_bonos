@@ -369,6 +369,9 @@ window.lsSet = function (k, v) {
         if (key === ti + '|') continue;
         for (var j = 1; j < cells.length; j++) {
           if (++n > MAX_CELLS) { flashFlush(); return; }
+          // data-noflash: celdas derivadas que cambian en cada tick (el Acum
+          // del libro corre con cada nivel nuevo) — flashearlas es ruido.
+          if (cells[j].hasAttribute('data-noflash')) continue;
           var was = num(old[key + '|' + j]);
           var now = num((cells[j].textContent || '').trim());
           if (was === null || now === null || was === now) continue;
@@ -1222,6 +1225,40 @@ window.lsSet = function (k, v) {
 // Un botoncito ⧉ re sutil inyectado como hermano ANTES de cada .table-scroll
 // — y de cada <table> suelta (sin .table-scroll) — (margen negativo: cero
 // corrimiento). Delegación global: sobrevive a todos los swaps de htmx sin
+// ── Libro: métrica por nivel (TIREA / TEM / TNA / Margen) ─────────────────
+// Los chips del libro piden el partial con ?y=…; la elección se guarda en
+// localStorage y se agrega a CUALQUIER pedido del libro que no la traiga
+// (click en una fila de Mercado, /ordenes/quote al tipear la especie), así el
+// desk ve siempre la métrica que eligió. El partial se refresca solo con su
+// propio hx-get, que ya lleva el y= elegido.
+(function () {
+  var KEY = 'book-y';
+  function saved() {
+    try { return window.localStorage.getItem(KEY) || ''; } catch (e) { return ''; }
+  }
+  // Se guarda en pointerdown, ANTES del blur: en Órdenes el input de la
+  // especie pierde el foco con el click y dispara su `change` → un pedido
+  // nuevo de /ordenes/quote que se lleva la elección recién guardada (y que,
+  // si llega después, pisa el swap del chip con la misma métrica). `click`
+  // queda para la activación por teclado.
+  function guardar(evt) {
+    var b = evt.target.closest && evt.target.closest('[data-book-y]');
+    if (!b) return;
+    try { window.localStorage.setItem(KEY, b.getAttribute('data-book-y') || 'tirea'); } catch (e) { /* privado */ }
+  }
+  document.body.addEventListener('pointerdown', guardar);
+  document.body.addEventListener('click', guardar);
+  document.body.addEventListener('htmx:configRequest', function (evt) {
+    var d = evt.detail;
+    if (!d || d.verb !== 'get') return;
+    var p = d.path || '';
+    if (p.indexOf('/mercado/book/') < 0 && p.indexOf('/ordenes/quote') < 0) return;
+    if (/[?&]y=/.test(p) || (d.parameters && d.parameters.y)) return;
+    var v = saved();
+    if (v && d.parameters) d.parameters.y = v;
+  });
+})();
+
 // re-bindear nada.
 (function () {
   function mkBtn() {
@@ -1247,7 +1284,22 @@ window.lsSet = function (k, v) {
       if (t.rows.length < 2) return;                          // sin cuerpo: nada que copiar
       var prev = t.previousElementSibling;
       if (prev && prev.classList && prev.classList.contains('tbl-copy')) return;
-      t.parentNode.insertBefore(mkBtn(), t);
+      var parent = t.parentNode;
+      // En un padre grid/flex (el libro: .book-grid con bid | offer) un botón
+      // hermano ocupa una CELDA propia y corre la tabla de columna — bid y
+      // offer quedaban apilados a la derecha. Ahí botón y tabla van juntos en
+      // un wrapper, que es el único hijo que ve la grilla.
+      var disp = '';
+      try { disp = window.getComputedStyle(parent).display || ''; } catch (e) { disp = ''; }
+      if (disp.indexOf('grid') >= 0 || disp.indexOf('flex') >= 0) {
+        var w = document.createElement('div');
+        w.className = 'tbl-wrap';
+        parent.insertBefore(w, t);
+        w.appendChild(mkBtn());
+        w.appendChild(t);
+        return;
+      }
+      parent.insertBefore(mkBtn(), t);
     });
   }
 
