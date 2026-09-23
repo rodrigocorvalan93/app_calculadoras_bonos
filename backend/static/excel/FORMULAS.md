@@ -89,7 +89,7 @@ Dólares de referencia en vivo.
 | `canje` | CCL/MEP − 1 (decimal) | |
 | `mep_ci` / `ccl_ci` | Ídem en contado inmediato | |
 | `mayorista` | Dólar mayorista intradía (SIOPEL → DLR/SPOT → A3500) | `oficial`, `siopel` |
-| `a3500` | **A3500 oficial** (Com. BCRA): el último publicado. Se actualiza solo cuando el BCRA publica el del día (~15:30; la app lo busca cada 10 min en la ventana vespertina) | |
+| `a3500` | **A3500 oficial** (Com. BCRA): el último publicado. Se actualiza solo cuando el BCRA publica el del día (~15:30; la app lo busca cada 15 min entre las 16 y las 19 h BA) | |
 | `a3500_fecha` | Fecha de ese A3500 como número de Excel (formatear la celda como fecha) | |
 | `a3500_ant` / `a3500_var` | A3500 oficial del día hábil anterior / variación día/día (decimal) | `a3500_anterior` |
 | `cierre` | Cierre anterior del mayorista según el feed (SIOPEL / DLR SPOT) — lo que antes devolvía `a3500` | |
