@@ -1,7 +1,9 @@
 # Referencia completa de fórmulas `=OMS.*`
 
-Todas las funciones (salvo `HIST`) son *streaming*: se actualizan solas ~1 s
-después de cada tick de mercado, sin recalcular a mano. Si un dato no existe
+Las funciones de mercado (`QUOTE`, `FX`, `ROFEX`, `CAUCION`, `TABLA`) son
+*streaming*: se actualizan solas ~1 s después de cada tick de mercado, sin
+recalcular a mano. `HIST`, `MACRO` y la calculadora YAS (`TIREA`…) son
+puntuales: corren al abrir el libro, al cambiar sus argumentos o con F9. Si un dato no existe
 todavía (sin operaciones, especie sin cotizar) la celda muestra vacío; si la
 especie/el campo no existen, `#N/A` con el detalle en el tooltip.
 
@@ -185,6 +187,38 @@ No es streaming: se recalcula al abrir el libro o con F9. Reemplaza los
 
 ---
 
+## OMS.MACRO(serie; [fecha])
+
+Último dato de una serie macro del BCRA en **una** celda (escalar, sin
+spill): el valor, o la fecha de ese dato. Misma fuente que `HIST` y que el
+riel del dólar de la web (el backup BCRA que la app refresca 1×/día), así la
+celda muestra lo mismo que la pantalla. No streamea: se recalcula al abrir el
+libro o con F9 (memo de 5 min en el add-in; valor y fecha de la misma serie
+comparten un solo request).
+
+    =OMS.MACRO("a3500")               → 1515,11    (último A3500)
+    =OMS.MACRO("a3500";VERDADERO)     → 09/09/2026 (fecha del dato — formatear la celda como fecha)
+    =OMS.MACRO("tamar")               → 24         (última TAMAR, en puntos de %)
+    =OMS.MACRO("tamar5")              → 24,2       (promedio de las últimas 5 ruedas = benchmark de OMS.MARGEN)
+
+| `serie` (case-insensitive) | Qué es |
+|---|---|
+| `a3500` (alias `mayorista`) | Dólar mayorista A3500 (Com. BCRA) |
+| `badlar` | BADLAR bancos privados (%) |
+| `tamar` | TAMAR (%) |
+| `cer` | Índice CER |
+| `uva` | UVA ($) |
+| `inflamom` (alias `inflacion`) | Inflación mensual (%) |
+| `tamar5` / `badlar5` | Promedio de las últimas 5 ruedas: el "Tamar aplicable" de la ficha YAS y el benchmark de `OMS.MARGEN` |
+
+**fecha** (default `FALSO`): con `VERDADERO` (también `"si"` / `"fecha"`)
+devuelve la **fecha del dato** como número de Excel — formateá la celda como
+fecha; sirve para restar contra `HOY()` y ver qué tan viejo es el dato. En
+`tamar5` / `badlar5` es la fecha de la última rueda del promedio. Una serie
+desconocida da `#N/A` con la lista de series válidas.
+
+---
+
 ## Calculadora YAS en celdas — OMS.TIREA / PRECIO / TNA / MARGEN / TICKET / CALC / TR
 
 El mismo motor de cálculo del YAS web (`genera_ticket` / `calcula_tirea` /
@@ -288,7 +322,7 @@ como el legacy.
 - **Decimales para formatear como %**: `var`, `canje`, `tna`, `tem`, `td`
   (0,068 → aplicar formato porcentaje → 6,8%).
 - **Ya en puntos** (no aplicar formato %): tasas de caución (`35,5` = 35,5%),
-  BADLAR/TAMAR/inflación de `HIST`.
+  BADLAR/TAMAR/inflación de `HIST` y `MACRO`.
 - **Volúmenes**: `vol` en $ del día; `nominal`/`bid_size`/`ask_size` en VN.
 
 ## Hoja OMS_DATA (modo CRUDA)

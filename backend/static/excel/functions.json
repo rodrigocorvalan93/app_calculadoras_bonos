@@ -209,6 +209,27 @@
       ]
     },
     {
+      "id": "MACRO",
+      "name": "MACRO",
+      "description": "Último dato macro del BCRA en una celda: a3500, badlar, tamar, cer, uva, inflamom; tamar5 / badlar5 = promedio de las últimas 5 ruedas (el benchmark de OMS.MARGEN). Default el valor; con fecha=VERDADERO devuelve la fecha del dato como número de Excel (formateá la celda como fecha). Ej: =OMS.MACRO(\"tamar\") · =OMS.MACRO(\"a3500\";VERDADERO).",
+      "result": {
+        "type": "any"
+      },
+      "parameters": [
+        {
+          "name": "serie",
+          "type": "string",
+          "description": "a3500 | badlar | tamar | cer | uva | inflamom | tamar5 | badlar5"
+        },
+        {
+          "name": "fecha",
+          "type": "any",
+          "description": "VERDADERO = fecha del dato (número de Excel, formatear como fecha) · FALSO / vacío = valor (default)",
+          "optional": true
+        }
+      ]
+    },
+    {
       "id": "TIREA",
       "name": "TIREA",
       "description": "TIR efectiva anual (decimal) de un bono a un precio dado — mismo motor que el YAS. Ej: =OMS.TIREA(\"GD30\";78,5).",

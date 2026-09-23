@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v20 · 2026-09-18 (OMS.DURATION: modified duration a un precio; OMS.VENCIMIENTO: fecha de vencimiento de la ficha, texto DD/MM/AAAA o fecha de Excel con formato 'fecha'; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
+var OMS_BUILD = "v21 · 2026-09-23 (OMS.MACRO: último dato macro del BCRA — a3500 / badlar / tamar / cer / uva / inflamom, tamar5 / badlar5 = promedio 5 ruedas — valor o, con VERDADERO, la fecha del dato como fecha de Excel; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -569,9 +569,10 @@ var OMSCalc = (function () {
     var k = keyOf(it);
     // Sin precio explícito el server resuelve el last del MOMENTO: no se
     // memoiza (cada F9 re-pide); el dedup en vuelo del mismo tick sí corre.
-    // La ficha estática (tipo "meta": OMS.VENCIMIENTO) no depende del mercado
-    // y sí se memoiza (con el TTL de siempre).
-    var live = (it.valor == null) && it.tipo !== "meta";
+    // La ficha estática (tipo "meta": OMS.VENCIMIENTO) y el último dato macro
+    // (tipo "macro": OMS.MACRO, cambia 1×/día) no dependen del mercado y sí se
+    // memoizan (con el TTL de siempre).
+    var live = (it.valor == null) && it.tipo !== "meta" && it.tipo !== "macro";
     if (!live && Object.prototype.hasOwnProperty.call(memo, k)) {
       var m = memo[k];
       if ((Date.now() - m.t) < MEMO_TTL_MS) { return Promise.resolve(m.v); }
@@ -779,6 +780,18 @@ function durationFn(especie, precio, plazo, fx) {
 // DD/MM/AAAA. Con formato "fecha" devuelve la fecha como número de Excel
 // (serial: formatear la celda como fecha) — así se puede restar contra HOY()
 // o usar en FRAC.AÑO / DIAS.
+// Serial de Excel (sistema 1900: días desde el 30/12/1899) de una fecha ISO
+// AAAA-MM-DD; null si no es una fecha. Lo usan VENCIMIENTO ("fecha") y MACRO
+// (VERDADERO): la celda se formatea como fecha y se puede restar contra
+// HOY(), DIAS o FRAC.AÑO.
+function isoToSerial(iso) {
+  var s = String(iso == null ? "" : iso);
+  if (s.length < 10) { return null; }
+  var y = +s.slice(0, 4), mo = +s.slice(5, 7), d = +s.slice(8, 10);
+  if (!(y > 1900 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31)) { return null; }
+  return Math.round((Date.UTC(y, mo - 1, d) - Date.UTC(1899, 11, 30)) / 86400000);
+}
+
 function vencimientoFn(especie, formato) {
   var code = String(especie == null ? "" : especie).trim().toUpperCase();
   if (!code) { throw naError("Especie vacía"); }
@@ -790,13 +803,47 @@ function vencimientoFn(especie, formato) {
     if (m.error) { throw naError(m.error); }
     var iso = m.vencimiento;
     if (!iso || String(iso).length < 10) { throw naError("Sin vencimiento en la ficha de " + code); }
-    var y = +String(iso).slice(0, 4), mo = +String(iso).slice(5, 7), d = +String(iso).slice(8, 10);
-    if (!(y > 1900 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31)) { throw naError("Vencimiento inválido en la ficha: " + iso); }
-    if (fmt === "fecha" || fmt === "serial") {
-      // Serial de Excel (sistema 1900): días desde el 30/12/1899.
-      return Math.round((Date.UTC(y, mo - 1, d) - Date.UTC(1899, 11, 30)) / 86400000);
+    var serial = isoToSerial(iso);
+    if (serial == null) { throw naError("Vencimiento inválido en la ficha: " + iso); }
+    if (fmt === "fecha" || fmt === "serial") { return serial; }
+    var s = String(iso);
+    return s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4);
+  });
+}
+
+// 2º argumento de OMS.MACRO: ¿la FECHA del dato en vez del valor? Booleano de
+// Excel (VERDADERO/FALSO), 1/0 o texto ("si"/"fecha" · "no"/"valor"). Vacío =
+// valor (default). Otra cosa → #N/A con el motivo, no un #¡VALOR! mudo.
+function wantsDate(arg) {
+  if (arg == null || arg === "") { return false; }
+  if (typeof arg === "boolean") { return arg; }
+  if (typeof arg === "number") { return arg !== 0; }
+  var s = String(arg).trim().toLowerCase();
+  if (s === "" || s === "0" || s === "no" || s === "false" || s === "falso" || s === "valor") { return false; }
+  if (s === "1" || s === "si" || s === "sí" || s === "true" || s === "verdadero" || s === "fecha") { return true; }
+  throw naError("2º argumento inválido: '" + arg + "' — VERDADERO = fecha del dato · FALSO / vacío = valor");
+}
+
+// Último dato macro del BCRA (a3500, badlar, tamar, cer, uva, inflamom; tamar5
+// / badlar5 = promedio de las últimas 5 ruedas, el benchmark de OMS.MARGEN):
+// el mismo backup que alimenta OMS.HIST y el riel del dólar de la web. Default
+// el VALOR; con fecha=VERDADERO devuelve la FECHA del dato como número de
+// Excel (formatear la celda como fecha). No depende del mercado: viaja en el
+// mismo batch que la calculadora YAS y se memoiza (TTL 5 min); valor y fecha
+// de la misma serie comparten UN request.
+function macroFn(serie, fecha) {
+  var s = String(serie == null ? "" : serie).trim().toLowerCase();
+  if (!s) { throw naError("Serie vacía (a3500 | badlar | tamar | cer | uva | inflamom | tamar5 | badlar5)"); }
+  var conFecha = wantsDate(fecha);
+  return OMSCalc.request({ code: s.toUpperCase(), serie: s, tipo: "macro" }).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    if (conFecha) {
+      var serial = isoToSerial(m.fecha);
+      if (serial == null) { throw naError("Fecha inválida en la serie " + s + ": " + m.fecha); }
+      return serial;
     }
-    return pad2(d) + "/" + pad2(mo) + "/" + y;
+    if (m.valor === undefined || m.valor === null) { throw naError("Sin dato para " + s); }
+    return m.valor;
   });
 }
 
@@ -900,6 +947,7 @@ function registerFunctions() {
   CustomFunctions.associate("CAUCION", makeStreaming("CAUCION", caucionGet));
   CustomFunctions.associate("TABLA", makeStreaming("TABLA", tablaGet));
   CustomFunctions.associate("HIST", histFn);
+  CustomFunctions.associate("MACRO", guard(macroFn));
   CustomFunctions.associate("TIREA", guard(tireaFn));
   CustomFunctions.associate("PRECIO", guard(precioFn));
   CustomFunctions.associate("TNA", guard(tnaFn));
