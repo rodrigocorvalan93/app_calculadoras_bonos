@@ -82,7 +82,7 @@
     {
       "id": "FX",
       "name": "FX",
-      "description": "Dólares de referencia en vivo: mep, ccl, canje, mep_ci, ccl_ci, mayorista, a3500.",
+      "description": "Dólares de referencia en vivo: mep, ccl, canje, mep_ci, ccl_ci, mayorista (SIOPEL intradía), a3500 (A3500 OFICIAL del BCRA, se actualiza al publicarse), a3500_fecha (fecha del dato, número de Excel), a3500_ant, a3500_var, cierre (cierre anterior del mayorista del feed).",
       "result": {
         "type": "any"
       },
@@ -90,7 +90,7 @@
         {
           "name": "tipo",
           "type": "string",
-          "description": "mep | ccl | canje | mayorista | a3500 | mep_ci | ccl_ci"
+          "description": "mep | ccl | canje | mayorista | a3500 | a3500_fecha | a3500_ant | a3500_var | cierre | mep_ci | ccl_ci"
         }
       ],
       "options": {

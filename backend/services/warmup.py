@@ -338,6 +338,11 @@ class WarmupDaemon:
                 # Los caches de métricas keyean por día + fingerprint del índice
                 # (ver pricing): las TIRs viejas se recalculan solas con inputs
                 # ya fresco.
+                # El backup recién escrito alimenta el riel, OMS.HIST / MACRO y el
+                # A3500 oficial del add-in (services.historico): releerlo ahora, no
+                # en el slot de las 11:00.
+                from backend.services import historico
+                await loop.run_in_executor(_pool, historico.refresh)
                 logger.info("[warmup] índices refrescados por rollover de fecha (%s); "
                             "%d cupones floater recomputados", today, nf)
             else:
