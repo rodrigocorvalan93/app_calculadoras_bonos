@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v23 · 2026-09-23 (ayuda completa en el panel + botón Recalcular puntuales (OMSCalc.reset + recálculo completo); OMS.FX('a3500') = A3500 OFICIAL del BCRA con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.MACRO: último dato macro del BCRA — a3500 / badlar / tamar / cer / uva / inflamom, tamar5 / badlar5 = promedio 5 ruedas — valor o, con VERDADERO, la fecha del dato como fecha de Excel; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
+var OMS_BUILD = "v24 · 2026-09-23 (OMS.TABLA('rofex_min') / ('futuros_min') = futuros minoristas, canal 'minorista'/'mayorista' también en OMS.ROFEX; ayuda completa en el panel + botón Recalcular puntuales (OMSCalc.reset + recálculo completo); OMS.FX('a3500') = A3500 OFICIAL del BCRA con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.MACRO: último dato macro del BCRA — a3500 / badlar / tamar / cer / uva / inflamom, tamar5 / badlar5 = promedio 5 ruedas — valor o, con VERDADERO, la fecha del dato como fecha de Excel; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -336,8 +336,14 @@ function fxGet(s, tipo) {
   return naError("Tipo desconocido: " + t);
 }
 
+// Canal de futuros: "may" / "mayorista" (default) · "min" / "minorista".
+function futCanal(canal) {
+  var c = String(canal == null ? "" : canal).trim().toLowerCase();
+  return (c === "min" || c === "minorista") ? "min" : "may";
+}
+
 function rofexRow(s, contrato, canal) {
-  var rows = ((s.futuros || {})[String(canal || "may").toLowerCase() === "min" ? "min" : "may"]) || [];
+  var rows = ((s.futuros || {})[futCanal(canal)]) || [];
   if (typeof contrato === "number") { return rows[contrato - 1] || null; }
   var c = String(contrato || "").trim().toUpperCase();
   if (!c) { return null; }
@@ -382,8 +388,11 @@ function nn(v) { return v == null ? "" : v; }
 function tablaGet(s, panel, opcion) {
   var p = String(panel || "").trim().toLowerCase();
   var i, r, out;
-  if (p === "futuros" || p === "rofex") {
-    var rows = ((s.futuros || {})[String(opcion || "may").toLowerCase() === "min" ? "min" : "may"]) || [];
+  // "futuros" / "rofex" (canal en `opcion`, default mayorista) o el canal en el
+  // nombre del panel: "rofex_min" / "futuros_min" (minorista), "rofex_may".
+  var fut = /^(futuros|rofex)(?:[_ -]?(may|min|mayorista|minorista))?$/.exec(p);
+  if (fut) {
+    var rows = ((s.futuros || {})[futCanal(fut[2] || opcion)]) || [];
     out = [["Contrato", "Vto", "Días", "Últ", "Bid", "Ask", "Cierre", "Var %", "TNA", "TEM", "Directo", "Vol"]];
     for (i = 0; i < rows.length; i++) {
       r = rows[i];

@@ -163,7 +163,7 @@
     {
       "id": "TABLA",
       "name": "TABLA",
-      "description": "Tabla completa en vivo (spill): quotes, futuros, cauciones, fx o mae.",
+      "description": "Tabla completa en vivo (spill): quotes, futuros (alias rofex; rofex_min / futuros_min = canal minorista), cauciones, fx o mae.",
       "result": {
         "type": "any",
         "dimensionality": "matrix"
@@ -172,12 +172,12 @@
         {
           "name": "panel",
           "type": "string",
-          "description": "quotes | futuros | cauciones | fx | mae"
+          "description": "quotes | futuros (alias rofex) | rofex_min / futuros_min (minorista) | cauciones | fx | mae"
         },
         {
           "name": "opcion",
           "type": "string",
-          "description": "quotes: plazo (24hs/CI) · futuros: canal (may/min) · cauciones: moneda (ARS/USD)",
+          "description": "quotes: plazo (24hs/CI) · futuros: canal (may/min, mayorista/minorista) · cauciones: moneda (ARS/USD)",
           "optional": true
         }
       ],

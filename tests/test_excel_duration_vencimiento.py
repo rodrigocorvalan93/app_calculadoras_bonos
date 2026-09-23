@@ -65,7 +65,8 @@ async def test_duration_y_vencimiento_en_excel_calc(tmp_path, monkeypatch) -> No
     assert [p["name"] for p in por_id["VENCIMIENTO"]["parameters"]] == ["especie", "formato"]
     js = (ROOT / "backend/static/excel/functions.js").read_text(encoding="utf-8")
     assert 'CustomFunctions.associate("DURATION", guard(durationFn))' in js
-    assert 'CustomFunctions.associate("VENCIMIENTO", guard(vencimientoFn))' in js and "v23" in js
+    assert 'CustomFunctions.associate("VENCIMIENTO", guard(vencimientoFn))' in js
+    assert int(js.split('OMS_BUILD = "v')[1].split(" ")[0]) >= 20     # el sello subió con la función
     assert 'it.tipo !== "meta"' in js                       # la ficha no es "a precio de mercado": se memoiza
     assert "Date.UTC(1899, 11, 30)" in js                   # serial de Excel (sistema 1900)
     for doc in ("FORMULAS.md", "README.md", "taskpane.html"):

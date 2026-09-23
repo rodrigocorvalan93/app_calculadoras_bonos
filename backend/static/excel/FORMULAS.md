@@ -130,7 +130,7 @@ Futuros de dólar DLR (Matba-Rofex) con tasas implícitas vs el mayorista.
 | `vto` | Fecha de vencimiento | |
 | `label` / `code` | Etiqueta (`Ago-26`) / código (`DLR/AGO26M`) | |
 
-**canal** (default `may`): `may` mayorista | `min` minorista.
+**canal** (default `may`): `may` / `mayorista` | `min` / `minorista`.
 
 ---
 
@@ -161,12 +161,13 @@ Caución bursátil BYMA por plazo. La caución cotiza directo por TNA: los
 Tabla completa con encabezados en una sola celda (spill: se desborda hacia
 abajo/derecha; necesita espacio libre).
 
-    =OMS.TABLA("futuros")        =OMS.TABLA("quotes";"CI")        =OMS.TABLA("cauciones";"USD")
+    =OMS.TABLA("futuros")        =OMS.TABLA("rofex_min")        =OMS.TABLA("quotes";"CI")        =OMS.TABLA("cauciones";"USD")
 
 | `panel` | `opcion` | Columnas |
 |---|---|---|
 | `quotes` (alias `especies`, `cruda`) | plazo `24hs`/`CI` (sin opción: ambos) | Especie · Plazo · Últ · Bid · Ask · Vol Bid · Vol Ask · Cierre · F. cierre · Var · Vol $ · Nominal · VWAP |
-| `futuros` (alias `rofex`) | canal `may` (default) / `min` | Contrato · Vto · Días · Últ · Bid · Ask · Cierre · Var % · TNA · TEM · Directo · Vol |
+| `futuros` (alias `rofex`) | canal `may` (default) / `min` (también `mayorista` / `minorista`) | Contrato · Vto · Días · Últ · Bid · Ask · Cierre · Var % · TNA · TEM · Directo · Vol |
+| `rofex_min` / `futuros_min` (y `rofex_may`) | — (el canal va en el nombre: minorista / mayorista) | Ídem `futuros` |
 | `cauciones` | moneda `ARS` (default) / `USD` | Plazo · TNA · Bid · Ask · Cierre · Var (pp) · Vol |
 | `fx` (alias `dolares`) | — | Tipo · Valor (MEP, CCL, Canje, MEP CI, CCL CI, Mayorista, A3500) |
 | `mae` | — | Ticker · Últ · Cierre · Var % · Mín · Máx · VN · Monto · Plazo · Moneda |
