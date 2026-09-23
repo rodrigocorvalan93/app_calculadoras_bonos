@@ -533,6 +533,12 @@ class Bono:
 
         cf_cpn = {
             "Fechas": self.fechas_cupon,
+            # Fecha HÁBIL de pago de la misma fila (la de cashflow_pmt): TIR,
+            # precio, duration, convexidad y TR descuentan a ESTA fecha — la
+            # plata entra el día hábil de pago, no en la fecha nominal del cupón
+            # (mismo criterio que 1816 / la mesa). Los montos, el devengamiento
+            # y el filtro por liquidación siguen por la fecha de cupón.
+            "FechaPago": self.fechas_pago_cupon_habil,
             "Intereses": self.intereses,
             "Amortización": self.amortizacion,
             "Ajuste": self.numero_ajuste_sobre_capital,
@@ -554,6 +560,12 @@ class Bono:
         self.cashflow_pmt = self.cashflow_pmt_full[self.cashflow_pmt_full['Fechas'] > self.fecha_settlement].copy()
 
         self.valor_residual = self.valor_nominal - sum(self.cashflow_cpn_full['Amortización'][self.cashflow_cpn_full['Fechas'] <= self.fecha_settlement]) # cada 100 o %
+
+        # Días desde la liquidación hasta el PAGO hábil del último flujo remanente:
+        # es el plazo que anualiza la TNA "plazo remanente" (LECAPs / bullets),
+        # consistente con la TIR que descuenta a FechaPago.
+        _fp = self.cashflow_cpn['FechaPago']
+        self.dias_al_pago = int((_fp.max() - self.fecha_settlement).days) if len(_fp) else int((self.vencimiento - self.fecha_settlement).days)
 
         #return print(self.cashflow_cpn,"\n" ,self.cashflow_pmt)
 
@@ -599,7 +611,11 @@ class Bono:
 
         # Calcular días remanentes
         if self.cupones == 1:
-            dias_remanentes = (fecha_siguiente_cpn - self.fecha_settlement).days
+            # Bullet / LECAP: hasta el PAGO hábil, no la fecha nominal — es el
+            # plazo de la TNA días/365 y el que descuenta la TIR (FechaPago).
+            _fila_sig = self.cashflow_cpn_full['Fechas'] == fecha_siguiente_cpn
+            _fecha_pago_sig = self.cashflow_cpn_full.loc[_fila_sig, 'FechaPago'].iloc[0]
+            dias_remanentes = (_fecha_pago_sig - self.fecha_settlement).days
         else:
             if self.convencion_devengamiento == "Actual":
                 dias_remanentes = (fecha_siguiente_cpn - self.fecha_settlement).days
@@ -675,6 +691,7 @@ class Bono:
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
         nueva_fila = {
             'Fechas': self.fecha_settlement,
+            'FechaPago': self.fecha_settlement,
             'Intereses': 0,
             'Amortización': 0,
             'Ajuste': 0,
@@ -682,9 +699,10 @@ class Bono:
         }
         cf = pd.concat([pd.DataFrame([nueva_fila]), cf], ignore_index=True)
 
-        # Pre-extraer arrays para Newton-Raphson vectorizado (evita iterrows en el loop)
+        # Pre-extraer arrays para Newton-Raphson vectorizado (evita iterrows en el loop).
+        # Descuento a la fecha HÁBIL de pago (FechaPago), no a la del cupón.
         _totals = cf['Total'].to_numpy(dtype=np.float64)
-        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        _t_years = _cf_yearfracs(cf['FechaPago'], self.fecha_settlement)
 
         # VP y derivada fusionados: una sola llamada a np.power por iteración.
         # VP(r)   = Σ cf · (1+r)^(-t)
@@ -760,7 +778,8 @@ class Bono:
 
         # Cálculo TNA según cnv
         if self.cnv_tna == 'plazo remanente':
-            dias_al_vto = (self.vencimiento - self.fecha_settlement).days
+            # Hasta el PAGO hábil del último flujo (consistente con la TIR)
+            dias_al_vto = getattr(self, 'dias_al_pago', None) or (self.vencimiento - self.fecha_settlement).days
             self.tna = tir_a_tna(self.tirea, dias_al_vto, self.convencion_base)
         else:
             self.tna = tir_a_tna(self.tirea, self.cnv_tna, self.convencion_base)
@@ -795,7 +814,7 @@ class Bono:
         self.tirea = tasa_descuento.real
         # Almacena nueva tasa en versión TNA
         if self.cnv_tna == 'plazo remanente':
-            dias_al_vto = (self.vencimiento - self.fecha_settlement).days
+            dias_al_vto = getattr(self, 'dias_al_pago', None) or (self.vencimiento - self.fecha_settlement).days
             self.tna = tir_a_tna(tasa_descuento.real,dias_al_vto,self.convencion_base)
         else:
             self.tna = tir_a_tna(tasa_descuento.real,self.cnv_tna,self.convencion_base)
@@ -805,9 +824,10 @@ class Bono:
         # Filtrar los flujos de caja desde la fecha de liquidación
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
 
-        # Calcular el valor presente de los flujos de caja (vectorizado)
+        # Calcular el valor presente de los flujos de caja (vectorizado), descontando
+        # a la fecha hábil de pago
         _totals = cf['Total'].to_numpy(dtype=np.float64)
-        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        _t_years = _cf_yearfracs(cf['FechaPago'], self.fecha_settlement)
         precio = _pv_vec(_totals, _t_years, tasa_descuento.real)
 
         self.precio = precio
@@ -841,9 +861,9 @@ class Bono:
         # Filtrar los flujos de caja desde la fecha de liquidación
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
 
-        # WAL (vectorizado)
+        # WAL (vectorizado), en años hasta la fecha hábil de pago
         capital = cf['Amortización'].to_numpy(dtype=np.float64)
-        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        _t_years = _cf_yearfracs(cf['FechaPago'], self.fecha_settlement)
         al = float(np.sum(capital * _t_years) / np.sum(capital))
 
 
@@ -873,9 +893,9 @@ class Bono:
         # Filtrar los flujos de caja desde la fecha de liquidación
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
 
-        # Calcular precio y duración (vectorizado)
+        # Calcular precio y duración (vectorizado), t = años hasta la fecha hábil de pago
         _totals = cf['Total'].to_numpy(dtype=np.float64)
-        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        _t_years = _cf_yearfracs(cf['FechaPago'], self.fecha_settlement)
         _df = np.power(1.0 + tasa_descuento.real, -_t_years)
         _pv = _totals * _df
 
@@ -928,9 +948,9 @@ class Bono:
         # Filtrar los flujos de caja desde la fecha de liquidación
         cf = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
 
-        # Calcular precio y convexidad (vectorizado)
+        # Calcular precio y convexidad (vectorizado), t = años hasta la fecha hábil de pago
         _totals = cf['Total'].to_numpy(dtype=np.float64)
-        _t_years = _cf_yearfracs(cf['Fechas'], self.fecha_settlement)
+        _t_years = _cf_yearfracs(cf['FechaPago'], self.fecha_settlement)
         _df = np.power(1.0 + tasa_descuento, -_t_years)
 
         precio = float(np.sum(_totals * _df))
@@ -950,13 +970,13 @@ class Bono:
         # Calcula el precio final del bono usando la tirea_final (vectorizado)
         cf_final = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > terminal_dt]
         _totals_f = cf_final['Total'].to_numpy(dtype=np.float64)
-        _t_years_f = _cf_yearfracs(cf_final['Fechas'], terminal_dt)
+        _t_years_f = _cf_yearfracs(cf_final['FechaPago'], terminal_dt)
         precio_final = _pv_vec(_totals_f, _t_years_f, tirea_final)
 
         # Calcula el precio inicial del bono usando la tirea_inicial (vectorizado)
         cf_inicial = self.cashflow_cpn[self.cashflow_cpn['Fechas'] > self.fecha_settlement]
         _totals_i = cf_inicial['Total'].to_numpy(dtype=np.float64)
-        _t_years_i = _cf_yearfracs(cf_inicial['Fechas'], self.fecha_settlement)
+        _t_years_i = _cf_yearfracs(cf_inicial['FechaPago'], self.fecha_settlement)
         precio_inicial = _pv_vec(_totals_i, _t_years_i, tirea_inicial)
 
         # precio_inicial = self.calcula_precio(tasa_descuento=tirea_inicial, settlement_date=settlement_date)

@@ -39,6 +39,19 @@ The bond singletons in `especies.py` mutate state on every calc
 `copy.copy`) before mutating, the same pattern the legacy uses in
 `OMSweb_app._bond_obj_copy`.
 
+## Descuento a fecha de pago hábil (23/09)
+
+`generate_cashflows` deja en `cashflow_cpn` la columna `FechaPago` (la fecha
+hábil de `cashflow_pmt`, misma fila) y TIR / precio / duration / convexidad /
+TR / `pricing._duration_desde_cashflows` / `ust.flujos_bono` descuentan a ESA
+fecha: la plata entra el día hábil de pago, igual que 1816 (TX26 a 746,90 con
+liq. 24/09/2026 = 3,59 %, no el 3,67 % que daba descontar al cupón del 09/11).
+Los MONTOS, el devengamiento y el filtro `Fechas > settlement` siguen por
+fecha de cupón. En bullets (`cupones == 1`) `dias_remanentes` y la TNA
+"plazo remanente" (`dias_al_pago`) cuentan hasta el pago hábil. Feriados que
+`holidays` (pineado 0.90) no trae van a `dias_habiles._additional_holidays`
+(09/11/2026: visita papal). Regresión: `tests/test_descuento_fecha_pago.py`.
+
 ## Locale and formatting
 
 `es-AR`: comma decimals, period thousands separator, `DD/MM/AAAA` dates.
