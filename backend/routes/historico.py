@@ -88,6 +88,53 @@ async def historicos_guardar_base(request: Request) -> HTMLResponse:
     return HTMLResponse(f'<span class="{cls} muted" style="font-size:12px">{msg}</span>')
 
 
+def _msg_reconstruccion(res: Dict[str, Any]) -> str:
+    if res.get("ok") and not res.get("skipped"):
+        fuente = "los cierres del feed" if res.get("fuente") == "feed" else "la rueda siguiente de la base"
+        extra = (f" · {res['sin_fx']} especies en pesos sin FX" if res.get("sin_fx") else "")
+        return (f"✅ Cierre del {res.get('dia_fmt')} reconstruido desde {fuente}: {res.get('rows')} filas RC"
+                f" · total {res.get('total_rows')} filas{extra} (el chip se actualiza en un minuto)")
+    return f"⚠ {res.get('error') or res.get('skipped') or 'no se reconstruyó'}"
+
+
+@router.post("/historicos/reconstruir-cierre", response_class=HTMLResponse)
+async def historicos_reconstruir_cierre(request: Request) -> HTMLResponse:
+    """Reconstrucción manual de un cierre perdido (botón del banner). SÓLO
+    superuser (gateado en main._SUPERUSER_ONLY). `dia` (ISO) en el form; sin
+    `dia`, todos los huecos de la base. Corre en el executor (~500 TIRs +
+    escritura de la base, segundos). force=True: el que aprieta decide, la
+    máquina no tiene que ser writer."""
+    from datetime import date as _date
+
+    from backend.services import historico_writer
+
+    form = await request.form()
+    dia_s = str(form.get("dia") or "").strip()
+    loop = asyncio.get_running_loop()
+    if dia_s:
+        try:
+            dia = _date.fromisoformat(dia_s)
+        except ValueError:
+            return HTMLResponse('<span class="guardar-err muted" style="font-size:12px">⚠ fecha inválida</span>',
+                                status_code=400)
+        res = await loop.run_in_executor(None, lambda: historico_writer.reconstruir_cierre(dia, force=True))
+        msg = _msg_reconstruccion(res)
+        cls = "guardar-ok" if (res.get("ok") and not res.get("skipped")) else "guardar-err"
+    else:
+        res = await loop.run_in_executor(None, lambda: historico_writer.reconstruir_faltantes(force=True))
+        if res.get("reconstruidos"):
+            msg = "✅ Reconstruido: " + ", ".join(res["reconstruidos"])
+            cls = "guardar-ok"
+        elif res.get("huecos"):
+            pend = "; ".join(f"{p['dia']}: {p['motivo']}" for p in res.get("pendientes") or [])
+            msg = f"⚠ sin reconstruir — {pend or 'sin rueda'}"
+            cls = "guardar-err"
+        else:
+            msg = "✓ la base no tiene huecos"
+            cls = "guardar-ok"
+    return HTMLResponse(f'<span class="{cls} muted" style="font-size:12px">{msg}</span>')
+
+
 def _line_chart(serie: str, rango: str, desde: Optional[str] = None,
                 hasta: Optional[str] = None, width: int = 960, height: int = 420) -> Dict[str, Any]:
     days = None if (desde or hasta) else _RANGOS.get(rango, 365)

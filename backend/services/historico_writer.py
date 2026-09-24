@@ -26,13 +26,26 @@ SOLIDEZ (tras la semana perdida 25-28/08/26, base clavada en el 24):
      auto-repara solo apenas una máquina que lo tenga vuelve a consolidar.
   3. REINTENTOS: el write de la base reintenta ante un xlsx lockeado
      (OneDrive sincronizando / archivo abierto en Excel), y el autosave de
-     las 17:01 reintenta cada 10 min hasta ~90 min si el guardado falló.
+     las 17:01 reintenta hasta ~95 min si el guardado falló: cada 5 min con
+     el feed caído, cada 10 min con otros errores.
   4. MULTI-INSTANCIA: dejá HISTORICO_AUTOSAVE=1 en TODAS las máquinas (el
      journal local es gratis y es la red de seguridad); en las secundarias
      poné HISTORICO_BASE_WRITER=0 para que NO escriban la base compartida
      (evita los conflictos de OneDrive) — el botón manual la escribe igual.
   5. VISIBILIDAD: /admin/salud muestra última fecha de la base, atraso en
      días hábiles y journal pendiente (`estado()`).
+  6. FEED CAÍDO AL CIERRE: con sesión de broker y el WS desconectado (o > 10
+     min sin market data) el autosave NO guarda los últimos precios que
+     llegaron como si fueran el cierre: avisa al superuser (banner + mail
+     una vez por día) y reintenta cada 5 min. Sin `force`, un feed muerto
+     nunca escribe un cierre.
+  7. RECONSTRUCCIÓN (`reconstruir_cierre`): un cierre que se perdió igual
+     (app cerrada a las 17:01, feed muerto toda la tarde) se rearma desde el
+     precio de cierre de esa rueda que sobrevive en dos lados — el CL con
+     fecha que manda el feed durante la rueda siguiente, o el `Close Price`
+     de las filas de la rueda siguiente ya guardadas en la base — con las
+     tasas recalculadas a la liquidación de ese día. Corre solo al arrancar
+     la app y antes del autosave; botón en el banner del superuser.
 """
 from __future__ import annotations
 
@@ -42,8 +55,8 @@ import os
 import re
 import threading
 import time
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("backend.historico_writer")
@@ -54,6 +67,17 @@ _TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 # Columnas obligatorias (mismas que el dropna de bymaapi.guardar_excel).
 _REQUIRED = ["Last Price", "TIREA", "TNA", "TEM", "Paridad", "Duration"]
 
+# Ventana de reintentos del autosave (minutos desde el disparo) y cadencia:
+# feed caído → 5 min (el WS suele volver solo); otros errores (xlsx lockeado,
+# store vacío) → 10 min. `estado_cierre` muestra "pendiente" mientras dure.
+_VENTANA_MIN = 95
+_REINTENTO_FEED_S = 300.0
+_REINTENTO_S = 600.0
+# "Feed muerto" para el cierre: WS desconectado, o conectado pero más de esto
+# sin market data. NO es el `feed_alive` de 90 s: después de las 17:00 el
+# mercado calla y un cierre normal daría falso "caído".
+_FEED_STALE_S = 600.0
+
 
 def _now() -> datetime:
     """Hora actual en BA (helper monkeypatcheable en tests)."""
@@ -62,14 +86,26 @@ def _now() -> datetime:
 
 def _fecha_dato(ts: Any) -> Optional[date]:
     """Fecha (BA) de un timestamp del feed: epoch millis ('1751833623000')
-    o ISO. None si no parsea."""
+    o ISO. Un ISO SIN zona se toma como hora BA (antes `astimezone` lo leía
+    en la zona de la máquina: en CI/UTC un '2026-09-23' caía al 22/09). Un
+    instante que es EXACTAMENTE medianoche UTC es un sello de fecha (el
+    CL.date de algunos gateways es el 00:00Z del día), no un momento: va la
+    fecha UTC — la hora BA sería las 21:00 del día anterior. None si no
+    parsea."""
     if ts in (None, ""):
         return None
     s = str(ts).strip()
     try:
         if s.isdigit() and len(s) >= 12:
-            return datetime.fromtimestamp(int(s) / 1000.0, tz=_TZ).date()
-        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(_TZ).date()
+            dt = datetime.fromtimestamp(int(s) / 1000.0, tz=timezone.utc)
+        else:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                return dt.date()
+            dt = dt.astimezone(timezone.utc)
+        if dt.hour == 0 and dt.minute == 0 and dt.second == 0 and dt.microsecond == 0:
+            return dt.date()
+        return dt.astimezone(_TZ).date()
     except (ValueError, OSError, OverflowError):
         return None
 
@@ -193,11 +229,12 @@ def journal_dir() -> str:
     return d
 
 
-def write_journal(df: "Any") -> str:
+def write_journal(df: "Any", dia: Optional[date] = None) -> str:
     """Parquet del día en el journal local (atómico; pisa el del mismo día).
     Es lo PRIMERO que se guarda al cierre: sin OneDrive en el medio no hay
-    locks ni conflictos, el día queda capturado pase lo que pase con la base."""
-    path = os.path.join(journal_dir(), f"px_tasas_{_now().date():%Y%m%d}.parquet")
+    locks ni conflictos, el día queda capturado pase lo que pase con la base.
+    `dia` (default hoy): la reconstrucción journalea la rueda que rearma."""
+    path = os.path.join(journal_dir(), f"px_tasas_{(dia or _now().date()):%Y%m%d}.parquet")
     mirror = df.copy()
     for col in ("symbol", "Código", "Price Source", "Price Date"):
         if col in mirror.columns:
@@ -359,6 +396,34 @@ def _feed_vivo() -> bool:
         return False
 
 
+def _feed_estado() -> Tuple[bool, str]:
+    """(vivo, motivo) para el guard del autosave. "Muerto" = hay broker
+    configurado y el WS está desconectado (nunca logueó, sesión caída) o
+    conectado pero más de `_FEED_STALE_S` sin market data. Sin broker
+    (dev / tests / paper) cuenta como vivo: ahí decide el guard de operados
+    de siempre. Nunca lanza."""
+    try:
+        from backend.config import settings
+        if not settings.primary_user:
+            return True, ""
+        from backend.services.primary_ws import get_ws_client
+        st = get_ws_client().stats() or {}
+        if not st.get("connected"):
+            return False, "WS del broker desconectado"
+        stale = st.get("stale_seconds")
+        if stale is not None and stale > _FEED_STALE_S:
+            return False, f"sin market data hace {int(stale // 60)} min"
+        return True, ""
+    except Exception:  # noqa: BLE001
+        return True, ""
+
+
+def _intervalo_reintento(res: Optional[Dict[str, Any]]) -> float:
+    """Segundos hasta el próximo intento del autosave: 5 min con el feed
+    caído (suele volver solo), 10 min para el resto."""
+    return _REINTENTO_FEED_S if (res or {}).get("feed_muerto") else _REINTENTO_S
+
+
 def _sin_rueda_days() -> set:
     out: set = set()
     try:
@@ -406,10 +471,29 @@ def estado_cierre() -> Dict[str, Any]:
     journal = _journal_days()
     atraso = _atraso_habiles(ultima, esperado, sin_rueda)
     r = (_autosave.last_result or {}) if _autosave is not None else {}
+    # El último intento del autosave habla del cierre esperado sólo si es de
+    # ESE día (a la mañana siguiente `last_result` sigue siendo el de ayer).
+    if r.get("dia") and r.get("dia") != esperado.isoformat():
+        r = {}
+    feed_muerto = r.get("feed_muerto") if r.get("retry") else None
+    disparo = ahora.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    hasta = (disparo + timedelta(minutes=_VENTANA_MIN)).strftime("%H:%M")
+    # Huecos: ruedas anteriores al cierre esperado que a la base le faltan (el
+    # chip sólo reclama el ÚLTIMO cierre; un día perdido en el medio quedaba
+    # invisible). Sólo el más nuevo lleva de dónde se reconstruye.
+    huecos = [d for d in huecos_base(fechas, sin_rueda, hoy) if d != esperado]
     out.update({"ultima": ultima.isoformat() if ultima else None,
                 "esperado": esperado.isoformat(), "esperado_fmt": esperado.strftime("%d/%m/%Y"),
                 "atraso": atraso, "hoy_en_base": hoy in fechas, "hoy_en_journal": hoy in journal,
-                "error": r.get("error")})
+                "error": r.get("error"), "feed_muerto": feed_muerto, "hasta": hasta,
+                "reintento_min": int(_intervalo_reintento(r) // 60),
+                "reconstruible": None,
+                "huecos": [d.isoformat() for d in huecos],
+                "hueco": huecos[-1].isoformat() if huecos else None,
+                "hueco_fmt": huecos[-1].strftime("%d/%m/%Y") if huecos else None,
+                "hueco_reconstruible": (_fuente_reconstruccion(huecos[-1], fechas, sin_rueda, hoy)
+                                        if huecos else None),
+                "reconstruccion": _ultima_reconstruccion})
     dm = esperado.strftime("%d/%m")
     if esperado in fechas:
         out["estado"] = "ok"
@@ -424,6 +508,8 @@ def estado_cierre() -> Dict[str, Any]:
             quien = (f"hoy se guarda solo a las {hh:02d}:{mm:02d} — dejá la app abierta (o la captura programada)"
                      if out["autosave"] and out["writer"] else f"hoy lo guarda la PC writer a las {hh:02d}:{mm:02d}")
             out["detalle"] = f"Base histórica al día (último cierre {dm}); {quien}"
+        if huecos:
+            out["detalle"] += f" · hueco el {huecos[-1]:%d/%m}" + (f" (+{len(huecos) - 1})" if len(huecos) > 1 else "")
         return out
     if esperado in journal:
         out["estado"] = "capturado"
@@ -432,22 +518,37 @@ def estado_cierre() -> Dict[str, Any]:
                           "tiene (se consolida en el próximo guardado / al arrancar la app writer)")
         return out
     if esperado == hoy:
-        mins = (ahora - ahora.replace(hour=hh, minute=mm, second=0, microsecond=0)).total_seconds() / 60.0
-        if mins <= 95 and out["autosave"]:
+        mins = (ahora - disparo).total_seconds() / 60.0
+        if mins <= _VENTANA_MIN and out["autosave"]:
             out["estado"] = "pendiente"
-            out["texto"] = "⏳ cierre pendiente"
-            out["detalle"] = (f"El autosave de las {hh:02d}:{mm:02d} todavía no guardó "
-                              "(reintenta cada 10 min hasta ~90 min)")
+            if feed_muerto:
+                out["texto"] = "⏳ cierre pendiente · feed caído"
+                out["detalle"] = (f"A las {hh:02d}:{mm:02d} el feed estaba caído ({feed_muerto}): el autosave no "
+                                  f"guarda precios viejos y reintenta cada {out['reintento_min']} min hasta las {hasta}")
+            else:
+                out["texto"] = "⏳ cierre pendiente"
+                out["detalle"] = (f"El autosave de las {hh:02d}:{mm:02d} todavía no guardó "
+                                  f"(reintenta cada 10 min hasta las {hasta})")
             return out
+    else:
+        out["reconstruible"] = _fuente_reconstruccion(esperado, fechas, sin_rueda, hoy)
     # El texto del error (paths de OneDrive, etc.) NO va al tooltip que ven todos
     # los roles: viaja en `error` y lo muestra sólo el banner del superuser.
     out["estado"] = "falta"
     out["texto"] = f"⚠ falta cierre {dm}" + (f" (+{atraso - 1})" if atraso and atraso > 1 else "")
+    if r.get("error"):
+        motivo = " · el último intento de guardado falló (detalle en el panel)"
+    elif feed_muerto:
+        motivo = f" · a las {hh:02d}:{mm:02d} el feed estaba caído ({feed_muerto}) y no volvió en la ventana de reintentos"
+    else:
+        motivo = (f" · ¿la app estaba cerrada a las {hh:02d}:{mm:02d}? "
+                  "Programá la captura headless (backend/tools/cierre.py)")
+    if out["reconstruible"]:
+        motivo += (" · se reconstruye desde los cierres del feed" if out["reconstruible"] == "feed"
+                   else " · se reconstruye desde la rueda siguiente de la base")
     out["detalle"] = (f"La base histórica no tiene el cierre del {dm}"
                       + (f" — atraso {atraso} ruedas" if atraso and atraso > 1 else "")
-                      + (" · el último intento de guardado falló (detalle en el panel)" if r.get("error")
-                         else f" · ¿la app estaba cerrada a las {hh:02d}:{mm:02d}? "
-                              "Programá la captura headless (backend/tools/cierre.py)"))
+                      + motivo)
     return out
 
 
@@ -773,7 +874,8 @@ def save_today(force: bool = False) -> Dict[str, Any]:
     from backend.services import deltapaths, historico_byma
 
     res: Dict[str, Any] = {"ok": False, "skipped": None, "error": None,
-                           "rows": 0, "operados": 0, "total_rows": None, "xlsx": None}
+                           "rows": 0, "operados": 0, "total_rows": None, "xlsx": None,
+                           "dia": _now().date().isoformat()}
     hist_dir = deltapaths.historico_dir()
     if not hist_dir:
         res["error"] = ("No encontré la carpeta 'Delta Bases' (DELTA_HISTORICO_DIR / "
@@ -786,8 +888,27 @@ def save_today(force: bool = False) -> Dict[str, Any]:
         if _now().weekday() >= 5:
             res["skipped"] = "fin de semana"
             return res
+        if not _es_habil(_now().date()):
+            # Feriado del calendario: antes caía al guard de operados y, con el
+            # feed conectado pero mudo todo el día, el guard de feed de abajo
+            # habría avisado "caído" y reintentado toda la tarde.
+            res["skipped"] = "feriado (calendario AR)"
+            return res
         if _ya_guardado_hoy(xlsx):
             res["skipped"] = "la base ya tiene filas de hoy"
+            return res
+        vivo, motivo = _feed_estado()
+        res["feed_vivo"] = vivo
+        if not vivo:
+            # Con el feed muerto, lo que hay en el store son los últimos precios
+            # que llegaron ANTES de la caída (un feed que murió a las 15:00 deja
+            # 'last' de las 15:00 con fecha de hoy y pasaría el guard de
+            # operados): no se guardan como cierre. Se avisa al superuser, se
+            # reintenta cada 5 min y, si no vuelve, mañana el cierre se
+            # reconstruye desde los cierres del feed (`reconstruir_cierre`).
+            res["skipped"] = f"feed caído al cierre ({motivo}): no guardo precios viejos como cierre"
+            res["retry"] = True
+            res["feed_muerto"] = motivo
             return res
 
     df = build_rows()
@@ -877,6 +998,554 @@ def save_today(force: bool = False) -> Dict[str, Any]:
     logger.info("[historico_writer] base guardada: %d filas de hoy (%d operados) → %s",
                 res["rows"], res["operados"], xlsx)
     return res
+
+
+# ── Reconstrucción de un cierre perdido ────────────────────────────────────
+# La app no corría a las 17:01 (o el feed estuvo muerto toda la tarde) y a la
+# base le falta la rueda D. El precio de cierre de D sobrevive en dos lados:
+#   feed  durante la rueda siguiente el broker manda, por símbolo, el cierre
+#         previo (CL) con su fecha: si es D, ES el cierre de D. Vale sólo
+#         mientras el feed esté en la rueda D+1.
+#   base  las filas de la rueda siguiente (D+1) guardan ese mismo cierre en
+#         `Close Price`: vale para siempre, una vez que D+1 está guardada.
+# Con el precio se recalculan TIREA/TNA/TEM/paridad/duration con liquidación
+# al hábil siguiente de D (24hs — la misma fecha que usó la tabla de Curvas
+# ese día), con el mismo camino que build_rows (especie en pesos de un
+# hard-dollar → ficha nativa ÷ FX, acá el FX implícito de los CIERRES). Las
+# filas van marcadas `Price Source = RC`. Sólo se recupera el último día de un
+# hueco (nadie guarda el cierre de D-1 después de D). Lo que NO vuelve:
+# volumen / OHLC / puntas del cierre completo (la partición sale de la base,
+# sin ellos) y la caución del día en la serie FX.
+PRICE_SOURCE_RC = "RC"
+_MAX_HUECOS = 15                      # ruedas hacia atrás que se revisan
+_ESPERA_SNAPSHOT_S = 240.0            # al arrancar: cuánto esperar los cierres del feed
+_reconstruir_lock = threading.Lock()
+_ultima_reconstruccion: Optional[Dict[str, Any]] = None
+
+
+def _habil_siguiente(d: date, excluir: Optional[set] = None) -> date:
+    d += timedelta(days=1)
+    while not _es_habil(d) or (excluir and d in excluir):
+        d += timedelta(days=1)
+    return d
+
+
+def _habil_anterior(d: date, excluir: Optional[set] = None) -> date:
+    d -= timedelta(days=1)
+    while not _es_habil(d) or (excluir and d in excluir):
+        d -= timedelta(days=1)
+    return d
+
+
+def _settle_24hs(dia: date) -> str:
+    """Liquidación 24hs de la rueda `dia`: el hábil siguiente (DD/MM/AAAA),
+    igual que `pricing.settlement_date_str("24hs")` evaluada ese día."""
+    import rentafija
+    return rentafija.n_dias_laborales(dia, 1).strftime("%d/%m/%Y")
+
+
+def huecos_base(fechas: Optional[set] = None, sin_rueda: Optional[set] = None,
+                hoy: Optional[date] = None, max_ruedas: int = _MAX_HUECOS) -> List[date]:
+    """Ruedas de las últimas `max_ruedas` (anteriores a HOY, hoy es cosa de
+    `save_today`) que a la base le faltan, ascendente. Feriados y días
+    marcados sin rueda no cuentan. Con la base vacía sólo la última rueda: no
+    hay historia contra la que medir un hueco. ~µs con `fechas` dado."""
+    if fechas is None or sin_rueda is None:
+        from backend.services import deltapaths
+        hist_dir = deltapaths.historico_dir()
+        if not hist_dir:
+            return []
+        fechas = _fechas_base_cached(os.path.join(hist_dir, HIST_FILENAME))
+        sin_rueda = _sin_rueda_days()
+    hoy = hoy or _now().date()
+    d = _habil_anterior(hoy, sin_rueda)
+    piso = min(fechas) if fechas else d
+    out: List[date] = []
+    for _ in range(max_ruedas):
+        if d < piso:
+            break
+        if d not in fechas:
+            out.append(d)
+        d = _habil_anterior(d, sin_rueda)
+    return sorted(out)
+
+
+def cierres_en_store(dia: date, plazo: str = "24hs") -> Dict[str, int]:
+    """Qué cierre previo trae el feed, contado sobre los bonos de las curvas:
+    `en_dia` = símbolos con CL fechado `dia`; `posteriores` = con CL fechado
+    DESPUÉS (el feed ya pasó de la rueda siguiente: esos cierres no sirven);
+    `liquidos` / `liquidos_en_dia` = lo mismo en la canasta líquida (bases FX
+    y sus patas C/D) — si ni los soberanos líquidos tienen cierre de `dia`,
+    la fecha del CL no es la que creemos. ~1 ms."""
+    from backend.services import curves, marketdata_store
+    from backend.services import fx as fx_svc
+    from backend.services import symbols as syms
+
+    store = marketdata_store.get_store()
+    out = {"en_dia": 0, "posteriores": 0, "liquidos": 0, "liquidos_en_dia": 0}
+    vistos: set = set()
+    for codes in curves.build_curve_codes().values():
+        for code in codes or []:
+            if code in vistos:
+                continue
+            vistos.add(code)
+            snap = store.get(syms.md_symbol(code, plazo))
+            if snap is None or snap.close is None:
+                continue
+            f = _fecha_dato(snap.close_ts)
+            if f == dia:
+                out["en_dia"] += 1
+            elif f is not None and f > dia:
+                out["posteriores"] += 1
+    try:
+        bases = fx_svc.fx_bases()
+    except Exception:  # noqa: BLE001 — universo no cargado
+        bases = []
+    for b in bases:
+        for suf in ("", "C", "D"):
+            snap = store.get(syms.md_symbol(b + suf, plazo))
+            if snap is None or snap.close is None:
+                continue
+            f = _fecha_dato(snap.close_ts)
+            if f is None:
+                continue
+            out["liquidos"] += 1
+            if f == dia:
+                out["liquidos_en_dia"] += 1
+    return out
+
+
+def _feed_en_rueda_siguiente(c: Dict[str, int], minimo: int) -> bool:
+    """El store tiene los cierres de `dia`: bastantes símbolos con CL de ese
+    día, ninguno ya posterior y, si la canasta líquida tiene fecha, al menos
+    la mitad cae en `dia`."""
+    return (c["posteriores"] == 0 and c["en_dia"] >= minimo
+            and (c["liquidos"] == 0 or c["liquidos_en_dia"] * 2 >= c["liquidos"]))
+
+
+def _fuente_reconstruccion(dia: date, fechas: set, sin_rueda: set, hoy: date) -> Optional[str]:
+    """De dónde se puede reconstruir `dia` ahora mismo: 'feed' (sólo la
+    última rueda antes de hoy, mientras el store tenga sus cierres), 'base'
+    (la rueda siguiente ya está guardada) o None."""
+    from backend.config import settings
+    try:
+        if dia == _habil_anterior(hoy, sin_rueda) and \
+                _feed_en_rueda_siguiente(cierres_en_store(dia), settings.historico_autosave_min_operados):
+            return "feed"
+    except Exception:  # noqa: BLE001 — universo no cargado todavía
+        pass
+    if _habil_siguiente(dia, sin_rueda) in fechas:
+        return "base"
+    return None
+
+
+def _leer_base_lectura(xlsx_path: str) -> "Any":
+    """La base completa para leer (espejo parquet si es fiel, si no el
+    Excel; parquet suelto si el xlsx no está). None si no hay base."""
+    import pandas as pd
+    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+    try:
+        if os.path.exists(xlsx_path):
+            return _leer_base(xlsx_path, pd)
+        if os.path.isfile(pq):
+            prev = pd.read_parquet(pq)
+            prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
+            return prev
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] no pude leer la base para reconstruir: %s", exc)
+    return None
+
+
+def _ultimos_previos(base_df: "Any", dia: date) -> Dict[tuple, float]:
+    """{(symbol, Código): Last Price} de la última rueda de la base ANTERIOR
+    a `dia` — el 'Close Price' de las filas reconstruidas y la evidencia de
+    que hubo rueda."""
+    if base_df is None or not len(base_df):
+        return {}
+    f = base_df["fecha_hoy"]
+    mask = f < dia
+    if not mask.any():
+        return {}
+    sub = base_df[f == f[mask].max()]
+    out: Dict[tuple, float] = {}
+    for s, c, p in zip(sub["symbol"], sub["Código"], sub["Last Price"]):
+        try:
+            v = float(p)
+        except (TypeError, ValueError):
+            continue
+        if v == v:
+            out[(str(s), str(c))] = v
+    return out
+
+
+def _filas_base_en(base_df: "Any", dia: date) -> List[Dict[str, Any]]:
+    """[{symbol, Código, close}] de la rueda `dia` en la base (cierre previo
+    con valor)."""
+    if base_df is None or not len(base_df):
+        return []
+    sub = base_df[base_df["fecha_hoy"] == dia]
+    out: List[Dict[str, Any]] = []
+    for s, c, cl in zip(sub["symbol"], sub["Código"], sub.get("Close Price", [None] * len(sub))):
+        try:
+            v = float(cl)
+        except (TypeError, ValueError):
+            continue
+        if v == v and v > 0:
+            out.append({"symbol": str(s), "Código": str(c), "close": v})
+    return out
+
+
+def _evidencia_rueda(filas_sig: List[Dict[str, Any]], previos: Dict[tuple, float]) -> Optional[Tuple[int, int]]:
+    """(comparados, movidos): cuántos cierres previos de la rueda siguiente
+    difieren del último de la rueda anterior. Si casi ninguno se movió, en el
+    medio NO hubo rueda (feriado no listado). None sin rueda anterior."""
+    if not previos:
+        return None
+    comparados = movidos = 0
+    for r in filas_sig:
+        p = previos.get((r["symbol"], r["Código"]))
+        if p is None:
+            continue
+        comparados += 1
+        if abs(r["close"] - p) > 1e-9 * max(1.0, abs(p)):
+            movidos += 1
+    return comparados, movidos
+
+
+def _fx_desde_filas(filas_sig: List[Dict[str, Any]]) -> "Any":
+    """FX implícito (CCL / MEP) de la rueda D desde los cierres previos que
+    guardan las filas de D+1: precio en pesos ÷ pata C (cable) o D (MEP) de
+    la misma base soberana. None si ninguna base tiene las dos patas."""
+    from backend.services import fx as fx_svc
+    por_codigo = {r["Código"]: r["close"] for r in filas_sig}
+    try:
+        bases = fx_svc.fx_bases()
+    except Exception:  # noqa: BLE001
+        bases = []
+    orden = [b for b in ("AL30", "GD30") if b in bases] + [b for b in bases if b not in ("AL30", "GD30")]
+    for b in orden:
+        ars = por_codigo.get(b)
+        if not ars:
+            continue
+        c, d = por_codigo.get(b + "C"), por_codigo.get(b + "D")
+        ccl = (ars / c) if c else None
+        usb = (ars / d) if d else None
+        if ccl or usb:
+            return fx_svc.FxSnapshot(ccl=ccl, usb=usb, ccl_base=b if ccl else None,
+                                     usb_base=b if usb else None,
+                                     canje=(ccl / usb - 1.0) if (ccl and usb) else None,
+                                     bases=len(bases), as_of=time.time())
+    return None
+
+
+def _metricas_a_fecha(code: str, px: float, settle: str) -> Optional[Dict[str, Any]]:
+    """Métricas de `code` a `px` liquidando en `settle` (DD/MM/AAAA), SIN
+    pasar por el cache de las curvas (otra fecha de liquidación: no comparte
+    keys y sólo desalojaría entradas calientes). None si el calc falló."""
+    from backend.services import pricing
+    if not (px > 0 and px < 10_000_000):
+        return None
+    try:
+        m = pricing.compute_metrics(code=code, mode="precio", value=float(px), settle=settle,
+                                    include_cashflows=False)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[historico_writer] reconstrucción: %s a %s falló: %s", code, px, exc)
+        return None
+    if not m or m.get("error"):
+        return None
+    return m
+
+
+def _fila_rc(code: str, symbol: str, close: float, close_ts: Any, dia: date, settle: str,
+             previos: Dict[tuple, float], fx_getter, contadores: Dict[str, int]) -> Optional[Dict[str, Any]]:
+    """Una fila reconstruida (mismo esquema que build_rows) o None."""
+    from backend.services import pricing
+    from backend.services import fx as fx_svc
+
+    meta = pricing.bond_meta(code) or {}
+    calc, px = code, float(close)
+    if meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
+        fx = fx_getter()
+        calc = pricing.native_dollar_code(code) or code
+        px = fx_svc.normalize_price(close, "ARS", meta.get("moneda"), fx) if fx is not None else None
+        if px is None:
+            contadores["sin_fx"] += 1
+            return None
+    m = _metricas_a_fecha(calc, px, settle)
+    if not m:
+        contadores["sin_calc"] += 1
+        return None
+    prev = previos.get((symbol, code))
+    var = None
+    try:
+        if prev:
+            var = float(close) / prev - 1.0
+    except (TypeError, ZeroDivisionError):
+        var = None
+    return {
+        "symbol": symbol, "Código": code,
+        "Last Price": float(close), "Close Price": prev, "Variación %": var,
+        "TIREA": m.get("tirea"), "TNA": m.get("tna"), "TEM": m.get("tem"),
+        "Paridad": m.get("paridad"), "Duration": m.get("duration"),
+        "Price Source": PRICE_SOURCE_RC, "Price Date": (str(close_ts) if close_ts else None),
+        "fecha_hoy": dia,
+    }
+
+
+def _filas_desde_feed(dia: date, settle: str, previos: Dict[tuple, float],
+                      plazo: str = "24hs") -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Filas de la rueda `dia` con el cierre previo (CL) que trae el feed
+    durante la rueda siguiente. Un CL fechado antes de `dia` es un cierre
+    pegajoso (el bono no operó en `dia`): entra igual, como en build_rows."""
+    from backend.services import curves, marketdata_store
+    from backend.services import fx as fx_svc
+    from backend.services import symbols as syms
+
+    store = marketdata_store.get_store()
+    memo: Dict[str, Any] = {}
+
+    def _fx():
+        if "fx" not in memo:
+            try:
+                memo["fx"] = fx_svc.compute_fx_cierres(plazo)
+            except Exception:  # noqa: BLE001
+                memo["fx"] = None
+            if memo["fx"] is not None and not (memo["fx"].ccl or memo["fx"].usb):
+                memo["fx"] = None
+        return memo["fx"]
+
+    contadores = {"sin_fx": 0, "sin_calc": 0}
+    rows: List[Dict[str, Any]] = []
+    vistos: set = set()
+    for codes in curves.build_curve_codes().values():
+        for code in codes or []:
+            if code in vistos:
+                continue
+            vistos.add(code)
+            symbol = syms.md_symbol(code, plazo)
+            snap = store.get(symbol)
+            if snap is None or snap.close is None:
+                continue
+            f = _fecha_dato(snap.close_ts)
+            if f is None or f > dia:
+                continue
+            fila = _fila_rc(code, symbol, snap.close, snap.close_ts, dia, settle, previos, _fx, contadores)
+            if fila:
+                rows.append(fila)
+    return rows, {"fx": _fx(), **contadores}
+
+
+def _filas_desde_base(dia: date, filas_sig: List[Dict[str, Any]], settle: str,
+                      previos: Dict[tuple, float]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Filas de la rueda `dia` con el `Close Price` de las filas de la rueda
+    siguiente ya guardadas en la base."""
+    memo: Dict[str, Any] = {}
+
+    def _fx():
+        if "fx" not in memo:
+            memo["fx"] = _fx_desde_filas(filas_sig)
+        return memo["fx"]
+
+    contadores = {"sin_fx": 0, "sin_calc": 0}
+    rows: List[Dict[str, Any]] = []
+    for r in filas_sig:
+        fila = _fila_rc(r["Código"], r["symbol"], r["close"], None, dia, settle, previos, _fx, contadores)
+        if fila:
+            rows.append(fila)
+    return rows, {"fx": _fx(), **contadores}
+
+
+def _fx_row_reconstruida(dia: date, fx: "Any") -> Optional[Dict[str, Any]]:
+    """Fila FX de la rueda `dia`: CCL/MEP implícitos de los cierres y el A3500
+    de ese día (serie BCRA, ya publicada al día siguiente). Sin caución (no
+    sobrevive). None si no hay ningún dato."""
+    a3500 = None
+    try:
+        from backend.services import historico
+        pts = historico.series_points("a3500", desde=dia.isoformat(), hasta=dia.isoformat()).get("points") or []
+        if pts:
+            a3500 = float(pts[-1][1])
+    except Exception:  # noqa: BLE001
+        a3500 = None
+    ccl = getattr(fx, "ccl", None) if fx is not None else None
+    usb = getattr(fx, "usb", None) if fx is not None else None
+    if not (ccl or usb or a3500):
+        return None
+    fila: Dict[str, Any] = {c: None for c in FX_COLUMNAS}
+    fila.update({"fecha_hoy": dia, "ccl": ccl, "mep": usb,
+                 "canje": (ccl / usb - 1.0) if (ccl and usb) else None,
+                 "oficial_a3500": a3500,
+                 "ccl_base": (getattr(fx, "ccl_base", None) if fx is not None else None) or ""})
+    return fila
+
+
+def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -> Dict[str, Any]:
+    """Rearma en la base la rueda `dia` que le falta (ver el bloque de
+    arriba): primero desde los cierres del feed, si no desde la rueda
+    siguiente de la base. Journal local siempre; base compartida sólo en la
+    máquina writer (o `force` = botón). `force` también pisa un día que ya
+    está. Nunca lanza: todo va en el dict (ok / skipped / error)."""
+    global _ultima_reconstruccion
+    import pandas as pd
+
+    from backend.config import settings
+    from backend.services import deltapaths, historico_byma
+
+    dia_fmt = dia.strftime("%d/%m/%Y")
+    res: Dict[str, Any] = {"ok": False, "dia": dia.isoformat(), "dia_fmt": dia_fmt, "fuente": None,
+                           "rows": 0, "sin_fx": 0, "sin_calc": 0, "skipped": None, "error": None,
+                           "total_rows": None, "sin_rueda": False, "journal": None}
+    hist_dir = deltapaths.historico_dir()
+    if not hist_dir:
+        res["error"] = ("No encontré la carpeta 'Delta Bases' (DELTA_HISTORICO_DIR / "
+                        "DELTA_BASES_DIR en secrets.txt).")
+        return res
+    if dia >= _now().date():
+        res["skipped"] = "el cierre de hoy lo guarda el autosave (o Guardar ahora)"
+        return res
+    if not _es_habil(dia):
+        res["skipped"] = f"{dia_fmt} no es día hábil"
+        return res
+    if not _reconstruir_lock.acquire(blocking=False):
+        res["skipped"] = "ya hay una reconstrucción en curso"
+        return res
+    try:
+        xlsx = os.path.join(hist_dir, HIST_FILENAME)
+        fechas = _fechas_base(xlsx)
+        if dia in fechas and not force:
+            res["skipped"] = f"la base ya tiene el {dia_fmt}"
+            return res
+        if not settings.historico_base_writer and not force and dia in _journal_days():
+            # Máquina secundaria: ya lo journaleó; no recalcular 500 TIRs en
+            # cada arranque hasta que la writer consolide.
+            res["ok"] = True
+            res["skipped"] = f"base_writer=0: el {dia_fmt} ya está en el journal local"
+            return res
+        minimo = int(settings.historico_autosave_min_operados)
+        base_df = _leer_base_lectura(xlsx)
+        previos = _ultimos_previos(base_df, dia)
+        settle = _settle_24hs(dia)
+        rows: List[Dict[str, Any]] = []
+        info: Dict[str, Any] = {}
+        fuente = None
+        c = cierres_en_store(dia, plazo)
+        if _feed_en_rueda_siguiente(c, minimo):
+            rows, info = _filas_desde_feed(dia, settle, previos, plazo)
+            fuente = "feed"
+        sig = _habil_siguiente(dia, _sin_rueda_days())
+        if len(rows) < minimo:
+            filas_sig = _filas_base_en(base_df, sig)
+            if len(filas_sig) >= minimo:
+                ev = _evidencia_rueda(filas_sig, previos)
+                if ev is not None and ev[0] >= minimo and ev[1] < max(3, ev[0] // 10):
+                    _marcar_sin_rueda(dia)
+                    res["sin_rueda"] = True
+                    res["skipped"] = (f"sin rueda el {dia_fmt}: los cierres previos de la rueda siguiente son los "
+                                      f"de la rueda anterior ({ev[1]} de {ev[0]} se movieron) — feriado no listado; "
+                                      "queda marcado y el chip ya no lo reclama")
+                    return res
+                rows, info = _filas_desde_base(dia, filas_sig, settle, previos)
+                fuente = "base"
+        if len(rows) < minimo:
+            res["error"] = (f"no hay de dónde reconstruir el {dia_fmt}: el feed no trae los cierres de esa rueda "
+                            f"({c['en_dia']} símbolos con cierre del {dia:%d/%m}, {c['posteriores']} ya posteriores) "
+                            f"y la base no tiene la rueda siguiente ({sig:%d/%m}) con precios de cierre"
+                            + (f" — {len(rows)} filas calculables (mínimo {minimo})" if rows else ""))
+            return res
+        df = pd.DataFrame(rows)
+        res.update(fuente=fuente, rows=int(len(df)), sin_fx=info.get("sin_fx", 0),
+                   sin_calc=info.get("sin_calc", 0))
+        try:
+            res["journal"] = write_journal(df, dia)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] journal de la reconstrucción no guardado: %s", exc)
+        if not settings.historico_base_writer and not force:
+            res["ok"] = True
+            res["skipped"] = "base_writer=0: sólo journal local (la consolida la máquina writer)"
+            return res
+        try:
+            saved = append_and_save(df, xlsx)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[historico_writer] reconstrucción del %s: guardado falló", dia_fmt)
+            res["error"] = str(exc)
+            return res
+        res["total_rows"] = saved.get("total_rows")
+        res["ok"] = True
+        try:
+            fila = _fx_row_reconstruida(dia, info.get("fx"))
+            if fila:
+                _guardar_fx(hist_dir, fila=fila)
+                res["fx"] = True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] FX de la reconstrucción falló: %s", exc)
+        try:
+            from backend.services import cierres
+            cierres.importar_base(force=True)       # partición del día desde la base (sin volumen/OHLC)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] partición de cierres de la reconstrucción falló: %s", exc)
+        try:
+            historico_byma.refresh()
+        except Exception:  # noqa: BLE001
+            logger.exception("[historico_writer] refresh tras la reconstrucción falló")
+        logger.warning("[historico_writer] cierre del %s RECONSTRUIDO desde %s: %d filas RC "
+                       "(sin FX %d, sin calc %d) → %s", dia_fmt,
+                       "los cierres del feed" if fuente == "feed" else f"la rueda del {sig:%d/%m} en la base",
+                       res["rows"], res["sin_fx"], res["sin_calc"], xlsx)
+        return res
+    finally:
+        _reconstruir_lock.release()
+        _ultima_reconstruccion = dict(res, hora=_now().strftime("%H:%M"))
+
+
+def reconstruir_faltantes(*, force: bool = False) -> Dict[str, Any]:
+    """Recorre los huecos de la base (últimas ruedas) e intenta reconstruir
+    cada uno, del más nuevo al más viejo (el feed sólo sirve para la última
+    rueda). Lo llama el daemon al arrancar y antes del autosave; con `force`
+    el botón. {huecos, reconstruidos, sin_rueda, pendientes, resultados}."""
+    from backend.config import settings
+    out: Dict[str, Any] = {"huecos": [], "reconstruidos": [], "sin_rueda": [], "pendientes": [],
+                           "resultados": [], "skipped": None}
+    if not settings.historico_reconstruir and not force:
+        out["skipped"] = "historico_reconstruir=0"
+        return out
+    huecos = huecos_base()
+    out["huecos"] = [d.isoformat() for d in huecos]
+    for d in reversed(huecos):
+        r = reconstruir_cierre(d, force=force)
+        out["resultados"].append(r)
+        if r.get("ok") and not r.get("skipped"):
+            out["reconstruidos"].append(d.isoformat())
+        elif r.get("sin_rueda"):
+            out["sin_rueda"].append(d.isoformat())
+        else:
+            out["pendientes"].append({"dia": d.isoformat(), "motivo": r.get("error") or r.get("skipped")})
+    return out
+
+
+def avisar_feed_muerto_mail(res: Dict[str, Any], hhmm: str = "17:01") -> Tuple[bool, str]:
+    """Mail al destinatario operativo cuando el feed está caído a la hora del
+    cierre (el banner sólo sirve si alguien mira la app). Best-effort: sin
+    SMTP devuelve (False, motivo) y queda en el log. Nunca lanza."""
+    try:
+        from backend.services import mailer
+        motivo = res.get("feed_muerto") or "feed caído"
+        hh, mm = _hhmm(hhmm)
+        hasta = (_now().replace(hour=hh, minute=mm, second=0, microsecond=0)
+                 + timedelta(minutes=_VENTANA_MIN)).strftime("%H:%M")
+        to = mailer.default_recipient()
+        if not mailer.is_configured() or not to:
+            return False, "sin SMTP/destinatario"
+        return mailer.send(
+            to, f"⚠ Cierre {hh:02d}:{mm:02d}: feed caído — reintento cada {int(_REINTENTO_FEED_S // 60)} min",
+            f"A las {hh:02d}:{mm:02d} (BA) el feed del broker estaba caído ({motivo}).\n\n"
+            "El autosave NO guardó los últimos precios que llegaron como si fueran el cierre; "
+            f"reintenta cada {int(_REINTENTO_FEED_S // 60)} min hasta las {hasta}.\n"
+            "Si el feed no vuelve, mañana el cierre se reconstruye solo desde los cierres del feed "
+            "(o desde la rueda siguiente de la base). En la app, el banner del superuser tiene "
+            "'Guardar igual' para forzar el guardado con los precios que hay.\n\n"
+            "— Calculadora de Bonos (autosave)")
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
 
 
 # ── Historial diario de FX (cable / MEP / canje) ───────────────────────────
@@ -1035,14 +1704,17 @@ def _leer_fx_previo(xlsx: str, pq: str, pd) -> Optional["Any"]:
         "de OneDrive o apartá los archivos y reintentá.")
 
 
-def _guardar_fx(hist_dir: str) -> Optional[Dict[str, Any]]:
+def _guardar_fx(hist_dir: str, fila: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """Appendea la fila FX del día a Delta - historico_fx (xlsx + espejo
     parquet firmado): merge por día (escalares por columna, caución por
     grupo), escritura atómica y reintentos ante lock — la misma solidez que
-    la base grande, en miniatura. Con el historial ilegible NO escribe."""
+    la base grande, en miniatura. Con el historial ilegible NO escribe.
+    `fila` (default `build_fx_row()` = hoy): la reconstrucción trae la de
+    otra rueda; el merge nunca pisa un dato ya guardado de ese día."""
     import pandas as pd
 
-    fila = build_fx_row()
+    if fila is None:
+        fila = build_fx_row()
     if fila is None:
         logger.info("[historico_writer] sin FX para guardar (feed sin CCL/MEP/A3500)")
         return None
@@ -1418,6 +2090,8 @@ class HistoricoAutosave:
         self._stop = asyncio.Event()
         self.last_result: Optional[Dict[str, Any]] = None
         self.last_recaptura: Optional[Dict[str, Any]] = None
+        self.last_reconstruccion: Optional[Dict[str, Any]] = None
+        self._aviso_feed_dia: Optional[str] = None      # ISO del día ya avisado (1 mail/día)
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -1447,6 +2121,13 @@ class HistoricoAutosave:
                             r0.get("consolidados"), r0.get("total_rows"))
         except Exception:  # noqa: BLE001
             logger.exception("[historico_writer] catch-up del journal falló")
+        # RECONSTRUCCIÓN al arranque: a la base le falta una rueda que el
+        # journal tampoco tiene (app cerrada ayer a las 17:01) → esperar los
+        # cierres del feed y rearmarla (o desde la rueda siguiente de la base).
+        try:
+            await self._reconstruir_al_arrancar(loop)
+        except Exception:  # noqa: BLE001
+            logger.exception("[historico_writer] reconstrucción al arranque falló")
         while not self._stop.is_set():
             disparo = next_fire(_now(), self.hhmm)
             wait = (disparo - _now()).total_seconds()
@@ -1455,12 +2136,21 @@ class HistoricoAutosave:
                 break                                  # stop durante la espera
             except asyncio.TimeoutError:
                 pass
-            # Ventana de REINTENTOS: un xlsx lockeado o el feed caído justo a
-            # las 17:01 no puede costar el día entero — reintenta cada 10 min
-            # hasta ~90 min. Los skips de calendario (finde/feriado/ya
-            # guardado) cortan al primer intento.
+            # Antes de guardar HOY: huecos anteriores (el feed todavía trae los
+            # cierres de ayer; a partir de mañana ya no).
+            try:
+                self.last_reconstruccion = await loop.run_in_executor(None, reconstruir_faltantes)
+                self._log_reconstruccion(self.last_reconstruccion)
+            except Exception:  # noqa: BLE001
+                logger.exception("[historico_writer] reconstrucción previa al autosave falló")
+            # Ventana de REINTENTOS (`_VENTANA_MIN`): un xlsx lockeado o el feed
+            # caído justo a las 17:01 no puede costar el día entero — cada 5 min
+            # con el feed muerto (avisa al superuser una vez), cada 10 min con
+            # otros errores. Los skips de calendario (finde/feriado/ya guardado)
+            # cortan al primer intento.
             guardado_hoy = False
-            for _intento in range(10):
+            limite = disparo + timedelta(minutes=_VENTANA_MIN)
+            while True:
                 try:
                     self.last_result = await loop.run_in_executor(None, save_today)
                 except Exception:  # noqa: BLE001
@@ -1483,13 +2173,22 @@ class HistoricoAutosave:
                     guardado_hoy = "ya tiene" in (r.get("skipped") or "")
                     logger.info("[historico_writer] autosave salteado: %s", r["skipped"])
                     break
-                # skipped+retry = 0 operados con el feed caído: puede ser el WS
-                # reconectando a las 17:01, no un feriado → reintentar igual.
-                logger.warning("[historico_writer] autosave %s (%s) — reintento en 10 min",
+                if r.get("feed_muerto"):
+                    await self._avisar_feed_muerto(loop, r)
+                espera = _intervalo_reintento(r)
+                if _now() + timedelta(seconds=espera) > limite:
+                    logger.warning("[historico_writer] cierre de HOY sin guardar (%s): ventana de reintentos "
+                                   "agotada a las %s — mañana se reconstruye desde los cierres del feed "
+                                   "(o 'Guardar igual' en el banner)",
+                                   r.get("skipped") or r.get("error"), limite.strftime("%H:%M"))
+                    break
+                # skipped+retry = feed caído / 0 operados con el feed caído: puede
+                # ser el WS reconectando a las 17:01, no un feriado → reintentar.
+                logger.warning("[historico_writer] autosave %s (%s) — reintento en %d min",
                                "sin datos frescos" if r.get("skipped") else "falló",
-                               r.get("skipped") or r.get("error"))
+                               r.get("skipped") or r.get("error"), int(espera // 60))
                 try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=600.0)
+                    await asyncio.wait_for(self._stop.wait(), timeout=espera)
                     return                             # shutdown durante la espera
                 except asyncio.TimeoutError:
                     continue
@@ -1497,6 +2196,62 @@ class HistoricoAutosave:
             # partición del día se pisa con los prints tardíos (y el parquet de
             # acciones se re-escribe keep-last). La base px/tasas no se toca.
             await self._recaptura(loop, disparo, guardado_hoy)
+
+    async def _avisar_feed_muerto(self, loop, r: Dict[str, Any]) -> None:
+        """Aviso al superuser, UNA vez por día: log + mail (best-effort, en el
+        threadpool). El banner lo arma `estado_cierre` desde `last_result`."""
+        hoy = _now().date().isoformat()
+        if self._aviso_feed_dia == hoy:
+            return
+        self._aviso_feed_dia = hoy
+        logger.warning("[historico_writer] ⚠ feed caído al cierre (%s): no guardo precios viejos — "
+                       "reintento cada %d min; aviso al superuser (banner + mail)",
+                       r.get("feed_muerto"), int(_REINTENTO_FEED_S // 60))
+        try:
+            ok, detalle = await loop.run_in_executor(None, lambda: avisar_feed_muerto_mail(r, self.hhmm))
+            (logger.info if ok else logger.warning)("[historico_writer] mail de feed caído: %s",
+                                                    "enviado" if ok else detalle)
+        except Exception:  # noqa: BLE001
+            logger.exception("[historico_writer] mail de feed caído falló")
+
+    async def _reconstruir_al_arrancar(self, loop) -> None:
+        from backend.config import settings
+        if not settings.historico_reconstruir:
+            return
+        huecos = await loop.run_in_executor(None, huecos_base)
+        if not huecos:
+            return
+        ultimo = huecos[-1]
+        logger.warning("[historico_writer] a la base le falta el cierre del %s%s — reconstrucción",
+                       ultimo.strftime("%d/%m/%Y"), f" (+{len(huecos) - 1})" if len(huecos) > 1 else "")
+        # Con broker: esperar el snapshot inicial (CL de ayer) — sin él la
+        # reconstrucción sólo tendría la base. Hasta _ESPERA_SNAPSHOT_S.
+        if settings.primary_user:
+            minimo = int(settings.historico_autosave_min_operados)
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < _ESPERA_SNAPSHOT_S and not self._stop.is_set():
+                try:
+                    c = await loop.run_in_executor(None, lambda: cierres_en_store(ultimo))
+                except Exception:  # noqa: BLE001 — universo cargándose
+                    c = {"en_dia": 0, "posteriores": 0}
+                if c["en_dia"] >= minimo or c["posteriores"] > 0:
+                    break
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=10.0)
+                    return
+                except asyncio.TimeoutError:
+                    pass
+        self.last_reconstruccion = await loop.run_in_executor(None, reconstruir_faltantes)
+        self._log_reconstruccion(self.last_reconstruccion)
+
+    @staticmethod
+    def _log_reconstruccion(res: Optional[Dict[str, Any]]) -> None:
+        if not res or not res.get("huecos"):
+            return
+        if res.get("reconstruidos"):
+            logger.info("[historico_writer] reconstrucción OK: %s", ", ".join(res["reconstruidos"]))
+        for p in res.get("pendientes") or []:
+            logger.warning("[historico_writer] hueco del %s sin reconstruir: %s", p["dia"], p["motivo"])
 
     async def _recaptura(self, loop, disparo: datetime, guardado_hoy: bool) -> None:
         from backend.config import settings

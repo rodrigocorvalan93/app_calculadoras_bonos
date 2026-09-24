@@ -84,6 +84,10 @@ superuser define desde `/admin` qué pestañas ve cada rol.
 - `historico_byma.py`: base parquet por rueda (TIREA/Duration/TEM/paridad por
   bono). `historico_writer.py` la guarda solo a las 17:01 hábiles
   (`HISTORICO_AUTOSAVE`, dejarlo prendido en **una** sola máquina del equipo).
+  Con el feed caído a esa hora no guarda precios viejos: avisa al superuser
+  (banner + mail) y reintenta cada 5 min; una rueda que igual se perdió se
+  reconstruye sola al día siguiente desde los cierres del feed (o desde la
+  rueda siguiente de la base) — `reconstruir_cierre`, botón en el banner.
 - `forwards_hist.py`: serie histórica del forward par-a-par reconstruida de esa
   base (fórmula de descuento, gap mínimo 0,03 años para no anualizar ruido),
   con media/desvío/percentil empírico/z por ventana (30/60/90/todas). El

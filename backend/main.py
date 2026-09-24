@@ -641,7 +641,7 @@ def create_app() -> FastAPI:
     # puede reconectar): la ruta misma limita a los no-superuser a los brokers
     # conocidos (sin URL libre; usuario/clave propios permitidos).
     _SUPERUSER_ONLY = ("/admin", "/ordenes/live", "/ordenes/kill",
-                       "/historicos/guardar-base", "/alertas")
+                       "/historicos/guardar-base", "/historicos/reconstruir-cierre", "/alertas")
     # Paths gateados por FEATURE (administrable desde /admin, a diferencia de
     # _SUPERUSER_ONLY que es fijo): superuser siempre pasa; premium/básico
     # sólo si el superuser les tildó la feature.

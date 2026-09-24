@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     # Mínimo de bonos con operaciones DE HOY para autoguardar (guard de
     # feriado/sin rueda: los cierres pegajosos de ayer no cuentan).
     historico_autosave_min_operados: int = 30
+    # HISTORICO_RECONSTRUIR=0 apaga la reconstrucción automática de una rueda
+    # que a la base le falta (al arrancar y antes del autosave; el botón del
+    # banner sigue funcionando). Ver historico_writer.reconstruir_cierre.
+    historico_reconstruir: bool = True
     # Cierre COMPLETO (cierres/AAAA/AAAA-MM-DD.parquet, todos los símbolos del
     # store): se captura con el autosave y se RE-captura N minutos después para
     # llevarse los prints tardíos (la partición del día se pisa). 0 = sin

@@ -116,7 +116,22 @@ async def capturar(force: bool = False, timeout: float = 150.0,
         logger.info("[cierre] %d bonos con operaciones de hoy en el store (mínimo %d) tras %.0f s",
                     n, minimo, time.monotonic() - t0)
         loop = asyncio.get_running_loop()
+        # Huecos ANTERIORES primero: con el feed arriba el store trae el cierre
+        # previo (el de ayer) de cada símbolo — si ayer la app estaba cerrada y
+        # esta tarea no corrió, se reconstruye acá (best-effort, ver
+        # historico_writer.reconstruir_cierre).
+        try:
+            rec = await loop.run_in_executor(None, hw.reconstruir_faltantes)
+            if rec.get("reconstruidos"):
+                logger.info("[cierre] reconstruido: %s", ", ".join(rec["reconstruidos"]))
+            for p in rec.get("pendientes") or []:
+                logger.warning("[cierre] hueco del %s sin reconstruir: %s", p["dia"], p["motivo"])
+        except Exception:  # noqa: BLE001
+            logger.exception("[cierre] reconstrucción de huecos falló")
+            rec = {}
         res = await loop.run_in_executor(None, lambda: hw.save_today(force=force))
+        if rec.get("reconstruidos"):
+            res["reconstruidos"] = rec["reconstruidos"]
         if res.get("ok") and not res.get("skipped"):
             # Mismo mail de cierre que manda el autosave de la app (best-effort).
             try:
@@ -147,7 +162,8 @@ def main(argv: Optional[list] = None) -> int:
         print(f"cierre: salteado — {res['skipped']}")
         return 0
     if res.get("ok"):
-        print(f"cierre: OK — {res.get('rows')} filas de hoy ({res.get('operados')} operados) → {res.get('xlsx')}")
+        print(f"cierre: OK — {res.get('rows')} filas de hoy ({res.get('operados')} operados) → {res.get('xlsx')}"
+              + (f" · reconstruido: {', '.join(res['reconstruidos'])}" if res.get("reconstruidos") else ""))
         return 0
     print(f"cierre: ERROR — {res.get('error') or 'no se guardó'}", file=sys.stderr)
     return 1

@@ -151,6 +151,39 @@ Excel (corrección a mano, OneDrive con mtime viejo) hace ganar al Excel y el
 espejo se regenera. Lectores: `historico_byma._pick_source`,
 `historico_writer._leer_base`, `fx_hist._path`, `_leer_fx_previo`.
 
+**Cierre perdido y feed caído al cierre** (`historico_writer`, 24/09): el
+autosave de las 17:01 guarda lo que tenga el store con `last_ts` de hoy, no
+necesita el feed "en vivo" (el gris del dot después del cierre es normal).
+Con broker configurado y el WS desconectado o > 10 min sin market data
+(`_feed_estado`, NO el `feed_alive` de 90 s: post-cierre el mercado calla)
+NO guarda los últimos precios que llegaron como cierre: `skipped` +
+`retry` + `feed_muerto`, aviso al superuser (chip "pendiente · feed caído",
+banner con "Guardar igual" = force, mail 1×/día vía `mailer`) y reintento
+cada 5 min hasta `_VENTANA_MIN` (95); otros errores siguen cada 10 min.
+Feriado del calendario → skip explícito. Una rueda que igual se perdió se
+REARMA (`reconstruir_cierre(dia)` / `reconstruir_faltantes()`): primero con
+el cierre previo (CL con fecha) que el feed manda durante la rueda
+siguiente (`cierres_en_store`: bastantes símbolos con CL de ese día, ninguno
+posterior, la canasta líquida coincide), si no con el `Close Price` de las
+filas de la rueda siguiente ya guardadas; TIREA/TNA/TEM/paridad/duration se
+recalculan con liquidación al hábil siguiente (`_settle_24hs`, mismo settle
+que Curvas ese día) vía `compute_metrics` directo (sin ensuciar el cache de
+curvas), especie en pesos de un hard-dollar → nativa ÷ FX de los CIERRES
+(`fx.compute_fx_cierres` / `_fx_desde_filas`). Filas `Price Source = RC`,
+`Close Price` = último de la rueda anterior, journal `px_tasas_<dia>`, base
+con el dedup de siempre, fila FX del día (CCL/MEP de cierres + A3500 de la
+serie) y partición de cierres desde la base (`cierres.importar_base`, sin
+volumen/OHLC; `opero` cuenta RC con fecha). Si los cierres previos de D+1 son
+exactamente los últimos de D-1, D no tuvo rueda → `sin_rueda`. Sólo se
+recupera el último día de un hueco. Corre solo al arrancar (espera el
+snapshot hasta 4 min), a las 17:01 antes de guardar hoy, en
+`tools/cierre.py`, y a mano: POST `/historicos/reconstruir-cierre`
+(superuser; botón "Reconstruir DD/MM" del banner, también para huecos
+anteriores al cierre esperado: `estado_cierre()["huecos"]`).
+`HISTORICO_RECONSTRUIR=0` apaga lo automático. `_fecha_dato`: ISO sin zona =
+hora BA y un instante 00:00Z es sello de FECHA (no las 21:00 BA del día
+anterior). Regresión: `tests/test_cierre_reconstruccion.py`.
+
 **Series diarias FX + caución** (`Delta - historico_fx`, `_guardar_fx`): UNA
 fila por día que se mergea así: escalares (CCL, MEP, canje, A3500) POR COLUMNA
 (último valor no nulo); cada caución POR GRUPO (`_FX_GRUPOS`: plazo + TNA +
