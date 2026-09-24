@@ -1,4 +1,4 @@
-"""Tests for the Phase 2 warmup daemon.
+ """Tests for the Phase 2 warmup daemon.
 
 Covers the two cold-path mitigations:
   - `prime_calc_engine` forces the lazy calc-engine load and leaves the

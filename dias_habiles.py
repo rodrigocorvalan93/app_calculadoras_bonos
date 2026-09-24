@@ -23,8 +23,9 @@ _additional_holidays = {
     "2026-11-06": "Día del bancario",
     # Decretado el 22/09/2026 (visita del papa León XIV): `holidays` 0.90 / 0.104
     # no lo traen. Corre al 10/11 el pago de los cupones del 09/11 (TX26, etc.).
-    "2026-11-09": "Feriado nacional — visita del papa León XIV",
-    "2026-12-31": "Día no hábil de fin de año"
+    "2026-11-09": "Feriado Puente (visita del Papa)",
+    "2026-12-31": "Día no hábil de fin de año",
+    "2027-11-06": "Día del bancario"
 }
 
 
