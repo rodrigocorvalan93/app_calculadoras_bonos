@@ -1,16 +1,36 @@
 {# Chip "cierre" del pie de página + banner (oob) — historico_writer.estado_cierre.
-   Sin carpeta de bases (sin_base) el chip queda vacío (CSS lo oculta). #}
+   Sin carpeta de bases (sin_base) el chip queda vacío (CSS lo oculta).
+   Banner (sólo superuser):
+     falta      → cierre esperado ausente: Guardar ahora (si es HOY) o Reconstruir
+                  (rueda anterior: desde los cierres del feed / la rueda siguiente)
+     pendiente  → feed caído a la hora del autosave: aviso + Guardar igual (force)
+     hueco      → chip en verde pero una rueda anterior falta en la base #}
 {%- if e.estado != "sin_base" -%}
 <a class="cierre-chip" data-state="{{ e.estado }}" href="/historicos" title="{{ e.detalle }}">{{ e.texto }}</a>
 {%- endif -%}
 <div id="cierre-banner" hx-swap-oob="true">
-{%- if e.estado == "falta" and request.state.is_superuser %}
+{%- if request.state.is_superuser and e.estado == "falta" %}
   <div class="alert alert-error cierre-banner">
     <span>⚠ <strong>La base histórica no tiene el cierre del {{ e.esperado_fmt }}</strong>{% if e.atraso and e.atraso > 1 %} (atraso {{ e.atraso }} ruedas){% endif %}.
-      {% if e.error %}Último intento: {{ e.error }}.{% else %}¿La app estaba cerrada a las {{ e.hhmm }}?{% endif %}
-      {% if e.esperado == e.hoy %}Si el feed sigue con los precios de hoy, guardala ahora:{% else %}Ese día ya no se reconstruye desde el feed — si otra máquina lo capturó, se consolida solo al abrir la app ahí. Para que no vuelva a pasar: captura programada (<code>python -m backend.tools.cierre</code>).{% endif %}
+      {% if e.error %}Último intento: {{ e.error }}.{% elif e.feed_muerto %}A las {{ e.hhmm }} el feed estaba caído ({{ e.feed_muerto }}) y el autosave reintentó hasta las {{ e.hasta }} sin datos frescos.{% else %}¿La app estaba cerrada a las {{ e.hhmm }}?{% endif %}
+      {% if e.esperado == e.hoy %}Si el feed sigue con los precios de hoy, guardala ahora:{% elif e.reconstruible == "feed" %}Se reconstruye con los cierres de esa rueda que trae el feed hoy (precio de cierre + tasas recalculadas a esa fecha; filas marcadas RC):{% elif e.reconstruible == "base" %}Se reconstruye desde la rueda siguiente que ya está en la base (su cierre previo + tasas recalculadas a esa fecha; filas marcadas RC):{% else %}No hay de dónde reconstruirlo: el feed ya no trae los cierres de esa rueda y la base no tiene la rueda siguiente. Si otra máquina lo capturó, se consolida solo al abrir la app ahí. Para que no vuelva a pasar: captura programada (<code>python -m backend.tools.cierre</code>).{% endif %}
     </span>
-    {% if e.esperado == e.hoy %}<button type="button" class="btn-primary" style="font-size:11px" hx-post="/historicos/guardar-base" hx-target="#cierre-banner-msg" hx-swap="innerHTML">Guardar ahora</button>{% endif %}
+    {% if e.esperado == e.hoy %}<button type="button" class="btn-primary" style="font-size:11px" hx-post="/historicos/guardar-base" hx-target="#cierre-banner-msg" hx-swap="innerHTML">Guardar ahora</button>
+    {% elif e.reconstruible %}<button type="button" class="btn-primary" style="font-size:11px" hx-post="/historicos/reconstruir-cierre" hx-vals='{"dia": "{{ e.esperado }}"}' hx-target="#cierre-banner-msg" hx-swap="innerHTML" hx-disabled-elt="this">Reconstruir {{ e.esperado_fmt[:5] }}</button>{% endif %}
+    <span id="cierre-banner-msg"></span>
+  </div>
+{%- elif request.state.is_superuser and e.estado == "pendiente" and e.feed_muerto %}
+  <div class="alert cierre-banner">
+    <span>⚠ <strong>Feed caído al cierre</strong> ({{ e.feed_muerto }}): el autosave de las {{ e.hhmm }} no guardó precios viejos como cierre y reintenta cada {{ e.reintento_min }} min hasta las {{ e.hasta }}. Si el feed no vuelve, mañana el cierre se reconstruye solo con los cierres del feed. "Guardar igual" usa los últimos precios que llegaron:</span>
+    <button type="button" class="btn-primary" style="font-size:11px" hx-post="/historicos/guardar-base" hx-target="#cierre-banner-msg" hx-swap="innerHTML" hx-confirm="Guarda los últimos precios que llegaron ANTES de la caída del feed como cierre de hoy. ¿Seguro?">Guardar igual</button>
+    <span id="cierre-banner-msg"></span>
+  </div>
+{%- elif request.state.is_superuser and e.hueco %}
+  <div class="alert cierre-banner">
+    <span>ℹ La base histórica tiene un <strong>hueco el {{ e.hueco_fmt }}</strong>{% if e.huecos|length > 1 %} (y {{ e.huecos|length - 1 }} más){% endif %}.
+      {% if e.hueco_reconstruible == "feed" %}Se reconstruye con los cierres de esa rueda que trae el feed hoy (filas RC):{% elif e.hueco_reconstruible == "base" %}Se reconstruye desde la rueda siguiente que ya está en la base (filas RC):{% else %}No hay de dónde reconstruirlo: ni el feed trae los cierres de esa rueda ni la base tiene la rueda siguiente.{% endif %}
+    </span>
+    {% if e.hueco_reconstruible %}<button type="button" class="btn-primary" style="font-size:11px" hx-post="/historicos/reconstruir-cierre" hx-vals='{"dia": "{{ e.hueco }}"}' hx-target="#cierre-banner-msg" hx-swap="innerHTML" hx-disabled-elt="this">Reconstruir {{ e.hueco_fmt[:5] }}</button>{% endif %}
     <span id="cierre-banner-msg"></span>
   </div>
 {%- endif %}

@@ -183,6 +183,38 @@ def get_fx(plazo: str = "24hs") -> FxSnapshot:
     return _fx_cache.get_or_compute(("fx", plazo), lambda: compute_fx(plazo))
 
 
+def _reference_close(rows: List[FxLeg]) -> Optional[FxLeg]:
+    """Like `_reference` but over the CLOSE ratio: highest USD-leg volume
+    among the rows that have a close, else the first one with a close."""
+    con = [r for r in rows if r.close is not None]
+    if not con:
+        return None
+    with_vol = [r for r in con if r.vol_usd_m is not None]
+    if with_vol:
+        return max(with_vol, key=lambda r: r.vol_usd_m or 0.0)
+    return con[0]
+
+
+def compute_fx_cierres(plazo: str = "24hs") -> FxSnapshot:
+    """CCL / MEP implícitos de los CIERRES PREVIOS del store (`ars.close /
+    usd.close`): el FX de la rueda ANTERIOR, no el de ahora. Lo usa la
+    reconstrucción de un cierre perdido (`historico_writer.reconstruir_cierre`)
+    para valuar en su dólar nativo la especie en pesos de un hard-dollar con
+    el precio de cierre de esa rueda. Sin cache: se llama una vez por
+    reconstrucción."""
+    usd_ref = _reference_close(leg_table("USD", plazo))
+    usb_ref = _reference_close(leg_table("USB", plazo))
+    ccl = usd_ref.close if usd_ref else None
+    usb = usb_ref.close if usb_ref else None
+    canje = (ccl / usb - 1.0) if (ccl and usb) else None
+    return FxSnapshot(
+        ccl=ccl, usb=usb,
+        ccl_base=usd_ref.base if usd_ref else None,
+        usb_base=usb_ref.base if usb_ref else None,
+        canje=canje, bases=len(fx_bases()), as_of=time.time(),
+    )
+
+
 def invalidate() -> None:
     _fx_cache.clear()
 

@@ -356,7 +356,9 @@ def importar_base(force: bool = False) -> Dict[str, Any]:
                 "close": r.get("Close Price"), "close_ts": None,
                 "open": None, "high": None, "low": None, "bid": None, "bid_size": None,
                 "offer": None, "offer_size": None, "volume": None, "nominal": None, "trade_count": None,
-                "opero": bool(src == "LA" and _fecha_dato(r.get("Price Date")) == fecha),
+                # "RC" = fila reconstruida desde el cierre previo con fecha que
+                # mandó el feed: si esa fecha es la rueda, el bono operó ese día.
+                "opero": bool(src in ("LA", "RC") and _fecha_dato(r.get("Price Date")) == fecha),
                 "codigo_calc": r.get("Código"), "price_ref": r.get("Last Price"), "price_source": src,
                 "tirea": r.get("TIREA"), "tna": r.get("TNA"), "tem": r.get("TEM"),
                 "paridad": r.get("Paridad"), "duration": r.get("Duration"),
