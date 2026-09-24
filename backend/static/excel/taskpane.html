@@ -67,6 +67,11 @@
   .ok { color: #3fb950; } .err { color: #f85149; }
   ul { padding-left: 18px; margin: 6px 0; }
   li { margin-bottom: 4px; }
+  .grp { margin: 10px 0 2px; font-size: 11px; color: #8b949e; text-transform: uppercase;
+         letter-spacing: .04em; font-weight: 600; }
+  .grp:first-child { margin-top: 0; }
+  a { color: #58a6ff; }
+  strong { color: #c9d1d9; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -97,27 +102,65 @@
   </div>
 
   <div class="card">
-    <h2>Fórmulas</h2>
+    <h2>Cómo se actualizan</h2>
     <ul class="muted">
-      <li><code>=OMS.QUOTE("GD30";"last")</code> — último BYMA 24hs</li>
-      <li><code>=OMS.QUOTE("S31L6";"bid";"CI")</code> — bid contado inmediato</li>
-      <li><code>=OMS.QUOTE("GD30";"vol";;"mae")</code> — cinta MAE</li>
-      <li><code>=OMS.FX("mep")</code> · <code>=OMS.FX("ccl")</code> · <code>=OMS.FX("mayorista")</code></li>
-      <li><code>=OMS.ROFEX(1;"tna")</code> — TNA implícita del 1er DLR</li>
-      <li><code>=OMS.CAUCION(7;"tasa")</code> — caución ARS a 7 días</li>
-      <li><code>=OMS.TABLA("futuros")</code> — tabla completa (spill)</li>
-      <li><code>=OMS.HIST("a3500";365)</code> — serie histórica (spill)</li>
-      <li><code>=OMS.MACRO("tamar")</code> — último dato BCRA (<code>;VERDADERO</code> = fecha del dato · <code>"tamar5"</code> = promedio 5 ruedas)</li>
-      <li><code>=OMS.TIREA("GD30";78,5)</code> — TIR a un precio (motor YAS)</li>
-      <li><code>=OMS.PRECIO("GD30";0,14)</code> — precio a una TIR</li>
+      <li><strong>En vivo</strong>, sin recalcular: <code>QUOTE</code> · <code>FX</code> · <code>ROFEX</code> · <code>CAUCION</code> · <code>TABLA</code>.
+        Un solo feed por libro: 1-2 s después de cada tick BYMA (bonos, acciones, cauciones, futuros DLR);
+        lo que no viene por el feed (mayorista SIOPEL, cinta MAE, A3500 oficial) tarda hasta 30 s.</li>
+      <li><strong>Puntuales</strong>, no streamean: <code>HIST</code> · <code>MACRO</code> · <code>TIREA</code> · <code>PRECIO</code> ·
+        <code>TNA</code> · <code>MARGEN</code> · <code>DURATION</code> · <code>VENCIMIENTO</code> · <code>TICKET</code> ·
+        <code>CALC</code> · <code>TR</code>. Corren al abrir el libro, al cambiar un argumento o con un recálculo
+        completo (<code>Ctrl+Alt+F9</code>). F9 solo <em>no</em> las vuelve a correr si los argumentos no cambiaron.
+        Precio vacío en la calculadora = último del mercado en ese momento.</li>
+      <li><strong>Series macro</strong> (MACRO / HIST / A3500): la app las trae del BCRA al cambiar el día y, por la
+        tarde, cada 15 min entre las 16 y las 19 h hasta conseguir el A3500 del día.</li>
+    </ul>
+    <div class="row">
+      <button id="recalc">Recalcular puntuales</button>
+      <span id="recalc-status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Fórmulas</h2>
+    <div class="grp">Mercado · en vivo</div>
+    <ul class="muted">
+      <li><code>=OMS.QUOTE("GD30";"last")</code> — último BYMA 24hs. Campos: <code>last · bid · ask · bid_size · ask_size · close · close_date · var · vol · nominal · vwap · high · low · last_ts</code></li>
+      <li><code>=OMS.QUOTE("S31L6";"bid";"CI")</code> — contado inmediato</li>
+      <li><code>=OMS.QUOTE("AL30";"vol";;"mae")</code> — cinta MAE (con plazo: <code>;"CI";"mae"</code>)</li>
+      <li><code>=OMS.FX("mep")</code> · <code>("ccl")</code> · <code>("canje")</code> · <code>("mep_ci")</code> · <code>("mayorista")</code> — implícitos y mayorista intradía</li>
+      <li><code>=OMS.FX("a3500")</code> — A3500 <strong>oficial</strong> del BCRA · <code>("a3500_fecha")</code> fecha del dato (formatear como fecha) · <code>("a3500_ant")</code> anterior · <code>("cierre")</code> cierre del mayorista del feed</li>
+      <li><code>=OMS.ROFEX(1;"tna")</code> — TNA implícita del 1er DLR · <code>("DLR/DIC26M";"last")</code> por código · campos <code>tea · tem · td · dias · vto · oi · bid · ask</code> · canal <code>;"min"</code></li>
+      <li><code>=OMS.CAUCION(7;"tasa")</code> — caución ARS a 7 días, en puntos · <code>(30;"bid";"USD")</code></li>
+      <li><code>=OMS.TABLA("futuros")</code> — tabla completa (spill), mayorista · <code>("rofex_min")</code> minorista · <code>("cauciones";"USD")</code> · <code>("fx")</code> · <code>("quotes";"CI")</code> · <code>("mae")</code></li>
+    </ul>
+    <div class="grp">Macro BCRA</div>
+    <ul class="muted">
+      <li><code>=OMS.MACRO("tamar")</code> — último dato: <code>a3500 · badlar · tamar · cer · uva · inflamom</code></li>
+      <li><code>=OMS.MACRO("a3500";VERDADERO)</code> — fecha del dato en otra celda (formatear como fecha)</li>
+      <li><code>=OMS.MACRO("tamar5")</code> — promedio de las últimas 5 ruedas (el benchmark de MARGEN); ídem <code>"badlar5"</code></li>
+      <li><code>=OMS.HIST("a3500";365)</code> — serie histórica Fecha · Valor (spill); sin días = toda la serie</li>
+    </ul>
+    <div class="grp">Calculadora YAS · puntuales</div>
+    <ul class="muted">
+      <li><code>=OMS.TIREA("GD30";78,5)</code> — TIR efectiva anual (decimal) a un precio; <code>=OMS.TIREA("GD30")</code> al último del mercado</li>
+      <li><code>=OMS.TIREA("GD30";78,5;"15/08/2026")</code> — con fecha de liquidación (o una celda con fecha; <code>"CI"</code> = contado)</li>
+      <li><code>=OMS.PRECIO("GD30";0,14)</code> — precio a una TIR, en la convención de mercado del bono</li>
       <li><code>=OMS.TNA("TTM26";99,8)</code> — TNA con la convención del bono</li>
-      <li><code>=OMS.MARGEN("TTM26";99,8)</code> — margen TNA sobre TAMAR/BADLAR (floaters)</li>
-      <li><code>=OMS.DURATION("GD30";78,5)</code> — modified duration a un precio</li>
+      <li><code>=OMS.MARGEN("TTM26";99,8)</code> — margen TNA sobre TAMAR/BADLAR (sólo floaters)</li>
+      <li><code>=OMS.DURATION("GD30";78,5)</code> — duration (Macaulay, años) a un precio, la del YAS y Mercado</li>
       <li><code>=OMS.VENCIMIENTO("GD30")</code> — vencimiento de la ficha (<code>;"fecha"</code> = fecha de Excel)</li>
       <li><code>=OMS.TICKET("GD30";78,5;1000000)</code> — ticket de operación (spill)</li>
-      <li><code>=OMS.CALC("TX26";"duration";105)</code> — cualquier métrica YAS</li>
+      <li><code>=OMS.CALC("TX26";"duration";105)</code> — cualquier métrica YAS; modo <code>;"tir"</code> / <code>"tna"</code> / <code>"margen"</code> para dar tasa en vez de precio</li>
       <li><code>=OMS.TR("GD30";78,5;0,12;"30/12/2026")</code> — total return puntual (spill)</li>
     </ul>
+    <div class="grp">Diagnóstico</div>
+    <ul class="muted">
+      <li><code>=OMS.PING()</code> — build del add-in cargado (si es viejo, Excel sirve caché: ver README)</li>
+      <li><code>=OMS.DIAG("GD30";78,5)</code> — el cálculo como texto, con el motivo si falla</li>
+    </ul>
+    <div class="muted" style="margin-top:8px">Separador de argumentos: <code>;</code> en es-AR. Referencia completa de campos, alias y unidades:
+      <a href="FORMULAS.md" target="_blank" rel="noopener">FORMULAS.md</a>.</div>
   </div>
 
   <script src="taskpane.js"></script>

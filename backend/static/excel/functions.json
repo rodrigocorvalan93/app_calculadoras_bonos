@@ -82,7 +82,7 @@
     {
       "id": "FX",
       "name": "FX",
-      "description": "Dólares de referencia en vivo: mep, ccl, canje, mep_ci, ccl_ci, mayorista, a3500.",
+      "description": "Dólares de referencia en vivo: mep, ccl, canje, mep_ci, ccl_ci, mayorista (SIOPEL intradía), a3500 (A3500 OFICIAL del BCRA, se actualiza al publicarse), a3500_fecha (fecha del dato, número de Excel), a3500_ant, a3500_var, cierre (cierre anterior del mayorista del feed).",
       "result": {
         "type": "any"
       },
@@ -90,7 +90,7 @@
         {
           "name": "tipo",
           "type": "string",
-          "description": "mep | ccl | canje | mayorista | a3500 | mep_ci | ccl_ci"
+          "description": "mep | ccl | canje | mayorista | a3500 | a3500_fecha | a3500_ant | a3500_var | cierre | mep_ci | ccl_ci"
         }
       ],
       "options": {
@@ -163,7 +163,7 @@
     {
       "id": "TABLA",
       "name": "TABLA",
-      "description": "Tabla completa en vivo (spill): quotes, futuros, cauciones, fx o mae.",
+      "description": "Tabla completa en vivo (spill): quotes, futuros (alias rofex; rofex_min / futuros_min = canal minorista), cauciones, fx o mae.",
       "result": {
         "type": "any",
         "dimensionality": "matrix"
@@ -172,12 +172,12 @@
         {
           "name": "panel",
           "type": "string",
-          "description": "quotes | futuros | cauciones | fx | mae"
+          "description": "quotes | futuros (alias rofex) | rofex_min / futuros_min (minorista) | cauciones | fx | mae"
         },
         {
           "name": "opcion",
           "type": "string",
-          "description": "quotes: plazo (24hs/CI) · futuros: canal (may/min) · cauciones: moneda (ARS/USD)",
+          "description": "quotes: plazo (24hs/CI) · futuros: canal (may/min, mayorista/minorista) · cauciones: moneda (ARS/USD)",
           "optional": true
         }
       ],
@@ -363,7 +363,7 @@
     {
       "id": "DURATION",
       "name": "DURATION",
-      "description": "Modified duration (años) de un bono a un precio dado — la misma del YAS y de Mercado. Ej: =OMS.DURATION(\"GD30\";78,5). Sin precio usa el último del mercado (puntual).",
+      "description": "Duration (Macaulay, años) de un bono a un precio dado — la misma del YAS y de Mercado. Ej: =OMS.DURATION(\"GD30\";78,5). Sin precio usa el último del mercado (puntual).",
       "result": {
         "type": "number"
       },

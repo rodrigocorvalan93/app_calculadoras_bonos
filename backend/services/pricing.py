@@ -437,7 +437,9 @@ def _duration_desde_cashflows(obj, tirea: float) -> float:
 
     cf = obj.cashflow_cpn[obj.cashflow_cpn["Fechas"] > obj.fecha_settlement]
     totals = cf["Total"].to_numpy(dtype=np.float64)
-    t_years = rentafija._cf_yearfracs(cf["Fechas"], obj.fecha_settlement)
+    # t hasta la fecha HÁBIL de pago (FechaPago), como la TIR de rentafija
+    fechas = cf["FechaPago"] if "FechaPago" in cf.columns else cf["Fechas"]
+    t_years = rentafija._cf_yearfracs(fechas, obj.fecha_settlement)
     pv = totals * np.power(1.0 + float(np.real(tirea)), -t_years)
     precio = float(np.sum(pv))
     duration = float(np.sum(pv * t_years)) / precio

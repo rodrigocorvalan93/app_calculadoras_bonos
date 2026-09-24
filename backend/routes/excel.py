@@ -137,6 +137,16 @@ def _build(codes: Optional[FrozenSet[str]]) -> Dict[str, Any]:
         logger.exception("[excel] mayorista section failed")
         out["mayorista"] = {}
     try:
+        # A3500 OFICIAL (Com. BCRA) con su fecha: =OMS.FX("a3500") / ("a3500_fecha").
+        # `mayorista.close` es el cierre anterior del feed (SIOPEL / DLR/SPOT) y
+        # NO cambia cuando el BCRA publica el A3500 del día (~15:30): la celda
+        # quedaba clavada en el dato de ayer toda la rueda. Sale de la serie en
+        # memoria (services.historico), que el warmup relee al publicarse.
+        out["a3500"] = dolares_svc.a3500_official()
+    except Exception:  # noqa: BLE001
+        logger.exception("[excel] a3500 section failed")
+        out["a3500"] = {}
+    try:
         out["futuros"] = {"may": futuros_svc.rows("may"), "min": futuros_svc.rows("min")}
     except Exception:  # noqa: BLE001
         logger.exception("[excel] futuros section failed")

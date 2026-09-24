@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v21 · 2026-09-23 (OMS.MACRO: último dato macro del BCRA — a3500 / badlar / tamar / cer / uva / inflamom, tamar5 / badlar5 = promedio 5 ruedas — valor o, con VERDADERO, la fecha del dato como fecha de Excel; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
+var OMS_BUILD = "v24 · 2026-09-23 (OMS.TABLA('rofex_min') / ('futuros_min') = futuros minoristas, canal 'minorista'/'mayorista' también en OMS.ROFEX; ayuda completa en el panel + botón Recalcular puntuales (OMSCalc.reset + recálculo completo); OMS.FX('a3500') = A3500 OFICIAL del BCRA con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.MACRO: último dato macro del BCRA — a3500 / badlar / tamar / cer / uva / inflamom, tamar5 / badlar5 = promedio 5 ruedas — valor o, con VERDADERO, la fecha del dato como fecha de Excel; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -322,14 +322,28 @@ function fxGet(s, tipo) {
   if (t === "mep_ci") { return fx.mep_ci == null ? "" : fx.mep_ci; }
   if (t === "ccl_ci") { return fx.ccl_ci == null ? "" : fx.ccl_ci; }
   if (t === "mayorista" || t === "oficial" || t === "siopel") { return may.last == null ? "" : may.last; }
-  if (t === "a3500" || t === "cierre") { return may.close == null ? "" : may.close; }
+  // A3500 OFICIAL (Com. BCRA, serie en memoria del server) — antes "a3500" era
+  // el cierre anterior del mayorista del feed y no se movía cuando el BCRA
+  // publicaba el dato del día. "cierre" conserva ese cierre del feed.
+  var a35 = s.a3500 || {};
+  if (t === "a3500") { return a35.last != null ? a35.last : (may.close == null ? "" : may.close); }
+  if (t === "a3500_fecha") { var ser = isoToSerial(a35.date); return ser == null ? "" : ser; }
+  if (t === "a3500_ant" || t === "a3500_anterior") { return a35.close == null ? "" : a35.close; }
+  if (t === "a3500_var") { return a35.var_pct == null ? "" : a35.var_pct; }
+  if (t === "cierre") { return may.close == null ? "" : may.close; }
   if (t === "mep_base") { return fx.mep_base || ""; }
   if (t === "ccl_base") { return fx.ccl_base || ""; }
   return naError("Tipo desconocido: " + t);
 }
 
+// Canal de futuros: "may" / "mayorista" (default) · "min" / "minorista".
+function futCanal(canal) {
+  var c = String(canal == null ? "" : canal).trim().toLowerCase();
+  return (c === "min" || c === "minorista") ? "min" : "may";
+}
+
 function rofexRow(s, contrato, canal) {
-  var rows = ((s.futuros || {})[String(canal || "may").toLowerCase() === "min" ? "min" : "may"]) || [];
+  var rows = ((s.futuros || {})[futCanal(canal)]) || [];
   if (typeof contrato === "number") { return rows[contrato - 1] || null; }
   var c = String(contrato || "").trim().toUpperCase();
   if (!c) { return null; }
@@ -374,8 +388,11 @@ function nn(v) { return v == null ? "" : v; }
 function tablaGet(s, panel, opcion) {
   var p = String(panel || "").trim().toLowerCase();
   var i, r, out;
-  if (p === "futuros" || p === "rofex") {
-    var rows = ((s.futuros || {})[String(opcion || "may").toLowerCase() === "min" ? "min" : "may"]) || [];
+  // "futuros" / "rofex" (canal en `opcion`, default mayorista) o el canal en el
+  // nombre del panel: "rofex_min" / "futuros_min" (minorista), "rofex_may".
+  var fut = /^(futuros|rofex)(?:[_ -]?(may|min|mayorista|minorista))?$/.exec(p);
+  if (fut) {
+    var rows = ((s.futuros || {})[futCanal(fut[2] || opcion)]) || [];
     out = [["Contrato", "Vto", "Días", "Últ", "Bid", "Ask", "Cierre", "Var %", "TNA", "TEM", "Directo", "Vol"]];
     for (i = 0; i < rows.length; i++) {
       r = rows[i];
@@ -395,11 +412,14 @@ function tablaGet(s, panel, opcion) {
     return out;
   }
   if (p === "fx" || p === "dolares" || p === "dólares") {
-    var fx = s.fx || {}, may = s.mayorista || {};
+    var fx = s.fx || {}, may = s.mayorista || {}, a35t = s.a3500 || {};
+    var a35d = String(a35t.date || "");
     return [["Tipo", "Valor"],
             ["MEP", nn(fx.mep)], ["CCL", nn(fx.ccl)], ["Canje", nn(fx.canje)],
             ["MEP CI", nn(fx.mep_ci)], ["CCL CI", nn(fx.ccl_ci)],
-            ["Mayorista", nn(may.last)], ["A3500 (cierre)", nn(may.close)]];
+            ["Mayorista", nn(may.last)], ["A3500 (cierre)", nn(a35t.last != null ? a35t.last : may.close)],
+            ["A3500 fecha", a35d.length >= 10 ? a35d.slice(8, 10) + "/" + a35d.slice(5, 7) + "/" + a35d.slice(0, 4) : ""],
+            ["Mayorista (cierre feed)", nn(may.close)]];
   }
   if (p === "mae") {
     var mae = s.mae || {};
@@ -645,7 +665,12 @@ var OMSCalc = (function () {
     while (items.length) { sendChunk(items.splice(0, CHUNK)); }
   }
 
-  return { request: request };
+  // Vacía el memo: lo usa el botón «Recalcular puntuales» del panel antes del
+  // recálculo completo, así HIST / MACRO / calculadora vuelven a pedir al
+  // server aunque no hayan pasado los 5 min del TTL.
+  function reset() { memo = {}; memoN = 0; }
+
+  return { request: request, reset: reset };
 })();
 
 var FECHA_RE = /^\s*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\s*$/;

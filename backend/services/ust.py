@@ -300,7 +300,8 @@ def _as_date(x: Any) -> Optional[date]:
 def flujos_bono(bono: Any) -> List[Tuple[date, float]]:
     """Flujos (fecha, total) del bono ya calculado — EXACTAMENTE los que
     rentafija usa para la TIR: cashflow_cpn con Fechas > fecha_settlement,
-    columna Total. Duck-typed (no importa pandas)."""
+    columna Total, descontados a la fecha HÁBIL de pago (FechaPago).
+    Duck-typed (no importa pandas)."""
     cf = getattr(bono, "cashflow_cpn", None)
     settle = _as_date(getattr(bono, "fecha_settlement", None))
     if cf is None or settle is None or len(cf) == 0:
@@ -308,7 +309,8 @@ def flujos_bono(bono: Any) -> List[Tuple[date, float]]:
     try:
         # Acceso por columna (no iterrows): ~10× más rápido y en el render
         # frío de curvas esto corre para ~100 bonos hard-dollar.
-        fechas = list(cf["Fechas"])
+        cols = list(getattr(cf, "columns", []))
+        fechas = list(cf["FechaPago"] if "FechaPago" in cols else cf["Fechas"])
         totales = list(cf["Total"])
     except Exception:  # noqa: BLE001
         return []
