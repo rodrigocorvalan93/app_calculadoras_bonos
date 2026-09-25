@@ -80,7 +80,7 @@
     <span class="metric-value">{{ metrics.margen_tna | ar_pct(2) }}</span>
   </div>
   <div class="metric">
-    <span class="metric-label">{{ metrics.index }} aplicable (avg 5d)</span>
+    <span class="metric-label">{{ metrics.index }} aplicable ({{ "custom" if metrics.get("bench_custom") else "avg 5d" }})</span>
     <span class="metric-value">{{ metrics.benchmark_pct | ar_pct_pp(4) }}</span>
   </div>
   <div class="metric">

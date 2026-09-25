@@ -75,6 +75,15 @@
         <input type="text" inputmode="decimal" name="fx_override" x-model="fx" :disabled="!useCustomFx" autocomplete="off">
       </label>
 
+      {# Floaters: TAMAR / BADLAR aplicable a mano (TNA %). Reemplaza la
+         proyección plana del cupón desde la última observación y el benchmark
+         del margen; en un bono que no es floater no hace nada. #}
+      <label class="field-toggle"><input type="checkbox" x-model="useCustomBench"> TAMAR/BADLAR custom</label>
+      <label class="field" x-show="useCustomBench">
+        <span>Tasa aplicable (TNA %)</span>
+        <input type="text" inputmode="decimal" name="bench_override" x-model="bench" :disabled="!useCustomBench" placeholder="ej 23,50" autocomplete="off">
+      </label>
+
       <label class="field-toggle"><input type="checkbox" x-model="useCustomConv"> Convención custom</label>
       <label class="field" x-show="useCustomConv">
         <span>Freq (días)</span>
@@ -167,8 +176,10 @@
     <p class="muted">
       Margen TNA — <strong>VARIABLE</strong>: <code>TNA − bench/100</code> ·
       <strong>VARIABLE_CAP</strong>: <code>((1+TIREA)^(32/365)−1)·(365/32) − bench/100</code>.
-      Benchmark = avg últimos 5 obs BCRA. Si querés sanity-check contra otra convención,
-      activá <em>Convención custom</em>.
+      Benchmark = avg últimos 5 obs BCRA; con <em>TAMAR/BADLAR custom</em> el nivel que
+      ingresás reemplaza ese benchmark y la proyección del cupón de los períodos por devengar
+      (los ya devengados con dato observado no cambian). Si querés sanity-check contra otra
+      convención, activá <em>Convención custom</em>.
     </p>
   </details>
   {% endif %}
@@ -186,6 +197,8 @@
       settle: '',
       useCustomFx: false,
       fx: '',
+      useCustomBench: false,
+      bench: '',
       useCustomConv: false,
       freq: '',
       base_: '',
