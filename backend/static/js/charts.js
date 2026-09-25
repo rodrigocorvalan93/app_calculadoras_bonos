@@ -14,6 +14,69 @@
   function fmtPct(v) { return (v == null) ? "" : (v.toFixed(2).replace(".", ",") + "%"); }
   function fmtNum(v) { return (v == null) ? "" : v.toFixed(2).replace(".", ","); }
 
+  // ── Tabla de Gráficos: filas desde el payload de /graficos/data ────────────
+  // Lo que el chart dibuja como puntos, en cuadro: la curva principal en el
+  // orden del eje x (duration) y después cada comparación, cada una ordenada
+  // igual. Funciones PURAS (sin DOM ni requests): las usa initGraficos en cada
+  // render y el harness tests/graficos_tabla_harness.cjs.
+  function grafTablaRows(j) {
+    var out = [];
+    if (!j || !j.xs) return out;
+    var meta = j.meta || {};
+    function push(curva, codes, yAt) {
+      if (!codes) return;
+      for (var i = 0; i < codes.length; i++) {
+        var c = codes[i];
+        if (!c) continue;
+        out.push({ curva: curva, code: c, x: j.xs[i], y: yAt(i), m: meta[c] || {} });
+      }
+    }
+    push(null, j.codes, function (i) { return (j.ars && j.ars[i] != null) ? j.ars[i] : (j.usd ? j.usd[i] : null); });
+    (j.cmps || []).forEach(function (c) { push(c.label, c.codes, function (i) { return c.vals ? c.vals[i] : null; }); });
+    return out;
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch];
+    });
+  }
+  // Precio con miles (es-AR): 1.234,56. Sin ICU cae al formato simple.
+  function fmtPx(v) {
+    if (v == null) return "—";
+    try { return Number(v).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    catch (e) { return fmtNum(v); }
+  }
+  // thead + tbody de la tabla. `metric` = la del gráfico: en "margen" se agrega
+  // la columna del margen graficado (la TIR sigue siendo la TIREA). `conCurva`
+  // agrega la columna Curva (hay comparaciones): el label de la curva
+  // principal si viene como string, "principal" si es true.
+  function grafTablaHTML(rows, metric, conCurva) {
+    var principal = (typeof conCurva === "string" && conCurva) ? conCurva : "principal";
+    var cols = conCurva ? [["Curva", ""]] : [];
+    cols = cols.concat([["Bono", ""], ["Vto.", ""], ["Calif.", ""], ["Industria", ""], ["Mon.", ""],
+                        ["Precio", "num"], ["Fuente", ""], ["TIR", "num"], ["TNA", "num"], ["TEM", "num"], ["Dur", "num"]]);
+    if (metric === "margen") cols.push(["Margen", "num"]);
+    function pct(v) { return v == null ? "—" : fmtPct(v); }
+    function num(v) { return v == null ? "—" : fmtNum(v); }
+    var h = "<thead><tr>" + cols.map(function (c) {
+      return "<th" + (c[1] ? ' class="' + c[1] + '"' : "") + ">" + c[0] + "</th>";
+    }).join("") + "</tr></thead><tbody>";
+    rows.forEach(function (r) {
+      var m = r.m || {}, cells = [];
+      if (conCurva) cells.push(esc(r.curva || principal));
+      cells.push("<b>" + esc(r.code) + "</b>", esc(m.vto || "—"), esc(m.cal || "—"), esc(m.ind || "—"),
+                 esc(m.mon || "—"), fmtPx(m.p), esc(m.src || "—"), pct(m.tir), pct(m.tna), pct(m.tem),
+                 num(m.dur != null ? m.dur : r.x));
+      if (metric === "margen") cells.push(pct(r.y));
+      h += "<tr>" + cells.map(function (v, i) {
+        return "<td" + (cols[i][1] ? ' class="num"' : "") + ">" + v + "</td>";
+      }).join("") + "</tr>";
+    });
+    return h + "</tbody>";
+  }
+  window.grafTablaRows = grafTablaRows;
+  window.grafTablaHTML = grafTablaHTML;
+
   // ── Gráficos: scatter (Duration → TIREA) + regresión NSS ──────────────────
   function initGraficos() {
     var box = document.getElementById("grafico-uplot");
@@ -358,7 +421,9 @@
         clear();
         var e = document.createElement("div"); e.className = "alert";
         e.textContent = "Sin bonos con TIREA y Duration (¿hay cotización?).";
-        box.appendChild(e); return;
+        box.appendChild(e);
+        renderTabla(j);
+        return;
       }
       var xs = j.xs.slice();
       var vac = xs.map(function () { return null; });
@@ -445,6 +510,48 @@
         u.setData(data, !userZoomed);
         selfSet = false;
       }
+      renderTabla(j);                 // el cuadro de abajo sigue al mismo payload
+    }
+
+    // ── Tabla de los bonos graficados (cajón abajo de todo) ─────────────────
+    // Mismo payload que el chart: nada de requests extra. Colapsada sólo se
+    // actualiza el conteo; el HTML se arma al abrir (y en cada refresh mientras
+    // esté abierta: ~1-3 ms para 500 filas).
+    var tabla = document.getElementById("graf-tabla");
+    var tablaBody = document.getElementById("graf-tabla-body");
+    var tablaN = document.getElementById("graf-tabla-n");
+    var tablaToggle = document.getElementById("graf-tabla-toggle");
+    var tablaDirty = false;
+    function renderTabla(j) {
+      if (!tabla) return;
+      var rows = grafTablaRows(j);
+      if (tablaN) tablaN.textContent = rows.length ? (rows.length + " bono" + (rows.length > 1 ? "s" : "")) : "";
+      if (tablaBody && tablaBody.hidden) { tablaDirty = true; return; }
+      tablaDirty = false;
+      // Con comparaciones, la columna Curva nombra la principal con el label
+      // del selector ("CER (12)" → "CER").
+      var conCurva = false;
+      if (j && j.cmps && j.cmps.length) {
+        var curEl = form.querySelector("[name=curve]");
+        var opt = curEl && curEl.selectedOptions && curEl.selectedOptions[0];
+        conCurva = (opt ? opt.textContent.replace(/\s*\(\d+\)\s*$/, "").trim() : "") || true;
+      }
+      tabla.innerHTML = grafTablaHTML(rows, j && j.metric, conCurva);
+    }
+    function tablaOpen(open) {
+      if (!tablaToggle || !tablaBody) return;
+      tablaBody.hidden = !open;
+      tablaToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      var caret = tablaToggle.querySelector(".graf-emis-caret");
+      if (caret) caret.textContent = open ? "▾" : "▸";
+      try { localStorage.setItem("graf_tabla_open", open ? "1" : "0"); } catch (e) { /* noop */ }
+      if (open && tablaDirty && lastJ) renderTabla(lastJ);
+    }
+    if (tablaToggle && tablaBody) {
+      var t0 = "0";
+      try { t0 = localStorage.getItem("graf_tabla_open") || "0"; } catch (e) { /* noop */ }
+      tablaOpen(t0 === "1");
+      tablaToggle.addEventListener("click", function () { tablaOpen(tablaBody.hidden); });
     }
 
     // Generación por pedido: sólo la respuesta del ÚLTIMO load() se dibuja.

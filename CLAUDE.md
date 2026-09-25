@@ -344,6 +344,18 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   CALCULADO inline (pintura + tipografía, `display:none` respetado) y recién
   ahí se rasteriza; sólo al click, ~1 ms por 100 nodos. Regresión:
   `tests/chart_copy_harness.cjs` (JS real en Node).
+- **Gráficos · tabla de bonos** (`#graf-tabla`, 25/09): cajón colapsado
+  abajo de todo con los puntos del chart en cuadro (bono · vto · calif. ·
+  industria · mon. · precio · fuente · TIR · TNA · TEM · dur [· margen]).
+  `charts.js` la arma desde el MISMO payload de `/graficos/data` (cero
+  requests: `grafTablaRows` / `grafTablaHTML`, funciones puras expuestas en
+  `window` para `tests/graficos_tabla_harness.cjs`), en el orden del eje x y
+  con cada comparación como bloque propio (columna Curva; la principal con
+  el label del selector). `meta[code]` del payload lleva la ficha estática
+  `vto/cal/ind` (`curves._graf_ficha`, de `pricing.bond_meta`, también con
+  fuente CAFCI). Colapsada sólo actualiza el conteo; abierta se rearma en
+  cada refresh (~ms). Estado en `localStorage` (`graf_tabla_open`); el ⧉ de
+  app.js la copia como celdas. Regresión: `tests/test_graficos_tabla.py`.
 - **Paneles por FILAS (delta)**: un contenedor `data-delta-scope` (Mercado)
   NO swapea completo en cada `md-update`: si adentro hay una
   `table[data-delta]`, app.js pide `data-delta&since=<data-seq>&order=<data-order>`
