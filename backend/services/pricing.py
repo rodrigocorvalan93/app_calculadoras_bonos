@@ -630,6 +630,8 @@ def bond_meta(code: str) -> Dict[str, Any]:
         "ajuste_sobre_capital": getattr(obj, "ajuste_sobre_capital", "") or "",
         "callable": getattr(obj, "callable", False),
         "calificacion": getattr(obj, "calificacion", ""),
+        "industria": getattr(obj, "industria", "") or "",
+        "clasificacion": getattr(obj, "clasificacion", "") or "",
         "frecuencia": getattr(obj, "frecuencia_pago_cupon", ""),
         "convencion_base": getattr(obj, "convencion_base", ""),
         "quote_price_cnv": getattr(obj, "quote_price_cnv", ""),

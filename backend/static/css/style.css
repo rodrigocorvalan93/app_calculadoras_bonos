@@ -1581,6 +1581,15 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 }
 .graf-emis-toggle:hover { opacity: .8; }
 .graf-emis-caret { display: inline-block; width: 10px; font-size: 11px; opacity: .7; }
+/* Tabla de los bonos graficados (Gráficos): cajón colapsable abajo de todo,
+   alto acotado con scroll propio; columnas numéricas con dígitos tabulares. */
+.graf-tabla-body[hidden] { display: none; }
+.graf-tabla-body .table-scroll { max-height: 440px; overflow: auto; }
+.graf-tabla th, .graf-tabla td { white-space: nowrap; padding: 5px 10px; }
+.graf-tabla th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.graf-tabla td.num, .graf-tabla th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.graf-tabla td:not(.num) { text-align: left; }
+.graf-tabla-body p { font-size: 11.5px; margin: 8px 0 0; }
 /* "premio vs" (mínimo / curva / instrumento) en el título del cuadro de emisiones. */
 .graf-emis-ref { font-weight: 400; margin: 0 10px; white-space: nowrap; }
 .graf-emis-ref select {

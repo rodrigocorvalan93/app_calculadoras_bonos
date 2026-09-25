@@ -1400,10 +1400,23 @@ def _pct(x):
     return x * 100.0 if (x is not None and x == x) else None
 
 
+def _graf_ficha(code: str) -> dict:
+    """Ficha estática del bono para la tabla de Gráficos (vencimiento
+    DD/MM/AAAA, calificación, industria). Sale de `pricing.bond_meta`
+    (memoizada): µs por código, ~40 bytes más por punto en el payload."""
+    m = pricing.bond_meta(code or "") or {}
+    v = m.get("vencimiento")
+    return {
+        "vto": v.strftime("%d/%m/%Y") if hasattr(v, "strftime") else (str(v) if v else None),
+        "cal": (m.get("calificacion") or None),
+        "ind": (m.get("industria") or None),
+    }
+
+
 def _graf_meta(r) -> dict:
     from backend.locale_ar import fmt_ts
     dt = r.get("price_date")
-    return {
+    out = {
         "p": r.get("px_calc"),
         "src": _SRC_LABEL.get(r.get("price_source") or "", r.get("price_source") or ""),
         "dt": (fmt_ts(dt) if dt else None),
@@ -1415,6 +1428,8 @@ def _graf_meta(r) -> dict:
         "bp": r.get("bid"), "bt": _pct(r.get("tirea_bid")),
         "op": r.get("offer"), "ot": _pct(r.get("tirea_offer")),
     }
+    out.update(_graf_ficha(r.get("code") or ""))
+    return out
 
 
 def _graf_pts(rows, metric: str, dmin, exclude: set, dmax=None):
@@ -1517,6 +1532,7 @@ def _graf_pts_cafci(curve_key: str, metric: str, dmin, dmax, exclude: set):
         meta = {"p": None, "src": "CAFCI", "dt": None, "tir": tir, "tna": None,
                 "tem": None, "dur": float(d), "mon": leg_mon,
                 "bp": None, "bt": None, "op": None, "ot": None}
+        meta.update(_graf_ficha(code))
         out.append((code, float(d), y, leg_mon, None, None, meta))
     return out
 

@@ -162,5 +162,30 @@
       <p class="muted">Una por línea: <code>ticker; tasa; duration</code> (opcional <code>; nota</code>, p. ej. el precio de corte). La tasa va en la métrica del gráfico (TIREA / TEM / margen), tal cual sale del aviso de resultados — acá no se calcula nada. Cada corte aparece como ★ con su premio: contra la curva NSS y, si el ticker ya cotiza en el gráfico (match por nombre, también con sufijo de pata), contra la TIR offer del bono (o el último/cierre si no hay punta). Por defecto se dibuja el menor de los dos; el desplegable lo fija en curva o instrumento. En el hover van todas las distancias, incluido el bono más cercano por duration.</p>
     </div>
   </div>
+
+  {# Tabla de los bonos graficados: lo que se ve como puntos, en cuadro (bono ·
+     vto · calificación · industria · moneda · precio · fuente · TIR · TNA · TEM
+     · duration [· margen]). La arma charts.js desde el MISMO payload del
+     gráfico (cero requests extra) en cada refresh, en el orden del eje x y con
+     cada comparación como bloque propio. Cajón abajo de todo y MINIMIZADO por
+     default (recuerda el estado); colapsada sólo se actualiza el conteo. El
+     .table-scroll está desde el load, así app.js le inyecta el ⧉ que la copia
+     como celdas a Excel. #}
+  <div class="card graf-tabla-card" id="graf-tabla-card" style="margin-top:14px">
+    <div class="card-title">
+      <button type="button" class="graf-emis-toggle" id="graf-tabla-toggle" aria-expanded="false"
+              aria-controls="graf-tabla-body" title="Mostrar / ocultar la tabla de los bonos del gráfico">
+        <span class="graf-emis-caret" aria-hidden="true">▸</span>
+        <span>Bonos del gráfico · tabla <small class="muted">(los mismos puntos, en cuadro)</small></span>
+      </button>
+      <span class="card-title-aux" id="graf-tabla-n"></span>
+    </div>
+    <div class="card-body graf-tabla-body" id="graf-tabla-body" hidden>
+      <div class="table-scroll">
+        <table class="cashflows curve-table graf-tabla" id="graf-tabla"></table>
+      </div>
+      <p class="muted">Misma data que el gráfico (precio, TIR, TNA, TEM y duration de la fuente elegida; con <em>Vector CAFCI</em> la TIR y la mod. duration del vector, sin precio ni puntas). Orden: duration ascendente; las curvas comparadas van después, cada una en su bloque. El ⧉ copia el cuadro para pegarlo en Excel.</p>
+    </div>
+  </div>
 </section>
 {% endblock %}
