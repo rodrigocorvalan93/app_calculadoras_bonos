@@ -17,7 +17,7 @@
     <tr><th>TEM</th><td>{{ metrics.tem | ar_pct(4) }}</td></tr>
     {% if metrics.tipo_tasa_interes in ("VARIABLE", "VARIABLE_CAP") and metrics.index %}
     <tr><th>Margen TNA</th><td>{{ metrics.margen_tna | ar_pct(2) }}</td></tr>
-    <tr><th>{{ metrics.index }} aplicable</th><td>{{ metrics.benchmark_pct | ar_pct_pp(4) }}</td></tr>
+    <tr><th>{{ metrics.index }} aplicable{% if metrics.get("bench_custom") %} (custom){% endif %}</th><td>{{ metrics.benchmark_pct | ar_pct_pp(4) }}</td></tr>
     {% endif %}
 
     <tr class="ticket-section"><th colspan="2">Sensibilidad</th></tr>

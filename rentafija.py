@@ -376,18 +376,45 @@ class Bono:
         FIJA / step-up."""
         if self.step_up or self.tipo_tasa_interes not in ("VARIABLE", "VARIABLE_CAP"):
             return
+        serie, col = self._serie_variable()
+        self._cupon_desde_serie(inputs[serie], col)
+
+    def _serie_variable(self):
+        """(clave en `inputs`, columna) de la serie proyectada que pricea este
+        floater — mismo matching que __init__ (TAMAR; cualquier otro → BADLAR)."""
+        return (('tamar_proyectado', 'TAMAR')
+                if self.index == "TAMAR" else ('badlar_proyectado', 'BADLAR'))
+
+    def _cupon_desde_serie(self, s, col, idx64=None):
+        """Recomputa `self.intereses` desde la serie proyectada `s` (DataFrame
+        con la columna `col`). Réplica exacta de las ramas de __init__: promedio
+        de la serie en cada período de devengo + spread (VARIABLE) o
+        capitalización al TEM (VARIABLE_CAP TAMAR).
+
+        Los cortes por período salen de `searchsorted` sobre el índice en ns
+        (`idx64`, se calcula si no viene): con el índice ordenado son los
+        MISMOS elementos que la máscara `(s.index >= inicio) & (s.index < fin)`
+        y el mismo `.mean()` de pandas → resultado bit a bit idéntico, sin
+        recorrer 14k fechas por período (11 ms → 3 ms por what-if de YAS). Con
+        el índice desordenado se usa la máscara de siempre."""
         fechas = self.fechas_devengo_intereses_habil
         dca = self.dias_entre_cupones_anual
         vr = self.valores_residuales
         es_tamar_cap = self.tipo_tasa_interes == "VARIABLE_CAP" and self.index == "TAMAR"
-        serie, col = (('tamar_proyectado', 'TAMAR')
-                      if self.index == "TAMAR" else ('badlar_proyectado', 'BADLAR'))
+        if idx64 is None:
+            idx64 = pd.to_datetime(s.index).values
+        ordenado = len(idx64) < 2 or bool(np.all(idx64[1:] >= idx64[:-1]))
+        vals = s[col]
         index_premium = []
         tamar_tem_100 = 0.0
         for i in range(len(fechas) - 1):
             inicio, fin = fechas[i], fechas[i + 1]
-            s = inputs[serie]
-            promedio = s[(s.index >= inicio) & (s.index < fin)][col].mean()
+            if ordenado:
+                lo = int(np.searchsorted(idx64, pd.Timestamp(inicio).to_datetime64(), "left"))
+                hi = int(np.searchsorted(idx64, pd.Timestamp(fin).to_datetime64(), "left"))
+                promedio = vals.iloc[lo:hi].mean()
+            else:
+                promedio = s[(s.index >= inicio) & (s.index < fin)][col].mean()
             if es_tamar_cap:
                 tamar_tem_100 = 100 * ((((1 + (((promedio + self.cupon_spread) / 100) / (365 / 32))) ** (365 / 32)) ** (1 / 12)) - 1)
                 index_premium.append(tamar_tem_100)
@@ -400,6 +427,38 @@ class Bono:
         else:
             cupon_aplicable = np.array([tv + self.cupon_spread for tv in index_premium])
             self.intereses = dca * cupon_aplicable / 100 * vr
+
+    def aplica_nivel_variable(self, nivel_pct, desde=None):
+        """What-if de la TAMAR / BADLAR aplicable (YAS): recomputa `self.intereses`
+        con la serie proyectada reemplazada por `nivel_pct` (TNA en %) a partir
+        de `desde` (default: el día siguiente a la ÚLTIMA OBSERVACIÓN de la serie
+        real). Es exactamente lo que hace indices.py al proyectar la serie a 30
+        años con el "aplicable" (promedio de las últimas 5 ruedas), pero con el
+        nivel que elige el usuario: con `nivel_pct` = ese promedio el cupón queda
+        idéntico al de siempre. Los períodos ya devengados con dato observado no
+        cambian. Sólo floaters TAMAR / BADLAR (VARIABLE / VARIABLE_CAP); en el
+        resto no hace nada. Devuelve True si aplicó.
+
+        Lo usa el backend sobre la COPIA per-request del bono (mismo patrón que
+        `_a3500_override` y `aplica_sendero_tamar`): la serie se copia, así no
+        muta `inputs` ni el singleton."""
+        if self.step_up or self.tipo_tasa_interes not in ("VARIABLE", "VARIABLE_CAP"):
+            return False
+        if self.index not in ("TAMAR", "BADLAR"):
+            return False
+        serie, col = self._serie_variable()
+        s = inputs[serie][[col]].copy()
+        if desde is None:
+            real = inputs.get('tamar' if self.index == "TAMAR" else 'badlar')
+            desde = real.index[-1] if real is not None and len(real.index) else None
+        idx64 = pd.to_datetime(s.index).values
+        if desde is None:
+            mask = np.ones(len(s), dtype=bool)
+        else:
+            mask = np.asarray(idx64 > pd.Timestamp(desde).to_datetime64(), dtype=bool)
+        s.loc[mask, col] = float(nivel_pct)
+        self._cupon_desde_serie(s, col, idx64)
+        return True
 
     def generate_cashflows(self, settlement_date=None):
         '''

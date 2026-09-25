@@ -77,6 +77,23 @@ wins:
 `freq_override` + `base_override` always win over auto-detection (label
 shows `… custom`).
 
+**TAMAR / BADLAR aplicable a mano** (YAS "TAMAR/BADLAR custom", 25/09):
+`compute_metrics(bench_override=<TNA %>)` / `tr_puntual(bench_override=…)`.
+Sobre la COPIA per-request, `rentafija.Bono.aplica_nivel_variable(nivel)`
+reemplaza la serie proyectada (plana en el promedio 5 ruedas desde la última
+observación, `indices.py`) por el nivel del usuario de ahí en adelante y
+recomputa el cupón con la misma réplica de `__init__`
+(`_cupon_desde_serie`, compartida con `recalcula_cupon_variable`: cortes por
+período con `searchsorted` sobre el índice ordenado + el mismo `.mean()` de
+pandas → bit a bit igual a la máscara del legacy, 11 → 3 ms); con el
+nivel = ese promedio el precio es idéntico al de siempre (test). Costo del
+what-if: +1 a +3 ms por cálculo. El mismo
+nivel es el benchmark del margen (`_bench_for`: modo margen, Margen TNA,
+card "aplicable (custom)", `bench_custom` en las métricas). No muta `inputs`
+ni el singleton (mismo patrón que `_a3500_override`); en un bono que no es
+floater no hace nada. El add-in de Excel no lo expone. Regresión:
+`tests/test_bench_override.py`.
+
 Hard-dollar detection is **decoupled from the FX leg**: `moneda` now
 encodes the quote leg (USD = cable, USB = MEP), so `_is_hard_dollar` is
 true when `moneda in ("USD","USB")` **or** the classification/industria

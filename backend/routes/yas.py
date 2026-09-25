@@ -91,12 +91,14 @@ async def yas_recompute(
     fx_override: str = Form(""),
     freq_override: str = Form(""),
     base_override: str = Form(""),
+    bench_override: str = Form(""),
 ) -> HTMLResponse:
     parsed_value = _parse_ar_number(value)
     parsed_nom = _parse_ar_number(nominales) or 1_000_000.0
     parsed_fx = _parse_ar_number(fx_override)
     parsed_freq = _parse_ar_number(freq_override)
     parsed_base = _parse_ar_number(base_override)
+    parsed_bench = _parse_ar_number(bench_override)        # TAMAR/BADLAR custom (TNA %)
 
     if parsed_value is None:
         return _render(
@@ -121,10 +123,11 @@ async def yas_recompute(
             fx_override=parsed_fx,
             freq_override=int(parsed_freq) if parsed_freq else None,
             base_override=int(parsed_base) if parsed_base else None,
+            bench_override=parsed_bench,
         )
         return m, pricing.ticket_rows(m, nominales=parsed_nom)
 
-    key = (code, mode, parsed_value, settle, parsed_nom, parsed_fx, parsed_freq, parsed_base)
+    key = (code, mode, parsed_value, settle, parsed_nom, parsed_fx, parsed_freq, parsed_base, parsed_bench)
     metrics, ticket = await _single_flight(key, _calc)
     return _render(
         request,
@@ -153,6 +156,7 @@ async def yas_tr(
     fx_override: str = Form(""),
     freq_override: str = Form(""),
     base_override: str = Form(""),
+    bench_override: str = Form(""),
     tasa_salida: str = Form(""),
     fecha_salida: str = Form(""),
 ) -> HTMLResponse:
@@ -164,6 +168,7 @@ async def yas_tr(
     parsed_fx = _parse_ar_number(fx_override)
     parsed_freq = _parse_ar_number(freq_override)
     parsed_base = _parse_ar_number(base_override)
+    parsed_bench = _parse_ar_number(bench_override)
     parsed_salida = _parse_ar_number(tasa_salida)
 
     if parsed_value is None:
@@ -180,6 +185,7 @@ async def yas_tr(
             nominales=parsed_nom, fx_override=parsed_fx,
             freq_override=int(parsed_freq) if parsed_freq else None,
             base_override=int(parsed_base) if parsed_base else None,
+            bench_override=parsed_bench,
         )
 
     tr = await asyncio.get_running_loop().run_in_executor(None, _calc)

@@ -203,6 +203,19 @@ def _bench_pct(idx_name: Optional[str]) -> float:
     return float("nan")
 
 
+def _bench_for(obj, idx_name: Optional[str]) -> float:
+    """Benchmark (%) que pricea ESTA copia del bono: el override del usuario
+    (`_bench_override`, YAS "TAMAR/BADLAR custom") si lo hay, si no el promedio
+    de las últimas 5 observaciones del BCRA."""
+    ov = getattr(obj, "_bench_override", None)
+    if ov is not None:
+        try:
+            return float(ov)
+        except (TypeError, ValueError):
+            pass
+    return _bench_pct(idx_name)
+
+
 def _last_series_value(key: str, colname: str) -> Tuple[Optional[Any], float]:
     """Return (fecha, valor) of the most recent row of rentafija.inputs[key].
 
@@ -316,6 +329,13 @@ def index_applied(obj) -> Dict[str, Any]:
         return out
 
     if tipo in ("VARIABLE", "VARIABLE_CAP") and idx in ("TAMAR", "BADLAR"):
+        # Tasa custom del usuario (YAS): el card muestra el nivel que REALMENTE
+        # priceó el cupón y el margen, no el promedio de la serie.
+        ov = getattr(obj, "_bench_override", None)
+        if ov is not None:
+            out.update({"kind": "BENCH", "label": f"{idx} aplicable (custom)", "value": float(ov),
+                        "value_fmt_hint": "percent_pp", "fecha": None})
+            return out
         bench = _bench_pct(idx)
         out.update({"kind": "BENCH", "label": f"{idx} aplicable (avg 5d)", "value": bench, "value_fmt_hint": "percent_pp", "fecha": None})
         return out
@@ -672,8 +692,14 @@ def compute_metrics(
     base_override: Optional[int] = None,
     include_cashflows: bool = True,
     obj_override: Optional[Any] = None,
+    bench_override: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Run a YAS calc end-to-end and return numerics + ticket + cashflow.
+
+    `bench_override` (TNA en %): TAMAR / BADLAR aplicable a mano para un
+    floater — reemplaza la proyección plana del cupón desde la última
+    observación Y el benchmark del margen (modo margen, Margen TNA, card),
+    sobre la copia per-request. Ignorado en bonos que no son floaters.
 
     Modes:
       precio  → value is price as % of par (e.g. 87.30)
@@ -732,6 +758,22 @@ def compute_metrics(
         if auto is not None:
             obj._a3500_override = auto
 
+    # What-if de TAMAR / BADLAR (YAS "TAMAR/BADLAR custom"): la serie proyectada
+    # es plana en el promedio 5 ruedas desde la última observación (indices.py);
+    # acá se reemplaza por `bench_override` de ahí en adelante SOBRE LA COPIA —
+    # los períodos ya devengados con dato observado no cambian — y el mismo
+    # nivel es el benchmark del margen. No muta `inputs` ni el singleton (mismo
+    # patrón que `_a3500_override`). En un bono que no es floater no hace nada.
+    bench_custom = False
+    if bench_override is not None:
+        try:
+            if obj.aplica_nivel_variable(float(bench_override)):
+                obj._bench_override = float(bench_override)
+                bench_custom = True
+        except Exception as exc:  # noqa: BLE001 — ficha rara: se pricea sin override
+            logger.debug("[pricing] bench_override(%s) no aplicó: %s", code, exc)
+    base["bench_custom"] = bench_custom
+
     # `calcula_tirea` / `calcula_precio` ya corren `generate_cashflows` +
     # `calcula_intereses_corridos` ADENTRO (rentafija), así que acá no se repiten:
     # cada llamada extra reconstruía los cashflows completos (sin memo) y era puro
@@ -751,7 +793,7 @@ def compute_metrics(
             obj.calcula_precio(tir, canonical_settle)
         elif mode == "margen":
             idx_name = getattr(obj, "index", None)
-            bench_pct = _bench_pct(idx_name)
+            bench_pct = _bench_for(obj, idx_name)
             if not np.isfinite(bench_pct):
                 # Sin serie del benchmark (BCRA caído / índice desconocido) el
                 # fallback ajuste=0 produciría un precio/TIR plausible pero
@@ -822,7 +864,7 @@ def compute_metrics(
     margen_tna = float("nan")
     bench_pct = float("nan")
     if tipo in ("VARIABLE", "VARIABLE_CAP") and idx_name:
-        bench_pct = _bench_pct(idx_name)
+        bench_pct = _bench_for(obj, idx_name)
         if np.isfinite(bench_pct):
             if tipo == "VARIABLE_CAP" and np.isfinite(tirea):
                 tna_eq = ((1.0 + tirea) ** (32.0 / 365.0) - 1.0) * (365.0 / 32.0)
@@ -1139,6 +1181,7 @@ def tr_puntual(
     fx_override: Optional[float] = None,
     freq_override: Optional[int] = None,
     base_override: Optional[int] = None,
+    bench_override: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Total return puntual de la ficha YAS, vía `Bono.calcula_total_return`.
 
@@ -1155,7 +1198,8 @@ def tr_puntual(
 
     m = compute_metrics(code=code, mode=mode, value=value, settle=settle,
                         fx_override=fx_override, freq_override=freq_override,
-                        base_override=base_override, include_cashflows=False)
+                        base_override=base_override, include_cashflows=False,
+                        bench_override=bench_override)
     if m.get("error"):
         out["error"] = m["error"]
         return out
@@ -1201,6 +1245,14 @@ def tr_puntual(
         auto = _dlk_fx_auto()
         if auto is not None:
             obj._a3500_override = auto
+    # …y la misma TAMAR/BADLAR custom: los cupones del período tienen que ser
+    # los que priceó la ficha de arriba.
+    if bench_override is not None:
+        try:
+            if obj.aplica_nivel_variable(float(bench_override)):
+                obj._bench_override = float(bench_override)
+        except Exception:  # noqa: BLE001
+            pass
 
     canonical_settle = _safe_settle(settle)
     try:
