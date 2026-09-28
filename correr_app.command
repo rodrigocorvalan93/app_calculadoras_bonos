@@ -16,6 +16,13 @@ cd "$(dirname "$0")"
 
 PORT="${PORT:-8000}"
 export PORT        # el banner de la app muestra el puerto real
+# El puente TLS del add-in (:8443) proxya al uvicorn de ESTE puerto.
+export TLS_TARGET_PORT="${TLS_TARGET_PORT:-$PORT}"
+# Archivos/sockets abiertos por proceso: en una terminal de macOS el tope es
+# 256 (Windows/Linux no tienen ese techo). Feed del broker + pestañas del
+# navegador + add-in (2 sockets por conexion) + bases abiertas lo pasan en
+# una rueda larga -> "Too many open files". Subir el limite blando no pide sudo.
+ulimit -S -n 4096 2>/dev/null || ulimit -S -n 2048 2>/dev/null || true
 # Host de escucha: 127.0.0.1 (solo esta Mac) por default. Para entrar desde
 # el celular via Tailscale, agregar en secrets.txt:  APP_HOST=0.0.0.0
 if [ -z "${HOST:-}" ] && [ -f secrets.txt ]; then
@@ -94,7 +101,11 @@ echo "  Python  : $("$PY" --version)  (entorno $VENVDIR)"
 "$PY" -m backend.tools.https_local --quiet || echo "(sin HTTPS local: el add-in de Excel no va a cargar; el resto sigue igual)"
 # El Python de python.org no trae CAs: usar el bundle de certifi para
 # treasury.gov / RSS / SMTP (el feed del broker ya lo hace por su cuenta).
-export SSL_CERT_FILE="${SSL_CERT_FILE:-$("$PY" -c 'import certifi,sys;sys.stdout.write(certifi.where())' 2>/dev/null)}"
+# Solo si certifi contesta: un SSL_CERT_FILE vacio deja a OpenSSL SIN CAs.
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+  CERTIFI="$("$PY" -c 'import certifi,sys;sys.stdout.write(certifi.where())' 2>/dev/null)"
+  [ -n "$CERTIFI" ] && export SSL_CERT_FILE="$CERTIFI"
+fi
 
 # --- Modo de ejecucion: ESTABLE por default; "dev" -> auto-reload ---
 # Con la carpeta compartida por OneDrive, cada git pull del equipo hace

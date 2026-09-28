@@ -508,11 +508,60 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
 that (a) exercises the calc, (b) hits the HTTP endpoint via
 `httpx.AsyncClient` with `ASGITransport`.
 
-CI (`.github/workflows/tests.yml`) corre la suite en **Ubuntu y Windows**
-(Python 3.12) con `pytest-timeout --timeout=300`: la app se despliega como
-servicio Windows y el add-in de Excel vive ahí, así que nada Unix-only
-(`os.fchmod`, `fcntl`, señales) puede entrar sin guard. Los tests de rutas
-Mac (`test_deltapaths.py`) parchean `deltapaths._WINDOWS` para correr en
-los dos runners. Las credenciales de bootstrap de la suite son sintéticas
-(`tests/conftest.py`): nunca una cuenta real. Las regresiones de la
-auditoría externa (sept. 2026) viven en `tests/test_auditoria_tanda1.py`.
+CI (`.github/workflows/tests.yml`) corre la suite en **Ubuntu, Windows y
+macOS (arm64)** (Python 3.12) con `pytest-timeout --timeout=300`, en cada
+push a CUALQUIER rama y en cada PR (repo público: runners gratis; a mano,
+`workflow_dispatch` con la versión de Python como input, p. ej. 3.14 = `brew
+install python`). La app se despliega como servicio Windows y el add-in de
+Excel vive ahí, así que nada Unix-only (`os.fchmod`, `fcntl`, señales) puede
+entrar sin guard; el desk también la levanta en Macs (sección **macOS**). Los
+tests de rutas Mac (`test_deltapaths.py`) parchean `deltapaths._WINDOWS` para
+correr en todos los runners. Las credenciales de bootstrap de la suite son
+sintéticas (`tests/conftest.py`): nunca una cuenta real. Las regresiones de
+la auditoría externa (sept. 2026) viven en `tests/test_auditoria_tanda1.py`.
+La suite corre también sábados, domingos y feriados: un test que ejercite
+`save_today` / `recapturar_cierre` / el 5D de Mercado fija "hoy" en el último
+día hábil (`_ahora_habil()` en `test_cierres` / `test_historico_writer`,
+`hoy_ba` parcheado en `test_ret5d`) — el calendario tiene sus tests aparte.
+Nunca `datetime.now()` a secas como "hoy operable".
+
+## macOS (Macs del desk con `correr_app.command`)
+
+Invariantes que mantienen la app andando en Mac — CI la corre en
+`macos-latest` en cada push, y `tests/test_tls_local.py` /
+`tests/test_consola.py` cubren las ramas darwin parcheando constantes:
+
+- **Rutas**: `secrets.txt` viene en estilo Windows (`~\...`,
+  `%USERPROFILE%\...`). TODO lector pasa por `deltapaths.expand` /
+  `deltapaths.historico_dir()`, que remapea la cola de carpetas a
+  `~/Library/CloudStorage/OneDrive-…`. Nunca `os.getenv("DELTA_…")` a secas.
+- **TLS saliente**: el Python de python.org no trae CAs → cada `urlopen` /
+  SMTP / wss usa `ssl.create_default_context(cafile=certifi.where())` (`ust`,
+  `news`, `mailer`, `primary_ws`); `requests` trae el suyo. El launcher
+  exporta `SSL_CERT_FILE` sólo si certifi contesta (vacío = OpenSSL sin CAs).
+- **Certificado del add-in** (`tools/https_local.py`): hoja ≤ 825 días (Apple
+  rechaza más largas); el CN de la CA lleva el hostname acotado a 64 bytes
+  (`_ca_common_name`: cryptography valida RFC 5280 y con un nombre de equipo
+  largo `generate()` reventaba — lo vio el runner de macOS); el hostname
+  entra a `wanted_hosts` sólo si puede ir al SAN (`_san_ok`: un
+  "…-Corvalán.local" con acento regeneraba la hoja en CADA arranque); la
+  confianza en el keychain de login (`security add-trusted-cert`, pide la
+  clave) se instala SÓLO con CA nueva o no confiada — `ca_trusted_macos`
+  (`security verify-cert -L`, sin diálogo) lo decide cuando la hoja se
+  regenera por cambio de red/IP. Ramas por plataforma con `_PLATFORM`
+  (parcheable), no `sys.platform` inline.
+- **git**: sin Command Line Tools, `/usr/bin/git` es un stub de Apple que abre
+  un diálogo; `consola._git_disponible()` (`xcode-select -p`, una vez por
+  proceso) decide antes de invocarlo y el banner lee `.git` a mano. Cualquier
+  subprocess nuevo a `git` va por ahí.
+- **Launcher**: venv en `~/.venvs/bonos` (fuera de OneDrive), `ulimit -S -n
+  4096` (una terminal de macOS arranca con tope 256 FDs), `TLS_TARGET_PORT =
+  PORT`, shebang zsh y sin CRLF (test).
+- **Safari / WebKit** (también el WKWebView de Excel para Mac): escribir en el
+  portapapeles sólo dentro del gesto → `app.js deliver` arma el
+  `ClipboardItem` con la PROMESA del PNG y reintenta con el Blob; todo
+  `localStorage` bajo try/catch (puede tirar con cookies bloqueadas); nada de
+  `.at()`, lookbehind, `structuredClone` sin fallback; `color-mix` /
+  `scrollbar-width` en el CSS son sólo cosméticos si faltan.
+- Windows-only sin guard no entra: `os.fchmod`, `msvcrt`, `winreg`,
+  `LOCALAPPDATA` (`historico_writer.journal_dir` cae a `~/.local/share`).

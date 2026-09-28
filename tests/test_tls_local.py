@@ -265,3 +265,83 @@ async def test_bridge_502_si_el_target_no_esta(certs):
             assert r.status_code == 502
     finally:
         await bridge.stop()
+
+
+# ── macOS: hostname con acento y clave del keychain sólo cuando hace falta ───
+def test_hostname_con_acento_no_entra_al_san_ni_regenera_en_loop(tmp_path, monkeypatch):
+    """Un hostname que no puede ir al SAN (Mac "MacBook-de-…-Corvalán.local")
+    se filtra en wanted_hosts. Antes quedaba en `hosts` sin entrar al SAN y
+    `_leaf_ok` regeneraba la hoja en CADA arranque — en macOS, pedir la clave
+    del keychain cada vez."""
+    monkeypatch.setattr(https_local.socket, "gethostname", lambda: "MacBook-de-Rodrigo-Corvalán.local")
+    monkeypatch.setattr(https_local, "_lan_ip", lambda: None)
+    hosts = https_local.wanted_hosts(["otra-máquina.local", "10.0.0.7"])
+    assert hosts == ["localhost", "127.0.0.1", "::1", "10.0.0.7"]
+    assert not https_local._san_ok("macbook-de-rodrigo-corvalán.local")
+    assert https_local._san_ok("macbook-de-rodrigo.local") and https_local._san_ok("::1")
+    res = https_local.generate(tmp_path, hosts)
+    assert res["regenerated"]
+    res2 = https_local.generate(tmp_path, https_local.wanted_hosts(["otra-máquina.local", "10.0.0.7"]))
+    assert not res2["regenerated"] and res2["reason"] == "vigente"
+
+
+def test_macos_no_pide_la_clave_si_la_ca_ya_esta_confiada(tmp_path, monkeypatch, capsys):
+    """En macOS `security add-trusted-cert` abre el diálogo de la clave del
+    usuario. Con la CA reusada y ya confiada (hoja nueva por cambio de red /
+    IP) no se llama; con la CA nueva o no confiada, sí."""
+    llamadas = []
+    confiada = {"ok": True}
+
+    class _R:
+        def __init__(self, rc):
+            self.returncode, self.stdout, self.stderr = rc, "", ""
+
+    def fake_run(argv, **kw):
+        llamadas.append(argv)
+        if argv[:2] == ["security", "verify-cert"]:
+            return _R(0 if confiada["ok"] else 1)
+        return _R(0)
+
+    monkeypatch.setattr(https_local, "_PLATFORM", "darwin")
+    monkeypatch.setattr(https_local.subprocess, "run", fake_run)
+    monkeypatch.setattr(https_local, "wanted_hosts", lambda extra=None: ["localhost", "127.0.0.1"])
+    # CA nueva (primer arranque): se instala sí o sí
+    assert https_local.main(["--dir", str(tmp_path), "--quiet"]) == 0
+    assert any(a[:2] == ["security", "add-trusted-cert"] for a in llamadas)
+    # hoja nueva con la MISMA CA, ya confiada: ni un diálogo
+    llamadas.clear()
+    assert https_local.main(["--dir", str(tmp_path), "--force"]) == 0
+    assert any(a[:2] == ["security", "verify-cert"] for a in llamadas)
+    assert not any(a[:2] == ["security", "add-trusted-cert"] for a in llamadas)
+    assert "no se pide la clave" in capsys.readouterr().out
+    # misma CA pero NO confiada (el usuario canceló el diálogo): se vuelve a pedir
+    confiada["ok"] = False
+    llamadas.clear()
+    assert https_local.main(["--dir", str(tmp_path), "--force"]) == 0
+    assert any(a[:2] == ["security", "add-trusted-cert"] for a in llamadas)
+    # fuera de macOS la sonda no corre nunca
+    monkeypatch.setattr(https_local, "_PLATFORM", "linux")
+    assert https_local.ca_trusted_macos(tmp_path / "x") is False
+    assert https_local.trust_ca_macos(tmp_path / "x") == (False, "no-macos")
+
+
+def test_cn_de_la_ca_acotado_a_64_bytes_con_hostname_largo(tmp_path, monkeypatch):
+    """El CN de la CA lleva el hostname y RFC 5280 lo acota a 64 bytes:
+    cryptography lo valida y con un nombre largo (runner de macOS de CI, una
+    Mac con nombre de equipo largo) generate() reventaba → sin HTTPS local, el
+    add-in de Excel no arrancaba en esa máquina."""
+    largo = "MacBook-Pro-de-Rodrigo-Corvalan-del-trabajo-con-nombre-larguisimo-1759020000.local"
+    assert len(largo) > https_local._CN_MAX
+    cn = https_local._ca_common_name(largo)
+    assert cn.startswith("OMS Bonos CA local (MacBook-Pro-de-Rodrigo") and cn.endswith(")")
+    assert len(cn.encode("utf-8")) <= https_local._CN_MAX
+    assert https_local._ca_common_name("corta.local") == "OMS Bonos CA local (corta.local)"
+    assert https_local._ca_common_name("") == "OMS Bonos CA local"
+    assert len(https_local._ca_common_name("ñ" * 80).encode("utf-8")) <= https_local._CN_MAX   # bytes, no chars
+    monkeypatch.setattr(https_local.socket, "gethostname", lambda: largo)
+    res = https_local.generate(tmp_path, ["localhost", "127.0.0.1"])
+    assert res["regenerated"] and res["ca_cert"].exists()
+    from cryptography import x509
+    ca = x509.load_pem_x509_certificate(res["ca_cert"].read_bytes())
+    cn_emitido = ca.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
+    assert cn_emitido == cn

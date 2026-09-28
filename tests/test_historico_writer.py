@@ -36,6 +36,20 @@ def _epoch_ms(dt: datetime) -> str:
     return str(int(dt.timestamp() * 1000))
 
 
+def _ahora_habil() -> datetime:
+    """'Ahora' en BA — salvo en fin de semana / feriado, donde es el último día
+    hábil a las 17:05: la suite corre también sábados y domingos (y en CI a
+    cualquier hora UTC) y save_today saltea el finde por diseño
+    (test_save_today_skips_weekend). Los end-to-end prueban el guardado."""
+    ahora = datetime.now(_TZ)
+    if hw._es_habil(ahora.date()):
+        return ahora
+    d = ahora.date()
+    while not hw._es_habil(d):
+        d -= timedelta(days=1)
+    return datetime(d.year, d.month, d.day, 17, 5, tzinfo=_TZ)
+
+
 def _rows_df(fecha: date, *, source: str = "LA", ts: str | None = None) -> pd.DataFrame:
     ts = ts if ts is not None else _epoch_ms(datetime.now(_TZ))
     return pd.DataFrame({
@@ -132,8 +146,9 @@ def test_save_today_skips_feriado_por_min_operados(hist_env, monkeypatch) -> Non
 
 
 def test_save_today_end_to_end_y_refresh(hist_env, monkeypatch) -> None:
-    hoy = datetime.now(_TZ)
-    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date()))
+    hoy = _ahora_habil()
+    monkeypatch.setattr(hw, "_now", lambda: hoy)
+    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date(), ts=_epoch_ms(hoy)))
     monkeypatch.setattr(settings, "historico_autosave_min_operados", 1)
     res = hw.save_today()
     assert res["ok"] is True and res["rows"] == 2 and res["operados"] == 2
@@ -219,8 +234,9 @@ def test_append_reintenta_ante_lock(hist_env, monkeypatch) -> None:
 
 
 def test_save_today_journal_only_con_writer_apagado(hist_env, monkeypatch) -> None:
-    hoy = datetime.now(_TZ)
-    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date()))
+    hoy = _ahora_habil()
+    monkeypatch.setattr(hw, "_now", lambda: hoy)
+    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date(), ts=_epoch_ms(hoy)))
     monkeypatch.setattr(settings, "historico_autosave_min_operados", 1)
     monkeypatch.setattr(settings, "historico_base_writer", False)
     res = hw.save_today()
@@ -284,8 +300,9 @@ def test_save_today_guarda_fx_junto_al_cierre(hist_env, monkeypatch) -> None:
 
     from backend.services import dolares, fx as fx_svc
 
-    hoy = datetime.now(_TZ)
-    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date()))
+    hoy = _ahora_habil()
+    monkeypatch.setattr(hw, "_now", lambda: hoy)
+    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date(), ts=_epoch_ms(hoy)))
     monkeypatch.setattr(settings, "historico_autosave_min_operados", 1)
     monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": SimpleNamespace(
         ccl=1520.0, usb=1490.0, canje=1520.0 / 1490.0 - 1.0, ccl_base="AL30"))
