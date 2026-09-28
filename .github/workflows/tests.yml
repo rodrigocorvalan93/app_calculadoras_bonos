@@ -7,23 +7,39 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A mano (Actions → tests → Run workflow): elegir la rama y la versión de
+  # Python — p. ej. 3.14 es lo que instala `brew install python` en una Mac
+  # nueva; el default 3.12 es el del servicio Windows.
+  workflow_dispatch:
+    inputs:
+      python:
+        description: "Versión de Python (default 3.12)"
+        default: "3.12"
+        required: false
 
 jobs:
   pytest:
-    # Ubuntu + Windows: la app se despliega también como servicio Windows y el
-    # add-in de Excel corre ahí; un job sólo-Linux no vio que os.fchmod no
-    # existe en Windows (ningún guardado de usuarios funcionaba en ese server).
+    # Ubuntu + Windows + macOS: la app se despliega como servicio Windows (y el
+    # add-in de Excel corre ahí), pero el desk también la levanta en Macs con
+    # correr_app.command. Un job sólo-Linux no vio que os.fchmod no existe en
+    # Windows; sin macOS no se ve un wheel arm64 que falta, el /tmp simlinkeado
+    # a /private/var o una diferencia de punto flotante de Accelerate.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      # utils.py importa matplotlib al cargar: sin display (y en el runner de
+      # macOS sin sesión gráfica útil) el backend Agg evita que un test toque
+      # la GUI. La app no dibuja nada con matplotlib.
+      MPLBACKEND: Agg
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ github.event.inputs.python || '3.12' }}
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: Instalar dependencias
