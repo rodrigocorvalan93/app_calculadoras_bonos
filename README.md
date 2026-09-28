@@ -205,6 +205,17 @@ remapean solas a `~/Library/CloudStorage/OneDrive-...`
 este dispositivo* en OneDrive. La suite corre en CI también en macOS (arm64) en
 cada push, además de Ubuntu y Windows.
 
+**Dónde clonar en la Mac**: FUERA de OneDrive (p. ej. `~/Code/app_calculadoras_bonos`).
+Un `.git` adentro de la biblioteca compartida se sincroniza entre máquinas: locks
+ajenos ("File exists"), refs que cambian abajo del fetch ("is at X but expected Y")
+y objetos a 1 KB/s. Las bases de Delta se siguen leyendo del OneDrive porque las
+rutas salen de `secrets.txt`, no de dónde vive el código; copiá `secrets.txt`,
+`certs/` (evita volver a pedir la clave del keychain) y `auth_store.json`. La
+carpeta compartida queda para el equipo, con `git pull` desde UNA sola máquina.
+Si igual hay que destrabar un pull ahí: `find .git -name '*.lock' -delete`,
+`git update-ref -d refs/remotes/origin/main`, `git fetch --prune origin`,
+`git pull --ff-only`.
+
 ### Credenciales
 
 Archivos locales (NO versionados, ver `.gitignore`):

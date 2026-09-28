@@ -557,6 +557,11 @@ Invariantes que mantienen la app andando en Mac — CI la corre en
 - **Launcher**: venv en `~/.venvs/bonos` (fuera de OneDrive), `ulimit -S -n
   4096` (una terminal de macOS arranca con tope 256 FDs), `TLS_TARGET_PORT =
   PORT`, shebang zsh y sin CRLF (test).
+- **Clon fuera de OneDrive**: un `.git` adentro de la biblioteca compartida se
+  sincroniza entre máquinas (locks ajenos, refs que cambian abajo del fetch,
+  objetos a 1 KB/s). En la Mac el código va en `~/Code/...` clonado con git;
+  las bases se leen igual del OneDrive vía `secrets.txt` (deltapaths). La
+  carpeta compartida es para el equipo, con `git pull` desde UNA máquina.
 - **Safari / WebKit** (también el WKWebView de Excel para Mac): escribir en el
   portapapeles sólo dentro del gesto → `app.js deliver` arma el
   `ClipboardItem` con la PROMESA del PNG y reintenta con el Blob; todo
