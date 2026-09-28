@@ -4,8 +4,11 @@
 name: tests
 
 on:
+  # Cada push a CUALQUIER rama corre la suite en los tres sistemas — así una
+  # rama de trabajo se verifica en macOS/Windows ANTES de abrir el PR (el
+  # PR vuelve a correr sobre el merge con main). El costo es cero: repo
+  # público, runners gratis.
   push:
-    branches: [main]
   pull_request:
   # A mano (Actions → tests → Run workflow): elegir la rama y la versión de
   # Python — p. ej. 3.14 es lo que instala `brew install python` en una Mac
