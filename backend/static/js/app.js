@@ -51,8 +51,12 @@ window.lsSet = function (k, v) {
 })();
 
 (function () {
-  // htmx custom event hooks (debug logging behind a flag).
-  if (window.localStorage.getItem('yas_debug') === '1') {
+  // htmx custom event hooks (debug logging behind a flag). localStorage puede
+  // TIRAR (Safari con "bloquear todas las cookies" / datos de sitio): si esta
+  // línea explota, muere el resto del archivo — motor live incluido.
+  var debug = false;
+  try { debug = window.localStorage.getItem('yas_debug') === '1'; } catch (e) { /* sin storage */ }
+  if (debug) {
     document.body.addEventListener('htmx:afterRequest', function (evt) {
       console.log('[htmx]', evt.detail.requestConfig.verb, evt.detail.requestConfig.path, evt.detail.xhr.status);
     });
@@ -1388,16 +1392,36 @@ window.lsSet = function (k, v) {
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
   }
-  function deliver(canvas, name, btn) {
-    canvas.toBlob(function (blob) {
-      if (!blob) return;
-      var can = !!(navigator.clipboard && navigator.clipboard.write && window.ClipboardItem);
-      if (!can) { download(blob, name); feedback(btn, false); return; }
-      try {
-        navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-          .then(function () { feedback(btn, true); }, function () { download(blob, name); feedback(btn, false); });
-      } catch (e) { download(blob, name); feedback(btn, false); }
-    }, 'image/png');
+  function toPng(canvas) {
+    return new Promise(function (resolve, reject) {
+      canvas.toBlob(function (blob) { if (blob) resolve(blob); else reject(new Error('toBlob')); }, 'image/png');
+    });
+  }
+  // Safari sólo deja escribir en el portapapeles DENTRO del gesto del click, y
+  // rasterizar (SVG → <img> → canvas → PNG) es async: el ClipboardItem se arma
+  // ya con la PROMESA del PNG (patrón del Async Clipboard API; Chrome/Edge/
+  // Firefox también lo aceptan). Si el browser no admite promesas ahí, se
+  // reintenta con el Blob resuelto (el camino de siempre); sin Clipboard API
+  // (http por LAN/Tailscale) se descarga el PNG.
+  function deliver(png, name, btn) {
+    var can = !!(navigator.clipboard && navigator.clipboard.write && window.ClipboardItem);
+    var fail = function () { feedback(btn, false); };
+    if (!can) {
+      png.then(function (blob) { download(blob, name); feedback(btn, false); }, fail);
+      return;
+    }
+    var conBlob = function () {
+      png.then(function (blob) {
+        try {
+          navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+            .then(function () { feedback(btn, true); }, function () { download(blob, name); feedback(btn, false); });
+        } catch (e) { download(blob, name); feedback(btn, false); }
+      }, fail);
+    };
+    try {
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+        .then(function () { feedback(btn, true); }, conBlob);
+    } catch (e) { conBlob(); }
   }
   function withBg(src, w, h) {
     var c = document.createElement('canvas');
@@ -1412,7 +1436,7 @@ window.lsSet = function (k, v) {
   function copyUplot(box, name, btn) {
     var src = box.querySelector('canvas');
     if (!src) return;
-    deliver(withBg(src, src.width, src.height), name, btn);
+    deliver(toPng(withBg(src, src.width, src.height)), name, btn);
   }
   // Una imagen suelta no ve el CSS de la página: todo lo que el SVG toma de
   // clases (.fut-chart .pa-band1 { fill: var(--accent); opacity: .14 }, .hc-*,
@@ -1454,14 +1478,19 @@ window.lsSet = function (k, v) {
     var s = new XMLSerializer().serializeToString(clone);
     s = s.replace(/var\(--([\w-]+)(?:\s*,\s*([^()]*))?\)/g, function (m, v, fb) { return cssVar('--' + v, (fb || '#888').trim()); });
     if (!/xmlns=/.test(s)) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    var img = new Image();
-    img.onload = function () {
-      var c = withBg(null, w * 2, h * 2);
-      c.getContext('2d').drawImage(img, 0, 0, w * 2, h * 2);
-      deliver(c, name, btn);
-    };
-    img.onerror = function () { feedback(btn, false); };
-    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+    // La promesa del PNG se entrega YA (dentro del gesto del click, ver deliver);
+    // el <img> la resuelve cuando termina de decodificar el SVG.
+    var png = new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        var c = withBg(null, w * 2, h * 2);
+        c.getContext('2d').drawImage(img, 0, 0, w * 2, h * 2);
+        toPng(c).then(resolve, reject);
+      };
+      img.onerror = function () { reject(new Error('svg')); };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+    });
+    deliver(png, name, btn);
   }
   function mkBtn(title) {
     var b = document.createElement('button');

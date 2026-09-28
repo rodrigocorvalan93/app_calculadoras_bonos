@@ -48,3 +48,9 @@ def test_copy_svg_fragmentos_en_app_js() -> None:
                  "serializeToString(clone)", "clone.setAttribute('width'", "cs.display === 'none'"):
         assert frag in bloque, frag
     assert "serializeToString(svg)" not in bloque
+    # Safari sólo escribe en el portapapeles DENTRO del gesto: el ClipboardItem
+    # se arma con la PROMESA del PNG (la rasterización es async) y se entrega
+    # sincrónicamente desde el click; con Blob resuelto sólo como reintento.
+    assert "function toPng(canvas)" in bloque and "deliver(png, name, btn)" in bloque
+    assert "new ClipboardItem({ 'image/png': png })" in bloque
+    assert bloque.index("new ClipboardItem({ 'image/png': png })") > bloque.index("new ClipboardItem({ 'image/png': blob })")

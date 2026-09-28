@@ -67,6 +67,29 @@ _LEAF_DIAS_MAX_APPLE = 825
 _CRL_PORT_DEFAULT = 8000
 _CRL_DIAS = 7                        # vigencia de cada CRL firmada on-demand
 
+# Constante (no `sys.platform` inline) para que los tests de la rama macOS /
+# Windows corran en cualquier runner parcheándola — la lógica es la misma.
+_PLATFORM = sys.platform
+
+# RFC 5280 ub-common-name: cryptography ≥ 42 valida el largo del CN y REVIENTA
+# con más de 64 bytes — y el CN de la CA lleva el hostname (una Mac con nombre
+# largo, el runner de macOS de CI: "…Attribute's length must be <= 64").
+_CN_MAX = 64
+
+
+def _ca_common_name(host: Optional[str] = None) -> str:
+    """'OMS Bonos CA local (<hostname>)' acotado a 64 bytes UTF-8: se recorta
+    el hostname, nunca la parte fija."""
+    base = "OMS Bonos CA local"
+    host = (socket.gethostname() if host is None else host).strip()
+    if not host:
+        return base
+    cn = f"{base} ({host})"
+    while host and len(cn.encode("utf-8")) > _CN_MAX:
+        host = host[:-1]
+        cn = f"{base} ({host})"
+    return cn
+
 
 def default_crl_urls(port: int = _CRL_PORT_DEFAULT) -> List[str]:
     """URLs del punto de distribución de CRL (extensión CDP de la hoja).
@@ -100,19 +123,43 @@ def _lan_ip() -> Optional[str]:
         return None
 
 
+def _san_ok(h: str) -> bool:
+    """¿`h` puede entrar al SAN (IP o DNSName en A-label)? Un hostname con
+    acento — "MacBook-de-Rodrigo-Corvalán.local", común en Macs en castellano —
+    no: cryptography lo rechaza. Si igual quedaba en `hosts`, `_leaf_ok` nunca
+    lo encontraba en el SAN y regeneraba la hoja EN CADA ARRANQUE, que en macOS
+    es pedir la clave del keychain cada vez. Se filtra ANTES."""
+    try:
+        ipaddress.ip_address(h)
+        return True
+    except ValueError:
+        pass
+    if not h.isascii():
+        return False
+    try:
+        from cryptography import x509
+        x509.DNSName(h)
+    except ImportError:          # sin el paquete: main() ya avisó; el filtro ASCII alcanza
+        return True
+    except ValueError:
+        return False
+    return True
+
+
 def wanted_hosts(extra: Optional[List[str]] = None) -> List[str]:
     """Hosts que el certificado tiene que cubrir. localhost siempre; la IP LAN
-    si existe (para el flujo server centralizado); extras por CLI/env."""
+    si existe (para el flujo server centralizado); el hostname y los extras por
+    CLI/env sólo si pueden ir en el SAN (ver `_san_ok`)."""
     hosts = ["localhost", "127.0.0.1", "::1"]
     ip = _lan_ip()
     if ip:
         hosts.append(ip)
     hostname = socket.gethostname().lower()
-    if hostname and hostname not in hosts:
+    if hostname and hostname not in hosts and _san_ok(hostname):
         hosts.append(hostname)
     for h in extra or []:
         h = h.strip().lower()
-        if h and h not in hosts:
+        if h and h not in hosts and _san_ok(h):
             hosts.append(h)
     return hosts
 
@@ -275,7 +322,7 @@ def generate(cert_dir: Optional[Path] = None, hosts: Optional[List[str]] = None,
     else:
         ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         ca_name = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, f"OMS Bonos CA local ({socket.gethostname()})"),
+            x509.NameAttribute(NameOID.COMMON_NAME, _ca_common_name()),
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "OMS Bonos"),
         ])
         ca_cert = (
@@ -371,7 +418,7 @@ def build_crl(cert_dir: Optional[Path] = None, days: int = _CRL_DIAS) -> bytes:
 def trust_ca_windows(ca_cert_path: Path) -> Tuple[bool, str]:
     """Confía la CA en el store Root DEL USUARIO (certutil -user: sin admin;
     WebView2/Edge/Chrome lo leen). Idempotente con -f. Sólo Windows."""
-    if sys.platform != "win32":
+    if _PLATFORM != "win32":
         return False, "no-windows (confiar a mano si hace falta)"
     try:
         r = subprocess.run(
@@ -389,7 +436,7 @@ def trust_ca_macos(ca_cert_path: Path) -> Tuple[bool, str]:
     """Confía la CA en el keychain de LOGIN del usuario (sin sudo; Safari,
     Chrome y WKWebView —Excel para Mac— lo leen). `security` pide la clave
     del usuario una vez (diálogo GUI). Idempotente. Sólo macOS."""
-    if sys.platform != "darwin":
+    if _PLATFORM != "darwin":
         return False, "no-macos"
     keychain = Path.home() / "Library" / "Keychains" / "login.keychain-db"
     try:
@@ -405,12 +452,29 @@ def trust_ca_macos(ca_cert_path: Path) -> Tuple[bool, str]:
     return False, f"security rc={r.returncode}: {detalle[-1] if detalle else '?'}"
 
 
+def ca_trusted_macos(ca_cert_path: Path) -> bool:
+    """¿Esta CA YA está confiada para SSL en la Mac? `security verify-cert`
+    evalúa el certificado contra los trust settings del usuario, sin red (-L)
+    y sin diálogo; `-l` porque la hoja que se verifica es una CA. Sólo un 0
+    cuenta como confiada: ante cualquier duda se vuelve a pedir la confianza
+    (idempotente). Sólo macOS."""
+    if _PLATFORM != "darwin":
+        return False
+    try:
+        r = subprocess.run(
+            ["security", "verify-cert", "-c", str(ca_cert_path), "-p", "ssl", "-l", "-L"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
 def trust_ca(ca_cert_path: Path) -> Tuple[bool, str]:
     """Confianza de la CA según la plataforma (Windows: certutil; macOS:
     keychain de login; Linux: a mano)."""
-    if sys.platform == "win32":
+    if _PLATFORM == "win32":
         return trust_ca_windows(ca_cert_path)
-    if sys.platform == "darwin":
+    if _PLATFORM == "darwin":
         return trust_ca_macos(ca_cert_path)
     return False, "confiar a mano (Linux: copiar la CA a /usr/local/share/ca-certificates y update-ca-certificates)"
 
@@ -446,11 +510,18 @@ def main(argv: Optional[List[str]] = None) -> int:
                if res["ca_reused"] else "CA + certificado nuevos")
         say(f"[https] {que} en {cert_dir} para: {', '.join(res['hosts'])} "
             f"(motivo: {res['reason']})")
-        ok, det = trust_ca(res["ca_cert"])
+        # macOS: `security add-trusted-cert` pide la clave del usuario CADA vez.
+        # Una notebook cambia de red seguido (IP LAN / hostname nuevos ⇒ hoja
+        # nueva con la MISMA CA): si la CA ya está confiada no hay nada que
+        # instalar y no se molesta con el diálogo.
+        if _PLATFORM == "darwin" and res["ca_reused"] and ca_trusted_macos(res["ca_cert"]):
+            ok, det = True, "CA ya confiada en el keychain (hoja nueva, misma CA: no se pide la clave)"
+        else:
+            ok, det = trust_ca(res["ca_cert"])
         say(f"[https] {det}" if ok else f"[https] CA no confiada automáticamente: {det}")
-        if not ok and sys.platform == "win32":
+        if not ok and _PLATFORM == "win32":
             print(f"[https] a mano:  certutil -user -addstore -f Root {res['ca_cert']}")
-        if not ok and sys.platform == "darwin":
+        if not ok and _PLATFORM == "darwin":
             print(f"[https] a mano:  security add-trusted-cert -r trustRoot -p ssl "
                   f"-k ~/Library/Keychains/login.keychain-db {res['ca_cert']}")
         say("[https] reiniciá la app (el puente carga el cert al arrancar) y cerrá "
@@ -460,7 +531,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Re-asegurar la confianza es gratis e idempotente (p.ej. certs copiados
         # de otra máquina, o el store del usuario limpiado). En macOS pediría la
         # clave del usuario cada vez → sólo cuando se (re)genera.
-        if sys.platform == "win32":
+        if _PLATFORM == "win32":
             ok, det = trust_ca_windows(res["ca_cert"])
             if not ok:
                 print(f"[https] OJO, la CA no está confiable: {det}")

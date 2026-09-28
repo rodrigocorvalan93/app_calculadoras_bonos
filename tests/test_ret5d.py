@@ -83,7 +83,7 @@ def test_ref_5d_cacheado_por_dia_y_base_y_sin_base(base_limpia) -> None:
 
 
 @pytest.mark.asyncio
-async def test_http_mercado_muestra_5d(base_limpia) -> None:
+async def test_http_mercado_muestra_5d(base_limpia, monkeypatch) -> None:
     """Fila de Mercado con last=105 y cierre de hace 5 ruedas=100 → 5D = +5,00%
     (verde) con la fecha de referencia en el title; sin referencia → '·'."""
     from backend.main import app
@@ -93,7 +93,15 @@ async def test_http_mercado_muestra_5d(base_limpia) -> None:
     assert len(codes) >= 2
     c0, c1 = codes[0], codes[1]
     from backend.locale_ar import hoy_ba
+    from backend.services.historico_writer import _es_habil
     hoy = hoy_ba()                              # la ruta cuenta ruedas en fecha BA, no UTC
+    # Sábado / domingo / feriado: el ancla de ref_5d es el último hábil, que
+    # acá quedaría DENTRO de la base sintética (y el cierre del ancla no cuenta
+    # como rueda anterior). Se fija "hoy" en ese hábil para la ruta y para el
+    # test: la suite corre también los fines de semana.
+    while not _es_habil(hoy):
+        hoy -= timedelta(days=1)
+    monkeypatch.setattr("backend.locale_ar.hoy_ba", lambda: hoy)
     _base_sintetica([c0], hoy, ruedas=8)
     historico_byma._cache["by_code"][c0]["vals"]["Last Price"][-5] = 100.0
     store = marketdata_store.get_store()

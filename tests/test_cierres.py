@@ -38,9 +38,23 @@ def env(tmp_path, monkeypatch):
     cierres.refresh()
 
 
-def _seed_store():
-    store = marketdata_store.get_store()
+def _ahora_habil() -> datetime:
+    """'Ahora' en BA — salvo en fin de semana / feriado, donde es el último día
+    hábil a las 17:05: la suite corre también sábados y domingos (y en CI a
+    cualquier hora UTC) y save_today / recapturar_cierre saltean el finde por
+    diseño. Estos tests prueban el guardado; el calendario tiene los suyos."""
     ahora = datetime.now(_TZ)
+    if hw._es_habil(ahora.date()):
+        return ahora
+    d = ahora.date()
+    while not hw._es_habil(d):
+        d -= timedelta(days=1)
+    return datetime(d.year, d.month, d.day, 17, 5, tzinfo=_TZ)
+
+
+def _seed_store(ahora: datetime | None = None):
+    store = marketdata_store.get_store()
+    ahora = ahora or datetime.now(_TZ)
     hoy_ms = str(int(ahora.timestamp() * 1000))
     ayer_ms = str(int((ahora - timedelta(days=1)).timestamp() * 1000))
     store.update_from_md("MERV - XMEV - GGAL - 24hs", {"LA": {"price": 5100.0, "size": 10, "date": hoy_ms},
@@ -55,8 +69,8 @@ def _seed_store():
     return ahora.date()
 
 
-def _df_bonos(hoy: date) -> pd.DataFrame:
-    ts = str(int(datetime.now(_TZ).timestamp() * 1000))
+def _df_bonos(hoy: date, ahora: datetime | None = None) -> pd.DataFrame:
+    ts = str(int((ahora or datetime.now(_TZ)).timestamp() * 1000))
     return pd.DataFrame({
         "symbol": ["MERV - XMEV - TX26 - 24hs", "MERV - XMEV - TX26 - 24hs"],
         "Código": ["TX26j", "TX26"], "Last Price": [1500.0, 1500.0], "Close Price": [1490.0, 1490.0],
@@ -107,9 +121,11 @@ def test_build_rows_particion_keep_last_y_journal(env, monkeypatch) -> None:
 
 
 def test_recaptura(env, monkeypatch) -> None:
-    hoy = _seed_store()
+    ahora = _ahora_habil()
+    monkeypatch.setattr(hw, "_now", lambda: ahora)
+    hoy = _seed_store(ahora)
     monkeypatch.setattr(settings, "historico_autosave_min_operados", 3)
-    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _df_bonos(hoy))
+    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _df_bonos(hoy, ahora))
     r = hw.recapturar_cierre()
     assert r["ok"] and r["filas"] >= 6 and os.path.isfile(r["path"])
     assert r.get("acciones_filas", 0) >= 1                              # GGAL operó → parquet de acciones
@@ -118,7 +134,7 @@ def test_recaptura(env, monkeypatch) -> None:
     monkeypatch.setattr(hw, "_now", lambda: datetime(2026, 9, 12, 17, 35, tzinfo=_TZ))
     assert hw.recapturar_cierre()["skipped"] == "fin de semana"
     # base_writer=0 → sólo journal (sin partición nueva)
-    monkeypatch.setattr(hw, "_now", lambda: datetime.now(_TZ))
+    monkeypatch.setattr(hw, "_now", lambda: ahora)
     monkeypatch.setattr(settings, "historico_base_writer", False)
     os.remove(r["path"])
     r2 = hw.recapturar_cierre()

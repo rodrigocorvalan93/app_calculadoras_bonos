@@ -32,6 +32,9 @@ AUTOR = "Rodrigo Corvalán"
 PARA = "Delta Asset Management · Galileo · Latin Securities"
 _ROOT = Path(__file__).resolve().parents[1]
 
+_DARWIN = sys.platform == "darwin"       # constante: los tests parchean la rama macOS
+_clt_ok: Optional[bool] = None          # cache de `xcode-select -p` (una vez por proceso)
+
 _GLIFO = {logging.DEBUG: "·", logging.INFO: "·", logging.WARNING: "!",
           logging.ERROR: "x", logging.CRITICAL: "x"}
 _PREFIJOS = ("backend.services.", "backend.routes.", "backend.tools.", "backend.")
@@ -109,10 +112,32 @@ def instalar(level: int = logging.INFO) -> None:
 
 
 # ── Banner ────────────────────────────────────────────────────────────────────
+def _git_disponible() -> bool:
+    """En macOS, /usr/bin/git es un STUB de Apple mientras no estén las Command
+    Line Tools (una Mac con el Python de python.org y la carpeta llegada por
+    OneDrive no las tiene): correrlo abre el diálogo "instalar las herramientas
+    de desarrollo" — y `version()` corre en cada arranque. `xcode-select -p`
+    dice si están, sin diálogo; si no, el banner lee .git a mano. En otras
+    plataformas siempre True (sin git en el PATH, subprocess falla en silencio
+    como hasta ahora)."""
+    global _clt_ok
+    if not _DARWIN:
+        return True
+    if _clt_ok is None:
+        try:
+            r = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True, timeout=2.0)
+            _clt_ok = r.returncode == 0
+        except Exception:  # noqa: BLE001
+            _clt_ok = False
+    return _clt_ok
+
+
 def version() -> str:
     """'rama @ sha7 · AAAA-MM-DD' desde git (si está en el PATH) o leyendo
     .git a mano; '' si no hay repo. Nunca tira."""
     try:
+        if not _git_disponible():
+            raise OSError("git no disponible (macOS sin Command Line Tools)")
         log = subprocess.run(["git", "-C", str(_ROOT), "log", "-1", "--format=%h %cs", "HEAD"],
                              capture_output=True, text=True, timeout=2.0)
         if log.returncode == 0 and log.stdout.strip():

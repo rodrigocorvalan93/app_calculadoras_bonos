@@ -130,6 +130,40 @@ def test_app_ya_corriendo_sonda_http(monkeypatch) -> None:
     monkeypatch.setenv("PORT", "0"); assert consola.puerto_configurado() is None
 
 
+def test_version_en_mac_sin_command_line_tools_no_invoca_el_stub_de_git(monkeypatch) -> None:
+    """macOS sin Command Line Tools: /usr/bin/git es un stub de Apple que abre
+    el diálogo de instalación. `xcode-select -p` ≠ 0 → no se llama a git (el
+    banner lee .git a mano); con las CLT, git como siempre. Una sonda por
+    proceso."""
+    llamadas = []
+    clt = {"rc": 2}
+
+    class _R:
+        def __init__(self, rc, out=""):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    def fake_run(argv, **kw):
+        llamadas.append(argv[0])
+        if argv[0] == "xcode-select":
+            return _R(clt["rc"])
+        if argv[0] == "git":
+            return _R(0, "abc1234 2026-09-28\n") if argv[3] == "log" else _R(0, "main\n")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(consola, "_DARWIN", True)
+    monkeypatch.setattr(consola, "_clt_ok", None)
+    monkeypatch.setattr(consola.subprocess, "run", fake_run)
+    v = consola.version()
+    assert "git" not in llamadas and llamadas.count("xcode-select") == 1
+    assert isinstance(v, str)                       # .git a mano (o '' sin repo)
+    consola.version()
+    assert llamadas.count("xcode-select") == 1      # cacheado
+    clt["rc"] = 0
+    monkeypatch.setattr(consola, "_clt_ok", None)
+    assert consola.version() == "main @ abc1234 · 2026-09-28"
+    assert "git" in llamadas
+
+
 def test_main_usa_consola_y_los_launchers_estan_ordenados() -> None:
     main = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
     assert "consola.instalar(" in main and "consola.imprimir_banner(" in main and "logging.basicConfig" not in main
@@ -142,3 +176,9 @@ def test_main_usa_consola_y_los_launchers_estan_ordenados() -> None:
         assert "/healthz" in launcher and "OMS_RELOAD=1" in launcher     # 2ª instancia → sólo el navegador; dev sin chequeo
     assert bat.isascii()                                                # cmd.exe sin sorpresas de code page
     assert "consola.app_ya_corriendo(" in main and 'os.environ.get("OMS_RELOAD") != "1"' in main
+    # macOS: FDs por proceso (tope 256 en una terminal), el puente apunta al
+    # puerto real y certifi sólo si contesta (SSL_CERT_FILE vacío = sin CAs)
+    assert cmd.startswith("#!/bin/zsh") and "ulimit -S -n 4096" in cmd
+    assert 'export TLS_TARGET_PORT="${TLS_TARGET_PORT:-$PORT}"' in cmd
+    assert '[ -n "$CERTIFI" ] && export SSL_CERT_FILE="$CERTIFI"' in cmd
+    assert "\r" not in cmd                                              # CRLF rompe el shebang en zsh

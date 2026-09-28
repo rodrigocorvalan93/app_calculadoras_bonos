@@ -195,12 +195,15 @@ pip install -r backend/requirements.txt   # la app FastAPI (requirements.txt de 
 **macOS**: doble click en `correr_app.command` (o en Terminal `zsh correr_app.command`;
 `./correr_app.command dev` = auto-reload). Crea el venv en `~/.venvs/bonos` (fuera de
 OneDrive), instala `backend/requirements.txt`, genera y confía el certificado del
-add-in de Excel (pide la clave del usuario una vez) y abre el navegador. Si la
-carpeta llegó por OneDrive y no por `git clone`: `chmod +x correr_app.command` y, si
-Gatekeeper lo frena, botón derecho → Abrir. Las rutas `%USERPROFILE%\...` de
-`secrets.txt` se remapean solas a `~/Library/CloudStorage/OneDrive-...`
+add-in de Excel y abre el navegador. La clave del usuario se pide UNA vez (la CA
+nueva); un certificado nuevo por cambio de red/IP con la misma CA ya confiada no la
+vuelve a pedir. No hacen falta `git` ni las Command Line Tools. Si la carpeta llegó
+por OneDrive y no por `git clone`: `chmod +x correr_app.command` y, si Gatekeeper lo
+frena, botón derecho → Abrir. Las rutas `%USERPROFILE%\...` de `secrets.txt` se
+remapean solas a `~/Library/CloudStorage/OneDrive-...`
 (`backend/services/deltapaths.py`); marcá "Delta Bases" como *Mantener siempre en
-este dispositivo* en OneDrive.
+este dispositivo* en OneDrive. La suite corre en CI también en macOS (arm64) en
+cada push, además de Ubuntu y Windows.
 
 ### Credenciales
 
