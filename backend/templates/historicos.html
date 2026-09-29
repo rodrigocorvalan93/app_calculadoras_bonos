@@ -3,7 +3,7 @@
 {% block tab_historicos %}active{% endblock %}
 
 {% block content %}
-<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false, fechasLoaded: false, seriesLoaded: false, accionesLoaded: false }">
+<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false, fechasLoaded: false, seriesLoaded: false, accionesLoaded: false, compLoaded: false }">
   <header class="yas-header">
     <h1>Históricos</h1>
     <p class="muted">Series macro del BCRA y evolución histórica de tasas por curva (BYMA). Rango personalizable. Lectura única + cache; <strong>Actualizar</strong> relee.</p>
@@ -37,6 +37,9 @@
     <button @click="tab='acciones'; if(!accionesLoaded){accionesLoaded=true; $nextTick(()=>htmx.trigger('#hist-acciones','reveal'))}"
             :style="tab==='acciones' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
             style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Acciones (price action)</button>
+    <button @click="tab='comp'; if(!compLoaded){compLoaded=true; $nextTick(()=>htmx.trigger('#hist-comp','reveal'))}"
+            :style="tab==='comp' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
+            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">⚖ Comparar (COMP)</button>
   </div>
 
   {# ── Macro (BCRA) ── #}
@@ -122,6 +125,15 @@
   <div x-show="tab==='acciones'" x-cloak>
     <div id="hist-acciones" hx-get="/historicos/acciones" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
       <p class="muted" style="padding:10px">Cargando price action…</p>
+    </div>
+  </div>
+
+  {# ── COMP: varios activos en un gráfico, base 100 / % / nivel (lazy: numpy
+     sobre las mismas fuentes que Acciones, HTML cacheado por firma; el chart
+     lo dibuja charts.js con el JSON embebido) ── #}
+  <div x-show="tab==='comp'" x-cloak>
+    <div id="hist-comp" hx-get="/historicos/comp" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
+      <p class="muted" style="padding:10px">Cargando comparación…</p>
     </div>
   </div>
 </section>

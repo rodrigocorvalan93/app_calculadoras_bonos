@@ -13,6 +13,65 @@
   }
   function fmtPct(v) { return (v == null) ? "" : (v.toFixed(2).replace(".", ",") + "%"); }
   function fmtNum(v) { return (v == null) ? "" : v.toFixed(2).replace(".", ","); }
+  // Fechas de las series históricas: el server manda la MEDIANOCHE UTC de cada
+  // rueda. Formatearlas con el reloj local corría la etiqueta un día para
+  // atrás en Buenos Aires (UTC-3 → "21:00 del día anterior"): eje, leyenda y
+  // tabla decían 25/09 para el dato del 26/09. Todo en UTC.
+  function utcTz(ts) { return uPlot.tzDate(new Date(ts * 1e3), "Etc/UTC"); }
+  function utcDia(v) { return uPlot.fmtDate("{DD}/{MM}/{YYYY}")(utcTz(v)); }
+  // Eje x en es-AR (DD/MM; con el año cuando el rango pasa de un año) — el
+  // default de uPlot es M/D.
+  function ejeFechas(u, vals) {
+    var span = vals.length > 1 ? (vals[vals.length - 1] - vals[0]) : 0;
+    var f = uPlot.fmtDate(span > 365 * 86400 ? "{DD}/{MM}/{YY}" : "{DD}/{MM}");
+    return vals.map(function (v) { return f(utcTz(v)); });
+  }
+  // Color de una serie ya inicializada: uPlot envuelve `stroke` en una función
+  // (fnOrSelf) y deja el valor resuelto en `_stroke`. Asignar la función a
+  // ctx.fillStyle se ignora → las etiquetas al final de cada línea salían con
+  // el fillStyle anterior (negro: invisibles en el tema oscuro).
+  function seriesColor(u, si) {
+    var s = u.series[si];
+    if (s._stroke != null) return s._stroke;
+    return (typeof s.stroke === "function") ? s.stroke(u, si) : s.stroke;
+  }
+  // Etiqueta al final de cada línea visible (ticker [+ valor]), a la derecha
+  // del último punto (en el padding derecho del chart), en píxeles del canvas
+  // (escala por pxRatio). Las que caerían encima de otra se CORREN
+  // verticalmente (apiladas con un mínimo de separación, el bloque entero sube
+  // si se pasa del borde inferior) — antes se omitían y un activo que cerraba
+  // pegado a otro se quedaba sin nombre. textAlign se fija explícitamente:
+  // uPlot deja el estado del eje y ("right") en el contexto y las etiquetas
+  // salían hacia la IZQUIERDA, pisando las líneas.
+  function etiquetasFinales(u, texto) {
+    var ctx = u.ctx, R = u.pxRatio || window.devicePixelRatio || 1, gap = 12 * R;
+    var X = u.data[0], items = [];
+    for (var si = 1; si < u.series.length; si++) {
+      if (!u.series[si].show) continue;
+      var ys = u.data[si], li = -1;
+      for (var i = ys.length - 1; i >= 0; i--) { if (ys[i] != null) { li = i; break; } }
+      if (li < 0) continue;
+      items.push({ si: si, v: ys[li], x: u.valToPos(X[li], "x", true), y: u.valToPos(ys[li], "y", true) });
+    }
+    if (!items.length) return;
+    items.sort(function (a, b) { return a.y - b.y; });
+    var top = u.bbox.top + gap / 2, bot = u.bbox.top + u.bbox.height - gap / 2, k;
+    for (k = 0; k < items.length; k++) {
+      var y = Math.max(items[k].y, k > 0 ? items[k - 1].ly + gap : top);
+      items[k].ly = y;
+    }
+    var exceso = items[items.length - 1].ly - bot;
+    if (exceso > 0) for (k = 0; k < items.length; k++) items[k].ly -= exceso;
+    ctx.save();
+    ctx.font = Math.round(10 * R) + "px system-ui,-apple-system,sans-serif";
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    for (k = 0; k < items.length; k++) {
+      var it = items[k];
+      ctx.fillStyle = seriesColor(u, it.si);
+      ctx.fillText(texto(u.series[it.si], it.v), it.x + 5 * R, it.ly);
+    }
+    ctx.restore();
+  }
 
   // ── Tabla de Gráficos: filas desde el payload de /graficos/data ────────────
   // Lo que el chart dibuja como puntos, en cuadro: la curva principal en el
@@ -726,7 +785,7 @@
     var u = null, lastJ = null;
     box.style.position = "relative";
 
-    function fmtDia(v) { return uPlot.fmtDate("{DD}/{MM}/{YYYY}")(new Date(v * 1000)); }
+    function fmtDia(v) { return utcDia(v); }
 
     function draw() {
       var j = lastJ;
@@ -746,8 +805,9 @@
       }
       var opts = {
         width: box.clientWidth || 900, height: 420,
+        tzDate: utcTz,
         scales: { x: { time: true } },
-        axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD } },
+        axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, values: ejeFechas },
                { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: 60 }],
         series: [{ value: function (uu, v) { return v == null ? "" : fmtDia(v); } }, serie],
         cursor: { focus: { prox: 24 } },
@@ -825,7 +885,7 @@
           box.appendChild(e); return;
         }
         var data = [j.x].concat(j.series.map(function (s) { return s.y; }));
-        var series = [{ value: function (uu, v) { return v == null ? "" : uPlot.fmtDate("{DD}/{MM}/{YYYY}")(new Date(v * 1000)); } }]
+        var series = [{ label: "Fecha", value: function (uu, v) { return v == null ? "" : utcDia(v); } }]
           .concat(j.series.map(function (s, i) {
             return { label: s.code, stroke: PAL[i % PAL.length], width: 1.4, points: { show: false },
                      value: function (uu, v) { return fmtPct(v); } };
@@ -833,8 +893,9 @@
         var bands = j.bands;
         var opts = {
           width: box.clientWidth || 900, height: 520,
+          tzDate: utcTz,
           scales: { x: { time: true } },
-          axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD } },
+          axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, values: ejeFechas },
                  { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: 56,
                    values: function (uu, vals) { return vals.map(function (v) { return v + "%"; }); } }],
           series: series,
@@ -855,22 +916,9 @@
               });
               ctx.setLineDash([]); ctx.globalAlpha = 1;
             }
-            // código de cada bono al final de su línea (anti-superposición vertical)
-            ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.textBaseline = "middle";
-            var X = u.data[0], drawn = [];
-            for (var si = 1; si < u.series.length; si++) {
-              if (!u.series[si].show) continue;
-              var ys = u.data[si], li = -1;
-              for (var i = ys.length - 1; i >= 0; i--) { if (ys[i] != null) { li = i; break; } }
-              if (li < 0) continue;
-              var px = u.valToPos(X[li], "x", true), py = u.valToPos(ys[li], "y", true), ok = true;
-              for (var d = 0; d < drawn.length; d++) { if (Math.abs(drawn[d] - py) < 11) { ok = false; break; } }
-              if (!ok) continue;
-              drawn.push(py);
-              ctx.fillStyle = u.series[si].stroke;
-              ctx.fillText(u.series[si].label, px + 4, py);
-            }
             ctx.restore();
+            // código de cada bono al final de su línea (anti-superposición vertical)
+            etiquetasFinales(u, function (s) { return s.label; });
           }] },
         };
         if (box._u) box._u.destroy();
@@ -1046,14 +1094,85 @@
     }
   }
 
-  function boot() { initGraficos(); initHistMacro(); initHistFechas(); }
+  // ── Históricos · COMP (varios activos: base 100 / variación % / nivel) ────
+  // El cuerpo del partial trae el JSON embebido (#hist-comp-data): cero
+  // requests extra, acá sólo se dibuja. Cada activo con su color (el mismo
+  // que el punto de la tabla, viene en el payload), huecos unidos (spanGaps),
+  // línea de referencia en 100 / 0, ticker al final de cada línea.
+  var COMP_H = 440;
+  function initHistComp() {
+    var box = document.getElementById("hist-comp-uplot");
+    var dataEl = document.getElementById("hist-comp-data");
+    if (!box || !dataEl || typeof uPlot === "undefined") return;
+    var j = null;
+    try { j = JSON.parse(dataEl.textContent || "null"); } catch (e) { j = null; }
+    var MUT = cssVar("--text-muted", "#8a8a8a"), BORD = cssVar("--border", "#333");
+    box.style.position = "relative";
+    clearBox(box);
+    if (box._u) { box._u.destroy(); box._u = null; }
+    if (!j || !j.ok || !j.series || !j.series.length) {
+      var e = document.createElement("div"); e.className = "alert"; e.textContent = "Sin datos para comparar.";
+      box.appendChild(e); return;
+    }
+    var esTir = j.campo === "tir", modo = j.modo;
+    var enPct = (modo === "pct" || esTir);
+    function fmtY(v) {
+      if (v == null) return "";
+      if (modo === "pct") return (v > 0 ? "+" : "") + fmtPct(v);
+      return enPct ? fmtPct(v) : fmtNum(v);
+    }
+    var ref = (modo === "base") ? 100 : (modo === "pct" ? 0 : null);
+    var data = [j.x].concat(j.series.map(function (s) { return s.y; }));
+    var series = [{ label: "Fecha", value: function (uu, v) { return v == null ? "" : utcDia(v); } }]
+      .concat(j.series.map(function (s) {
+        return { label: s.ticker, stroke: s.color, width: 1.6, points: { show: false }, spanGaps: true,
+                 value: function (uu, v) { return fmtY(v); } };
+      }));
+    var opts = {
+      width: box.clientWidth || 900, height: COMP_H,
+      tzDate: utcTz,
+      scales: { x: { time: true } },
+      axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, values: ejeFechas },
+             { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: 64,
+               values: function (uu, vals) { return vals.map(function (v) { return enPct ? fmtPct(v) : fmtNum(v); }); } }],
+      series: series,
+      cursor: { focus: { prox: 16 } },
+      legend: { isolate: true },
+      // padding derecho: lugar para "TICKER valor" al final de cada línea
+      padding: [12, 96, 0, 0],
+      hooks: { draw: [function (u) {
+        var ctx = u.ctx; ctx.save();
+        if (ref != null) {
+          var yr = u.valToPos(ref, "y", true);
+          if (yr >= u.bbox.top && yr <= u.bbox.top + u.bbox.height) {
+            ctx.strokeStyle = MUT; ctx.globalAlpha = 0.7; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+            ctx.beginPath(); ctx.moveTo(u.bbox.left, yr); ctx.lineTo(u.bbox.left + u.bbox.width, yr); ctx.stroke();
+            ctx.setLineDash([]); ctx.globalAlpha = 1;
+          }
+        }
+        ctx.restore();
+        etiquetasFinales(u, function (s, v) { return s.label + " " + fmtY(v); });
+      }] },
+    };
+    box._u = new uPlot(opts, data, box);
+    if (window.chartCopyInject) window.chartCopyInject(box, "comp-" + j.series.map(function (s) { return s.ticker; }).join("-"));
+  }
+  // Un solo listener: redimensiona el COMP vigente (el cuerpo se reemplaza en
+  // cada consulta; un listener por instancia acumularía gráficos muertos).
+  window.addEventListener("resize", function () {
+    var b = document.getElementById("hist-comp-uplot");
+    if (b && b._u) b._u.setSize({ width: b.clientWidth || 900, height: COMP_H });
+  });
+
+  function boot() { initGraficos(); initHistMacro(); initHistFechas(); initHistComp(); }
   if (document.readyState !== "loading") boot();
   else document.addEventListener("DOMContentLoaded", boot);
-  // Las pestañas "Tasas por curva" / "Curva por fecha" se cargan lazy (htmx);
-  // al insertarse, init.
+  // Las pestañas "Tasas por curva" / "Curva por fecha" / "Comparar" se cargan
+  // lazy (htmx); al insertarse, init. El form del COMP swapea sólo el cuerpo.
   document.addEventListener("htmx:afterSwap", function (e) {
     if (e.target && e.target.id === "hist-curva") initHistCurva();
     if (e.target && e.target.id === "hist-fechas") initHistFechas();
+    if (e.target && (e.target.id === "hist-comp" || e.target.id === "hist-comp-body")) initHistComp();
   });
 })();
 

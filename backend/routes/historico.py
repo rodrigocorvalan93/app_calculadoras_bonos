@@ -910,6 +910,79 @@ async def historicos_acciones(
     return resp
 
 
+# ── COMP: comparación de activos (base 100 / variación % / nivel) ─────────
+_COMP_CACHE: Dict[tuple, str] = {}       # HTML por (template, parámetros, firmas de los archivos)
+
+
+def _comp_ctx(tickers: str, campo: str, base: str, modo: str, rango: str,
+              desde: Optional[str], hasta: Optional[str]) -> Dict[str, Any]:
+    """Contexto del COMP (corre en el executor): especies con historia (mismo
+    cache que Acciones), payload de `comp.comparar` y su JSON embebible."""
+    from backend.services import comp, price_action
+
+    grupos, names = _grupos_especies()
+    lista = comp.parse_tickers(tickers)
+    sel = lista or comp.default_tickers(names)
+    res = comp.comparar(sel, campo, base, modo, rango, desde, hasta)
+    # Va adentro de un <script type="application/json">: "</" cerraría el tag.
+    payload = json.dumps(res, ensure_ascii=False, separators=(",", ":"), default=str).replace("</", "<\\/")
+    return {"names": names, "tickers_txt": " ".join(sel), "res": res, "payload": payload,
+            "campo": res["campo"], "base": res["base"], "modo": res["modo"], "rango": res["rango"],
+            "desde": desde, "hasta": hasta, "bases": price_action.BASES, "modos": comp.MODOS,
+            "rangos": comp.RANGOS_LABEL, "max_tickers": comp.MAX_TICKERS}
+
+
+async def _comp_render(request: Request, template: str, tickers: str, campo: str, base: str, modo: str,
+                       rango: str, desde: Optional[str], hasta: Optional[str]) -> HTMLResponse:
+    """Render cacheado por (parámetros normalizados, firmas de los archivos):
+    la data cambia 1×/día, así que un COMP repetido no vuelve a calcular."""
+    from backend.services import acciones_hist, cierres, comp, price_action
+
+    campo = "tir" if campo == "tir" else "precio"
+    base = base if base in price_action.BASES else "ars"
+    modo = modo if modo in comp.MODOS else "base"
+    rango = rango if rango in comp.RANGOS else "6m"
+    desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
+    tk = " ".join(comp.parse_tickers(tickers))
+    sig = (acciones_hist.signature(), fx_hist.signature(), cierres.signature(), len(historico_byma.codigos()))
+    key = (template, tk, campo, base, modo, rango, desde, hasta, sig)
+    html = _COMP_CACHE.get(key)
+    if html is not None:
+        return HTMLResponse(html)
+    ctx = await asyncio.get_running_loop().run_in_executor(
+        None, _comp_ctx, tk, campo, base, modo, rango, desde, hasta)
+    resp = _render(request, template, **ctx)
+    if _COMP_CACHE and next(iter(_COMP_CACHE))[-1] != sig:
+        _COMP_CACHE.clear()                     # cambió un archivo → todo lo viejo afuera
+    if len(_COMP_CACHE) < 128:
+        _COMP_CACHE[key] = bytes(resp.body).decode("utf-8")
+    return resp
+
+
+@router.get("/historicos/comp", response_class=HTMLResponse)
+@_pestana_resiliente("No se pudo armar la comparación")
+async def historicos_comp(
+    request: Request, tickers: str = "", campo: str = "precio", base: str = "ars", modo: str = "base",
+    rango: str = "6m", desde: Optional[str] = None, hasta: Optional[str] = None,
+) -> HTMLResponse:
+    """Pestaña COMP completa: controles + datalist de especies + cuerpo. Sin
+    `tickers` arranca con un set por defecto (líderes + Merval, o soberanos)."""
+    return await _comp_render(request, "partials/historico_comp.html",
+                              tickers, campo, base, modo, rango, desde, hasta)
+
+
+@router.get("/historicos/comp/body", response_class=HTMLResponse)
+@_pestana_resiliente("No se pudo armar la comparación")
+async def historicos_comp_body(
+    request: Request, tickers: str = "", campo: str = "precio", base: str = "ars", modo: str = "base",
+    rango: str = "6m", desde: Optional[str] = None, hasta: Optional[str] = None,
+) -> HTMLResponse:
+    """Sólo el cuerpo (lo que pide el form al cambiar algo): avisos, gráfico
+    con el JSON embebido y cuadro del rango."""
+    return await _comp_render(request, "partials/historico_comp_body.html",
+                              tickers, campo, base, modo, rango, desde, hasta)
+
+
 @router.get("/historicos/series-diarias", response_class=HTMLResponse)
 @_pestana_resiliente("No se pudieron cargar las series diarias")
 async def historicos_series_diarias(

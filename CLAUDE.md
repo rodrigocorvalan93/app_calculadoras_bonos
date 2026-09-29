@@ -311,12 +311,30 @@ Manual para el desk (orden de decisión, tokens, qué cargar en la base):
 `backend/docs/posiciones_clasificacion.md` (el `.gitignore` es una allowlist:
 `docs/` en la raíz queda afuera) — si cambia una regla, cambia el manual.
 
-**Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las 4 rutas llevan
-`@_pestana_resiliente(...)` — una excepción responde 200 con
+**Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las rutas de pestaña
+llevan `@_pestana_resiliente(...)` — una excepción responde 200 con
 `partials/historico_tab_error.html` (qué falló + Reintentar) en vez de un 500
 que htmx no swapea (el tab quedaba en "Cargando…" para siempre); los
 contenedores llevan `hx-request='{"timeout":90000}'` y `app.js` (`lazyFail`)
 muestra el mismo alert ante error de red / timeout.
+
+**COMP (Históricos · Comparar, 29/09)**: `services/comp.py` — hasta 10
+activos (bonos por código de calc vía `cierres` con fallback a la base,
+acciones / CEDEARs / Merval del parquet; mismas fuentes que el price action:
+`price_action.serie_de`) alineados a la unión de ruedas, `y` = base 100 en la
+primera rueda con dato del rango / variación % / nivel, ÷ FX opcional
+(`fx_por_fecha` + `_alinear`), TIR de bonos en % con Δ en pp; `stats` por
+activo (inicio, fin, var, máx, mín, caída desde el máx, vol anualizada).
+Rutas `/historicos/comp` (controles + `<datalist>` de especies + cuerpo) y
+`/historicos/comp/body` (lo que swapea el form: avisos, gráfico, cuadro);
+HTML cacheado por (parámetros normalizados, firmas de los archivos) como
+Acciones; el cálculo es numpy en memoria (~ms) y corre en el executor. El
+gráfico lo dibuja `charts.js initHistComp` con el JSON embebido en el cuerpo
+(cero requests extra; colores del payload = punto de la tabla). **Fechas de
+los gráficos históricos**: el server manda medianoche UTC por rueda y uPlot
+formatea en UTC (`utcTz` / `utcDia`, opción `tzDate`) — con el reloj local
+Buenos Aires (UTC-3) etiquetaba un día antes. Regresión:
+`tests/test_historico_comp.py`.
 
 ## Visual style (FastAPI rewrite)
 
