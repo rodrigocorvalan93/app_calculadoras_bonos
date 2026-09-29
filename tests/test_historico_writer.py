@@ -378,3 +378,58 @@ async def test_guardar_base_solo_superuser(auth_on, monkeypatch) -> None:
         assert r.status_code in (200, 303)
         r = await ac.post("/historicos/guardar-base")
         assert r.status_code == 403                      # básico: sección de superuser
+
+
+def test_append_tolera_celdas_basura_en_el_excel(hist_env, caplog) -> None:
+    """28/09/2026: con el espejo parquet no fiel se leía el Excel y una celda
+    con TEXTO en TIREA dejaba la columna como object; ahí una TIREA absurda
+    (1e+20, integral) quedaba como int de Python y `to_parquet` moría con
+    "PyLong is too large to fit int64" — cierre, consolidación del journal y
+    reconstrucción, todos. Ahora: texto → NaN (la fila cae), entero → float,
+    warning con la celda, y el guardado sigue."""
+    import logging
+
+    from openpyxl import Workbook
+
+    xlsx = str(hist_env / hw.HIST_FILENAME)
+    wb = Workbook()
+    ws = wb.active
+    cols = ["symbol", "Código", "Last Price", "Close Price", "Variación %", "TIREA", "TNA", "TEM",
+            "Paridad", "Duration", "Price Source", "Price Date", "fecha_hoy"]
+    ws.append(cols)
+    ws.append(["MERV - XMEV - AA - 24hs", "AA", 100.0, 99.0, 0.01, 0.31, 0.28, 0.023, 0.98, 0.6, "LA", "1", "2026-09-24"])
+    # "s/d" y no "N/A": "N/A" está en los na_values default de pandas y la columna
+    # llegaría float64 sin pasar por el caso que rompió (texto que NO es NA).
+    ws.append(["MERV - XMEV - BB - 24hs", "BB", 100.0, 99.0, 0.01, "s/d", 0.28, 0.023, 0.98, 0.6, "LA", "1", "2026-09-24"])
+    ws.append(["MERV - XMEV - CC - 24hs", "CC", 100.0, 99.0, 0.01, 10 ** 20, 0.28, 0.023, 0.98, 0.6, "LA", "1", "2026-09-24"])
+    wb.save(xlsx)                                        # sin espejo parquet → se lee el Excel
+
+    raw = pd.read_excel(xlsx)                            # el crudo reproduce el problema: object con int/str
+    assert str(raw["TIREA"].dtype) == "object" and isinstance(raw["TIREA"].iloc[2], int)
+    prev = hw._leer_base(xlsx, pd)
+    assert str(prev["TIREA"].dtype) == "float64"
+    with caplog.at_level(logging.WARNING, logger="backend.historico_writer"):
+        res = hw.append_and_save(_rows_df(date(2026, 9, 25)), xlsx)
+    assert any("no numéricas en 'TIREA'" in r.getMessage() and "BB" in r.getMessage() for r in caplog.records)
+    assert res["total_rows"] == 4                       # AA + CC (1e20 sigue como float) + 2 nuevas; BB cae
+    back = pd.read_parquet(str(hist_env / hw.HIST_FILENAME).replace(".xlsx", ".parquet"))
+    assert str(back["TIREA"].dtype) == "float64" and "BB" not in set(back["Código"])
+    assert float(back.set_index("Código").at["CC", "TIREA"]) == 1e20
+    # el parquet recién escrito es espejo fiel: la próxima lectura ya no pasa por el Excel
+    from backend.services import espejo
+    assert espejo.espejo_valido(str(hist_env / hw.HIST_FILENAME).replace(".xlsx", ".parquet"), xlsx)
+
+
+def test_filas_base_en_ignora_ruedas_reconstruidas() -> None:
+    """Una rueda RC no sirve de fuente para reconstruir la anterior: su Close
+    Price es el último de la rueda previa disponible, no el cierre real de
+    D-1 (fabricaría D-1 con precios de D-2 o la marcaría 'sin rueda')."""
+    d = date(2026, 9, 24)
+    base = pd.DataFrame({
+        "symbol": ["S1", "S2", "S3"], "Código": ["C1", "C2", "C3"],
+        "Close Price": [100.0, 101.0, 102.0], "Price Source": ["RC", "LA", "RC"],
+        "fecha_hoy": [d, d, d],
+    })
+    assert [r["Código"] for r in hw._filas_base_en(base, d)] == ["C2"]
+    assert hw._filas_base_en(base.drop(columns=["Price Source"]), d) and \
+        len(hw._filas_base_en(base.drop(columns=["Price Source"]), d)) == 3   # sin la columna: como antes

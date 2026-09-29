@@ -66,6 +66,43 @@ _TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 # Columnas obligatorias (mismas que el dropna de bymaapi.guardar_excel).
 _REQUIRED = ["Last Price", "TIREA", "TNA", "TEM", "Paridad", "Duration"]
+# Columnas numéricas de la base: SIEMPRE float64 al escribir (ver _normalizar_numericas).
+_COLS_NUMERICAS = ("Last Price", "Close Price", "Variación %", "TIREA", "TNA", "TEM",
+                   "Paridad", "Duration")
+
+
+def _normalizar_numericas(df: "Any", origen: str) -> "Any":
+    """Columnas numéricas a float64, venga de donde venga el cuadro.
+
+    `read_excel` deja una columna como `object` si alguna celda del Excel
+    tiene TEXTO (un "N/A" tipeado, una nota, un encabezado pegado) y, en ese
+    caso, un valor integral grande (una TIREA absurda de 1e+20 que el calc
+    dejó algún día) queda como `int` de Python: pyarrow no lo puede meter en
+    int64 y `to_parquet` revienta con "PyLong is too large to fit int64" — el
+    guardado ENTERO (cierre del día, consolidación del journal, reconstrucción
+    de un hueco) moría por una celda, y sólo cuando el espejo parquet no era
+    fiel y había que leer el Excel (28/09/2026). Acá: texto → NaN (la fila cae
+    en el dropna de métricas), enteros → float, y un warning con qué celdas
+    eran para poder limpiar el Excel. Una columna ya float64 no se toca:
+    costo cero en el camino normal (espejo parquet)."""
+    import pandas as pd
+    for col in _COLS_NUMERICAS:
+        if col not in df.columns or df[col].dtype == "float64":
+            continue
+        orig = df[col]
+        conv = pd.to_numeric(orig, errors="coerce")
+        vacio = orig.isna() | orig.astype(str).str.strip().eq("")
+        perdidos = conv.isna() & ~vacio
+        if perdidos.any():
+            cods = df["Código"] if "Código" in df.columns else orig
+            fechas = df["fecha_hoy"] if "fecha_hoy" in df.columns else orig
+            muestra = [f"{c} {f}: {v!r}" for c, f, v in
+                       zip(cods[perdidos].head(5), fechas[perdidos].head(5), orig[perdidos].head(5))]
+            logger.warning("[historico_writer] %s: %d celdas no numéricas en '%s' → NaN "
+                           "(la fila cae del guardado si es una métrica): %s",
+                           origen, int(perdidos.sum()), col, "; ".join(muestra))
+        df[col] = conv.astype("float64")
+    return df
 
 # Ventana de reintentos del autosave (minutos desde el disparo) y cadencia:
 # feed caído → 5 min (el WS suele volver solo); otros errores (xlsx lockeado,
@@ -235,7 +272,7 @@ def write_journal(df: "Any", dia: Optional[date] = None) -> str:
     locks ni conflictos, el día queda capturado pase lo que pase con la base.
     `dia` (default hoy): la reconstrucción journalea la rueda que rearma."""
     path = os.path.join(journal_dir(), f"px_tasas_{(dia or _now().date()):%Y%m%d}.parquet")
-    mirror = df.copy()
+    mirror = _normalizar_numericas(df.copy(), "journal")
     for col in ("symbol", "Código", "Price Source", "Price Date"):
         if col in mirror.columns:
             mirror[col] = mirror[col].astype("string")
@@ -640,7 +677,9 @@ def _leer_base(xlsx_path: str, pd) -> "Any":
     try:
         prev = pd.read_excel(xlsx_path, parse_dates=["fecha_hoy"])
         prev["fecha_hoy"] = pd.to_datetime(prev["fecha_hoy"]).dt.date
-        return prev
+        # El Excel lo edita gente (y OneDrive lo pisa): una celda con texto o
+        # un entero gigante no puede voltear el guardado entero.
+        return _normalizar_numericas(prev, f"Excel {os.path.basename(xlsx_path)}")
     except Exception as exc_xlsx:  # noqa: BLE001 — BadZipFile/ValueError/etc.
         pq = os.path.splitext(xlsx_path)[0] + ".parquet"
         try:
@@ -714,6 +753,9 @@ def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
     if not frames:
         return {"total_rows": 0, "xlsx": xlsx_path, "parquet": None, "consolidados": 0}
     df_final = pd.concat(frames, ignore_index=True)
+    # Red de seguridad para TODO lo que entra (base, journal, filas nuevas):
+    # las métricas van a parquet/Excel como float64 o no van (dropna abajo).
+    df_final = _normalizar_numericas(df_final, "base + journal + filas nuevas")
 
     df_last = df_final.drop_duplicates(subset=["symbol", "Código", "fecha_hoy"], keep="last")
     df_last = df_last.dropna(subset=[c for c in _REQUIRED if c in df_last.columns])
@@ -1184,6 +1226,14 @@ def _filas_base_en(base_df: "Any", dia: date) -> List[Dict[str, Any]]:
     if base_df is None or not len(base_df):
         return []
     sub = base_df[base_df["fecha_hoy"] == dia]
+    # Una rueda RECONSTRUIDA no sirve de fuente para la anterior: su 'Close
+    # Price' es el último de la rueda previa DISPONIBLE en la base (no el
+    # cierre real de D-1). Leerlo como cierre de D-1 fabricaría esa rueda con
+    # los precios de D-2 — o peor, la marcaría "sin rueda" (0 movidos) para
+    # siempre. Sólo se recupera el último día de un hueco; el resto queda
+    # pendiente y visible.
+    if "Price Source" in sub.columns:
+        sub = sub[sub["Price Source"].astype(str) != PRICE_SOURCE_RC]
     out: List[Dict[str, Any]] = []
     for s, c, cl in zip(sub["symbol"], sub["Código"], sub.get("Close Price", [None] * len(sub))):
         try:
@@ -1433,6 +1483,7 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
             rows, info = _filas_desde_feed(dia, settle, previos, plazo)
             fuente = "feed"
         sig = _habil_siguiente(dia, _sin_rueda_days())
+        filas_sig: List[Dict[str, Any]] = []
         if len(rows) < minimo:
             filas_sig = _filas_base_en(base_df, sig)
             if len(filas_sig) >= minimo:
@@ -1447,9 +1498,19 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
                 rows, info = _filas_desde_base(dia, filas_sig, settle, previos)
                 fuente = "base"
         if len(rows) < minimo:
+            sig_en_base = (base_df is not None and len(base_df) > 0
+                           and bool((base_df["fecha_hoy"] == sig).any()))
+            if sig_en_base and len(filas_sig) < minimo:
+                # Está la fecha pero sus filas no sirven: rueda reconstruida (RC,
+                # con el Close Price de la rueda previa disponible) o sin cierres.
+                motivo_sig = (f"y la rueda siguiente de la base ({sig:%d/%m}) no sirve de fuente: es "
+                              f"reconstruida (RC, su Close Price no es el cierre del {dia:%d/%m}) o no trae "
+                              "precios de cierre")
+            else:
+                motivo_sig = f"y la base no tiene la rueda siguiente ({sig:%d/%m}) con precios de cierre"
             res["error"] = (f"no hay de dónde reconstruir el {dia_fmt}: el feed no trae los cierres de esa rueda "
                             f"({c['en_dia']} símbolos con cierre del {dia:%d/%m}, {c['posteriores']} ya posteriores) "
-                            f"y la base no tiene la rueda siguiente ({sig:%d/%m}) con precios de cierre"
+                            + motivo_sig
                             + (f" — {len(rows)} filas calculables (mínimo {minimo})" if rows else ""))
             return res
         df = pd.DataFrame(rows)

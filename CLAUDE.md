@@ -192,7 +192,11 @@ con el dedup de siempre, fila FX del día (CCL/MEP de cierres + A3500 de la
 serie) y partición de cierres desde la base (`cierres.importar_base`, sin
 volumen/OHLC; `opero` cuenta RC con fecha). Si los cierres previos de D+1 son
 exactamente los últimos de D-1, D no tuvo rueda → `sin_rueda`. Sólo se
-recupera el último día de un hueco. Corre solo al arrancar (espera el
+recupera el último día de un hueco, y una rueda RC NO es fuente para
+reconstruir la anterior (`_filas_base_en` la salta: su `Close Price` es el
+último de la rueda previa DISPONIBLE, no el cierre real de D-1 — fabricaría
+D-1 con precios de D-2 o la marcaría `sin_rueda`); con dos huecos seguidos el
+más viejo queda pendiente y visible. Corre solo al arrancar (espera el
 snapshot hasta 4 min), a las 17:01 antes de guardar hoy, en
 `tools/cierre.py`, y a mano: POST `/historicos/reconstruir-cierre`
 (superuser; botón "Reconstruir DD/MM" del banner, también para huecos
@@ -200,6 +204,17 @@ anteriores al cierre esperado: `estado_cierre()["huecos"]`).
 `HISTORICO_RECONSTRUIR=0` apaga lo automático. `_fecha_dato`: ISO sin zona =
 hora BA y un instante 00:00Z es sello de FECHA (no las 21:00 BA del día
 anterior). Regresión: `tests/test_cierre_reconstruccion.py`.
+**Celdas basura en el Excel** (28/09): cuando el espejo no es fiel y hay que
+leer el xlsx, una celda con TEXTO en una métrica deja la columna `object` y
+un entero gigante (TIREA 1e+20 que dejó algún calc) queda como `int` de
+Python → `to_parquet` moría con "PyLong is too large to fit int64" y con eso
+TODO guardado (cierre, consolidación del journal, reconstrucción).
+`_normalizar_numericas` (`_COLS_NUMERICAS`, en `_leer_base` Excel,
+`write_journal` y antes del `to_parquet` de `_append_and_save_locked`): texto
+→ NaN (la fila cae en el dropna de métricas), entero → float64, warning con
+código/fecha/valor de las celdas para limpiar el Excel; una columna ya
+float64 no se toca (costo cero por el espejo). Regresión:
+`test_append_tolera_celdas_basura_en_el_excel`.
 
 **Series diarias FX + caución** (`Delta - historico_fx`, `_guardar_fx`): UNA
 fila por día que se mergea así: escalares (CCL, MEP, canje, A3500) POR COLUMNA
