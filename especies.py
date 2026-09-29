@@ -1118,6 +1118,43 @@ D30O6 = {
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
 }
+D30N6 = {
+    "Nombre Security": "Letra del Tesoro Vinculada al Dólar Cero Cupón Vto 30 11 2026",
+    "Código": "D30N6",
+    "ISIN": "AR0747244991", # CRYL / Aviso de Resultados 11/09/2026
+    "Calificación": "CCC-",
+    "País": "Argentina",
+    "Clasificación": "Soberano",
+    "Industria": "Soberanos Dolar Linked",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
+    "Emisión": "15/09/2026",
+    "Vencimiento": "30/11/2026",
+    "Fecha Primer Cupón": "30/11/2026",
+    "Cupón / Spread": 0., # es un nro flotante
+    "Step-up": False, # Es binario True or False
+    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
+    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360., # 365 o 360
+    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
+    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
+    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
+    "Días Lag índice desde inc": 0, # enteros negativos
+    "Días Lag índice hasta inc": 0, # enteros negativos
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": "A3500", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
+    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
+    "Días lag Ajuste base": -3, # → A3500 del 10/09/2026 (T-1 de la licitación del 11/09) desde emisión 15/09
+    "Días lag Ajuste": -3, # pago al A3500 del 3er día hábil previo al vencimiento
+    "Fechas de cupón": ["30/11/2026"], # Lista de fechas como ejemplo
+    "Amortización": None,
+    "Callable": False , # Es binario True or False
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,  # Precio Call
+    "Aviso Resultados": """https://www.argentina.gob.ar/noticias/llamado-licitacion-de-instrumentos-del-tesoro-nacional-denominados-en-pesos-y-en-dolares-10"""
+}
 D15E7 = {
     "Nombre Security": "Letra del Tesoro Vinculada al Dólar Cero Cupón Vto 15 01 2027",
     "Código": "D15E7",
@@ -29803,6 +29840,7 @@ PARP = rentafija.Bono(PARP)
 CUAP = rentafija.Bono(CUAP)
 D30S6 = rentafija.Bono(D30S6)
 D30O6 = rentafija.Bono(D30O6)
+D30N6 = rentafija.Bono(D30N6)
 D15E7 = rentafija.Bono(D15E7)
 TMVE8 = rentafija.Bono(TMVE8)
 TMVE8v = rentafija.Bono(TMVE8v)
@@ -29934,7 +29972,7 @@ todos_los_bonos = [
     TZXS8j, TZX28j, TZXM7j, TZXM8j, TZXD8j, TZXM9j,
     TZXO6j, X30N6j, X30S6j, X29E7j,
     DICP, PARP, CUAP,
-    D30O6, D30S6, D15E7, TZVD8,
+    D30O6, D30S6, D30N6, D15E7, TZVD8,
     D31M7, TMVE8, TMVE8v, TZV27, TZV28,
     TXMJ9, TXMJ9v, TXMJ9j,
     TXMJ8, TXMJ8v, TXMJ8j,
@@ -30107,3 +30145,87 @@ BONDS = {
 #           falta cargar la Serie XII 2027 con sus cashflows correctos.
 # ======================================================================
 
+
+
+# --- Especie ad-hoc agregada desde la app ---
+PDSJAR35 = {
+    'Nombre Security': 'Titulo de Deuda Provincia de San Juan Vto 27 04 2030',
+    'Código': 'PDSJAR35',
+    'ISIN': None,
+    'Calificación': None,
+    'País': 'Argentina',
+    'Clasificación': 'Corporativo Hard Dolar',
+    'Industria': None,
+    'Legislación': None,
+    'Moneda': 'USD',
+    'Plazo habitual de liquidación: t +': 1.0,
+    'Emisión': '01/10/2026',
+    'Vencimiento': '01/10/2035',
+    'Fecha Primer Cupón': '01/04/2027',
+    'Cupón / Spread': 9.55,
+    'Step-up': False,
+    'Frecuencia de pago de cupón anual': 2.0,
+    'Convención fechas de pago': 'Regular',
+    'Convención de devengamiento': 'ISMA-30',
+    'Convención Base': 360.0,
+    'Tipo de Amortización': 'AMORTIZABLE',
+    'Tipo Tasa Interés': 'FIJA',
+    'Index': None,
+    'Días Lag índice desde inc': 0,
+    'Días Lag índice hasta inc': 0,
+    'Valor Nominal': 100.0,
+    'Ajuste sobre Capital': None,
+    'Factor Capitalización': 1.0,
+    'Días lag Ajuste base': -10,
+    'Días lag Ajuste': -10,
+    'Fechas de cupón': ['01/04/2027', '01/10/2027', '01/04/2028', '01/10/2028', '01/04/2029', '01/10/2029', '01/04/2030', '01/10/2030', '01/04/2031', '01/10/2031', '01/04/2032', '01/10/2032', '01/04/2033', '01/10/2033', '01/04/2034', '01/10/2034', '01/04/2035', '01/10/2035'],
+    'Amortización': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 33.0, 0.0, 33.0, 0.0, 34.0],
+    'Quote Price Convention': 'CLEAN',
+    'Callable': False,
+    'Tipo de Call': None,
+    'Fecha Call': None,
+    'Precio Call': None,
+}
+PDSJAR35 = rentafija.Bono(PDSJAR35)
+
+
+# --- Especie ad-hoc agregada desde la app ---
+PDSJAR35C = {
+    'Nombre Security': 'Titulo de Deuda Provincia de San Juan Vto 27 04 2030',
+    'Código': 'PDSJAR35C',
+    'ISIN': None,
+    'Calificación': None,
+    'País': 'Argentina',
+    'Clasificación': 'Corporativo Hard Dolar',
+    'Industria': None,
+    'Legislación': None,
+    'Moneda': 'USD',
+    'Plazo habitual de liquidación: t +': 1.0,
+    'Emisión': '01/10/2026',
+    'Vencimiento': '01/10/2035',
+    'Fecha Primer Cupón': '01/04/2027',
+    'Cupón / Spread': 9.55,
+    'Step-up': False,
+    'Frecuencia de pago de cupón anual': 2.0,
+    'Convención fechas de pago': 'Regular',
+    'Convención de devengamiento': 'ISMA-30',
+    'Convención Base': 360.0,
+    'Tipo de Amortización': 'AMORTIZABLE',
+    'Tipo Tasa Interés': 'FIJA',
+    'Index': None,
+    'Días Lag índice desde inc': 0,
+    'Días Lag índice hasta inc': 0,
+    'Valor Nominal': 100.0,
+    'Ajuste sobre Capital': None,
+    'Factor Capitalización': 1.0,
+    'Días lag Ajuste base': -10,
+    'Días lag Ajuste': -10,
+    'Fechas de cupón': ['01/04/2027', '01/10/2027', '01/04/2028', '01/10/2028', '01/04/2029', '01/10/2029', '01/04/2030', '01/10/2030', '01/04/2031', '01/10/2031', '01/04/2032', '01/10/2032', '01/04/2033', '01/10/2033', '01/04/2034', '01/10/2034', '01/04/2035', '01/10/2035'],
+    'Amortización': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 33.0, 0.0, 33.0, 0.0, 34.0],
+    'Quote Price Convention': 'DIRTY',
+    'Callable': False,
+    'Tipo de Call': None,
+    'Fecha Call': None,
+    'Precio Call': None,
+}
+PDSJAR35C = rentafija.Bono(PDSJAR35C)
