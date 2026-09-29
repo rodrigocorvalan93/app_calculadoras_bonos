@@ -30,7 +30,7 @@
           <th data-sort>Close</th>
           <th data-sort>Last</th>
           <th title="Posición del Last en el rango Low–High del día">Rango</th>
-          <th data-sort>Var %</th>
+          <th data-sort title="Variación vs cierre · la barra mide |var| sobre ±2 %">Var %</th>
           <th data-sort>Δyield</th>
           <th data-sort>Bid</th>
           <th data-sort>Ask</th>
@@ -61,7 +61,7 @@
             <td>{{ r.close | ar_num(2) }}</td>
             <td class="{{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
             <td>{% if r.range_pos is not none %}<div class="rango" title="Last en el {{ (r.range_pos*100)|round(0)|int }}% del rango del día"><i style="left:{{ (r.range_pos*100)|round(1) }}%"></i></div>{% else %}<span class="muted">·</span>{% endif %}</td>
-            <td style="{{ r.var_bg }}">{{ r.var_pct | ar_pct_pp(2) }}</td>
+            <td class="var-cell {{ r.var_pct | var_cls }}" style="--vw:{{ r.var_pct | var_w(2) }}%">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td>{{ r.delta_yield_bps | ar_num(1) }}</td>
             <td class="{{ r.bid_cls }}">{{ r.bid | ar_num(2) }}</td>
             <td class="{{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>

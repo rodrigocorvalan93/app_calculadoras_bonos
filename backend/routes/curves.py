@@ -248,16 +248,11 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             except (TypeError, ZeroDivisionError):
                 ret_5d = ret_5d_fecha = None
 
-    # Color por punta (vs cierre) + fondo de la celda de variación (heatmap
-    # cuya intensidad escala con |var%|, tope ±2%).
+    # Color por punta (vs cierre). La celda Var % (color fuerte + barrita de
+    # magnitud, tope ±2 %) la arman los filtros var_cls / var_w en el template.
     last_cls = _px_cls(last, close)
     bid_cls = _px_cls(bid, close)
     offer_cls = _px_cls(offer, close)
-    var_bg = ""
-    if var_pct is not None:
-        alpha = min(abs(var_pct) / 2.0, 1.0) * 0.38
-        rgb = "34,197,94" if var_pct >= 0 else "239,68,68"
-        var_bg = f"background-color: rgba({rgb},{alpha:.2f})"
 
     row = dict(meta)
     # Estreno: emitido hace ≤5 días (o liquida en estos días). Exime del filtro
@@ -296,7 +291,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             "close": close, "open": open_, "high": high, "low": low,
             "bid_size": bid_size, "offer_size": offer_size, "last_size": last_size,
             "volume": volume, "nominal": nominal, "vwap": vwap,
-            "var_pct": var_pct, "var_px": var_px, "var_bg": var_bg,
+            "var_pct": var_pct, "var_px": var_px,
             "ret_5d": ret_5d, "ret_5d_fecha": ret_5d_fecha,
             "last_cls": last_cls, "bid_cls": bid_cls, "offer_cls": offer_cls,
             "last_ts": last_ts, "close_ts": close_ts,
@@ -340,7 +335,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             except (TypeError, ZeroDivisionError):
                 mvar = mq.get("var_pct")
             row.update({
-                "last": mlast, "close": mclose, "var_pct": mvar, "var_px": None, "var_bg": "",
+                "last": mlast, "close": mclose, "var_pct": mvar, "var_px": None,
                 "ret_5d": None, "ret_5d_fecha": None,      # la base 5D es BYMA: no mezclar plazas
                 "low": mq.get("min"), "high": mq.get("max"),
                 "bid": None, "offer": None, "bid_size": None, "offer_size": None,

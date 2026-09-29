@@ -233,9 +233,37 @@ def fmt_hum(x: Any) -> str:
     return _swap_sep(f"{n:,.0f}")
 
 
+def var_cls(x: Any, eps: float = 0.005) -> str:
+    """Clase de color de una variación en PUNTOS porcentuales: 'var-up' /
+    'var-down' / '' (cero, ±medio centésimo, None, NaN). Para la celda Var % de
+    Curvas / Mercado / Acciones (`.var-cell`)."""
+    if _is_nan(x):
+        return ""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return ""
+    return "var-up" if v > eps else ("var-down" if v < -eps else "")
+
+
+def var_w(x: Any, cap: float = 2.0) -> int:
+    """Ancho (0-100, entero) de la barrita de magnitud de la celda Var %:
+    |x| / `cap` con tope 100. `cap` en puntos porcentuales: 2 = un ±2 % llena
+    la barra (bonos); 5 para acciones / CEDEARs. None / NaN / texto → 0."""
+    if _is_nan(x) or cap <= 0:
+        return 0
+    try:
+        v = abs(float(x))
+    except (TypeError, ValueError):
+        return 0
+    return int(min(v / cap, 1.0) * 100.0 + 0.5)
+
+
 JINJA_FILTERS = {
     "ar_pct": fmt_pct,
     "ar_pct_pp": fmt_pct_pp,
+    "var_cls": var_cls,
+    "var_w": var_w,
     "ar_num": fmt_num,
     "ar_int": fmt_int,
     "ar_money": fmt_money,
