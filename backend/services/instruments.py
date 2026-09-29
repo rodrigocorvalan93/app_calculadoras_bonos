@@ -14,6 +14,14 @@ from backend.config import settings
 
 _lock = threading.Lock()
 _cache: Dict[str, Optional[Dict[str, Any]]] = {}
+# Contexto (host + versión de sesión del broker) al que pertenecen las
+# entradas: un hot-swap de /conexion o un re-login las invalida — los specs
+# y sobre todo los NEGATIVOS del broker anterior no valen para el nuevo.
+_cache_ctx: Optional[Tuple[str, int]] = None
+# El símbolo lo arma el usuario (libro de Mercado, ticket de Órdenes mientras
+# tipea): sin tope, cada string nuevo era un REST al broker + una entrada
+# para siempre. Con tope, al llenarse se descarta la mitad más vieja.
+_MAX_CACHE = 4096
 
 # Nombres posibles en Primary (defensivo: varían entre versiones).
 _LAMINA_KEYS: Tuple[str, ...] = ("minTradeVol", "roundLot", "minLot", "lotSize", "minSize")
@@ -42,14 +50,22 @@ def _extract(inst: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def detail(symbol: str) -> Optional[Dict[str, Any]]:
+    global _cache_ctx
     if not symbol:
         return None
-    with _lock:
-        if symbol in _cache:
-            return _cache[symbol]
+    from backend.services import primary_ws
     from backend.services.primary_ws import get_ws_client
 
-    data = await get_ws_client().get_json(
+    client = get_ws_client()
+    ctx = (client.base_url, primary_ws.context_version())
+    with _lock:
+        if _cache_ctx != ctx:
+            _cache.clear()
+            _cache_ctx = ctx
+        if symbol in _cache:
+            return _cache[symbol]
+
+    data = await client.get_json(
         "rest/instruments/detail", {"marketId": "ROFX", "symbol": symbol}
     )
     inst = (data or {}).get("instrument") if isinstance(data, dict) else None
@@ -61,7 +77,10 @@ async def detail(symbol: str) -> Optional[Dict[str, Any]]:
         # miss del seq-cache del book (~1/s con md-update) — un RTT de
         # 20-80 ms por poll. El fallo de TRANSPORTE / pre-login (data None)
         # sigue sin cachearse: reintenta al próximo request.
-        if result is not None or isinstance(data, dict):
+        if (result is not None or isinstance(data, dict)) and _cache_ctx == ctx:
+            if len(_cache) >= _MAX_CACHE:
+                for k in list(_cache)[: _MAX_CACHE // 2]:
+                    _cache.pop(k, None)
             _cache[symbol] = result
     return result
 

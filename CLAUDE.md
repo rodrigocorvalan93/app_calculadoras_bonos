@@ -281,6 +281,26 @@ filtra el "ConnectionClosedError exception in shielded future" de websockets
 (keepalive timeout): `primary_ws` loguea `disconnected: …` en la línea
 siguiente con el mismo motivo.
 
+**Revisión 29/09 — lo que no vuelve** (`tests/test_revision_2909.py`):
+`/graficos` no arma el SVG server-side (la página dibuja con charts.js; el
+pricing + fit NSS con scipy corría en el event loop para tirarse) y
+`/graficos/svg`, la matriz de forwards (`_matrix_async`, N² por tick con la
+pestaña abierta) y el form de Nueva especie (`build_ficha_from_form` +
+`adhoc.register`) van al pool. `append_acciones` NO sigue con `prev=None`
+si el parquet es ilegible y no se pudo apartar (pisaba la historia con las
+filas de hoy); reintenta la lectura una vez antes de darlo por corrupto.
+`cierres.particiones(strict=True)` en `importar_base` / `prime`: un error al
+listar no se lee como "no hay particiones" (el backfill las pisaba con filas
+sólo-base). `escenario_prefs._load_all(strict=True)` / `alertas._load(
+strict=True)` en los que escriben: archivo ilegible → OSError, no se
+reescribe con sólo la entrada del que guardó. `auth`: el PBKDF2 de
+`create_user` / `set_password` / `reset_with_token` corre FUERA de `_lock`
+(`_perfil_para_clave` + `_aplicar_clave`; el reset re-chequea el token bajo
+el lock: sigue siendo de un uso). `instruments.detail`: cache acotado
+(`_MAX_CACHE`, el símbolo lo arma el usuario) y por contexto de broker.
+`curves.build_curve_codes` / `curve_key_for` / perfil de vencimientos de
+Posiciones: `hoy_ba()`, no `date.today()`.
+
 ## Feed Primary — símbolos rechazados (cache local)
 
 matrizoms rechaza el `smd` ENTERO si un símbolo del lote es inválido y

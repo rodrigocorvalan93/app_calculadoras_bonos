@@ -437,36 +437,64 @@ def create_user(username: str, password: str, role: str, email: str = "") -> Non
     if not password or len(password) < 6:
         raise AuthError("La contraseña debe tener al menos 6 caracteres.")
     with _lock:
+        if name in _store()["users"]:
+            raise AuthError(f"El usuario '{name}' ya existe.")
+    # El PBKDF2 (200k iteraciones, ~0,2 s) corre FUERA del lock: `_store()` lo
+    # toma en cada request (auth_guard, ~4 veces) y el feed también → un alta
+    # o cambio de clave frenaba a toda la mesa mientras se calculaba el hash.
+    rec = _make_record(password, role, email)
+    with _lock:
         data = _store()
         if name in data["users"]:
             raise AuthError(f"El usuario '{name}' ya existe.")
-        data["users"][name] = _make_record(password, role, email)
+        data["users"][name] = rec
         _persist(data)
+
+
+def _perfil_para_clave(name: str) -> Tuple[str, str]:
+    """(role, email) del usuario para armar el registro nuevo; AuthError si
+    no existe. Sólo lo mínimo bajo el lock."""
+    with _lock:
+        u = _store()["users"].get(name)
+        if not u:
+            raise AuthError(f"El usuario '{name}' no existe.")
+        return u.get("role", "basico"), u.get("email", "")
+
+
+def _aplicar_clave(name: str, rec: Dict[str, Any]) -> None:
+    """Instala `rec` (registro con la clave nueva, ya hasheada) conservando
+    lo que NO es clave. Llamar con _lock tomado."""
+    data = _store()
+    u = data["users"].get(name)
+    if not u:
+        raise AuthError(f"El usuario '{name}' no existe.")
+    # rol / mail vigentes (por si cambiaron mientras se hasheaba)
+    rec["role"] = u.get("role", rec.get("role", "basico"))
+    if "email" in rec:
+        rec["email"] = u.get("email", rec["email"])
+    # el reset de contraseña no debe cortar el acceso Excel ya otorgado
+    rec["excel_enabled"] = bool(u.get("excel_enabled"))
+    rec["excel_token"] = u.get("excel_token", "")
+    # ...ni pisar la visibilidad de fondos configurada
+    if u.get("fondos") is not None:
+        rec["fondos"] = u.get("fondos")
+    # Clave nueva ⇒ las sesiones web anteriores dejan de valer (F06).
+    rec["sv"] = int(u.get("sv") or 0) + 1
+    # ...pero la cuenta es la MISMA: el uid se conserva (sólo cambia al
+    # borrar y recrear el usuario).
+    rec["uid"] = u.get("uid") or rec["uid"]
+    data["users"][name] = rec
+    _persist(data)
 
 
 def set_password(username: str, password: str) -> None:
     name = _norm(username)
     if not password or len(password) < 6:
         raise AuthError("La contraseña debe tener al menos 6 caracteres.")
+    role, email = _perfil_para_clave(name)
+    rec = _make_record(password, role, email)        # hash fuera del lock
     with _lock:
-        data = _store()
-        u = data["users"].get(name)
-        if not u:
-            raise AuthError(f"El usuario '{name}' no existe.")
-        rec = _make_record(password, u.get("role", "basico"), u.get("email", ""))
-        # el reset de contraseña no debe cortar el acceso Excel ya otorgado
-        rec["excel_enabled"] = bool(u.get("excel_enabled"))
-        rec["excel_token"] = u.get("excel_token", "")
-        # ...ni pisar la visibilidad de fondos configurada
-        if u.get("fondos") is not None:
-            rec["fondos"] = u.get("fondos")
-        # Clave nueva ⇒ las sesiones web anteriores dejan de valer (F06).
-        rec["sv"] = int(u.get("sv") or 0) + 1
-        # ...pero la cuenta es la MISMA: el uid se conserva (sólo cambia al
-        # borrar y recrear el usuario).
-        rec["uid"] = u.get("uid") or rec["uid"]
-        data["users"][name] = rec
-        _persist(data)
+        _aplicar_clave(name, rec)
 
 
 def session_uid(username: Optional[str]) -> str:
@@ -505,14 +533,24 @@ def bump_session_version(username: str) -> int:
 
 
 def reset_with_token(token: str, password: str) -> str:
-    """Reset por token de forma ATÓMICA (chequeo + cambio bajo el mismo lock):
-    dos POST simultáneos con el mismo token no pueden cambiar la clave dos
-    veces — el segundo ya ve la huella nueva y falla. Devuelve el username."""
+    """Reset por token de forma ATÓMICA (re-chequeo + cambio bajo el mismo
+    lock): dos POST simultáneos con el mismo token hashean los dos en
+    paralelo, pero el primero que entra al lock cambia la huella y el segundo
+    ya ve el token usado. El hash corre fuera del lock (ver create_user).
+    Devuelve el username."""
+    if not password or len(password) < 6:
+        raise AuthError("La contraseña debe tener al menos 6 caracteres.")
     with _lock:
         user = check_reset_token(token)
         if not user:
             raise AuthError("El enlace no es válido, expiró o ya se usó.")
-        set_password(user, password)
+    name = _norm(user)
+    role, email = _perfil_para_clave(name)
+    rec = _make_record(password, role, email)
+    with _lock:
+        if check_reset_token(token) != user:
+            raise AuthError("El enlace no es válido, expiró o ya se usó.")
+        _aplicar_clave(name, rec)
         return user
 
 
