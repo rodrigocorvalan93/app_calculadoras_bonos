@@ -43,3 +43,20 @@ def test_ring_no_se_llena_con_ruido() -> None:
     msgs = " | ".join(e["msg"] for e in errores.ultimos(10))
     assert "problema real" in msgs
     assert "_call_connection_lost" not in msgs
+
+
+def test_filtro_shielded_future_de_websockets() -> None:
+    """El cliente legacy de websockets deja una ConnectionClosedError sin retirar
+    en el waiter que protegía con asyncio.shield cuando cae por keepalive
+    timeout → asyncio imprime "… exception in shielded future" + 12 líneas de
+    traceback por CADA caída del feed. primary_ws ya loguea el motivo en la línea
+    siguiente: ese registro puntual se filtra; el resto de asyncio pasa."""
+    from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+
+    f = errores._FiltroProactor()
+    ruido = "ConnectionClosedError exception in shielded future\nfuture: <Future finished exception=…>"
+    assert f.filter(_rec(ruido, ConnectionClosedError(None, None))) is False
+    assert f.filter(_rec("ConnectionClosedOK exception in shielded future", ConnectionClosedOK(None, None))) is False
+    # misma excepción en otro contexto → pasa; mismo mensaje con otra excepción → pasa
+    assert f.filter(_rec("Task exception was never retrieved", ConnectionClosedError(None, None))) is True
+    assert f.filter(_rec("RuntimeError exception in shielded future", RuntimeError("otra"))) is True

@@ -272,6 +272,32 @@ HTTP real) y sale con código 3 y un mensaje claro antes de cargar nada.
 cast numpy sobre data externa (p. ej. `cierres._build`, float64 → float32)
 va bajo `np.errstate` + `warnings.catch_warnings()` y lo que no entra queda
 NaN — un valor basura en una celda no puede voltear una matriz entera.
+**Ruido que NO va al log** (29/09): `main._QuietPolls` calla el access-log de
+los paneles live (`md-update`: `/curves/table`, `/mercado/rows`, `/yas/market`,
+libros, `/market/health`, …) SÓLO en 2xx/3xx — un 4xx/5xx sale igual (es la
+única señal de que un panel se rompió); una pestaña de Curvas sola escribía
+~430 `GET /curves/table → 200` por rueda. `errores._FiltroProactor` también
+filtra el "ConnectionClosedError exception in shielded future" de websockets
+(keepalive timeout): `primary_ws` loguea `disconnected: …` en la línea
+siguiente con el mismo motivo.
+
+## Feed Primary — símbolos rechazados (cache local)
+
+matrizoms rechaza el `smd` ENTERO si un símbolo del lote es inválido y
+`primary_ws` reintenta el lote de a uno para conservar los válidos. Con
+~500 símbolos del universo que el broker no lista (ONs viejas, plazos CI
+sin rueda) cada arranque pagaba ~130 lotes rechazados + 500 reintentos
+(30-40 s sin feed para los válidos de esos lotes, y solía terminar en un
+keepalive timeout). Los rechazados quedan ahora en
+`%LOCALAPPDATA%\bonos\primary_rechazados.json` (Mac/Linux
+`~/.local/share/bonos/`), **por host** y con la fecha del rechazo: el
+cliente los carga en `__init__` y el primer subscribe ya sale sin ellos;
+una entrada vence a los `REJECTED_TTL_DAYS` (7) y se vuelve a probar (una
+emisión nueva que el broker lista después no queda muda para siempre). UNA
+escritura por tormenta (coalescida 3 s, en el executor, atómica) y flush en
+`stop()`. `PRIMARY_REJECTED_CACHE` = ruta del archivo; `0` apaga (la suite
+corre con 0 vía `conftest`). Regresión:
+`test_marketdata.test_rechazados_persisten_por_host_con_ttl`.
 
 ## Posiciones — Categoría de las tenencias
 

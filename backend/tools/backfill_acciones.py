@@ -26,7 +26,7 @@ import os
 import sys
 import time
 import warnings
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -140,7 +140,8 @@ def _parse_udf(j: Any) -> List[Dict[str, Any]]:
     out = []
     for i, ts in enumerate(t):
         try:
-            f = datetime.utcfromtimestamp(float(ts)).date()
+            # fromtimestamp(…, UTC): utcfromtimestamp está deprecado en 3.12
+            f = datetime.fromtimestamp(float(ts), timezone.utc).date()
             px = float(c[i])
         except (TypeError, ValueError, IndexError, OverflowError):
             continue

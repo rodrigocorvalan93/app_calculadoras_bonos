@@ -558,3 +558,67 @@ async def test_anom_badge_en_curvas() -> None:
     assert f"/mercado?book={code}" in r.text
     # …y /mercado?book=X auto-carga el libro al abrir (hx-trigger load)
     assert m.status_code == 200 and f"/mercado/book/{code}" in m.text and 'hx-trigger="load"' in m.text
+
+
+# ── Cache local de símbolos rechazados (por host, con TTL) ───────────
+
+
+@pytest.mark.asyncio
+async def test_rechazados_persisten_por_host_con_ttl(tmp_path, monkeypatch) -> None:
+    """Un símbolo que el broker rechazó queda en un JSON local: el próximo
+    cliente del MISMO host arranca sin pedirlo (el primer subscribe sale sin la
+    tormenta de lotes rechazados + reintentos de a uno), otro host no lo hereda
+    (y al guardar no le pisa lo suyo), una entrada vencida (> REJECTED_TTL_DAYS)
+    se vuelve a probar y PRIMARY_REJECTED_CACHE=0 apaga todo."""
+    import json
+    from datetime import date, timedelta
+
+    path = tmp_path / "rechazados.json"
+    monkeypatch.setenv("PRIMARY_REJECTED_CACHE", str(path))
+    z1, z2 = "MERV - XMEV - ZZZ1 - CI", "MERV - XMEV - ZZZ2 - 24hs"
+    client = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    assert not client._rejected
+    client._recover_from_error(pws._subscribe_payload([z1]))
+    client._recover_from_error(pws._subscribe_payload([z2]))
+    assert client._rejected == {z1, z2}
+    assert not path.exists()                       # escritura diferida (una por tormenta)
+    await client.stop()                            # el stop la fuerza
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data["broker-a.invalid"]) == {z1, z2}
+    assert all(f == date.today().isoformat() for f in data["broker-a.invalid"].values())
+
+    sent: list = []
+
+    class FakeWS:
+        async def send(self, raw: str) -> None:
+            sent.append(json.loads(raw))
+
+    # mismo host → arranca con el cache y el subscribe los saltea
+    c2 = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    assert c2._rejected == {z1, z2} and c2.stats()["rejected"] == 2
+    await c2._send_in_chunks(FakeWS(), ["MERV - XMEV - GD30 - 24hs", z1, z2])
+    assert [p["symbol"] for m in sent for p in m["products"]] == ["MERV - XMEV - GD30 - 24hs"]
+    # otro host no hereda, y al guardar conserva lo del primero
+    c3 = pws.PrimaryWS("https://broker-b.invalid/", store=mds.MarketDataStore())
+    assert not c3._rejected
+    c3._recover_from_error(pws._subscribe_payload(["MERV - XMEV - QQQ - CI"]))
+    await c3.stop()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data["broker-a.invalid"]) == {z1, z2}
+    assert set(data["broker-b.invalid"]) == {"MERV - XMEV - QQQ - CI"}
+    # vencida → se vuelve a probar
+    data["broker-a.invalid"][z1] = (date.today() - timedelta(days=pws.REJECTED_TTL_DAYS + 1)).isoformat()
+    path.write_text(json.dumps(data), encoding="utf-8")
+    c4 = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    assert c4._rejected == {z2}
+    # archivo roto → arranca vacío, sin tirar
+    path.write_text("{no es json", encoding="utf-8")
+    assert not pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())._rejected
+    # apagado
+    monkeypatch.setenv("PRIMARY_REJECTED_CACHE", "0")
+    path.write_text(json.dumps(data), encoding="utf-8")
+    c5 = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    assert not c5._rejected
+    c5._recover_from_error(pws._subscribe_payload([z1]))
+    await c5.stop()
+    assert json.loads(path.read_text(encoding="utf-8")) == data

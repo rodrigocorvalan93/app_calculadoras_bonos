@@ -17,6 +17,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("AUTH_ENABLED", "0")
+# el cache local de símbolos rechazados por el broker (primary_ws) no se toca
+# desde la suite: un test que lo necesite lo apunta a un tmp_path
+os.environ.setdefault("PRIMARY_REJECTED_CACHE", "0")
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")
 os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_auth_store.json"))
 # Bootstrap del superuser de la suite: valores SINTÉTICOS (nunca una cuenta
