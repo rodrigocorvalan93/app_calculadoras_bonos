@@ -31,3 +31,19 @@ async def test_curvas_mercado_ordenables_y_filtrables() -> None:
     for page, tbl in ((cp, "#curve-tbl"), (mp, "#mercado-tbl")):
         assert 'data-table-filters="%s"' % tbl in page
         assert "data-f-text" in page and "data-f-col" in page and "data-f-add" in page
+    # celda Var %: color fuerte + barrita de magnitud (100/99 − 1 = 1,01 % sobre
+    # el tope de 2 % → 51 %). Misma celda en Curvas y en la macro de Mercado.
+    assert 'class="var-cell var-up" style="--vw:51%">1,01%</td>' in ct
+    assert 'class="grp var-cell var-up" style="--vw:51%">1,01%</td>' in mt
+    assert "background-color: rgba(" not in ct and "background-color: rgba(" not in mt   # el heat viejo no vuelve
+
+
+def test_filtros_var_cls_y_var_w() -> None:
+    from backend.locale_ar import var_cls, var_w
+
+    assert var_cls(0.85) == "var-up" and var_cls(-0.3) == "var-down"
+    assert var_cls(0.0) == "" and var_cls(0.004) == "" and var_cls(-0.004) == ""   # 0,00 % no se pinta
+    assert var_cls(None) == "" and var_cls(float("nan")) == "" and var_cls("x") == ""
+    assert var_w(0.5, 2.0) == 25 and var_w(-1.0, 2.0) == 50 and var_w(7.3, 2.0) == 100
+    assert var_w(2.5, 5.0) == 50 and var_w(0.0) == 0
+    assert var_w(None) == 0 and var_w(float("nan")) == 0 and var_w("x") == 0 and var_w(1.0, 0.0) == 0

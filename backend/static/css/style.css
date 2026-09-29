@@ -31,6 +31,8 @@
   --cyan-soft: rgba(76, 201, 240, 0.10);
   --green: #22c55e;
   --red: #ef4444;
+  --up-strong: #35e37b;         /* celda Var %: más brillo que --green/--red */
+  --down-strong: #ff4d55;
   --yellow: #facc15;
 }
 
@@ -51,6 +53,8 @@
   --cyan-soft: rgba(0, 119, 170, 0.08);
   --green: #15803d;
   --red: #b91c1c;
+  --up-strong: #0e9f47;
+  --down-strong: #d92632;
   --yellow: #a16207;
 }
 
@@ -71,6 +75,8 @@
   --cyan-soft: rgba(14, 111, 178, 0.08);
   --green: #15803d;
   --red: #b91c1c;
+  --up-strong: #0e9f47;
+  --down-strong: #d92632;
   --yellow: #b45309;
 }
 
@@ -659,6 +665,13 @@ select {
 }
 .cashflows td:first-child, .cashflows th:first-child { text-align: left; }
 .cashflows td { color: var(--text-soft); }
+/* Verde / rojo por punta (Last / Bid / Ask vs cierre, Var px, 5D): la regla
+   de arriba (clase + elemento) le ganaba por especificidad a `.var-up` /
+   `.px-up` sueltas y en Curvas / Mercado esas celdas salían del color base
+   aunque el template las clasificara. Misma especificidad + 1 clase. */
+.cashflows td.var-up,   .cashflows td.px-up   { color: var(--green); }
+.cashflows td.var-down, .cashflows td.px-down { color: var(--red); }
+.cashflows td.px-flat { color: var(--text-muted); }
 .cashflows td.cf-total { color: var(--accent); font-weight: 600; }
 
 /* ── Convention note ──────────────────────────────────────────────── */
@@ -1255,6 +1268,22 @@ html, body, .topbar, .card, .fx-rail, .tape, .news-marquee, .footer {
 .vol-cell {
   background: linear-gradient(90deg, var(--accent-soft) var(--vf, 0%), transparent var(--vf, 0%));
   border-radius: 3px;
+}
+
+/* ── Celda Var % (Curvas / Mercado / Acciones): número en color fuerte y
+   barrita de magnitud bajo el número. `--vw` = |var| / tope en % (2 % en
+   bonos, 5 % en acciones) y la clase las ponen los filtros var_w / var_cls
+   (locale_ar). Pseudo-elemento, cero nodos extra: el diff de flashes
+   (textContent) y el ⧉ copiar tabla (innerText) no la ven. Vive dentro del
+   padding inferior de .cashflows (7 px) → la fila no crece; anclada a la
+   derecha, bajo el número, crece hacia la izquierda. ─────────────────── */
+.var-cell { position: relative; font-weight: 650; }
+.var-cell.var-up   { color: var(--up-strong); }
+.var-cell.var-down { color: var(--down-strong); }
+.var-cell::after {
+  content: ""; position: absolute; left: 14px; right: 14px; bottom: 2px; height: 3px;
+  border-radius: 2px; pointer-events: none; opacity: 0.9;
+  background: linear-gradient(270deg, currentColor var(--vw, 0%), transparent var(--vw, 0%));
 }
 
 /* ── Book DOM: degradé de profundidad por nivel (acum / total punta) ── */

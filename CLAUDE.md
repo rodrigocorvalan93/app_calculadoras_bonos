@@ -376,6 +376,15 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   fuente CAFCI). Colapsada sólo actualiza el conteo; abierta se rearma en
   cada refresh (~ms). Estado en `localStorage` (`graf_tabla_open`); el ⧉ de
   app.js la copia como celdas. Regresión: `tests/test_graficos_tabla.py`.
+- **Celda Var %** (`.var-cell`, 29/09) en Curvas / Mercado / Acciones: número
+  en color fuerte (`--up-strong` / `--down-strong` por tema, peso 650) +
+  barrita de magnitud bajo el número (`::after`, gradiente `currentColor`
+  hasta `--vw`, anclada a la derecha). `--vw` = |var| / tope (2 % bonos, 5 %
+  acciones) y la clase salen de los filtros `var_w(cap)` / `var_cls` de
+  `locale_ar` (0,00 % → sin clase ni barra). Cero nodos extra: el diff de
+  flashes (`textContent`) y el ⧉ no la ven; vive en el padding inferior de
+  `.cashflows`, la fila no crece. Reemplazó el fondo translúcido `var_bg`
+  que armaba `curves._row`. Regresión: `tests/test_table_ux.py`.
 - **Paneles por FILAS (delta)**: un contenedor `data-delta-scope` (Mercado)
   NO swapea completo en cada `md-update`: si adentro hay una
   `table[data-delta]`, app.js pide `data-delta&since=<data-seq>&order=<data-order>`

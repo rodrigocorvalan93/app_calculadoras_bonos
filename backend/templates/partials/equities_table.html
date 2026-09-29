@@ -18,7 +18,7 @@
           <th data-sort>Low</th>
           <th data-sort>High</th>
           <th title="Last en el rango Low–High">Rango</th>
-          <th data-sort class="grp">Var %</th>
+          <th data-sort class="grp" title="Variación vs cierre · la barra mide |var| sobre ±5 %">Var %</th>
           <th data-sort>Var px</th>
           <th data-sort class="grp">Bid sz</th>
           <th data-sort>Bid</th>
@@ -44,7 +44,7 @@
             <td>{{ r.low | ar_num(2) }}</td>
             <td>{{ r.high | ar_num(2) }}</td>
             <td>{% if r.range_pos is not none %}<div class="rango"><i style="left:{{ (r.range_pos*100)|round(1) }}%"></i></div>{% else %}<span class="muted">·</span>{% endif %}</td>
-            <td class="grp {{ vcls }}" style="font-weight:650">{{ r.var_pct | ar_pct_pp(2) }}</td>
+            <td class="grp var-cell {{ r.var_pct | var_cls }}" style="--vw:{{ r.var_pct | var_w(5) }}%">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td class="{{ vcls }}">{{ r.var_px | ar_num(2) }}</td>
             <td class="grp" style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
             <td>{{ r.bid | ar_num(2) }}</td>
