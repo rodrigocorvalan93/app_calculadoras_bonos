@@ -182,3 +182,29 @@ def test_main_usa_consola_y_los_launchers_estan_ordenados() -> None:
     assert 'export TLS_TARGET_PORT="${TLS_TARGET_PORT:-$PORT}"' in cmd
     assert '[ -n "$CERTIFI" ] && export SSL_CERT_FILE="$CERTIFI"' in cmd
     assert "\r" not in cmd                                              # CRLF rompe el shebang en zsh
+
+
+def test_quiet_polls_calla_paneles_live_solo_en_2xx() -> None:
+    """`main._QuietPolls`: el access-log de los paneles live (md-update) y las
+    sondas no entra al log — una pestaña de Curvas sola escribía ~430
+    `GET /curves/table → 200` por rueda — pero un 4xx/5xx de esos mismos
+    endpoints SÍ (es la única señal de que un panel se rompió); las rutas
+    'reales' se loguean como siempre."""
+    from backend.main import _QuietPolls
+
+    f = _QuietPolls()
+
+    def acc(ruta: str, st: int) -> logging.LogRecord:
+        return _rec("uvicorn.access", logging.INFO, '%s - "%s %s HTTP/%s" %d',
+                    ("127.0.0.1:50000", "GET", ruta, "1.1", st))
+
+    for ruta in ("/curves/table?curve=cer&plazo=24hs", "/mercado/rows?since=12", "/mercado/book/GD30?plazo=24hs",
+                 "/yas/market?code=TX26", "/market/seq", "/market/health", "/alertas/estado", "/tasas/table"):
+        assert f.filter(acc(ruta, 200)) is False, ruta
+        assert f.filter(acc(ruta, 304)) is False, ruta
+        assert f.filter(acc(ruta, 500)) is True, ruta
+        assert f.filter(acc(ruta, 401)) is True, ruta
+    for ruta in ("/yas", "/curves", "/historicos/comp/body?tickers=GGAL", "/ordenes", "/mercado"):
+        assert f.filter(acc(ruta, 200)) is True, ruta
+    # registros que no son de uvicorn.access: sólo el match por texto de siempre
+    assert f.filter(_rec("backend.main", logging.INFO, "[main] listo")) is True

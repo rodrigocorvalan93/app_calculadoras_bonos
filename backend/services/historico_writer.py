@@ -393,8 +393,10 @@ def _marcar_sin_rueda(d: date) -> None:
     try:
         with open(_sin_rueda_path(d), "w", encoding="utf-8") as f:
             f.write("sin rueda\n")
-    except OSError:
-        pass
+    except OSError as exc:
+        # sin la marca, el estado del cierre sigue reclamando el día en esta
+        # máquina: que quede en el log por qué
+        logger.warning("[historico_writer] no pude marcar %s como sin rueda: %s", d, exc)
 
 
 def _feed_vivo() -> bool:
@@ -1514,7 +1516,9 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
             logger.warning("[historico_writer] FX de la reconstrucción falló: %s", exc)
         try:
             from backend.services import cierres
-            cierres.importar_base(force=True)       # partición del día desde la base (sin volumen/OHLC)
+            r_cie = cierres.importar_base(force=True)   # partición del día desde la base (sin volumen/OHLC)
+            if r_cie.get("error"):
+                logger.warning("[historico_writer] partición de cierres de la reconstrucción: %s", r_cie["error"])
         except Exception as exc:  # noqa: BLE001
             logger.warning("[historico_writer] partición de cierres de la reconstrucción falló: %s", exc)
         try:
@@ -1876,14 +1880,23 @@ def append_acciones(df: "Any", pq: str, *, gana_previo: bool = False) -> Dict[st
     if os.path.exists(pq):
         try:
             prev = pd.read_parquet(pq)
-        except Exception as exc:  # noqa: BLE001
-            marca = _now().strftime("%Y%m%d-%H%M%S")
+        except Exception:  # noqa: BLE001 — lock de OneDrive / antivirus: un reintento
+            time.sleep(1.0)
             try:
-                os.replace(pq, f"{pq}.corrupto-{marca}")
-            except OSError:
-                pass
-            logger.warning("[historico_writer] parquet de acciones ilegible (%s): "
-                           "apartado como .corrupto-%s, arranco de nuevo", exc, marca)
+                prev = pd.read_parquet(pq)
+            except Exception as exc:  # noqa: BLE001
+                marca = _now().strftime("%Y%m%d-%H%M%S")
+                try:
+                    os.replace(pq, f"{pq}.corrupto-{marca}")
+                except OSError as exc2:
+                    # NO seguir con prev=None: el guardado de abajo pisaría la
+                    # historia entera con las filas de hoy (y el log diría que
+                    # se apartó). Mismo criterio que _leer_base con la base.
+                    raise RuntimeError(
+                        f"parquet de acciones ilegible ({exc}) y no pude apartarlo ({exc2}): "
+                        f"no guardo para no pisar la historia — revisá {pq}") from exc
+                logger.warning("[historico_writer] parquet de acciones ilegible (%s): "
+                               "apartado como .corrupto-%s, arranco de nuevo", exc, marca)
     partes = [df, prev] if gana_previo else [prev, df]
     df = pd.concat([p for p in partes if p is not None and len(p)], ignore_index=True)
     df["fecha_hoy"] = pd.to_datetime(df["fecha_hoy"]).dt.date

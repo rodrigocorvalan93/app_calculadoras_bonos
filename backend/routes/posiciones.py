@@ -663,7 +663,8 @@ def _perfil_vencimientos(selected: Optional[int],
     hs = positions.holdings(selected, visibles)
     if not hs:
         return vacio
-    hoy = date.today()
+    from backend.locale_ar import hoy_ba
+    hoy = hoy_ba()                      # liquidación / corte de flujos en fecha BA, no del server
     key = (selected, visibles, hoy.toordinal(), positions.status().get("asof"))
     with _perfil_lock:
         cached = _perfil_cache.get(key)

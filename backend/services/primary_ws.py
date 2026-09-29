@@ -23,9 +23,12 @@ import asyncio
 import inspect
 import json
 import logging
+import os
 import ssl
 import time
+from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set
+from urllib.parse import urlsplit
 
 import httpx
 import websockets
@@ -39,6 +42,40 @@ logger = logging.getLogger("backend.primary_ws")
 KEEPALIVE_SECS = 25
 BACKOFF_INITIAL = 2.0
 BACKOFF_MAX = 30.0
+
+# Símbolos que el broker rechazó como inválidos, persistidos POR HOST en un
+# JSON local (fuera de OneDrive) para no volver a pedirlos en cada arranque:
+# matrizoms rechaza el 'smd' ENTERO si un símbolo del lote es inválido, así
+# que cada arranque pagaba ~130 lotes rechazados + ~500 reintentos de a uno
+# (30-40 s de tormenta de mensajes en los que los válidos del mismo lote
+# tampoco tenían feed, y que solía terminar en un keepalive timeout). Con el
+# cache, el primer subscribe ya sale sin ellos. Un símbolo puede volver a ser
+# válido (nueva emisión que el broker lista días después): cada entrada vence
+# a los REJECTED_TTL_DAYS y se vuelve a probar. PRIMARY_REJECTED_CACHE = ruta
+# del archivo; "0" lo apaga (la suite de tests corre con 0).
+REJECTED_TTL_DAYS = 7
+_REJECTED_SAVE_DELAY = 3.0          # segundos: coalesce de la tormenta en UNA escritura
+
+
+def _rejected_cache_path() -> Optional[str]:
+    v = os.getenv("PRIMARY_REJECTED_CACHE")
+    if v is not None:
+        v = v.strip()
+        if v.lower() in ("", "0", "off", "no"):
+            return None
+        return os.path.expanduser(v)
+    # misma carpeta local por máquina que el journal del histórico
+    base = os.getenv("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "bonos", "primary_rechazados.json")
+
+
+def _leer_json(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 # matrizoms ignora un 'smd' con demasiados productos (probado: 1 símbolo ->
 # llega book; ~238 de una -> 0 mensajes). Suscribimos en lotes de este tamaño;
@@ -196,6 +233,13 @@ class PrimaryWS:
         # Futuros que ya reintentamos sin el entry OI (un rechazo con OI puede
         # ser por el entry, no por el símbolo — no descartar sin probar).
         self._retried_no_oi: Set[str] = set()
+        # Cache persistido de rechazados: por host, con la fecha del rechazo
+        # (TTL). Se carga acá para que el PRIMER subscribe ya salga sin ellos.
+        self._host = (urlsplit(self.base_url).netloc or self.base_url).lower()
+        self._rejected_fecha: Dict[str, str] = {}
+        self._rej_dirty = False
+        self._rej_handle: Optional[asyncio.TimerHandle] = None
+        self._cargar_rechazados()
 
     # ── API ─────────────────────────────────────────────────────────
 
@@ -307,6 +351,7 @@ class PrimaryWS:
         if self._http is not None:
             await self._http.aclose()
             self._http = None
+        await self._flush_rechazados()
         logger.info("[primary_ws] stopped")
 
     async def subscribe(self, symbols: Iterable[str]) -> None:
@@ -377,9 +422,12 @@ class PrimaryWS:
                 logger.info("[primary_ws] %s rechazado con OI; reintento sin OI", bad)
                 self._spawn_resub([bad], None)
                 return
-            # rechazo de un único símbolo -> es inválido, lo descartamos.
+            # rechazo de un único símbolo -> es inválido, lo descartamos (y
+            # queda en el cache local para los próximos arranques).
             if bad not in self._rejected:
                 self._rejected.add(bad)
+                self._rejected_fecha[bad] = date.today().isoformat()
+                self._programar_guardado()
                 logger.warning("[primary_ws] símbolo inválido descartado: %s", bad)
             return
         # lote rechazado: reintentar de a uno (con los MISMOS entries del lote,
@@ -417,6 +465,73 @@ class PrimaryWS:
                 await asyncio.sleep(0.02)
             except (ConnectionClosed, WebSocketException):
                 return
+
+    # ── Cache persistido de símbolos rechazados ─────────────────────
+
+    def _cargar_rechazados(self) -> None:
+        path = _rejected_cache_path()
+        if not path:
+            return
+        por_host = _leer_json(path).get(self._host)
+        if not isinstance(por_host, dict) or not por_host:
+            return
+        limite = (date.today() - timedelta(days=REJECTED_TTL_DAYS)).isoformat()
+        vigentes = {s: f for s, f in por_host.items()
+                    if isinstance(s, str) and isinstance(f, str) and f >= limite}
+        if not vigentes:
+            return
+        self._rejected.update(vigentes)
+        self._rejected_fecha.update(vigentes)
+        logger.info("[primary_ws] %d símbolos rechazados por %s cargados del cache local "
+                    "(se vuelven a probar a los %d días)", len(vigentes), self._host, REJECTED_TTL_DAYS)
+
+    def _programar_guardado(self) -> None:
+        """UNA escritura por tormenta: se reprograma con cada rechazo y corre
+        _REJECTED_SAVE_DELAY después del último, en el executor (nada de I/O
+        de archivo en el event loop). Sin loop (tests sync) escribe directo."""
+        self._rej_dirty = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._guardar_rechazados(dict(self._rejected_fecha))
+            return
+        if self._rej_handle is not None:
+            self._rej_handle.cancel()
+        self._rej_handle = loop.call_later(_REJECTED_SAVE_DELAY, self._guardar_en_executor, loop)
+
+    def _guardar_en_executor(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._rej_handle = None
+        snap = dict(self._rejected_fecha)          # copia en el hilo del loop
+        try:
+            loop.run_in_executor(None, self._guardar_rechazados, snap)
+        except RuntimeError:
+            pass  # loop cerrándose: lo escribe el flush de stop()
+
+    async def _flush_rechazados(self) -> None:
+        if self._rej_handle is not None:
+            self._rej_handle.cancel()
+            self._rej_handle = None
+        if self._rej_dirty:
+            snap = dict(self._rejected_fecha)
+            await asyncio.get_running_loop().run_in_executor(None, self._guardar_rechazados, snap)
+
+    def _guardar_rechazados(self, snap: Dict[str, str]) -> None:
+        """Escribe {host: {símbolo: fecha}} conservando los otros hosts del
+        archivo (una máquina que alterna brokers). Atómico (tmp + replace)."""
+        path = _rejected_cache_path()
+        self._rej_dirty = False
+        if not path:
+            return
+        try:
+            data = _leer_json(path) if os.path.exists(path) else {}
+            data[self._host] = dict(sorted(snap.items()))
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            tmp = f"{path}.tmp-{os.getpid()}"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False, indent=0)
+            os.replace(tmp, path)
+        except OSError as exc:
+            logger.warning("[primary_ws] no pude guardar el cache de rechazados (%s): %s", path, exc)
 
     # Sin un Md en este tiempo consideramos el feed "stale" (mercado quieto o
     # conexión muerta). 90 s cubre holgado un mercado ilíquido intradía.

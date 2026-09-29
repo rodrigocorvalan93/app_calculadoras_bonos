@@ -64,13 +64,31 @@ logger = logging.getLogger("backend.main")
 
 
 class _QuietPolls(logging.Filter):
-    """Silencia el access-log de los endpoints de polling (1 req/s): /market/seq
-    y los partials live. Costo-0: menos I/O de log y consola legible; los
-    endpoints 'reales' se siguen logueando igual."""
+    """Silencia el access-log de los endpoints de polling: /market/seq (1 req/s),
+    los partials live (`md-update` + `every N s`: cada tick real del feed
+    re-pide el panel abierto — una pestaña de Curvas sola escribía ~430 líneas
+    `GET /curves/table → 200` por rueda, 2 de cada 3 líneas del log) y las
+    sondas del frontend / add-in. Costo-0: menos I/O de log y consola legible;
+    los endpoints 'reales' se siguen logueando igual. Sólo se calla el 2xx/3xx:
+    un 4xx/5xx en un panel live SÍ sale (es la única señal de que se rompió)."""
     _NOISY = ("/market/seq", "/tape", "/dolares/rail", "/news/marquee",
-              "/excel/v1/seq", "/excel/v1/snapshot", "/excel/v1/beacon", "/cierre/chip")
+              "/excel/v1/seq", "/excel/v1/snapshot", "/excel/v1/beacon", "/cierre/chip",
+              # paneles live (md-update from:body) y sondas periódicas de app.js
+              "/curves/table", "/mercado/rows", "/mercado/book/", "/mercado/table",
+              "/tasas/table", "/tasas/caucion/book", "/dolares/oficial", "/dolares/tables",
+              "/futuros/table", "/futuros/book", "/breakeven/table", "/breakeven/chart",
+              "/forwards/table", "/forwards/hist", "/alertas/tabla", "/alertas/estado",
+              "/yas/market", "/ordenes/quote", "/market/health", "/market/events")
 
     def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5:
+            # uvicorn.access: (cliente, método, ruta, versión http, status)
+            try:
+                if int(args[4]) >= 400:
+                    return True
+            except (TypeError, ValueError):
+                pass
         msg = record.getMessage()
         return not any(p in msg for p in self._NOISY)
 

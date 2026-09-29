@@ -1060,7 +1060,16 @@ def _whatif_from_rows(rows: list[dict], include: set[str] | None,
 async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str,
                         include: set[str] | None = None, metric: str = "tirea") -> dict:
     rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
-    return _matrix_from_rows(rows, include, metric=metric)
+    return await _matrix_async(rows, include, metric)
+
+
+async def _matrix_async(rows: list[dict], include: set[str] | None = None,
+                        metric: str = "tirea") -> dict:
+    """La matriz N² de forwards (hasta 50×50 pares; ~30 ms en corp_hdmep) al
+    pool: con la pestaña abierta se rearma en cada miss del seq-cache, o sea
+    en cada tick, y en el event loop frenaba el libro / Mercado de todos."""
+    return await asyncio.get_running_loop().run_in_executor(
+        _row_pool, _matrix_from_rows, rows, include, metric)
 
 
 def _price_overrides(request: Request) -> dict[str, float]:
@@ -1118,7 +1127,7 @@ async def forwards_page(
     if selected_key:
         rows, _meta = await _rows_for(selected_key, plazo, only_quoting, leg)   # 1 sola pasada
         candidates = _candidates_from_rows(rows)
-        fwd = _matrix_from_rows(rows)
+        fwd = await _matrix_async(rows)
     else:
         candidates, fwd = [], {"header": [], "rows": [], "n": 0}
     # El what-if NO se computa acá: se difiere al partial /forwards/whatif
@@ -1147,7 +1156,7 @@ async def forwards_body(
     partial /forwards/whatif (revealed), igual que en la carga de página."""
     rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)   # 1 sola pasada
     candidates = _candidates_from_rows(rows)
-    fwd = _matrix_from_rows(rows)
+    fwd = await _matrix_async(rows)
     return _render(
         request, "partials/forwards_body.html",
         selected_def=curves.curve_def(curve),
@@ -1173,11 +1182,13 @@ async def forwards_table_partial(
     metric = "margen" if str(metric).lower().startswith("m") else "tirea"
     fwd = await _forwards_for(curve, plazo, only_quoting, leg, include=include,
                               metric=metric)
-    return _render(
-        request, "partials/forwards_table.html",
-        fwd=fwd, selected_def=curves.curve_def(curve),
-        plazo=plazo, only_quoting=only_quoting, leg=leg, fw_metric=metric,
-    )
+    # Render de la matriz (hasta 2.500 celdas) al pool, como la tabla de Curvas.
+    return await asyncio.get_running_loop().run_in_executor(
+        None, lambda: _render(
+            request, "partials/forwards_table.html",
+            fwd=fwd, selected_def=curves.curve_def(curve),
+            plazo=plazo, only_quoting=only_quoting, leg=leg, fw_metric=metric,
+        ))
 
 
 @forwards_router.get("/forwards/hist", response_class=HTMLResponse)
@@ -1293,7 +1304,10 @@ def _chart_data(rows: list[dict], width: int = 940, height: int = 480) -> dict:
 
 async def _chart_for(curve_key: str, plazo: str, only_quoting: bool, leg: str) -> dict:
     rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
-    return _chart_data(rows)
+    # _chart_data ajusta la NSS con scipy (curve_fit, hasta 4 pasadas) en cada
+    # miss del cache de fits (precios redondeados, TTL 120 s): decenas de ms
+    # que corrían en el event loop y frenaban los paneles live de todos.
+    return await asyncio.get_running_loop().run_in_executor(_row_pool, _chart_data, rows)
 
 
 @graficos_router.get("/graficos", response_class=HTMLResponse)
@@ -1315,7 +1329,10 @@ async def graficos_page(
     table = curves.build_curve_codes()
     default_key = next((c.key for c in all_curves if table.get(c.key)), None)
     selected_key = curve if (curve and curve in table) else default_key
-    chart = await _chart_for(selected_key, plazo, only_quoting, leg) if selected_key else {"points": [], "n": 0}
+    # El gráfico lo dibuja charts.js con /graficos/data (uPlot): la página NO
+    # usa `chart`. Antes igual se armaba el SVG server-side (pricing de la
+    # curva + fit NSS con scipy) en cada carga, para tirarlo.
+    chart = {"points": [], "n": 0}
     return _render(
         request, "graficos.html",
         all_curves=all_curves, table=table, selected_key=selected_key,

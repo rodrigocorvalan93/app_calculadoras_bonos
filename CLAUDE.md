@@ -272,6 +272,52 @@ HTTP real) y sale con código 3 y un mensaje claro antes de cargar nada.
 cast numpy sobre data externa (p. ej. `cierres._build`, float64 → float32)
 va bajo `np.errstate` + `warnings.catch_warnings()` y lo que no entra queda
 NaN — un valor basura en una celda no puede voltear una matriz entera.
+**Ruido que NO va al log** (29/09): `main._QuietPolls` calla el access-log de
+los paneles live (`md-update`: `/curves/table`, `/mercado/rows`, `/yas/market`,
+libros, `/market/health`, …) SÓLO en 2xx/3xx — un 4xx/5xx sale igual (es la
+única señal de que un panel se rompió); una pestaña de Curvas sola escribía
+~430 `GET /curves/table → 200` por rueda. `errores._FiltroProactor` también
+filtra el "ConnectionClosedError exception in shielded future" de websockets
+(keepalive timeout): `primary_ws` loguea `disconnected: …` en la línea
+siguiente con el mismo motivo.
+
+**Revisión 29/09 — lo que no vuelve** (`tests/test_revision_2909.py`):
+`/graficos` no arma el SVG server-side (la página dibuja con charts.js; el
+pricing + fit NSS con scipy corría en el event loop para tirarse) y
+`/graficos/svg`, la matriz de forwards (`_matrix_async`, N² por tick con la
+pestaña abierta) y el form de Nueva especie (`build_ficha_from_form` +
+`adhoc.register`) van al pool. `append_acciones` NO sigue con `prev=None`
+si el parquet es ilegible y no se pudo apartar (pisaba la historia con las
+filas de hoy); reintenta la lectura una vez antes de darlo por corrupto.
+`cierres.particiones(strict=True)` en `importar_base` / `prime`: un error al
+listar no se lee como "no hay particiones" (el backfill las pisaba con filas
+sólo-base). `escenario_prefs._load_all(strict=True)` / `alertas._load(
+strict=True)` en los que escriben: archivo ilegible → OSError, no se
+reescribe con sólo la entrada del que guardó. `auth`: el PBKDF2 de
+`create_user` / `set_password` / `reset_with_token` corre FUERA de `_lock`
+(`_perfil_para_clave` + `_aplicar_clave`; el reset re-chequea el token bajo
+el lock: sigue siendo de un uso). `instruments.detail`: cache acotado
+(`_MAX_CACHE`, el símbolo lo arma el usuario) y por contexto de broker.
+`curves.build_curve_codes` / `curve_key_for` / perfil de vencimientos de
+Posiciones: `hoy_ba()`, no `date.today()`.
+
+## Feed Primary — símbolos rechazados (cache local)
+
+matrizoms rechaza el `smd` ENTERO si un símbolo del lote es inválido y
+`primary_ws` reintenta el lote de a uno para conservar los válidos. Con
+~500 símbolos del universo que el broker no lista (ONs viejas, plazos CI
+sin rueda) cada arranque pagaba ~130 lotes rechazados + 500 reintentos
+(30-40 s sin feed para los válidos de esos lotes, y solía terminar en un
+keepalive timeout). Los rechazados quedan ahora en
+`%LOCALAPPDATA%\bonos\primary_rechazados.json` (Mac/Linux
+`~/.local/share/bonos/`), **por host** y con la fecha del rechazo: el
+cliente los carga en `__init__` y el primer subscribe ya sale sin ellos;
+una entrada vence a los `REJECTED_TTL_DAYS` (7) y se vuelve a probar (una
+emisión nueva que el broker lista después no queda muda para siempre). UNA
+escritura por tormenta (coalescida 3 s, en el executor, atómica) y flush en
+`stop()`. `PRIMARY_REJECTED_CACHE` = ruta del archivo; `0` apaga (la suite
+corre con 0 vía `conftest`). Regresión:
+`test_marketdata.test_rechazados_persisten_por_host_con_ttl`.
 
 ## Posiciones — Categoría de las tenencias
 
@@ -311,12 +357,30 @@ Manual para el desk (orden de decisión, tokens, qué cargar en la base):
 `backend/docs/posiciones_clasificacion.md` (el `.gitignore` es una allowlist:
 `docs/` en la raíz queda afuera) — si cambia una regla, cambia el manual.
 
-**Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las 4 rutas llevan
-`@_pestana_resiliente(...)` — una excepción responde 200 con
+**Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las rutas de pestaña
+llevan `@_pestana_resiliente(...)` — una excepción responde 200 con
 `partials/historico_tab_error.html` (qué falló + Reintentar) en vez de un 500
 que htmx no swapea (el tab quedaba en "Cargando…" para siempre); los
 contenedores llevan `hx-request='{"timeout":90000}'` y `app.js` (`lazyFail`)
 muestra el mismo alert ante error de red / timeout.
+
+**COMP (Históricos · Comparar, 29/09)**: `services/comp.py` — hasta 10
+activos (bonos por código de calc vía `cierres` con fallback a la base,
+acciones / CEDEARs / Merval del parquet; mismas fuentes que el price action:
+`price_action.serie_de`) alineados a la unión de ruedas, `y` = base 100 en la
+primera rueda con dato del rango / variación % / nivel, ÷ FX opcional
+(`fx_por_fecha` + `_alinear`), TIR de bonos en % con Δ en pp; `stats` por
+activo (inicio, fin, var, máx, mín, caída desde el máx, vol anualizada).
+Rutas `/historicos/comp` (controles + `<datalist>` de especies + cuerpo) y
+`/historicos/comp/body` (lo que swapea el form: avisos, gráfico, cuadro);
+HTML cacheado por (parámetros normalizados, firmas de los archivos) como
+Acciones; el cálculo es numpy en memoria (~ms) y corre en el executor. El
+gráfico lo dibuja `charts.js initHistComp` con el JSON embebido en el cuerpo
+(cero requests extra; colores del payload = punto de la tabla). **Fechas de
+los gráficos históricos**: el server manda medianoche UTC por rueda y uPlot
+formatea en UTC (`utcTz` / `utcDia`, opción `tzDate`) — con el reloj local
+Buenos Aires (UTC-3) etiquetaba un día antes. Regresión:
+`tests/test_historico_comp.py`.
 
 ## Visual style (FastAPI rewrite)
 

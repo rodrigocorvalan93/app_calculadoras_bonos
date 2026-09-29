@@ -47,10 +47,20 @@ class _FiltroProactor(logging.Filter):
     sigue pasando."""
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: D102
-        if record.exc_info and isinstance(record.exc_info[1],
-                                          (ConnectionResetError, ConnectionAbortedError)):
+        exc = record.exc_info[1] if record.exc_info else None
+        if exc is None:
+            return True
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError)):
             if "_call_connection_lost" in record.getMessage():
                 return False
+        # websockets (cliente legacy) cierra por keepalive timeout: el waiter
+        # que protegía con asyncio.shield queda con la ConnectionClosedError
+        # sin retirar y asyncio imprime un traceback de 12 líneas por CADA
+        # caída del feed. primary_ws ya loguea "disconnected: …" en la línea
+        # siguiente con el mismo motivo; el traceback no agrega nada.
+        if type(exc).__name__ in ("ConnectionClosedError", "ConnectionClosedOK", "ConnectionClosed") \
+                and "exception in shielded future" in record.getMessage():
+            return False
         return True
 
 

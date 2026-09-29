@@ -72,9 +72,15 @@ def _sane_user_entry(raw: Any) -> Dict[str, Any]:
             "cats_off": _sane_cats(raw.get("cats_off"))}
 
 
-def _load_all() -> Dict[str, Any]:
+def _load_all(strict: bool = False) -> Dict[str, Any]:
     """Estructura v2 completa: {"v": 2, "users": {u: {senderos, cats_off}},
-    "presets": {...}} — migrando el formato viejo si hace falta."""
+    "presets": {...}} — migrando el formato viejo si hace falta.
+
+    `strict=True` (los que ESCRIBEN): un archivo que existe pero no se puede
+    leer (lock, permisos, OneDrive a medias) sube el OSError en vez de
+    devolver defaults — el guardado que seguía reescribía el archivo con
+    SÓLO la entrada del que guardó: senderos de los demás y presets del
+    equipo perdidos. Las lecturas (página) siguen cayendo a defaults."""
     p = _path()
     if not p.is_file():
         return {"v": 2, "users": {}, "presets": {}}
@@ -83,6 +89,8 @@ def _load_all() -> Dict[str, Any]:
         if not isinstance(data, dict):
             return {"v": 2, "users": {}, "presets": {}}
     except OSError:
+        if strict:
+            raise
         logger.exception("[escenario_prefs] archivo ilegible; arranco de defaults")
         return {"v": 2, "users": {}, "presets": {}}
     except ValueError as exc:
@@ -134,7 +142,7 @@ def save(senderos: Optional[Dict[str, str]] = None,
     set guardado (el cliente manda sólo las filas tocadas); `cats_off`
     reemplaza la lista. None = no tocar esa parte. Presets intactos."""
     with _lock:
-        all_ = _load_all()
+        all_ = _load_all(strict=True)
         ent = _sane_user_entry(all_["users"].get(user) or all_["users"].get(_MIGRADO))
         if senderos is not None:
             ent["senderos"] = {k: str(v) for k, v in senderos.items() if k in SENDERO_KEYS}
@@ -149,7 +157,7 @@ def reset(user: str = "_local") -> None:
     """Borra lo ACTIVO del usuario → defaults vivos. Los presets nombrados
     sobreviven (biblioteca compartida), y el estado de los DEMÁS también."""
     with _lock:
-        all_ = _load_all()
+        all_ = _load_all(strict=True)
         all_["users"].pop(user, None)
         # el fallback migrado ya no aplica para quien pidió reset explícito
         if user != _MIGRADO and _MIGRADO in all_["users"]:
@@ -164,7 +172,7 @@ def preset_save(name: str, user: str = "_local") -> bool:
     if not name:
         return False
     with _lock:
-        all_ = _load_all()
+        all_ = _load_all(strict=True)
         presets = all_["presets"]
         if name not in presets and len(presets) >= _MAX_PRESETS:
             return False
@@ -178,7 +186,7 @@ def preset_save(name: str, user: str = "_local") -> bool:
 def preset_apply(name: str, user: str = "_local") -> bool:
     """Carga un preset compartido como estado activo DEL USUARIO."""
     with _lock:
-        all_ = _load_all()
+        all_ = _load_all(strict=True)
         pr = all_["presets"].get((name or "").strip()[:40])
         if pr is None:
             return False
@@ -190,7 +198,7 @@ def preset_apply(name: str, user: str = "_local") -> bool:
 
 def preset_delete(name: str) -> bool:
     with _lock:
-        all_ = _load_all()
+        all_ = _load_all(strict=True)
         key = (name or "").strip()[:40]
         if key not in all_["presets"]:
             return False

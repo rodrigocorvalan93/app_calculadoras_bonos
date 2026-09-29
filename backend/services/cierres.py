@@ -66,8 +66,14 @@ def dir_path() -> Optional[str]:
     return os.path.join(d, CIERRES_DIRNAME) if d else None
 
 
-def particiones() -> List[Tuple[str, str]]:
-    """[(fecha ISO, path)] ascendente de las particiones existentes."""
+def particiones(strict: bool = False) -> List[Tuple[str, str]]:
+    """[(fecha ISO, path)] ascendente de las particiones existentes.
+
+    `strict=True` (los que ESCRIBEN: `importar_base` / `prime`): un error al
+    listar (OneDrive a medio sincronizar, permisos) sube en vez de leerse como
+    "no hay particiones" — con [] el backfill daba por faltante cada fecha de
+    la base y `escribir_particion` PISABA las particiones reales (OHLC, puntas,
+    volumen y todos los símbolos sin ficha) con filas sólo-base."""
     root = dir_path()
     if not root or not os.path.isdir(root):
         return []
@@ -81,6 +87,8 @@ def particiones() -> List[Tuple[str, str]]:
                 if fn.endswith(".parquet") and len(fn) == 18:      # AAAA-MM-DD.parquet
                     out.append((fn[:10], os.path.join(yd, fn)))
     except OSError:
+        if strict:
+            raise
         return []
     return sorted(out)
 
@@ -336,7 +344,10 @@ def importar_base(force: bool = False) -> Dict[str, Any]:
         return {"error": f"base ilegible: {exc}"}
     if not len(df) or "symbol" not in df.columns or "fecha_hoy" not in df.columns:
         return {"skipped": "base sin filas"}
-    existentes = {f for f, _ in particiones()}
+    try:
+        existentes = {f for f, _ in particiones(strict=True)}
+    except OSError as exc:
+        return {"error": f"no pude listar las particiones ({exc}): no importo para no pisarlas"}
     df["fecha_hoy"] = pd.to_datetime(df["fecha_hoy"]).dt.date
     n = 0
     for fecha, g in df.groupby("fecha_hoy"):
@@ -378,10 +389,12 @@ def prime() -> None:
     """Warmup: si no hay particiones y la base existe, backfill (writer);
     después carga la matriz."""
     try:
-        if not particiones():
+        if not particiones(strict=True):
             r = importar_base()
             if r.get("importadas"):
                 logger.info("[cierres] backfill inicial: %s", r)
+            elif r.get("error"):
+                logger.warning("[cierres] backfill inicial: %s", r["error"])
     except Exception:  # noqa: BLE001
         logger.exception("[cierres] backfill inicial falló")
     ensure_loaded()

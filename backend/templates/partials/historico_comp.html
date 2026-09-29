@@ -1,0 +1,44 @@
+{# Históricos · COMP — comparación de la evolución de varios activos (bonos
+   del cierre completo / base, acciones / CEDEARs / Merval del parquet) al
+   estilo COMP de Bloomberg. El form pide sólo el cuerpo (#hist-comp-body):
+   controles y datalist quedan afuera del swap (la lista de especies puede
+   tener miles de opciones y no viaja en cada cambio). El gráfico lo dibuja
+   charts.js (initHistComp) con el JSON embebido en el cuerpo: cero requests
+   extra. Sin polling: la data cambia 1×/día. #}
+<div class="curve-picker card">
+  <div class="card-body">
+    <form id="hc-comp-form" hx-get="/historicos/comp/body" hx-target="#hist-comp-body" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
+      <div class="row-fields">
+        <label class="field" style="flex:1 1 300px"><span>Activos <small class="muted">(hasta {{ max_tickers }}, separados por espacio o coma)</small></span>
+          <input type="text" name="tickers" value="{{ tickers_txt }}" list="hc-comp-list" placeholder="GGAL AL30D TX26 SPY" autocomplete="off" spellcheck="false" autocapitalize="off"></label>
+        <label class="field"><span>Serie</span>
+          <select name="campo" title="Precio de pantalla, o la TIREA del cierre (sólo bonos con ficha): nivel en % y Δ en puntos">
+            <option value="precio" {% if campo == "precio" %}selected{% endif %}>Precio</option>
+            <option value="tir" {% if campo == "tir" %}selected{% endif %}>TIR (bonos)</option>
+          </select></label>
+        <label class="field"><span>Moneda</span>
+          <select name="base" title="÷ FX del mismo día (series diarias del cierre; A3500 del BCRA). No aplica a la TIR">
+            {% for k, lbl in bases.items() %}<option value="{{ k }}" {% if k == base %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+          </select></label>
+        <label class="field"><span>Vista</span>
+          <select name="modo" title="Base 100: cada activo vale 100 en su primera rueda con dato del rango. La TIR va siempre en nivel">
+            {% for k, lbl in modos.items() %}<option value="{{ k }}" {% if k == modo %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+          </select></label>
+        <label class="field"><span>Rango</span>
+          <select name="rango">
+            {% for k, lbl in rangos.items() %}<option value="{{ k }}" {% if k == rango %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+          </select></label>
+        <label class="field"><span>Desde</span><input type="date" name="desde" value="{{ desde or '' }}"></label>
+        <label class="field"><span>Hasta</span><input type="date" name="hasta" value="{{ hasta or '' }}"></label>
+        <button type="submit" class="btn-primary" style="align-self:end">Comparar</button>
+      </div>
+    </form>
+    <datalist id="hc-comp-list">{% for n in names %}<option value="{{ n }}">{% endfor %}</datalist>
+    <p class="muted" style="font-size:11px;margin-top:6px">
+      Bonos por código de calc (AL30D, GD30C, TX26, TX26j), acciones y CEDEARs por ticker, MERVAL para el índice.
+      Base 100 = cada activo vale 100 en su primera rueda con dato del rango; Variación % = lo mismo en %; Nivel = precio tal cual.
+      Desde/Hasta tienen prioridad sobre el rango. Zoom arrastrando, doble click reset; click en la leyenda apaga una serie.
+    </p>
+  </div>
+</div>
+<div id="hist-comp-body">{% include "partials/historico_comp_body.html" %}</div>

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date as _date
+from backend.locale_ar import hoy_ba
 from typing import Dict, List, Set, Tuple
 
 from . import bond_universe
@@ -124,7 +124,10 @@ def build_curve_codes() -> Dict[str, List[str]]:
     global _codes_cache
     bond_universe.ensure_loaded()
     all_codes = bond_universe.all_codes()
-    hoy = _date.today()
+    # Fecha de Buenos Aires (no la del reloj del server): con el proceso en
+    # UTC, date.today() ya es "mañana" a las 21:00 BA y un bono que vence
+    # mañana desaparecía de las curvas esa misma tarde.
+    hoy = hoy_ba()
     # El día entra en la key: un bono que vence mientras la app corre sale de
     # las curvas en el próximo rollover sin reiniciar.
     cache_key = (len(all_codes), hoy.toordinal())
@@ -312,7 +315,7 @@ def curve_key_for(code: str) -> str | None:
     junto al particionado — lookup O(1) tras el primer uso."""
     global _rev_cache
     bond_universe.ensure_loaded()
-    cache_key = (len(bond_universe.all_codes()), _date.today().toordinal())
+    cache_key = (len(bond_universe.all_codes()), hoy_ba().toordinal())
     cached = _rev_cache
     if cached is None or cached[0] != cache_key:
         rev: Dict[str, str] = {}

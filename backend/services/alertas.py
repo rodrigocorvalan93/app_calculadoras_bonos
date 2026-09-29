@@ -72,13 +72,19 @@ def _sane(a: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def _load() -> List[Dict[str, Any]]:
+def _load(strict: bool = False) -> List[Dict[str, Any]]:
+    """`strict=True` (alta / baja / rearme): un archivo que existe pero no se
+    puede leer sube el OSError — el guardado que seguía lo reescribía con la
+    lista vacía + la alerta nueva, y las demás se perdían. La lectura de la
+    tabla sigue cayendo a vacío."""
     p = _path()
     if not p.is_file():
         return []
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except OSError:
+        if strict:
+            raise
         logger.exception("[alertas] archivo ilegible; arranco vacío")
         return []
     except ValueError as exc:
@@ -127,7 +133,7 @@ def add(code: str, metric: str, op: str, valor: float, email: str = "") -> Optio
     if not math.isfinite(v):
         return "Valor inválido."
     with _lock:
-        alertas = _load()
+        alertas = _load(strict=True)
         if len(alertas) >= _MAX_ALERTAS:
             return f"Máximo {_MAX_ALERTAS} alertas."
         alertas.append({
@@ -143,7 +149,7 @@ def add(code: str, metric: str, op: str, valor: float, email: str = "") -> Optio
 
 def delete(alert_id: str) -> bool:
     with _lock:
-        alertas = _load()
+        alertas = _load(strict=True)
         keep = [a for a in alertas if a["id"] != alert_id]
         if len(keep) == len(alertas):
             return False
@@ -154,7 +160,7 @@ def delete(alert_id: str) -> bool:
 def rearm(alert_id: str) -> bool:
     """Re-arma una alerta disparada (vuelve a vigilar el mismo umbral)."""
     with _lock:
-        alertas = _load()
+        alertas = _load(strict=True)
         for a in alertas:
             if a["id"] == alert_id:
                 a["activa"] = True

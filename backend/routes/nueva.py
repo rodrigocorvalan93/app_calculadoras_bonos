@@ -89,15 +89,15 @@ async def nueva_parse(
     valor_nominal: str = Form("100"),
     quote_price_cnv: str = Form("DIRTY"),
 ) -> HTMLResponse:
+    loop = asyncio.get_running_loop()
     try:
         if entrada == "pegar":
             # Al threadpool: el parse de una ficha pegada es CPU/alloc-bound y
             # arbitrario (texto del usuario); en el event loop, un paste pesado
             # congelaba los paneles live de todos mientras se procesaba.
-            _name, ficha = await asyncio.get_running_loop().run_in_executor(
-                None, adhoc.parse_ficha, ficha_text)
+            _name, ficha = await loop.run_in_executor(None, adhoc.parse_ficha, ficha_text)
         else:
-            ficha = adhoc.build_ficha_from_form({
+            campos = {
                 "codigo": codigo, "nombre": nombre, "moneda": moneda,
                 "clasificacion": clasificacion, "emision": emision,
                 "vencimiento": vencimiento, "primer_cupon": primer_cupon,
@@ -107,8 +107,13 @@ async def nueva_parse(
                 "tipo_amortizacion": tipo_amortizacion, "cuotas_finales": cuotas_finales,
                 "amortizacion_custom": amortizacion_custom, "valor_nominal": valor_nominal,
                 "quote_price_cnv": quote_price_cnv,
-            })
-        token, _code = adhoc.register(ficha)
+            }
+            # Igual que el paste: coupon_dates itera el rango de fechas que
+            # eligió el usuario (emisión 1900 → vencimiento 2999 = miles de
+            # cupones) — fuera del event loop.
+            ficha = await loop.run_in_executor(None, adhoc.build_ficha_from_form, campos)
+        # register = rentafija.Bono(ficha): flujos + TIR de referencia (CPU).
+        token, _code = await loop.run_in_executor(None, adhoc.register, ficha)
     except ValueError as exc:
         return _render(request, "partials/nueva_error.html", error=str(exc))
     return await _panel(request, token, ficha)

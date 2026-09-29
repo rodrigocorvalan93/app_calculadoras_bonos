@@ -1277,6 +1277,8 @@ html, body, .topbar, .card, .fx-rail, .tape, .news-marquee, .footer {
    (textContent) y el ⧉ copiar tabla (innerText) no la ven. Vive dentro del
    padding inferior de .cashflows (7 px) → la fila no crece; anclada a la
    derecha, bajo el número, crece hacia la izquierda. ─────────────────── */
+/* COMP (Históricos): punto del color de la serie al lado del ticker. */
+.comp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
 .var-cell { position: relative; font-weight: 650; }
 .var-cell.var-up   { color: var(--up-strong); }
 .var-cell.var-down { color: var(--down-strong); }
