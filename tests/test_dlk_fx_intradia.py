@@ -194,10 +194,12 @@ def test_fx_custom_se_muestra_en_el_card() -> None:
     from backend.services import bond_universe, pricing
 
     bond_universe.ensure_loaded()
-    m = pricing.compute_metrics("D30S6", "precio", 148000.0, fx_override=1498.5,
+    # TZV28 (DLK soberano, vence en 2028): el D30S6 de antes vencía el 30/09/2026 y
+    # desde el 29/09 (liquidación 24hs = vencimiento) ya no tenía flujos → sin card.
+    m = pricing.compute_metrics("TZV28", "precio", 148000.0, fx_override=1498.5,
                                 include_cashflows=False)
     ia = m["index_applied"]
     assert ia["value"] == 1498.5 and "custom" in ia["label"].lower()
     # sin override → el card sigue leyendo la serie/intradía (label sin 'custom')
-    m2 = pricing.compute_metrics("D30S6", "precio", 148000.0, include_cashflows=False)
+    m2 = pricing.compute_metrics("TZV28", "precio", 148000.0, include_cashflows=False)
     assert "custom" not in m2["index_applied"]["label"].lower()

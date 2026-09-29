@@ -61,6 +61,42 @@ def test_falls_back_to_newer_xlsx_and_regenerates_mirror(hist_dir) -> None:
     assert pd.read_parquet(hist_dir / _PARQUET)["TIREA"].iloc[0] == pytest.approx(0.32)
 
 
+def test_regenera_el_espejo_con_celdas_basura_en_el_excel(hist_dir) -> None:
+    """28/09/2026: "no pude regenerar el parquet (PyLong is too large to fit
+    int64)" — una celda con texto en TIREA + una TIREA integral gigante en el
+    Excel dejaban a la app sin espejo, releyendo el xlsx entero (7 s) en cada
+    carga. Ahora el espejo se regenera con las métricas en float64."""
+    from openpyxl import Workbook
+
+    from backend.services import espejo
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["fecha_hoy", "Código", "TIREA", "TNA", "TEM", "Paridad", "Last Price", "Duration"])
+    ws.append(["2026-07-06", "T30E6", 0.32, 0.28, 0.0235, 0.98, 101.5, 0.6])
+    ws.append(["2026-07-06", "BB", "s/d", 0.28, 0.0235, 0.98, 100.0, 0.6])     # texto que no es NA
+    ws.append(["2026-07-06", "CC", 10 ** 20, 0.28, 0.0235, 0.98, 100.0, 0.6])  # int que no entra en int64
+    wb.save(hist_dir / _XLSX)
+    raw = pd.read_excel(hist_dir / _XLSX, sheet_name="Sheet1")
+    assert str(raw["TIREA"].dtype) == "object"                # el crudo reproduce el caso
+
+    out = historico_byma._load()
+    assert out["loaded"] is True and str(out["path"]).endswith(".xlsx")
+    assert out["by_code"]["T30E6"]["vals"]["TIREA"][0] == pytest.approx(0.32)
+    assert "CC" not in out["by_code"]                          # TIREA absurda: filtrada como siempre
+    pq = hist_dir / _PARQUET
+    assert pq.is_file() and espejo.espejo_valido(str(pq), str(hist_dir / _XLSX))
+    back = pd.read_parquet(pq)
+    assert str(back["TIREA"].dtype) == "float64"
+    assert back.set_index("Código")["TIREA"].isna().to_dict()["BB"] is True
+    assert float(back.set_index("Código").at["CC", "TIREA"]) == 1e20
+    # la próxima carga ya va por el espejo, con la misma data
+    out2 = historico_byma._load()
+    assert str(out2["path"]).endswith(".parquet")
+    assert out2["by_code"]["T30E6"]["vals"]["TIREA"][0] == pytest.approx(0.32)
+
+
 def test_parquet_only_works_without_xlsx(hist_dir) -> None:
     _df(0.44).to_parquet(hist_dir / _PARQUET, index=False)
     out = historico_byma._load()

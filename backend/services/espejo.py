@@ -149,3 +149,46 @@ def olvidar_firma(pq_path: str) -> None:
 def reset_memo() -> None:
     with _lock:
         _MEMO.clear()
+
+
+# Columnas numéricas de la base px/tasas: en el espejo van SIEMPRE float64.
+COLS_NUMERICAS = ("Last Price", "Close Price", "Variación %", "TIREA", "TNA", "TEM",
+                  "Paridad", "Duration")
+
+
+def normalizar_numericas(df: Any, origen: str, cols: Tuple[str, ...] = COLS_NUMERICAS) -> Any:
+    """Columnas numéricas a float64 antes de escribir un espejo, venga de
+    donde venga el cuadro (Excel leído por el writer, por el lector de
+    Históricos o por bymaapi).
+
+    `read_excel` deja una columna como `object` si alguna celda del Excel
+    tiene TEXTO que no es un NA de pandas (un "s/d" tipeado, una nota, un
+    encabezado pegado) y, en ese caso, un valor integral grande (una TIREA
+    absurda de 1e+20 que el calc dejó algún día) queda como `int` de Python:
+    pyarrow no lo puede meter en int64 y `to_parquet` revienta con "PyLong is
+    too large to fit int64". Una celda volteaba TODO guardado (cierre del
+    día, consolidación del journal, reconstrucción de un hueco) y dejaba al
+    lector sin espejo (28/09/2026). Acá: texto → NaN (la fila cae en el
+    dropna de métricas del writer), enteros → float, y un warning con qué
+    celdas eran para poder limpiar el Excel. Una columna ya float64 no se
+    toca: costo cero en el camino normal (espejo parquet). Modifica `df` en
+    el lugar y lo devuelve. pandas se importa acá adentro: el módulo sigue
+    siendo importable sin pandas."""
+    import pandas as pd
+    for col in cols:
+        if col not in df.columns or df[col].dtype == "float64":
+            continue
+        orig = df[col]
+        conv = pd.to_numeric(orig, errors="coerce")
+        vacio = orig.isna() | orig.astype(str).str.strip().eq("")
+        perdidos = conv.isna() & ~vacio
+        if perdidos.any():
+            cods = df["Código"] if "Código" in df.columns else orig
+            fechas = df["fecha_hoy"] if "fecha_hoy" in df.columns else orig
+            muestra = [f"{c} {f}: {v!r}" for c, f, v in
+                       zip(cods[perdidos].head(5), fechas[perdidos].head(5), orig[perdidos].head(5))]
+            logger.warning("[espejo] %s: %d celdas no numéricas en '%s' → NaN "
+                           "(la fila cae del guardado si es una métrica): %s",
+                           origen, int(perdidos.sum()), col, "; ".join(muestra))
+        df[col] = conv.astype("float64")
+    return df

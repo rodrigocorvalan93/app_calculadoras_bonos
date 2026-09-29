@@ -65,6 +65,42 @@ def _df_cierre(fecha: date) -> pd.DataFrame:
     })
 
 
+def test_guardar_directo_tolera_celdas_basura(tmp_path) -> None:
+    """Fallback legacy (write directo): un Excel viejo con texto en TIREA y una
+    TIREA integral gigante mataba el espejo parquet ("PyLong is too large to
+    fit int64") — el Excel quedaba bien pero la app releía el xlsx entero.
+    Ahora el espejo sale con las métricas en float64 y firmado."""
+    from openpyxl import Workbook
+
+    from backend.services import espejo
+
+    xlsx = str(tmp_path / "Delta - historico_byma_px_tasas.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    cols = ["symbol", "Código", "Last Price", "Close Price", "Variación %", "TIREA", "TNA", "TEM",
+            "Paridad", "Duration", "Price Source", "Price Date", "fecha_hoy"]
+    ws.append(cols)
+    ws.append(["MERV - XMEV - AA - 24hs", "AA", 100.0, 99.0, 0.01, 0.31, 0.28, 0.023, 0.98, 0.6, "LA", "1", "2026-09-24"])
+    ws.append(["MERV - XMEV - BB - 24hs", "BB", 100.0, 99.0, 0.01, "s/d", 0.28, 0.023, 0.98, 0.6, "LA", "1", "2026-09-24"])
+    ws.append(["MERV - XMEV - CC - 24hs", "CC", 100.0, 99.0, 0.01, 10 ** 20, 0.28, 0.023, 0.98, 0.6, "LA", "1", "2026-09-24"])
+    wb.save(xlsx)
+
+    nuevo = pd.DataFrame({
+        "symbol": ["MERV - XMEV - T30E6 - 24hs"], "Código": ["T30E6"],
+        "Last Price": [101.5], "Close Price": [100.0], "Variación %": [0.015],
+        "TIREA": [0.321], "TNA": [0.28], "TEM": [0.0235], "Paridad": [0.98], "Duration": [0.6],
+        "Price Source": ["LA"], "Price Date": ["1"], "fecha_hoy": [date(2026, 9, 25)],
+    })
+    bymaapi._guardar_excel_directo(nuevo, xlsx)
+    pq = xlsx.replace(".xlsx", ".parquet")
+    assert os.path.isfile(pq) and espejo.espejo_valido(pq, xlsx)
+    back = pd.read_parquet(pq).set_index("Código")
+    assert str(back["TIREA"].dtype) == "float64"
+    assert back.at["T30E6", "TIREA"] == 0.321 and float(back.at["CC", "TIREA"]) == 1e20
+    assert pd.isna(back.at["BB", "TIREA"])                     # el texto no entra al espejo
+    assert len(pd.read_excel(xlsx)) == 4                       # el Excel (canónico) quedó como siempre
+
+
 def test_guardar_excel_endurecido(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HISTORICO_JOURNAL_DIR", str(tmp_path / "journal"))
     xlsx = str(tmp_path / "Delta - historico_byma_px_tasas.xlsx")

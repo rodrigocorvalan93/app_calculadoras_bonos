@@ -270,6 +270,29 @@ def test_sin_rueda_por_evidencia(env, monkeypatch) -> None:
     assert hw.estado_cierre()["huecos"] == []
 
 
+def test_rueda_reconstruida_no_es_fuente_de_la_anterior(env, monkeypatch) -> None:
+    """Dos huecos seguidos: la rueda siguiente ya rearmada (filas RC) lleva
+    como Close Price el último de la rueda previa DISPONIBLE — leerlo como
+    cierre de D fabricaría D con precios viejos o, como acá (Close == último
+    de D-1), la marcaría 'sin rueda' para siempre. D queda pendiente, visible
+    y con el motivo en el error."""
+    codes = _codigos_calculables(3)
+    xlsx = str(env / hw.HIST_FILENAME)
+    hw.append_and_save(_df_base(D_ANT, [(c, 100.0 + i, 99.0) for i, c in enumerate(codes)]), xlsx)
+    hw.append_and_save(_df_base(D_SIG, [(c, 105.0 + i, 100.0 + i) for i, c in enumerate(codes)], source="RC"), xlsx)
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 25, 10, 0))
+    assert hw.huecos_base() == [D]
+    res = hw.reconstruir_cierre(D)
+    assert res["ok"] is False and res["sin_rueda"] is False, res
+    assert "no hay de dónde" in res["error"] and "reconstruida" in res["error"], res
+    assert D not in hw._sin_rueda_days() and hw.huecos_base() == [D]        # sigue pendiente
+    back = _base_parquet(env)
+    assert D not in set(pd.to_datetime(back["fecha_hoy"]).dt.date)
+    r = hw.reconstruir_faltantes()
+    assert r["reconstruidos"] == [] and r["sin_rueda"] == []
+    assert [p["dia"] for p in r["pendientes"]] == [D.isoformat()] and "reconstruida" in r["pendientes"][0]["motivo"]
+
+
 def test_reconstruir_en_maquina_secundaria_solo_journal(env, monkeypatch) -> None:
     """base_writer=0: la reconstrucción journalea local y no toca la base
     compartida; la segunda vez no recalcula (ya está en el journal); el botón

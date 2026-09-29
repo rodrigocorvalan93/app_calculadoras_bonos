@@ -192,7 +192,11 @@ con el dedup de siempre, fila FX del día (CCL/MEP de cierres + A3500 de la
 serie) y partición de cierres desde la base (`cierres.importar_base`, sin
 volumen/OHLC; `opero` cuenta RC con fecha). Si los cierres previos de D+1 son
 exactamente los últimos de D-1, D no tuvo rueda → `sin_rueda`. Sólo se
-recupera el último día de un hueco. Corre solo al arrancar (espera el
+recupera el último día de un hueco, y una rueda RC NO es fuente para
+reconstruir la anterior (`_filas_base_en` la salta: su `Close Price` es el
+último de la rueda previa DISPONIBLE, no el cierre real de D-1 — fabricaría
+D-1 con precios de D-2 o la marcaría `sin_rueda`); con dos huecos seguidos el
+más viejo queda pendiente y visible. Corre solo al arrancar (espera el
 snapshot hasta 4 min), a las 17:01 antes de guardar hoy, en
 `tools/cierre.py`, y a mano: POST `/historicos/reconstruir-cierre`
 (superuser; botón "Reconstruir DD/MM" del banner, también para huecos
@@ -200,6 +204,22 @@ anteriores al cierre esperado: `estado_cierre()["huecos"]`).
 `HISTORICO_RECONSTRUIR=0` apaga lo automático. `_fecha_dato`: ISO sin zona =
 hora BA y un instante 00:00Z es sello de FECHA (no las 21:00 BA del día
 anterior). Regresión: `tests/test_cierre_reconstruccion.py`.
+**Celdas basura en el Excel** (28/09): cuando el espejo no es fiel y hay que
+leer el xlsx, una celda con TEXTO en una métrica deja la columna `object` y
+un entero gigante (TIREA 1e+20 que dejó algún calc) queda como `int` de
+Python → `to_parquet` moría con "PyLong is too large to fit int64" y con eso
+TODO guardado (cierre, consolidación del journal, reconstrucción).
+`espejo.normalizar_numericas` (`espejo.COLS_NUMERICAS`; pandas importado
+adentro, el módulo sigue stdlib puro) corre antes de CADA escritura de un
+espejo: writer (`_leer_base` Excel, `write_journal`, `_append_and_save_locked`
+vía `_normalizar_numericas`), lector (`historico_byma._regen_parquet` — antes
+"no pude regenerar el parquet" y releía el xlsx entero en cada carga) y
+`bymaapi._guardar_excel_directo`: texto → NaN (la fila cae en el dropna de
+métricas del writer), entero → float64, warning con código/fecha/valor de las
+celdas para limpiar el Excel; una columna ya float64 no se toca (costo cero
+por el espejo). Regresión: `test_append_tolera_celdas_basura_en_el_excel`,
+`test_regenera_el_espejo_con_celdas_basura_en_el_excel`,
+`test_guardar_directo_tolera_celdas_basura`.
 
 **Series diarias FX + caución** (`Delta - historico_fx`, `_guardar_fx`): UNA
 fila por día que se mergea así: escalares (CCL, MEP, canje, A3500) POR COLUMNA
@@ -557,6 +577,11 @@ Invariantes que mantienen la app andando en Mac — CI la corre en
 - **Launcher**: venv en `~/.venvs/bonos` (fuera de OneDrive), `ulimit -S -n
   4096` (una terminal de macOS arranca con tope 256 FDs), `TLS_TARGET_PORT =
   PORT`, shebang zsh y sin CRLF (test).
+- **Clon fuera de OneDrive**: un `.git` adentro de la biblioteca compartida se
+  sincroniza entre máquinas (locks ajenos, refs que cambian abajo del fetch,
+  objetos a 1 KB/s). En la Mac el código va en `~/Code/...` clonado con git;
+  las bases se leen igual del OneDrive vía `secrets.txt` (deltapaths). La
+  carpeta compartida es para el equipo, con `git pull` desde UNA máquina.
 - **Safari / WebKit** (también el WKWebView de Excel para Mac): escribir en el
   portapapeles sólo dentro del gesto → `app.js deliver` arma el
   `ClipboardItem` con la PROMESA del PNG y reintenta con el Blob; todo
