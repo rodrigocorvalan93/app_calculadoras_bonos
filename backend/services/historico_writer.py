@@ -66,43 +66,16 @@ _TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 # Columnas obligatorias (mismas que el dropna de bymaapi.guardar_excel).
 _REQUIRED = ["Last Price", "TIREA", "TNA", "TEM", "Paridad", "Duration"]
-# Columnas numéricas de la base: SIEMPRE float64 al escribir (ver _normalizar_numericas).
-_COLS_NUMERICAS = ("Last Price", "Close Price", "Variación %", "TIREA", "TNA", "TEM",
-                   "Paridad", "Duration")
 
 
 def _normalizar_numericas(df: "Any", origen: str) -> "Any":
-    """Columnas numéricas a float64, venga de donde venga el cuadro.
-
-    `read_excel` deja una columna como `object` si alguna celda del Excel
-    tiene TEXTO (un "N/A" tipeado, una nota, un encabezado pegado) y, en ese
-    caso, un valor integral grande (una TIREA absurda de 1e+20 que el calc
-    dejó algún día) queda como `int` de Python: pyarrow no lo puede meter en
-    int64 y `to_parquet` revienta con "PyLong is too large to fit int64" — el
-    guardado ENTERO (cierre del día, consolidación del journal, reconstrucción
-    de un hueco) moría por una celda, y sólo cuando el espejo parquet no era
-    fiel y había que leer el Excel (28/09/2026). Acá: texto → NaN (la fila cae
-    en el dropna de métricas), enteros → float, y un warning con qué celdas
-    eran para poder limpiar el Excel. Una columna ya float64 no se toca:
-    costo cero en el camino normal (espejo parquet)."""
-    import pandas as pd
-    for col in _COLS_NUMERICAS:
-        if col not in df.columns or df[col].dtype == "float64":
-            continue
-        orig = df[col]
-        conv = pd.to_numeric(orig, errors="coerce")
-        vacio = orig.isna() | orig.astype(str).str.strip().eq("")
-        perdidos = conv.isna() & ~vacio
-        if perdidos.any():
-            cods = df["Código"] if "Código" in df.columns else orig
-            fechas = df["fecha_hoy"] if "fecha_hoy" in df.columns else orig
-            muestra = [f"{c} {f}: {v!r}" for c, f, v in
-                       zip(cods[perdidos].head(5), fechas[perdidos].head(5), orig[perdidos].head(5))]
-            logger.warning("[historico_writer] %s: %d celdas no numéricas en '%s' → NaN "
-                           "(la fila cae del guardado si es una métrica): %s",
-                           origen, int(perdidos.sum()), col, "; ".join(muestra))
-        df[col] = conv.astype("float64")
-    return df
+    """Métricas a float64 antes de escribir (Excel leído, journal, base
+    final): `espejo.normalizar_numericas`, la misma rutina que usan el lector
+    de Históricos al regenerar el espejo y bymaapi. Una celda con texto o un
+    entero gigante en el Excel (TIREA 1e+20) mataba `to_parquet` con "PyLong
+    is too large to fit int64" y con eso TODO guardado (28/09/2026)."""
+    from backend.services import espejo
+    return espejo.normalizar_numericas(df, origen)
 
 # Ventana de reintentos del autosave (minutos desde el disparo) y cadencia:
 # feed caído → 5 min (el WS suele volver solo); otros errores (xlsx lockeado,

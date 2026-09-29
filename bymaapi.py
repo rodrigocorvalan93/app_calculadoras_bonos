@@ -950,16 +950,21 @@ def _guardar_excel_directo(df: pd.DataFrame, file_path: str) -> None:
             for col in ("symbol", "Código", "Price Source", "Price Date"):
                 if col in mirror.columns:
                     mirror[col] = mirror[col].astype("string")
-            mirror.to_parquet(parquet_path, index=False)
-            print(f"Espejo parquet actualizado en '{parquet_path}'.")
-            # Firma del Excel junto al espejo (backend.services.espejo, stdlib
-            # puro): la app sabe que este parquet es copia de ESTE xlsx; sin la
-            # firma, releería el Excel entero en la próxima carga.
+            # backend.services.espejo (stdlib puro): métricas float64 o NaN
+            # (una celda con texto / un entero gigante en el Excel viejo mataba
+            # el espejo: "PyLong is too large to fit int64") y la firma del
+            # Excel junto al parquet, para que la app sepa que es copia de ESTE
+            # xlsx (sin firma releería el Excel entero en la próxima carga).
             try:
                 from backend.services import espejo
-                espejo.marcar_espejo(parquet_path, file_path)
             except Exception:  # noqa: BLE001 — sin repo en sys.path: vale la regla de mtime
-                pass
+                espejo = None
+            if espejo is not None:
+                mirror = espejo.normalizar_numericas(mirror, "bymaapi")
+            mirror.to_parquet(parquet_path, index=False)
+            print(f"Espejo parquet actualizado en '{parquet_path}'.")
+            if espejo is not None:
+                espejo.marcar_espejo(parquet_path, file_path)
         except Exception as e:  # noqa: BLE001
             print(f"(Espejo parquet no guardado: {e} — el Excel quedó bien. Tip: pip install pyarrow)")
 

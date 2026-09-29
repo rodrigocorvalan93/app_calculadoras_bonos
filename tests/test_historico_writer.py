@@ -408,7 +408,7 @@ def test_append_tolera_celdas_basura_en_el_excel(hist_env, caplog) -> None:
     assert str(raw["TIREA"].dtype) == "object" and isinstance(raw["TIREA"].iloc[2], int)
     prev = hw._leer_base(xlsx, pd)
     assert str(prev["TIREA"].dtype) == "float64"
-    with caplog.at_level(logging.WARNING, logger="backend.historico_writer"):
+    with caplog.at_level(logging.WARNING, logger="backend.services.espejo"):
         res = hw.append_and_save(_rows_df(date(2026, 9, 25)), xlsx)
     assert any("no numéricas en 'TIREA'" in r.getMessage() and "BB" in r.getMessage() for r in caplog.records)
     assert res["total_rows"] == 4                       # AA + CC (1e20 sigue como float) + 2 nuevas; BB cae

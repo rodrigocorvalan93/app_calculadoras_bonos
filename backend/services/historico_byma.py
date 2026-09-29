@@ -98,7 +98,11 @@ def _regen_parquet(xlsx_path: str, df) -> None:
     pq = _parquet_sibling(xlsx_path)
     tmp = pq + ".tmp"
     try:
-        df.to_parquet(tmp, index=False)
+        # Igual que el writer: métricas float64 o NaN. Una celda con texto o un
+        # entero gigante en el Excel dejaba a la app SIN espejo (pyarrow:
+        # "PyLong is too large to fit int64") y releyendo el xlsx en cada carga.
+        mirror = espejo.normalizar_numericas(df.copy(), f"espejo de {os.path.basename(xlsx_path)}")
+        mirror.to_parquet(tmp, index=False)
         os.replace(tmp, pq)
         espejo.marcar_espejo(pq, xlsx_path)
         logger.info("[historico_byma] parquet espejo regenerado: %s", pq)
