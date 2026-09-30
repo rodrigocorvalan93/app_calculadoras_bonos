@@ -659,7 +659,7 @@ async def mercado_page(
 # (/mercado/rows, cada tick, N clientes): single-flight por key.
 _ROWS_CACHE: Dict[tuple, tuple] = {}          # key → (seq, rows, meta, order_hash)
 _ROWS_IDX: Dict[tuple, tuple] = {}            # key → pricing.indices_token() con el que se armó
-_ROWS_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_ROWS_LOCKS: Dict[tuple, tuple] = {}          # key → (loop, asyncio.Lock)
 _ROWS_MAX = 64
 
 
@@ -694,7 +694,16 @@ async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fue
     ent = _ROWS_CACHE.get(key)
     if ent is not None and ent[0] == seq and _ROWS_IDX.get(key) == idx:
         return ent
-    lock = _ROWS_LOCKS.setdefault(key, asyncio.Lock())
+    # (loop, lock): un asyncio.Lock queda atado al loop en el que se disputó
+    # por primera vez y con otro loop revienta ("bound to a different event
+    # loop"). En producción el loop es uno solo; en la suite hay uno por test
+    # y dos tests que disputan la misma key lo pisaban (CI 30/09).
+    loop = asyncio.get_running_loop()
+    par = _ROWS_LOCKS.get(key)
+    if par is None or par[0] is not loop:
+        par = (loop, asyncio.Lock())
+        _ROWS_LOCKS[key] = par
+    lock = par[1]
     async with lock:
         ent = _ROWS_CACHE.get(key)
         if ent is not None and ent[0] >= seq and _ROWS_IDX.get(key) == idx:
@@ -712,12 +721,12 @@ async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fue
             # El lock se va con su entrada (si nadie lo tiene tomado): antes
             # quedaba para siempre y cada búsqueda de texto distinta sumaba uno.
             lk = _ROWS_LOCKS.get(viejo)
-            if lk is not None and not lk.locked():
+            if lk is not None and not lk[1].locked():
                 _ROWS_LOCKS.pop(viejo, None)
         _ROWS_CACHE[key] = ent
         _ROWS_IDX[key] = idx
         if len(_ROWS_LOCKS) > _ROWS_MAX * 2:          # red de seguridad
-            for k in [k for k, lk in _ROWS_LOCKS.items() if k not in _ROWS_CACHE and not lk.locked()]:
+            for k in [k for k, lk in _ROWS_LOCKS.items() if k not in _ROWS_CACHE and not lk[1].locked()]:
                 _ROWS_LOCKS.pop(k, None)
         return ent
 

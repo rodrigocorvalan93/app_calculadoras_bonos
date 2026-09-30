@@ -239,6 +239,28 @@ def journal_dir() -> str:
     return d
 
 
+def _tmp_de(path: str) -> str:
+    """Nombre temporal ÚNICO al lado del destino (mismo volumen → `os.replace`
+    atómico). Con un nombre fijo (`<path>.tmp`) dos escritores del mismo
+    archivo a la vez (autosave + "Guardar ahora" del banner, o dos threads de
+    reintento) se pisaban el temporal a medio escribir y uno renombraba el
+    parquet del otro (auditoría 30/09)."""
+    return f"{path}.{os.getpid()}-{threading.get_ident()}-{time.time_ns() % 1_000_000_000:09d}.tmp"
+
+
+def _escribir_parquet_atomico(df: "Any", path: str) -> None:
+    tmp = _tmp_de(path)
+    try:
+        df.to_parquet(tmp, index=False)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)                    # que no queden temporales huérfanos
+        except OSError:
+            pass
+        raise
+
+
 def write_journal(df: "Any", dia: Optional[date] = None) -> str:
     """Parquet del día en el journal local (atómico; pisa el del mismo día).
     Es lo PRIMERO que se guarda al cierre: sin OneDrive en el medio no hay
@@ -249,9 +271,7 @@ def write_journal(df: "Any", dia: Optional[date] = None) -> str:
     for col in ("symbol", "Código", "Price Source", "Price Date"):
         if col in mirror.columns:
             mirror[col] = mirror[col].astype("string")
-    tmp = path + ".tmp"
-    mirror.to_parquet(tmp, index=False)
-    os.replace(tmp, path)
+    _escribir_parquet_atomico(mirror, path)
     return path
 
 
@@ -273,22 +293,83 @@ def _journal_days() -> Dict[date, str]:
     return out
 
 
+def _cierre_journal_days() -> Dict[date, str]:
+    """{fecha: path} de los cierres COMPLETOS (`cierre_AAAAMMDD.parquet`) que
+    guardó el journal local — la copia por máquina de cada partición."""
+    out: Dict[date, str] = {}
+    try:
+        nombres = os.listdir(journal_dir())
+    except OSError:
+        return out
+    for fn in nombres:
+        m = re.fullmatch(r"cierre_(\d{8})\.parquet", fn)
+        if m:
+            try:
+                out[datetime.strptime(m.group(1), "%Y%m%d").date()] = \
+                    os.path.join(journal_dir(), fn)
+            except ValueError:
+                continue
+    return out
+
+
 def _prune_journal(max_dias: int = 90) -> None:
     """Higiene: journal más viejo que `max_dias` se borra (la base ya lo tiene
-    hace rato; el dedup protege si no)."""
+    hace rato; el dedup protege si no). También los cierres completos
+    (`cierre_*.parquet`): antes quedaban para siempre (~1 MB por rueda,
+    auditoría 30/09)."""
     limite = _now().date() - timedelta(days=max_dias)
-    for dia, path in _journal_days().items():
-        if dia < limite:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-    for dia in _sin_rueda_days():
-        if dia < limite:
-            try:
-                os.remove(_sin_rueda_path(dia))
-            except OSError:
-                pass
+    viejos = [p for d, p in _journal_days().items() if d < limite]
+    viejos += [p for d, p in _cierre_journal_days().items() if d < limite]
+    viejos += [_sin_rueda_path(d) for d in _sin_rueda_days() if d < limite]
+    for path in viejos:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def consolidar_cierres_journal() -> Optional[Dict[str, Any]]:
+    """Catch-up del cierre COMPLETO (el par de `consolidar_journal` para las
+    particiones `cierres/AAAA/AAAA-MM-DD.parquet`): cada `cierre_AAAAMMDD`
+    del journal local sin partición en la carpeta compartida se escribe desde
+    el journal (writer; idempotente: la partición se pisa keep-last y un día
+    marcado `sin_rueda` se respeta). Antes esa copia local era recuperable
+    sólo a mano — un fallo de la partición a las 17:01 seguido de un reinicio
+    dejaba el hueco (auditoría 30/09). None = nada para hacer."""
+    from backend.config import settings
+    from backend.services import deltapaths
+    if not settings.historico_base_writer:
+        return None
+    hist_dir = deltapaths.historico_dir()
+    if not hist_dir:
+        return None
+    dias = _cierre_journal_days()
+    if not dias:
+        return None
+    sin_rueda = _sin_rueda_days()
+    pendientes = sorted(d for d, _ in dias.items()
+                        if d not in sin_rueda and not os.path.isfile(cierre_path(hist_dir, d)))
+    if not pendientes:
+        return None
+    import pandas as pd
+    hechos: List[str] = []
+    errores: Dict[str, str] = {}
+    for d in pendientes:
+        try:
+            escribir_particion(pd.read_parquet(dias[d]), hist_dir, d)
+            hechos.append(d.isoformat())
+        except Exception as exc:  # noqa: BLE001 — un journal ilegible no frena a los demás
+            errores[d.isoformat()] = str(exc)
+            logger.warning("[historico_writer] catch-up del cierre completo %s falló: %s", d, exc)
+    if hechos:
+        logger.warning("[historico_writer] catch-up: particiones del cierre completo repuestas "
+                       "desde el journal local: %s", ", ".join(hechos))
+        try:
+            from backend.services import cierres
+            cierres.refresh()
+        except Exception:  # noqa: BLE001
+            logger.exception("[historico_writer] refresh de cierres tras catch-up falló")
+    return {"consolidados": len(hechos), "dias": hechos, "errores": errores}
 
 
 def _fechas_base(xlsx_path: str) -> set:
@@ -2033,21 +2114,18 @@ def write_cierre_journal(df: "Any", fecha: Optional[date] = None) -> str:
     mismo día."""
     fecha = fecha or _now().date()
     path = os.path.join(journal_dir(), f"cierre_{fecha:%Y%m%d}.parquet")
-    tmp = path + ".tmp"
-    df.to_parquet(tmp, index=False)
-    os.replace(tmp, path)
+    _escribir_parquet_atomico(df, path)
     return path
 
 
 def escribir_particion(df: "Any", hist_dir: str, fecha: date) -> str:
-    """Escribe (pisa) la partición del día: atómico + reintentos ante lock."""
+    """Escribe (pisa) la partición del día: atómico (temporal único por
+    escritor, ver `_tmp_de`) + reintentos ante lock."""
     path = cierre_path(hist_dir, fecha)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     for i in range(len(_LOCK_ESPERAS) + 1):
         try:
-            tmp = path + ".tmp"
-            df.to_parquet(tmp, index=False)
-            os.replace(tmp, path)
+            _escribir_parquet_atomico(df, path)
             return path
         except (PermissionError, OSError) as exc:
             if i == len(_LOCK_ESPERAS):
@@ -2240,6 +2318,15 @@ class HistoricoAutosave:
                             r0.get("consolidados"), r0.get("total_rows"))
         except Exception:  # noqa: BLE001
             logger.exception("[historico_writer] catch-up del journal falló")
+        # Lo mismo para las particiones del cierre completo (`cierre_*` del
+        # journal sin partición compartida): antes no había replay.
+        try:
+            r1 = await loop.run_in_executor(None, consolidar_cierres_journal)
+            if r1 and r1.get("consolidados"):
+                logger.info("[historico_writer] catch-up del cierre completo OK: %s",
+                            ", ".join(r1.get("dias") or []))
+        except Exception:  # noqa: BLE001
+            logger.exception("[historico_writer] catch-up del cierre completo falló")
         # RECONSTRUCCIÓN al arranque: a la base le falta una rueda que el
         # journal tampoco tiene (app cerrada ayer a las 17:01) → esperar los
         # cierres del feed y rearmarla (o desde la rueda siguiente de la base).

@@ -595,6 +595,73 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
   `CRYPT_E_NO_REVOCATION_CHECK`) — sirve una CRL vacía firmada por la CA
   local, no expone datos.
 
+## Auditoría 30/09 — trabajo por tick compartido e integridad del cierre
+
+Auditoría externa sobre `fcc335f` (100 llamadas por endpoint, "tick" = un
+update del store antes de cada request, ráfagas de 100 ondas × 24 clientes,
+heartbeat del loop). Regresiones en `tests/test_auditoria_gpt.py`.
+
+- **Delta de Mercado** (`/mercado/rows`, `routes/curves.py`): `_DELTA_MEMO` +
+  `_DELTA_INFLIGHT` — UN render + UN gzip (nivel 5, en el executor) por (query,
+  since, order, seq, ym); N pestañas sobre la misma tabla comparten la respuesta
+  ya comprimida (antes 24 clientes × 30 filas: p95 261 ms; compartida, 48 ms).
+  `GZipMiddleware` deja pasar lo que ya trae `Content-Encoding`.
+- **Curvas por fila**: `_curve_rows_html` memoiza el HTML de cada `<tr>`
+  (`_CROW_MEMO`, key = `_rk` que deja `_rows_for` = (key del `_ROW_MEMO`, seq
+  del símbolo) + plazo + fracción de volumen). La macro
+  `partials/curve_row.html` es la ÚNICA fuente de la fila (tabla completa y
+  memo salen idénticas, `compact` por fila): un tick re-renderiza sólo su
+  fila. Si agregás columnas a Curvas, van en la macro.
+- **Excel**: `_snapshot_entry` guarda `(seq, at, body, gz)` — un gzip por
+  build, servido con `Content-Encoding` si el cliente acepta
+  (`_json_gz_response`); `/excel/v1/hist` memo `_HIST_MEMO` por (serie, días,
+  versión de la carga macro); `functions.js` `histFn` con promesa por args
+  (`histInflight`) y timeout de 20 s.
+- **auth copy-on-write**: `_mutar(fn)` copia el store bajo `_lock` (µs),
+  aplica la mutación sobre la copia, escribe bajo `_disk_lock` FUERA de
+  `_lock` y publica recién con el archivo durable (OSError → memoria
+  intacta); `_store()` lee sin lock. `reset_with_token` re-chequea el token
+  adentro de la mutación. Nunca sostener `_lock` durante PBKDF2 ni fsync.
+- **cierres**: carga degradada — una partición ilegible NO publica una matriz
+  parcial como completa: se conserva la íntegra anterior y se reintenta a los
+  60 s (`completa` / `retry_at` / `degradada_sig`). La firma incluye los mtimes
+  de las carpetas por año (corregir una partición vieja invalida) y se memoiza
+  por esos mtimes (`_sig_memo`: las rutas de Históricos la piden en cada
+  request; el listado completo sólo cuando cambió una carpeta). Recarga
+  single-flight (`_load_lock`) y sin `df.copy()` del concat (`_build(copy=False)`).
+- **Cierre parcial**: `save_today` devuelve `pendientes` (fx / acciones /
+  cierre) cuando un componente falla DESPUÉS de la base; el autosave los
+  reintenta cada 5 min (`completar_cierre`, idempotente) hasta la recaptura y
+  el chip dice "parcial". Un no-writer con el journal fallido NO es éxito
+  (`error` + `retry`). `_tmp_de(path)` / `_escribir_parquet_atomico`: temporal
+  ÚNICO por escritor en journal, cierre completo y particiones (dos escritores
+  no se pisan; sin `.tmp` huérfanos). `consolidar_cierres_journal()` al
+  arrancar (writer): un `cierre_AAAAMMDD.parquet` del journal sin partición
+  compartida se repone (respeta `sin_rueda`); `_prune_journal` también poda
+  esos journals a los 90 días.
+- **Store**: `update_from_md` hace copy-on-write del `MarketSnapshot`
+  (`copy.copy(prev)`): la referencia que tomó un worker queda consistente
+  aunque entre otro tick en el medio.
+- **Breakeven**: `_ctx` memo + Future compartido por (plazo, tildes, seq,
+  huella de índices) — tabla y chart = un armado por tick. `/historicos/curva/data`
+  alinea y serializa en el pool.
+- **Frontend**: los `every` de htmx se cancelan con la pestaña oculta
+  (`htmx:beforeRequest` sobre `hx:poll:trigger`) y `stopAll` limpia
+  `pendingDispatch`; `charts.js load()` con AbortController (una petición en
+  vuelo, 20 s). Posiciones: el picker es Alpine (`x-model` fondo / plazo), el
+  link ↻ Cartera se arma en el cliente y el último fondo elegido se recuerda
+  en `localStorage` (`pos_fondo`) — antes el href server-side reseteaba el
+  fondo con cada actualización.
+- **Benchmark por tick**: `python -m backend.tools.bench_tick [--json x.json]
+  [--compare antes.json despues.json] [--slo 50]` — warm / tick / delta /
+  ráfagas de 24 con lag del loop, misma metodología que la auditoría
+  (in-process, store sembrado a 2000 símbolos, sin red ni lifespan, estado en
+  una carpeta temporal). Correrlo antes y después de tocar el camino live.
+- Quedó afuera a propósito (ver el informe del 30/09): arranque solapado
+  (universo + posiciones + metadata en paralelo), presupuesto en bytes para
+  los caches de respuesta (hoy acotados por entradas) y lectura incremental de
+  las particiones de cierres.
+
 ## Tests
 
 `pytest -q` at the repo root. New backend features need a smoke test

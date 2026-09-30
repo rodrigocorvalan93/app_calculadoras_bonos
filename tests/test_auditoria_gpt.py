@@ -281,3 +281,185 @@ def test_cierres_una_particion_ilegible_no_deja_una_matriz_parcial_pegajosa(tmp_
     assert m4 is not m3 and float(m4.mat["last"][0, 0]) == 150.0
     assert p3.endswith("2026-09-25.parquet")
     cierres.refresh()
+
+
+def _particion_tx26(d, last):
+    import pandas as pd
+    df = pd.DataFrame([{"fecha_hoy": d, "symbol": "MERV - XMEV - TX26 - 24hs", "code": "TX26", "plazo": "24hs",
+                        "last": last, "close": last - 1, "opero": True, "tirea": 0.3}])
+    for col in ("symbol", "code", "plazo"):
+        df[col] = df[col].astype("string")
+    return df
+
+
+def test_cierres_firma_memoizada_y_recarga_single_flight(tmp_path, monkeypatch) -> None:
+    """`signature()` (la llaman las rutas de Históricos en cada request) no
+    relista el árbol de particiones mientras las carpetas por año no cambien;
+    una partición nueva lo invalida al instante; y N threads con la firma
+    vencida hacen UNA sola lectura de las particiones (single-flight)."""
+    import threading
+    import time as _t
+    from datetime import date
+
+    import pandas as pd
+    from backend.services import cierres, historico_writer as hw
+
+    monkeypatch.setenv("DELTA_HISTORICO_DIR", str(tmp_path))
+    monkeypatch.delenv("DELTA_HISTORICO_PATH", raising=False)
+    monkeypatch.delenv("DELTA_BASES_DIR", raising=False)
+    cierres.refresh()
+    hw.escribir_particion(_particion_tx26(date(2026, 9, 23), 100.0), str(tmp_path), date(2026, 9, 23))
+    hw.escribir_particion(_particion_tx26(date(2026, 9, 24), 101.0), str(tmp_path), date(2026, 9, 24))
+    listados = {"n": 0}
+    real_part = cierres.particiones
+
+    def espia(*a, **k):
+        listados["n"] += 1
+        return real_part(*a, **k)
+
+    monkeypatch.setattr(cierres, "particiones", espia)
+    s1 = cierres.signature()
+    assert s1[0] == 2 and listados["n"] == 1
+    for _ in range(50):
+        assert cierres.signature() == s1
+    assert listados["n"] == 1                                      # memo: ningún listado más
+    hw.escribir_particion(_particion_tx26(date(2026, 9, 25), 102.0), str(tmp_path), date(2026, 9, 25))
+    s2 = cierres.signature()
+    assert s2 != s1 and s2[0] == 3 and listados["n"] == 2            # el rename tocó la carpeta del año
+    # single-flight: 4 threads con la matriz vencida → 3 lecturas (una por partición), una sola matriz
+    real_read = pd.read_parquet
+    lecturas = {"n": 0}
+
+    def lenta(path, *a, **k):
+        lecturas["n"] += 1
+        _t.sleep(0.05)
+        return real_read(path, *a, **k)
+
+    monkeypatch.setattr(pd, "read_parquet", lenta)
+    cierres.refresh()
+    res = []
+    hilos = [threading.Thread(target=lambda: res.append(cierres.ensure_loaded())) for _ in range(4)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    assert lecturas["n"] == 3
+    assert res[0] is not None and all(m is res[0] for m in res)
+    assert res[0].fechas == ["2026-09-23", "2026-09-24", "2026-09-25"]
+    cierres.refresh()
+
+
+def test_particion_con_temporal_unico_y_catchup_del_cierre_completo(tmp_path, monkeypatch) -> None:
+    """Dos escritores simultáneos de la MISMA partición no se pisan el temporal
+    (nombre único por escritor) y una escritura fallida no deja `.tmp`
+    huérfanos; el journal local del cierre completo repone una partición que
+    falta (catch-up al arrancar, writer; respeta `sin_rueda` y base_writer=0)
+    y se poda con el resto del journal."""
+    import os
+    import threading
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+
+    import pandas as pd
+    from backend.config import settings
+    from backend.services import cierres, historico_writer as hw
+
+    monkeypatch.setenv("DELTA_HISTORICO_DIR", str(tmp_path))
+    monkeypatch.delenv("DELTA_HISTORICO_PATH", raising=False)
+    monkeypatch.delenv("DELTA_BASES_DIR", raising=False)
+    monkeypatch.setenv("HISTORICO_JOURNAL_DIR", str(tmp_path / "journal"))
+    monkeypatch.setattr(settings, "historico_base_writer", True)
+    monkeypatch.setattr(hw, "_LOCK_ESPERAS", (0.05, 0.1))
+    cierres.refresh()
+    assert hw._tmp_de("x.parquet") != hw._tmp_de("x.parquet")
+    d = date(2026, 9, 25)
+    errores = []
+
+    def escribir(last):
+        try:
+            hw.escribir_particion(_particion_tx26(d, last), str(tmp_path), d)
+        except Exception as exc:  # noqa: BLE001
+            errores.append(exc)
+
+    hilos = [threading.Thread(target=escribir, args=(100.0 + i,)) for i in range(4)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    assert not errores
+    ydir = os.path.dirname(hw.cierre_path(str(tmp_path), d))
+    assert sorted(os.listdir(ydir)) == ["2026-09-25.parquet"]                 # ni .tmp ni parciales
+    assert float(pd.read_parquet(hw.cierre_path(str(tmp_path), d))["last"].iloc[0]) in {100.0, 101.0, 102.0, 103.0}
+    monkeypatch.setattr(hw, "_LOCK_ESPERAS", ())
+
+    class Rompe:
+        def to_parquet(self, path, *a, **k):
+            open(path, "wb").close()
+            raise OSError("disco lleno")
+
+    with pytest.raises(OSError):
+        hw.escribir_particion(Rompe(), str(tmp_path), date(2026, 9, 26))
+    assert sorted(os.listdir(ydir)) == ["2026-09-25.parquet"]                 # el temporal se limpió
+    # catch-up: un cierre completo journaleado sin partición compartida se repone desde el journal
+    d0 = date(2026, 9, 24)
+    hw.write_cierre_journal(_particion_tx26(d0, 90.0), d0)
+    assert not os.path.isfile(hw.cierre_path(str(tmp_path), d0))
+    assert hw.consolidar_cierres_journal() == {"consolidados": 1, "dias": ["2026-09-24"], "errores": {}}
+    assert float(pd.read_parquet(hw.cierre_path(str(tmp_path), d0))["last"].iloc[0]) == 90.0
+    assert hw.consolidar_cierres_journal() is None                             # nada pendiente → no-op
+    d9 = date(2026, 9, 22)                                                     # marcado sin rueda: se respeta
+    hw.write_cierre_journal(_particion_tx26(d9, 80.0), d9)
+    open(hw._sin_rueda_path(d9), "w").close()
+    assert hw.consolidar_cierres_journal() is None
+    assert not os.path.isfile(hw.cierre_path(str(tmp_path), d9))
+    monkeypatch.setattr(settings, "historico_base_writer", False)             # no-writer: no toca lo compartido
+    d8 = date(2026, 9, 21)
+    hw.write_cierre_journal(_particion_tx26(d8, 70.0), d8)
+    assert hw.consolidar_cierres_journal() is None
+    assert not os.path.isfile(hw.cierre_path(str(tmp_path), d8))
+    # poda: el cierre completo más viejo que 90 días se va con el resto del journal
+    viejo = date(2026, 1, 5)
+    hw.write_cierre_journal(_particion_tx26(viejo, 1.0), viejo)
+    monkeypatch.setattr(hw, "_now", lambda: datetime(2026, 9, 25, 17, 5, tzinfo=ZoneInfo("America/Argentina/Buenos_Aires")))
+    hw._prune_journal()
+    dias = hw._cierre_journal_days()
+    assert viejo not in dias and d0 in dias and d8 in dias
+    cierres.refresh()
+
+
+@pytest.mark.asyncio
+async def test_breakeven_un_ctx_por_tick_para_tabla_y_chart(monkeypatch) -> None:
+    """Tabla y chart de Breakeven disparan juntos en cada md-update: UN solo
+    armado de CER + LECAP + Fisher por (plazo, tildes, seq); un tick nuevo o
+    tildes distintos son otra key."""
+    from backend.main import app
+    from backend.routes import breakeven as rb
+    from backend.services import breakeven as be_svc
+
+    bond_universe.ensure_loaded()
+    tbl = curves.build_curve_codes()
+    cer, lecap = tbl.get("cer", [])[:4], tbl.get("lecap", [])[:4]
+    assert cer and lecap
+    store = _seed(cer + lecap)
+    rb._CTX_MEMO.clear()
+    rb._CTX_INFLIGHT.clear()
+    llamadas = []
+    real = be_svc.compute_fisher
+
+    def espia(*a, **k):
+        llamadas.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(be_svc, "compute_fisher", espia)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        store.update_from_md(syms.md_symbol(cer[0], "24hs"), {"NV": 12345})
+        rs = await asyncio.gather(ac.get("/breakeven/table?plazo=24hs"), ac.get("/breakeven/chart?plazo=24hs"),
+                                  ac.get("/breakeven/table?plazo=24hs"))
+        assert all(r.status_code == 200 for r in rs)
+        assert len(llamadas) == 1                                          # tabla + chart + tabla: un despeje
+        store.update_from_md(syms.md_symbol(cer[0], "24hs"), {"NV": 12346})   # tick → otra key
+        r = await ac.get("/breakeven/chart?plazo=24hs")
+        assert r.status_code == 200 and len(llamadas) == 2
+        r1 = await ac.get(f"/breakeven/table?plazo=24hs&incl={cer[0]}&incl_set=1")   # tildes: otra key…
+        r2 = await ac.get(f"/breakeven/chart?plazo=24hs&incl={cer[0]}&incl_set=1")   # …compartida entre los dos
+        assert r1.status_code == 200 and r2.status_code == 200 and len(llamadas) == 3

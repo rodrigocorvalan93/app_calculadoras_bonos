@@ -45,12 +45,27 @@ CAMPOS = ("last", "close", "open", "high", "low", "bid", "offer", "volume", "nom
 # el resto (OHLC, puntas, volúmenes) en float32 — mitad de RAM.
 _F64 = {"last", "close", "tirea", "paridad", "duration"}
 _lock = threading.Lock()
+# Single-flight de la RECARGA: dos threads con la firma vencida (price action +
+# Históricos disparados juntos tras el cierre) leían las N particiones y
+# armaban la matriz DOS veces a la vez — el pico de RAM de la recarga se
+# duplicaba (frames + concat + matrices × 2). El segundo espera y usa la del
+# primero (auditoría 30/09). Corre en executors, nunca en el event loop.
+_load_lock = threading.Lock()
 # `completa`: la matriz publicada se armó con TODAS las particiones legibles;
 # `retry_at`: hasta cuándo no volver a intentar una carga degradada.
 _cache: Dict[str, Any] = {"sig": None, "data": None, "completa": True, "retry_at": 0.0,
                           "degradada_sig": None}
 _vref_cache: Dict[tuple, Dict[str, tuple]] = {}
 _RETRY_S = 60.0
+# Firma memoizada por los mtimes de las carpetas por año: `signature()`
+# listaba el árbol cierres/ entero (un listdir de ~250 entradas por año) y la
+# llaman las rutas de Históricos EN CADA REQUEST para la key de su cache de
+# HTML — sobre OneDrive un listado grande cuesta decenas de ms. Toda
+# partición nueva / pisada / sincronizada entra por un rename dentro de su
+# carpeta de año, y el rename toca el mtime de la carpeta: alcanza con
+# listar la raíz (pocas entradas) y hacer un stat por año para saber si el
+# listado completo sigue valiendo. `refresh()` lo borra igual.
+_sig_memo: Dict[str, Any] = {"dirs": None, "sig": None}
 
 
 class Matriz:
@@ -98,12 +113,7 @@ def particiones(strict: bool = False) -> List[Tuple[str, str]]:
     return sorted(out)
 
 
-def signature() -> tuple:
-    """(n particiones, última fecha, mtime de la última, mtimes de las carpetas
-    por año): cambia con el cierre, con la recaptura (pisa la última), con un
-    backfill y con la corrección de una partición VIEJA — `os.replace` toca el
-    mtime del directorio aunque la última no cambie (antes esa corrección no
-    invalidaba la matriz hasta reiniciar)."""
+def _signature_disco() -> tuple:
     parts = particiones()
     if not parts:
         return (0, "", 0, ())
@@ -120,10 +130,54 @@ def signature() -> tuple:
     return (len(parts), parts[-1][0], m, tuple(dm))
 
 
-def _build(df: pd.DataFrame) -> Optional[Matriz]:
+def _carpetas_anio() -> tuple:
+    """((carpeta, mtime_ns), …) de las carpetas por año: la huella barata que
+    decide si el listado completo memoizado sigue valiendo."""
+    root = dir_path()
+    if not root or not os.path.isdir(root):
+        return ()
+    out = []
+    try:
+        for y in sorted(os.listdir(root)):
+            yd = os.path.join(root, y)
+            try:
+                st = os.stat(yd)
+            except OSError:
+                continue
+            if os.path.isdir(yd):
+                out.append((y, st.st_mtime_ns))
+    except OSError:
+        return ()
+    return tuple(out)
+
+
+def signature() -> tuple:
+    """(n particiones, última fecha, mtime de la última, mtimes de las carpetas
+    por año): cambia con el cierre, con la recaptura (pisa la última), con un
+    backfill y con la corrección de una partición VIEJA — `os.replace` toca el
+    mtime del directorio aunque la última no cambie (antes esa corrección no
+    invalidaba la matriz hasta reiniciar). El listado completo se memoiza
+    mientras las carpetas por año no cambien de mtime (ver `_sig_memo`)."""
+    dirs = _carpetas_anio()
+    with _lock:
+        if _sig_memo["sig"] is not None and _sig_memo["dirs"] == dirs:
+            return _sig_memo["sig"]
+    sig = _signature_disco()
+    with _lock:
+        _sig_memo["sig"] = sig
+        _sig_memo["dirs"] = dirs
+    return sig
+
+
+def _build(df: pd.DataFrame, copy: bool = True) -> Optional[Matriz]:
+    """Matriz densa desde las filas de las particiones. `copy=False` cuando el
+    frame es propio (el concat de `_load`): la copia duplicaba el DataFrame
+    entero durante la recarga (auditoría 30/09: la matriz de 5 años son
+    ~190 MB de arrays; el frame que la origina, otro tanto)."""
     if df is None or not len(df):
         return None
-    df = df.copy()
+    if copy:
+        df = df.copy()
     df["fecha_hoy"] = pd.to_datetime(df["fecha_hoy"]).dt.strftime("%Y-%m-%d")
     df["symbol"] = df["symbol"].astype(str)
     df = df.drop_duplicates(subset=["fecha_hoy", "symbol"], keep="last")
@@ -162,33 +216,61 @@ def _build(df: pd.DataFrame) -> Optional[Matriz]:
     return Matriz(fechas, simbolos, codes, plazos, mat, opero)
 
 
+def _vigente(sig: tuple, now: float) -> bool:
+    """Bajo `_lock`: la matriz en memoria sirve para esta firma (o hasta que
+    venza el reintento de una carga degradada / parcial)."""
+    if _cache["sig"] == sig and (_cache["completa"] or now < _cache["retry_at"]):
+        return True
+    # intento degradado reciente: la anterior hasta el reintento
+    return _cache["degradada_sig"] == sig and now < _cache["retry_at"]
+
+
+def _leer_particiones() -> Tuple[Optional[Matriz], int]:
+    """(matriz, particiones fallidas). Los frames por partición se sueltan
+    apenas existe el concat: durante la recarga conviven el frame unido y las
+    matrices, no además las N piezas."""
+    data: Optional[Matriz] = None
+    fallidas = 0
+    parts = particiones()
+    if not parts:
+        return None, 0
+    frames = []
+    for _iso, p in parts:
+        try:
+            frames.append(pd.read_parquet(p))
+        except Exception as exc:  # noqa: BLE001 — una partición rota no voltea la matriz
+            fallidas += 1
+            logger.warning("[cierres] partición ilegible %s: %s", p, exc)
+    if frames:
+        try:
+            df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+            del frames
+            data = _build(df, copy=False)
+        except Exception:  # noqa: BLE001
+            logger.exception("[cierres] build de la matriz falló")
+            data = None
+            fallidas += 1
+    return data, fallidas
+
+
 def _load() -> Optional[Matriz]:
     sig = signature()
     now = time.monotonic()
     with _lock:
-        if _cache["sig"] == sig and (_cache["completa"] or now < _cache["retry_at"]):
+        if _vigente(sig, now):
             return _cache["data"]
-        if _cache["degradada_sig"] == sig and now < _cache["retry_at"]:
-            return _cache["data"]           # intento degradado reciente: la anterior hasta el reintento
-        previa, previa_completa = _cache["data"], _cache["completa"]
-    data: Optional[Matriz] = None
-    fallidas = 0
-    parts = particiones()
-    if parts:
-        frames = []
-        for iso, p in parts:
-            try:
-                frames.append(pd.read_parquet(p))
-            except Exception as exc:  # noqa: BLE001 — una partición rota no voltea la matriz
-                fallidas += 1
-                logger.warning("[cierres] partición ilegible %s: %s", p, exc)
-        if frames:
-            try:
-                data = _build(pd.concat(frames, ignore_index=True))
-            except Exception:  # noqa: BLE001
-                logger.exception("[cierres] build de la matriz falló")
-                data = None
-                fallidas += 1
+    with _load_lock:                        # single-flight: UNA lectura por recarga
+        now = time.monotonic()
+        with _lock:
+            if _vigente(sig, now):          # otro thread la cargó mientras esperábamos
+                return _cache["data"]
+            previa, previa_completa = _cache["data"], _cache["completa"]
+        data, fallidas = _leer_particiones()
+        return _publicar(sig, now, data, fallidas, previa, previa_completa)
+
+
+def _publicar(sig: tuple, now: float, data: Optional[Matriz], fallidas: int,
+              previa: Optional[Matriz], previa_completa: bool) -> Optional[Matriz]:
     with _lock:
         if fallidas and previa is not None and previa_completa:
             # Carga DEGRADADA (un lock de OneDrive, un parquet a medio bajar):
@@ -226,6 +308,8 @@ def refresh() -> None:
         _cache["completa"] = True
         _cache["retry_at"] = 0.0
         _cache["degradada_sig"] = None
+        _sig_memo["sig"] = None
+        _sig_memo["dirs"] = None
         _vref_cache.clear()
 
 
