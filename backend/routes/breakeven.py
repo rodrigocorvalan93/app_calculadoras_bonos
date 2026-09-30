@@ -9,18 +9,29 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+import asyncio
+
 from backend.cache_seq import seq_cached
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _rows_for
-from backend.services import bond_universe, breakeven as be_svc
+from backend.services import bond_universe, breakeven as be_svc, marketdata_store, pricing
 
 router = APIRouter(tags=["breakeven"])
 
 # Curva nominal contra la que se despeja: LECAP/tasa fija (la misma que usa
 # el legacy). La curva real es siempre CER observada.
 _NOMINAL_CURVE = "lecap"
+
+# UN `_ctx` por (plazo, tildes, seq del store, huella de índices): la tabla y
+# el chart disparan juntos en cada md-update y cada uno rearmaba CER + LECAP
+# y despejaba Fisher por su cuenta — cuatro recorridos de filas por tick con
+# la pestaña abierta (auditoría 30/09). El primero en llegar publica un Future
+# que el otro espera; el resultado se comparte de sólo lectura.
+_CTX_MEMO: Dict[tuple, Dict[str, Any]] = {}
+_CTX_INFLIGHT: Dict[tuple, "asyncio.Future"] = {}
+_CTX_MAX = 32
 
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
@@ -42,6 +53,29 @@ def _cer_conocido_hasta():
 
 async def _ctx(plazo: str, incl: Optional[List[str]] = None,
                incl_set: bool = False) -> Dict[str, Any]:
+    key = (plazo, tuple(sorted(incl or [])) if incl_set else None, bool(incl_set),
+           marketdata_store.get_store().seq(), pricing.indices_token())
+    data = _CTX_MEMO.get(key)
+    if data is not None:
+        return data
+    fut = _CTX_INFLIGHT.get(key)
+    if fut is None:
+        fut = asyncio.ensure_future(_ctx_build(plazo, incl, incl_set))
+        _CTX_INFLIGHT[key] = fut
+
+        def _limpiar(f, k=key):
+            if _CTX_INFLIGHT.get(k) is f:
+                _CTX_INFLIGHT.pop(k, None)
+            if not f.cancelled() and f.exception() is None:
+                if len(_CTX_MEMO) >= _CTX_MAX:
+                    _CTX_MEMO.clear()
+                _CTX_MEMO[k] = f.result()
+
+        fut.add_done_callback(_limpiar)
+    return await asyncio.shield(fut)
+
+
+async def _ctx_build(plazo: str, incl: Optional[List[str]], incl_set: bool) -> Dict[str, Any]:
     cer_rows, _ = await _rows_for("cer", plazo, only_quoting=True)
     lecap_rows, _ = await _rows_for(_NOMINAL_CURVE, plazo, only_quoting=True)
     # Lag de ajuste de la especie (típ. −10 hábiles) → mes de referencia.

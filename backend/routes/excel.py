@@ -19,6 +19,7 @@ es público (es el instalador del add-in, no expone datos).
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
 import threading
@@ -189,43 +190,55 @@ def _build(codes: Optional[FrozenSet[str]]) -> Dict[str, Any]:
     return out
 
 
-def _snapshot_vigente(codes_key: str) -> Optional[bytes]:
-    """Bytes cacheados si siguen valiendo (ventana mínima de build o misma seq
-    dentro del TTL de quietud); None si hay que reconstruir."""
+def _snapshot_vigente(codes_key: str) -> Optional[Tuple[bytes, Optional[bytes]]]:
+    """(body, gzip) cacheados si siguen valiendo (ventana mínima de build o
+    misma seq dentro del TTL de quietud); None si hay que reconstruir."""
     cur_seq = mds.get_store().seq()
     now = time.monotonic()
     with _cache_lock:
         ent = _cache.get(codes_key)
     if ent is not None:
-        seq_b, at, body = ent
+        seq_b, at, body, gz = ent
         if (now - at) < _MIN_BUILD_INTERVAL or (seq_b == cur_seq and (now - at) < _STALE_TTL):
-            return body
+            return body, gz
     return None
 
 
-def _snapshot_bytes(codes_key: str) -> bytes:
-    body = _snapshot_vigente(codes_key)
-    if body is not None:
-        return body
+_GZIP_LEVEL = 5
+
+
+def _snapshot_entry(codes_key: str) -> Tuple[bytes, Optional[bytes]]:
+    """(JSON, JSON gzip) del snapshot: UN build y UNA compresión por ventana.
+    Antes se memoizaba sólo el JSON y GZipMiddleware lo comprimía en cada
+    request (537 KB → 22 KB, ~5 ms): 24 libros bajando a la vez, p95 102 ms;
+    con el gzip memoizado, 33 ms (auditoría 30/09)."""
+    ent = _snapshot_vigente(codes_key)
+    if ent is not None:
+        return ent
     with _cache_lock:
         lk = _build_locks.get(codes_key)
         if lk is None:
             lk = _build_locks[codes_key] = threading.Lock()
     with lk:
-        body = _snapshot_vigente(codes_key)   # otro libro lo acaba de armar
-        if body is not None:
-            return body
+        ent = _snapshot_vigente(codes_key)   # otro libro lo acaba de armar
+        if ent is not None:
+            return ent
         codes = frozenset(c for c in codes_key.split(",") if c) if codes_key else None
         data = _build(codes)
         body = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+        gz = gzip.compress(body, _GZIP_LEVEL) if len(body) >= 1024 else None
         with _cache_lock:
             if len(_cache) >= _MAX_CACHE_ENTRIES:
                 viejo = next(iter(_cache))
                 _cache.pop(viejo)
                 if viejo != codes_key:
                     _build_locks.pop(viejo, None)     # se va con su entrada
-            _cache[codes_key] = (data["seq"], time.monotonic(), body)
-        return body
+            _cache[codes_key] = (data["seq"], time.monotonic(), body, gz)
+        return body, gz
+
+
+def _snapshot_bytes(codes_key: str) -> bytes:
+    return _snapshot_entry(codes_key)[0]
 
 
 _health_flag_cache = {"at": 0.0, "flag": ""}
@@ -275,8 +288,20 @@ async def ping(request: Request) -> Dict[str, Any]:
     return {"ok": True, "user": u.get("username")}
 
 
+def _json_gz_response(body: bytes, gz: Optional[bytes], request: Request) -> Response:
+    """JSON ya serializado; los bytes gzip memoizados si el cliente los acepta
+    (GZipMiddleware deja pasar lo que ya trae Content-Encoding)."""
+    headers = {"Cache-Control": "no-store"}
+    if gz is not None and "gzip" in (request.headers.get("accept-encoding") or ""):
+        headers["Content-Encoding"] = "gzip"
+        headers["Vary"] = "Accept-Encoding"
+        return Response(content=gz, media_type="application/json", headers=headers)
+    return Response(content=body, media_type="application/json", headers=headers)
+
+
 @router.get("/v1/snapshot")
-async def snapshot(codes: str = Query("", description="Filtro opcional: ESPECIES separadas por coma")) -> Response:
+async def snapshot(request: Request,
+                   codes: str = Query("", description="Filtro opcional: ESPECIES separadas por coma")) -> Response:
     key = ",".join(sorted({c.strip().upper() for c in codes.split(",") if c.strip()}))
     # Al executor: el build de un cache-miss recorre ~2k símbolos del store +
     # fx + futuros + cauciones + MAE y hace un json.dumps de cientos de KB
@@ -284,21 +309,38 @@ async def snapshot(codes: str = Query("", description="Filtro opcional: ESPECIES
     # libro con `?codes=` propio (throttle POR key) congelaba el event loop
     # — y con él /market/seq y todos los paneles live de la web — hasta
     # varias veces por segundo. El hit del cache sigue siendo sub-ms.
-    body = await asyncio.get_running_loop().run_in_executor(None, _snapshot_bytes, key)
-    return Response(content=body, media_type="application/json",
-                    headers={"Cache-Control": "no-store"})
+    body, gz = await asyncio.get_running_loop().run_in_executor(None, _snapshot_entry, key)
+    return _json_gz_response(body, gz, request)
+
+
+# Memo de /v1/hist: (serie, days, versión de la carga macro) → (JSON, gzip).
+# La serie ya está en RAM; antes cada OMS.HIST la filtraba, serializaba y
+# comprimía de nuevo (A3500 completo 124 KB: p95 8,5 ms → <1 ms).
+_HIST_MEMO: Dict[tuple, Tuple[bytes, Optional[bytes]]] = {}
+_HIST_MAX = 64
 
 
 @router.get("/v1/hist/{serie}")
-async def hist(serie: str, days: Optional[int] = Query(None, ge=1)) -> Dict[str, Any]:
+async def hist(request: Request, serie: str, days: Optional[int] = Query(None, ge=1)) -> Response:
     """Serie macro histórica (reemplaza los RHistory del modelo Reuters).
     Series: las de backend.services.historico (a3500, badlar, tamar, CER, UVA…);
     el key matchea case-insensitive."""
     c = historico_svc.ensure_loaded()
     key = next((k for k in c["series"] if k.lower() == serie.strip().lower()), serie)
-    out = historico_svc.series_points(key, days=days)
-    out["serie"] = key
-    return out
+    mk = (key, days, c.get("ver"))
+    ent = _HIST_MEMO.get(mk)
+    if ent is None:
+        def _build_hist() -> Tuple[bytes, Optional[bytes]]:
+            out = historico_svc.series_points(key, days=days)
+            out["serie"] = key
+            body = json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+            return body, (gzip.compress(body, _GZIP_LEVEL) if len(body) >= 1024 else None)
+
+        ent = await asyncio.get_running_loop().run_in_executor(None, _build_hist)
+        if len(_HIST_MEMO) >= _HIST_MAX:
+            _HIST_MEMO.clear()
+        _HIST_MEMO[mk] = ent
+    return _json_gz_response(ent[0], ent[1], request)
 
 
 # ── Beacon de diagnóstico del runtime del add-in ─────────────────────────────

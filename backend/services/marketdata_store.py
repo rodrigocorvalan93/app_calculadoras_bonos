@@ -144,7 +144,14 @@ class MarketDataStore:
         """
         now = time.time()
         with self._lock:
-            snap = self._data.get(symbol) or MarketSnapshot(symbol=symbol)
+            # Copy-on-write: se muta una COPIA y recién al final se publica.
+            # get()/get_many() entregan la referencia sin lock y los workers
+            # leen campo por campo (pricing, filas): mutando el mismo objeto,
+            # una fila podía salir con el `last` nuevo y la `seq` vieja (o al
+            # revés) si el tick entraba en el medio. Con COW, quien tiene una
+            # referencia ve un snapshot consistente (el anterior).
+            prev = self._data.get(symbol)
+            snap = copy.copy(prev) if prev is not None else MarketSnapshot(symbol=symbol)
             for entry, attr_price, attr_size in (
                 ("BI", "bid", "bid_size"),
                 ("OF", "offer", "offer_size"),

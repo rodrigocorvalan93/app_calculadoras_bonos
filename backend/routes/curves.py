@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import gzip
 import math
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -37,6 +38,42 @@ router = APIRouter(prefix="/curves", tags=["curves"])
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, template, ctx)
+
+
+# ── Memo del HTML por fila de Curvas ──────────────────────────────────────────
+# Jinja de la tabla completa de una curva corporativa (170 filas × 20 celdas
+# con filtros) medía 22 ms por render, y se rehacía ENTERA en cada seq nueva
+# aunque hubiera cambiado un solo bono (auditoría 30/09: p95 52 ms en tick).
+# La fila sale idéntica mientras no cambie su dict (`_rk` = key + seq del
+# símbolo en _ROW_MEMO) ni su fracción de volumen (relativa al máximo de la
+# tabla): se cachea el <tr> ya renderizado y compactado, y un tick re-renderiza
+# sólo las filas que cambiaron. Las filas sin `_rk` (leg no nativa, especie
+# pesos de un hard-dollar) se renderizan siempre.
+_CROW_MEMO: Dict[tuple, str] = {}
+_CROW_MAX = 8192
+_CROW_STATS: Dict[str, int] = {"render": 0, "hit": 0}
+
+
+def _curve_rows_html(templates: Any, rows: list[dict], plazo: str) -> list[str]:
+    env = templates.env
+    fila = env.get_template("partials/curve_row.html").module.fila
+    compact = env.filters["compact"]
+    out: list[str] = []
+    for r in rows:
+        rk = r.get("_rk")
+        k = (rk, plazo, round(float(r.get("volume_frac") or 0.0), 3)) if rk is not None else None
+        h = _CROW_MEMO.get(k) if k is not None else None
+        if h is None:
+            h = str(compact(fila(r, plazo)))
+            _CROW_STATS["render"] += 1
+            if k is not None:
+                if len(_CROW_MEMO) >= _CROW_MAX:
+                    _CROW_MEMO.clear()
+                _CROW_MEMO[k] = h
+        else:
+            _CROW_STATS["hit"] += 1
+        out.append(h)
+    return out
 
 
 def _def_or_mix(key: str | None):
@@ -409,7 +446,10 @@ async def _rows_for(
     # nativa + fuente BYMA + especies FX-free (una especie pesos de un
     # hard-dollar depende del FX de OTROS símbolos). Devuelve copias: los
     # callers mutan las filas (fracciones de volumen, overrides).
-    memo_ok = leg == "native" and fuente != "mae" and book
+    # También para Curvas (book=False; `book` va en la key): la fila memoizada
+    # lleva `_rk` = (key, seq del símbolo), la identidad que usa el memo del
+    # HTML por fila de la tabla de Curvas (_curve_rows_html).
+    memo_ok = leg == "native" and fuente != "mae"
     mae_ts = mae_svc.snapshot_ts() if memo_ok else None
     ref5 = historico_byma.ref_5d_version() if memo_ok else None
     store = marketdata_store.get_store()
@@ -420,7 +460,7 @@ async def _rows_for(
             if memo_ok and not _pesos_de_dolar(c, pricing.bond_meta(c)):
                 snap = store.get(syms.md_symbol(c, plazo))
                 sseq = int(getattr(snap, "seq", 0) or 0) if snap is not None else -1
-                key = (c, plazo, fuente, settle, mae_ts, ref5,
+                key = (c, plazo, fuente, settle, mae_ts, ref5, book,
                        pricing._index_fingerprint(pricing._bond_index_kind(c)))
                 ent = _ROW_MEMO.get(key)
                 if ent is not None and ent[0] == sseq:
@@ -430,6 +470,8 @@ async def _rows_for(
                     if len(_ROW_MEMO) >= _ROW_MEMO_MAX:
                         _ROW_MEMO.clear()
                     _ROW_MEMO[key] = (sseq, dict(r) if r is not None else None)
+                if r is not None:
+                    r["_rk"] = (key, sseq)
             else:
                 r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
             if r is not None:
@@ -480,6 +522,7 @@ async def curves_page(
     rows, row_meta = await _rows_for(selected_key, plazo, only_quoting, leg) if selected_key else ([], {})
     # Render de la página en el pool (la tabla ancha va adentro): ~30 ms de
     # Jinja en el loop frenaban /market/seq de todos los clientes.
+    tpls = request.app.state.templates
     return await asyncio.get_running_loop().run_in_executor(None, lambda: _render(
         request,
         "curves.html",
@@ -488,6 +531,7 @@ async def curves_page(
         selected_key=selected_key,
         selected_def=_def_or_mix(selected_key),
         rows=rows,
+        rows_html=_curve_rows_html(tpls, rows, plazo),
         row_meta=row_meta,
         plazo=plazo,
         only_quoting=only_quoting,
@@ -508,12 +552,16 @@ async def curve_table_partial(
     rows, row_meta = await _rows_for(curve, plazo, only_quoting, leg)
     # Render Jinja de tabla ancha (5-8 ms @120-200 filas) al pool: en rueda esto
     # corre en cada tick y bloqueaba el event loop (misma razón que equities).
+    # Las filas salen del memo de HTML (_curve_rows_html): un tick re-renderiza
+    # sólo las que cambiaron.
+    tpls = request.app.state.templates
     return await asyncio.get_running_loop().run_in_executor(
         None, lambda: _render(
             request,
             "partials/curve_table.html",
             selected_def=_def_or_mix(curve),
             rows=rows,
+            rows_html=_curve_rows_html(tpls, rows, plazo),
             row_meta=row_meta,
             plazo=plazo,
             only_quoting=only_quoting,
@@ -611,7 +659,7 @@ async def mercado_page(
 # (/mercado/rows, cada tick, N clientes): single-flight por key.
 _ROWS_CACHE: Dict[tuple, tuple] = {}          # key → (seq, rows, meta, order_hash)
 _ROWS_IDX: Dict[tuple, tuple] = {}            # key → pricing.indices_token() con el que se armó
-_ROWS_LOCKS: Dict[tuple, asyncio.Lock] = {}
+_ROWS_LOCKS: Dict[tuple, tuple] = {}          # key → (loop, asyncio.Lock)
 _ROWS_MAX = 64
 
 
@@ -646,7 +694,16 @@ async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fue
     ent = _ROWS_CACHE.get(key)
     if ent is not None and ent[0] == seq and _ROWS_IDX.get(key) == idx:
         return ent
-    lock = _ROWS_LOCKS.setdefault(key, asyncio.Lock())
+    # (loop, lock): un asyncio.Lock queda atado al loop en el que se disputó
+    # por primera vez y con otro loop revienta ("bound to a different event
+    # loop"). En producción el loop es uno solo; en la suite hay uno por test
+    # y dos tests que disputan la misma key lo pisaban (CI 30/09).
+    loop = asyncio.get_running_loop()
+    par = _ROWS_LOCKS.get(key)
+    if par is None or par[0] is not loop:
+        par = (loop, asyncio.Lock())
+        _ROWS_LOCKS[key] = par
+    lock = par[1]
     async with lock:
         ent = _ROWS_CACHE.get(key)
         if ent is not None and ent[0] >= seq and _ROWS_IDX.get(key) == idx:
@@ -664,12 +721,12 @@ async def _rows_en_seq(curve: str, plazo: str, only_quoting: bool, leg: str, fue
             # El lock se va con su entrada (si nadie lo tiene tomado): antes
             # quedaba para siempre y cada búsqueda de texto distinta sumaba uno.
             lk = _ROWS_LOCKS.get(viejo)
-            if lk is not None and not lk.locked():
+            if lk is not None and not lk[1].locked():
                 _ROWS_LOCKS.pop(viejo, None)
         _ROWS_CACHE[key] = ent
         _ROWS_IDX[key] = idx
         if len(_ROWS_LOCKS) > _ROWS_MAX * 2:          # red de seguridad
-            for k in [k for k, lk in _ROWS_LOCKS.items() if k not in _ROWS_CACHE and not lk.locked()]:
+            for k in [k for k, lk in _ROWS_LOCKS.items() if k not in _ROWS_CACHE and not lk[1].locked()]:
                 _ROWS_LOCKS.pop(k, None)
         return ent
 
@@ -709,14 +766,71 @@ async def mercado_rows(
     hdr["X-Rows"] = str(len(cambiadas))
     if not cambiadas:
         return HTMLResponse("", headers=hdr)
-    ctx = dict(rows=cambiadas, plazo=plazo, leg=leg, fuente=fuente,
-               ym="margen" if ym == "margen" else "tir")
-    if len(cambiadas) > 40:
-        resp = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: _render(request, "partials/mercado_rows.html", **ctx))
-    else:
-        resp = _render(request, "partials/mercado_rows.html", **ctx)
-    return HTMLResponse(resp.body, headers=hdr)
+    ym_k = "margen" if ym == "margen" else "tir"
+    # Un render + un gzip por (query, since, seq): las filas ya se compartían
+    # (1 build por seq) pero el HTML y la compresión se repetían por cliente —
+    # 24 pestañas sobre la misma tabla en un tick de 30 filas: p95 261 ms;
+    # compartiendo la respuesta ya comprimida, 48 ms (auditoría 30/09).
+    key = (curve, plazo, only_quoting, leg, fuente, ym_k, q, mas, since, seq, ohash)
+    ent = _DELTA_MEMO.get(key)
+    if ent is None:
+        ent = await _delta_render(key, request, dict(rows=cambiadas, plazo=plazo, leg=leg,
+                                                     fuente=fuente, ym=ym_k))
+    return _delta_response(ent, request, hdr)
+
+
+# Memo de la respuesta del delta (body + gzip) por (query, since, seq). Cada
+# tick es una key nueva y las viejas se van solas (tope chico); el single-flight
+# hace que N clientes que reciben el mismo tick esperen UN render.
+_DELTA_MEMO: Dict[tuple, Dict[str, Any]] = {}
+_DELTA_MAX = 128
+_DELTA_INFLIGHT: Dict[tuple, "asyncio.Future[Dict[str, Any]]"] = {}
+_GZIP_LEVEL = 5
+
+
+async def _delta_render(key: tuple, request: Request, ctx: Dict[str, Any]) -> Dict[str, Any]:
+    fut = _DELTA_INFLIGHT.get(key)
+    if fut is not None:
+        try:
+            return await asyncio.shield(fut)
+        except Exception:  # noqa: BLE001 — el que rinde reporta; acá se reintenta
+            pass
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    _DELTA_INFLIGHT[key] = fut
+
+    def _build() -> Dict[str, Any]:
+        body = bytes(_render(request, "partials/mercado_rows.html", **ctx).body)
+        gz = gzip.compress(body, _GZIP_LEVEL) if len(body) >= 1024 else None
+        return {"body": body, "gz": gz}
+
+    try:
+        ent = await loop.run_in_executor(None, _build)     # Jinja + zlib fuera del loop
+    except BaseException as exc:
+        if not fut.done():
+            fut.set_exception(exc)
+        raise
+    finally:
+        if _DELTA_INFLIGHT.get(key) is fut:
+            _DELTA_INFLIGHT.pop(key, None)
+    if len(_DELTA_MEMO) >= _DELTA_MAX:
+        for k in list(_DELTA_MEMO)[: _DELTA_MAX // 4]:
+            _DELTA_MEMO.pop(k, None)
+    _DELTA_MEMO[key] = ent
+    if not fut.done():
+        fut.set_result(ent)
+    return ent
+
+
+def _delta_response(ent: Dict[str, Any], request: Request, hdr: Dict[str, str]) -> HTMLResponse:
+    headers = dict(hdr)
+    gz = ent.get("gz")
+    if gz is not None and "gzip" in (request.headers.get("accept-encoding") or ""):
+        # GZipMiddleware deja pasar lo que ya trae Content-Encoding (como cache_seq)
+        headers["Content-Encoding"] = "gzip"
+        headers["Vary"] = "Accept-Encoding"
+        return HTMLResponse(gz, headers=headers)
+    return HTMLResponse(ent["body"], headers=headers)
 
 
 @mercado_router.get("/mercado/table", response_class=HTMLResponse)

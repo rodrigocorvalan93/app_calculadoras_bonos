@@ -556,12 +556,22 @@ async def historicos_curva_data(curve: str = "", metric: str = "TIREA",
                                 proy: str = "todos") -> JSONResponse:
     """Histórico de tasas por curva en JSON para uPlot multilínea: una serie por
     bono (alineadas a la unión de fechas, null en los huecos) + bandas."""
-    loop = asyncio.get_running_loop()
-    cs = await loop.run_in_executor(None, historico_byma.curve_series, curve, metric, desde, hasta, proy)
+    # Series + alineación a la unión de fechas + JSON en UNA tarea del pool:
+    # la alineación escala con bonos × ruedas y corría en el event loop
+    # (auditoría 30/09).
+    body = await asyncio.get_running_loop().run_in_executor(
+        None, _historicos_curva_body, curve, metric, desde, hasta, proy)
+    return Response(content=body, media_type="application/json")
+
+
+def _historicos_curva_body(curve: str, metric: str, desde: Optional[str], hasta: Optional[str],
+                           proy: str) -> bytes:
+    cs = historico_byma.curve_series(curve, metric, desde, hasta, proy)
     lines = cs.get("lines") or []
     if not lines:
-        return JSONResponse({"loaded": cs.get("loaded", False), "x": [], "series": [],
-                             "bands": None, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")})
+        out = {"loaded": cs.get("loaded", False), "x": [], "series": [],
+               "bands": None, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")}
+        return json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
     all_dates = sorted({d for ln in lines for d, _ in ln["points"]})
     idx = {d: i for i, d in enumerate(all_dates)}
     scale = float(cs.get("scale", 100.0))   # métricas: fracción→% · Precio: tal cual
@@ -574,8 +584,9 @@ async def historicos_curva_data(curve: str = "", metric: str = "TIREA",
                        "delta": ln["delta"], "delta_unit": ln["delta_unit"]})
     agg = cs.get("agg")
     bands = {k: agg[k] * scale for k in ("mean", "min", "max")} if agg else None
-    return JSONResponse({"loaded": True, "x": [_unix(d) for d in all_dates], "series": series,
-                         "bands": bands, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")})
+    out = {"loaded": True, "x": [_unix(d) for d in all_dates], "series": series,
+           "bands": bands, "metric": cs.get("metric"), "curve_label": cs.get("curve_label")}
+    return json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
 
 
 def _segment_curve(rows: list, width: int = 460, height: int = 210) -> Optional[Dict[str, Any]]:
