@@ -526,7 +526,11 @@ window.lsSet = function (k, v) {
     if (!st) return;
     var tbody = table.tBodies[0];
     if (!tbody) return;
-    var rows = Array.prototype.slice.call(tbody.rows);
+    // Filas fijadas (tr[data-pin], p. ej. el índice Merval arriba del panel
+    // líderes): quedan primeras en el orden que traen, no entran al sort.
+    var all = Array.prototype.slice.call(tbody.rows), rows = [], pinned = [];
+    for (var p = 0; p < all.length; p++) (all[p].hasAttribute('data-pin') ? pinned : rows).push(all[p]);
+    for (var p2 = 0; p2 < pinned.length; p2++) tbody.appendChild(pinned[p2]);
     function cmp(a, b) {
       var va = cellVal(a, st.idx), vb = cellVal(b, st.idx);
       var na = parseAr(va), nb = parseAr(vb);

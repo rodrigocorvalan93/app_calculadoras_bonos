@@ -1090,6 +1090,10 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 }
 .hide-oclh .col-oclh { display: none; }
 .hide-mae  .col-mae  { display: none; }
+/* Fila del índice (Merval encabezando el panel líderes): fijada arriba, sin
+   libro; un fondo apenas distinto para que no se lea como un papel más. */
+.mercado-table tr.row-indice td { background: rgba(127, 127, 127, .07); }
+.mercado-table tr.row-indice td:first-child { color: var(--text); }
 .table-tools {
   display: flex; gap: 14px; align-items: center;
   font-size: 12px; margin: 0 0 6px; padding: 0 2px;

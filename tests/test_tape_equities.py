@@ -91,6 +91,49 @@ def test_panel_general_y_cedears_ampliados() -> None:
 
 
 @pytest.mark.asyncio
+async def test_panel_lideres_encabeza_con_el_merval_y_oclh_ocultable() -> None:
+    """(1) El índice Merval encabeza el panel Líderes (y Líder + General con
+    badge I): nivel por IV, OCLH del feed, var vs cierre, sin puntas / VWAP /
+    volumen, fijado arriba (`data-pin`) y sin libro; no cuenta como especie ni
+    aparece en General / CEDEARs. (2) Las columnas OCLH de la tabla de acciones
+    llevan `col-oclh`: el toggle de la página (CSS puro) no las ocultaba."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    _seed("GGAL", 5400.0, 5300.0)
+    mds.get_store().update_from_md("MERV - XMEV - I.MERVAL - spot",
+                                   {"IV": {"price": 2_500_000.0}, "CL": {"price": 2_450_000.0},
+                                    "OP": {"price": 2_460_000.0}, "HI": {"price": 2_510_000.0},
+                                    "LO": {"price": 2_440_000.0}})
+    equities._merval_sym = None
+    rows = equities.panel_rows("lideres")
+    assert rows[0]["code"] == "MERVAL" and rows[0]["indice"] is True
+    assert rows[0]["last"] == 2_500_000.0 and rows[0]["open"] == 2_460_000.0
+    assert abs(rows[0]["var_pct"] - (2_500_000.0 / 2_450_000.0 - 1) * 100) < 1e-9
+    assert rows[0]["bid"] is None and rows[0]["vwap"] is None and rows[0]["volume"] is None
+    assert rows[0]["volume_frac"] == 0.0 and rows[0]["range_pos"] is not None
+    assert sum(1 for r in rows if r.get("indice")) == 1 and any(r["code"] == "GGAL" for r in rows)
+    todas = equities.panel_rows("todas")
+    assert todas[0]["code"] == "MERVAL" and todas[0]["panel"] == "I"
+    assert not any(r["code"] == "MERVAL" for r in equities.panel_rows("general"))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/mercado/table?panel=lideres&plazo=24hs")
+        g = await ac.get("/mercado/table?panel=general&plazo=24hs")
+    assert r.status_code == 200
+    html = r.text
+    i_merval = html.index("MERVAL")
+    assert i_merval < html.index(">GGAL<")                             # encabeza la tabla
+    fila = html[html.rfind("<tr", 0, i_merval):html.index("</tr>", i_merval)]
+    assert 'data-pin' in fila and 'row-indice' in fila and "2.500.000,00" in fila
+    assert "/mercado/book/MERVAL" not in html                           # sin libro
+    assert 'class="col-oclh grp">Open</th>' in html and html.count('class="col-oclh"') >= 4
+    n = len([x for x in rows if not x.get("indice")])
+    assert f"{n} especies" in html                                      # el índice no cuenta
+    assert "MERVAL" not in g.text
+
+
+@pytest.mark.asyncio
 async def test_http_panel_general() -> None:
     from httpx import ASGITransport, AsyncClient
 

@@ -463,6 +463,16 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   que salir idénticas. Server: `_rows_en_seq` (1 build por params+seq,
   single-flight) + `_ROW_MEMO` (fila por seq del símbolo: un tick re-arma
   sólo su fila). Si agregás columnas a Mercado, van en la macro.
+- **Acciones / CEDEARs** (`partials/equities_table.html`, `services/equities.py`):
+  las columnas Open / Close / Low / High / Rango llevan `col-oclh` (el toggle
+  OCLH de la página es CSS puro: sin la clase no hacía nada, 30/09). El panel
+  Líderes (y Líder + General, badge `I`) arranca con la fila del índice
+  Merval (`equities.merval_row`: nivel por IV, OCLH del feed, var vs cierre;
+  sin puntas / VWAP / volumen, no abre libro, no cuenta como especie). Va
+  DESPUÉS de `_finish_rows` y con `data-pin`: el sort por columna de `app.js`
+  deja las filas `tr[data-pin]` fijadas arriba (sirve para cualquier tabla
+  `data-sortable`). Regresión:
+  `test_tape_equities.test_panel_lideres_encabeza_con_el_merval_y_oclh_ocultable`.
 
 ## Seguridad — invariantes (no regresar sin querer)
 

@@ -154,6 +154,10 @@ def row_for(code: str, plazo: str = "24hs") -> Optional[Dict[str, Any]]:
     snap = mds.get_store().get(syms.md_symbol(code, plazo))
     if snap is None:
         return None
+    return _row_from_snap(code, snap)
+
+
+def _row_from_snap(code: str, snap) -> Dict[str, Any]:
     var = _var(snap.last, snap.close)
     range_pos = None
     if snap.last is not None and snap.low is not None and snap.high is not None and snap.high > snap.low:
@@ -221,7 +225,31 @@ def panel_rows(panel: str, plazo: str = "24hs") -> List[Dict[str, Any]]:
                     rows.append(r)
     else:
         rows = [r for c in panel_tickers(panel) if (r := row_for(c, plazo)) is not None]
-    return _finish_rows(rows)
+    rows = _finish_rows(rows)
+    if panel in ("lideres", "todas"):
+        # El índice encabeza el panel de sus componentes (nivel + var del día,
+        # como en el tape). Va DESPUÉS de _finish_rows: no entra en el orden por
+        # volumen ni en la barrita de volumen, y el cliente lo deja fijado
+        # arriba aunque ordene por otra columna (`data-pin`).
+        m = merval_row()
+        if m is not None:
+            if panel == "todas":
+                m["panel"] = "I"
+            rows.insert(0, m)
+    return rows
+
+
+def merval_row() -> Optional[Dict[str, Any]]:
+    """Fila del índice Merval para el panel líderes: nivel (IV → last), OCLH
+    si el feed los manda y var vs cierre; sin puntas, VWAP ni volumen (no es
+    un papel) y no abre libro. None si el índice todavía no llegó."""
+    snap = merval_snapshot()
+    if snap is None:
+        return None
+    r = _row_from_snap("MERVAL", snap)
+    r.update({"bid": None, "bid_size": None, "offer": None, "offer_size": None, "vwap": None,
+              "volume": None, "nominal": None, "volume_frac": 0.0, "indice": True})
+    return r
 
 
 _merval_sym = None                      # símbolo MERVAL resuelto (memo)
