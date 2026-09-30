@@ -393,6 +393,15 @@ media simple del server (`_avg_seg`) sin los destildados — cero requests; la
 selección vive en `localStorage` (`qp_excl`, por `data-seg`) y se re-aplica
 tras cada swap. El CSV y el gráfico "antes/ahora" siguen con todos los bonos.
 Regresión: `tests/quepaso_harness.cjs` (vía `test_historico_semanal`).
+**Ventana efectiva**: el inicio es la última RUEDA de la base ≤ (fin − días),
+no la fecha calendario; el título dice cuántas ruedas abarca, hay un aviso ⚠
+si el hueco entre el inicio pedido y la rueda real pasa de 4 días (`aviso`,
+`hueco_dias`, `dias_efectivos`) y cada fila del detalle lleva `p0 → p1` con
+las fechas reales cuando no son las de la ventana (`desfasado`: ilíquido sin
+dato en la rueda inicial). Un bono sin observación ≤ inicio NO tiene Δ (no se
+inventa una desde su primera rueda). Antes "1 mes" podía medir mes y medio sin
+decirlo (CER +4,35 % con el mercado en 2-3 %, 30/09). El CSV lleva las
+mismas columnas (Precio ini/fin, Fecha ini/fin) y el aviso.
 
 ## Visual style (FastAPI rewrite)
 

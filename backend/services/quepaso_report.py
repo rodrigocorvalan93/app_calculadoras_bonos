@@ -29,8 +29,13 @@ def csv_es_ar(dias: int = 7) -> str:
 
     dias = max(1, min(int(dias or 7), 120))
     w = historico_byma.weekly_segments(dias)
-    lines = [f"Qué pasó;{w.get('start', '')} → {w.get('end', '')};ventana {dias} días", ""]
-    lines.append("Segmento;Bono;Duration;Δ Precio %;Cupones %;Δ TIR pp;Δ TEM pp;TIR ini %;TIR fin %")
+    lines = [f"Qué pasó;{w.get('start', '')} → {w.get('end', '')};ventana {dias} días"
+             + (f" ({w['n_ruedas']} ruedas)" if w.get("n_ruedas") else ""), ""]
+    if w.get("aviso"):
+        lines.append(f"AVISO;{w['aviso']}")
+        lines.append("")
+    lines.append("Segmento;Bono;Duration;Δ Precio %;Cupones %;Δ TIR pp;Δ TEM pp;TIR ini %;TIR fin %;"
+                 "Precio ini;Precio fin;Fecha ini;Fecha fin")
     for s in w.get("segments", []):
         lines.append(";".join([
             s["label"], f"PROMEDIO ({s['n']})", _n(s.get("dur_avg"), 2),
@@ -39,6 +44,7 @@ def csv_es_ar(dias: int = 7) -> str:
             _n((s.get("dtir") or 0) * 100, 2) if s.get("dtir") is not None else "",
             _n((s.get("dtem") or 0) * 100, 2) if s.get("dtem") is not None else "",
             "", _n((s.get("tir_avg") or 0) * 100, 2) if s.get("tir_avg") is not None else "",
+            "", "", "", "",
         ]))
         for r in s.get("rows", []):
             lines.append(";".join([
@@ -49,6 +55,8 @@ def csv_es_ar(dias: int = 7) -> str:
                 _n((r.get("dtem") or 0) * 100, 2) if r.get("dtem") is not None else "",
                 _n((r.get("tir0") or 0) * 100, 2) if r.get("tir0") is not None else "",
                 _n((r.get("tir1") or 0) * 100, 2) if r.get("tir1") is not None else "",
+                _n(r.get("p0"), 2), _n(r.get("p1"), 2),
+                r.get("f0_ar") or "", r.get("f1_ar") or "",
             ]))
     return "﻿" + "\n".join(lines)          # BOM → Excel abre UTF-8 con acentos bien
 

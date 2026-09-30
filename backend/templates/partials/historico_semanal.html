@@ -13,8 +13,13 @@
 <div class="card">
   <div class="card-title">
     <span>Qué pasó · {{ w.days }} días</span>
-    <span class="card-title-aux">{{ w.start }} → {{ w.end }} · Δprecio ≈ total return (hard-dollar en USD) · Δ TIR en pp (negativo = compresión) · clic en un segmento → detalle por bono · destildá un bono para sacarlo del promedio</span>
+    <span class="card-title-aux">{{ w.start }} → {{ w.end }}{% if w.n_ruedas %} · {{ w.n_ruedas }} ruedas{% endif %} · Δprecio ≈ total return (hard-dollar en USD) · Δ TIR en pp (negativo = compresión) · clic en un segmento → detalle por bono · destildá un bono para sacarlo del promedio</span>
   </div>
+  {% if w.aviso %}
+  {# Hueco en la base alrededor del inicio pedido: el Δ mide más días que la
+     ventana. Antes el inicio calendario tapaba esto y "1 mes" podía ser mes y medio. #}
+  <div class="alert" style="margin:8px 14px 0">⚠ {{ w.aviso }}</div>
+  {% endif %}
   {% if w.indices %}
   <div class="sem-idx">
     <span class="sem-idx-chip"><b>CER</b> {% if w.indices.cer is not none %}<span class="{{ 'px-up' if w.indices.cer >= 0 else 'px-down' }}">{{ '+' if w.indices.cer >= 0 else '' }}{{ (w.indices.cer * 100) | ar_num(2) }}%</span>{% else %}—{% endif %}</span>
@@ -110,6 +115,7 @@
                             title="Volver a tildar todos los bonos del segmento">✓ todos</button></th>
                   <th>Δ Precio</th><th>Δ TIR</th><th>Δ TEM</th>
                   {% if s.has_margen %}<th title="Margen = TNA 30d de la TIR − TAMAR/BADLAR del día">Margen</th>{% endif %}
+                  <th title="Precio inicial → final del Δ (dirty, de la base). Si las fechas no son las de la ventana, van abajo: el bono no tiene dato en esa rueda.">Precio ini → fin</th>
                 </tr></thead>
                 <tbody>
                   {% for b in s.rows %}
@@ -132,6 +138,7 @@
                     <td class="{{ 'px-up' if (b.dtem or 0) <= 0 else 'px-down' }}">{{
                       (('+' if b.dtem >= 0 else '') ~ ((b.dtem * 100) | ar_num(2)) ~ ' pp') if b.dtem is not none else '—' }}</td>
                     {% if s.has_margen %}<td>{% if b.margen is not none %}{{ (b.margen * 100) | ar_num(2) }}%{% if b.dmargen is not none %} <span class="sem-dm {{ 'px-up' if b.dmargen <= 0 else 'px-down' }}">({{ '+' if b.dmargen >= 0 else '' }}{{ (b.dmargen * 100) | ar_num(2) }})</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+                    <td class="sem-px">{% if b.p0 is not none and b.p1 is not none %}{{ b.p0 | ar_num(2) }} → {{ b.p1 | ar_num(2) }}{% if b.desfasado %}<div class="muted sem-fechas" title="Fechas reales del dato inicial y final de este bono">{{ b.f0_ar }} → {{ b.f1_ar }}</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
                   </tr>
                   {% endfor %}
                 </tbody>
