@@ -50,6 +50,7 @@ SOLIDEZ (tras la semana perdida 25-28/08/26, base clavada en el 24):
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import os
 import re
@@ -239,13 +240,17 @@ def journal_dir() -> str:
     return d
 
 
+_TMP_SEQ = itertools.count(1)
+
+
 def _tmp_de(path: str) -> str:
     """Nombre temporal ÚNICO al lado del destino (mismo volumen → `os.replace`
     atómico). Con un nombre fijo (`<path>.tmp`) dos escritores del mismo
     archivo a la vez (autosave + "Guardar ahora" del banner, o dos threads de
     reintento) se pisaban el temporal a medio escribir y uno renombraba el
-    parquet del otro (auditoría 30/09)."""
-    return f"{path}.{os.getpid()}-{threading.get_ident()}-{time.time_ns() % 1_000_000_000:09d}.tmp"
+    parquet del otro (auditoría 30/09). pid + contador del proceso (no el
+    reloj: en Windows `time_ns()` repite el valor entre dos llamadas seguidas)."""
+    return f"{path}.{os.getpid()}-{next(_TMP_SEQ)}.tmp"
 
 
 def _escribir_parquet_atomico(df: "Any", path: str) -> None:
