@@ -668,7 +668,13 @@ def _weekly_segments_compute(days: int, data: Dict[str, Any]) -> Dict[str, Any]:
     bench_ini = {"TAMAR": _index_at("tamar", "TAMAR", start), "BADLAR": _index_at("badlar", "BADLAR", start)}
     bench_fin = {"TAMAR": _index_at("tamar", "TAMAR", end), "BADLAR": _index_at("badlar", "BADLAR", end)}
     segments: List[Dict[str, Any]] = []
-    for cat in esc.CATEGORIES + esc.DUAL_CATEGORIES:
+    # Segmentos: las categorías de Escenario (sin los duales que entraron ahí
+    # para el multi-activo — Dual TAMAR/CER, Dual CER/TAMAR, Dual TAMAR/DLK) y
+    # después los seis duales juntos. Sumar las dos listas a secas mostraba
+    # esos tres segmentos DOS veces (30/09).
+    duales = {c.key for c in esc.DUAL_CATEGORIES}
+    cats = [c for c in esc.CATEGORIES if c.key not in duales] + list(esc.DUAL_CATEGORIES)
+    for cat in cats:
         dprices: List[float] = []
         dtirs: List[float] = []
         dtems: List[float] = []

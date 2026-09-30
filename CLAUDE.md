@@ -382,6 +382,18 @@ formatea en UTC (`utcTz` / `utcDia`, opción `tzDate`) — con el reloj local
 Buenos Aires (UTC-3) etiquetaba un día antes. Regresión:
 `tests/test_historico_comp.py`.
 
+**Qué pasó (30/09)**: los segmentos son las categorías de Escenario SIN los
+duales que entraron ahí para el multi-activo, más los seis `DUAL_CATEGORIES`
+juntos al final (sumar las dos listas a secas mostraba Dual TAMAR/CER, Dual
+CER/TAMAR y Dual TAMAR/DLK dos veces). **Tilde por bono**: cada fila del
+detalle lleva sus valores en `data-*` (dprice / dtir / dtem / cup / tir1 /
+tem1 / dur, fracciones) y un checkbox `.sem-chk`; `app.js` (`qpSegStats` /
+`qpSegCells`, puras) rehace las celdas `.sem-c-*` del encabezado con la misma
+media simple del server (`_avg_seg`) sin los destildados — cero requests; la
+selección vive en `localStorage` (`qp_excl`, por `data-seg`) y se re-aplica
+tras cada swap. El CSV y el gráfico "antes/ahora" siguen con todos los bonos.
+Regresión: `tests/quepaso_harness.cjs` (vía `test_historico_semanal`).
+
 ## Visual style (FastAPI rewrite)
 
 Bloomberg palette + Notion/Apple/Linear typography. System sans

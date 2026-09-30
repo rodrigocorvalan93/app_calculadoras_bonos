@@ -1778,3 +1778,124 @@ window.lsSet = function (k, v) {
   });
   window.__toast = show;
 })();
+
+// ── Qué pasó: tilde por bono → promedios del segmento sin los destildados ───
+// Los promedios del encabezado de cada segmento (Δ Precio, ✂ cupones, Δ TIR,
+// Δ TEM, TIR/TEM prom., Dur. prom.) se rehacen en el cliente con los valores
+// por bono que ya viajan en las filas del detalle (data-*): cero requests y
+// la misma media simple de los que tienen dato que hace el server
+// (historico_byma._avg_seg). La selección persiste por segmento en
+// localStorage (`qp_excl`) y se re-aplica tras cada swap de htmx (cambio de
+// ventana). El CSV y el gráfico "antes/ahora" siguen con todos los bonos.
+// qpSegStats / qpSegCells son puras (tests/quepaso_harness.cjs).
+(function () {
+  var KEY = 'qp_excl';
+  function fmt(n, dec) { return n.toLocaleString('es-AR', { minimumFractionDigits: dec, maximumFractionDigits: dec }); }
+  function num(s) { if (s == null || s === '') return null; var v = parseFloat(s); return isNaN(v) ? null : v; }
+  function avg(xs) { var s = 0, n = 0; for (var i = 0; i < xs.length; i++) if (xs[i] != null) { s += xs[i]; n++; } return n ? s / n : null; }
+  // rows: [{code, dprice, dtir, dtem, cup, tir1, tem1, dur}] en FRACCIONES (como el server); excl: códigos fuera.
+  function qpSegStats(rows, excl) {
+    var ex = {}; for (var i = 0; i < (excl || []).length; i++) ex[excl[i]] = true;
+    var dp = [], cup = [], dt = [], dm = [], t1 = [], m1 = [], du = [], n = 0;
+    for (var j = 0; j < rows.length; j++) {
+      var r = rows[j]; if (ex[r.code]) continue; n++;
+      if (r.dprice != null) { dp.push(r.dprice); cup.push(r.cup != null ? r.cup : 0); }   // mismo set → Δp + cup ≈ TR
+      if (r.dtir != null) dt.push(r.dtir);
+      if (r.dtem != null) dm.push(r.dtem);
+      if (r.tir1 != null) t1.push(r.tir1);
+      if (r.tem1 != null) m1.push(r.tem1);
+      if (r.dur != null) du.push(r.dur);
+    }
+    return { n: n, total: rows.length, dprice: avg(dp), cup: avg(cup), dtir: avg(dt), dtem: avg(dm),
+             tir: avg(t1), tem: avg(m1), dur: avg(du) };
+  }
+  function pp(x) { return x == null ? '—' : ((x >= 0 ? '+' : '') + fmt(x * 100, 2) + ' pp'); }
+  // Texto + clase de cada celda del encabezado, con los MISMOS formatos que el template Jinja.
+  function qpSegCells(st) {
+    return {
+      n: st.n === st.total ? '(' + st.total + ')' : '(' + st.n + ' de ' + st.total + ')',
+      dprice: { text: st.dprice == null ? '—' : fmt(st.dprice * 100, 2) + '%', cls: (st.dprice || 0) >= 0 ? 'px-up' : 'px-down' },
+      cup: (st.cup != null && st.cup > 0.0001) ? '✂ cupones +' + fmt(st.cup * 100, 2) + '%' : '',
+      dtir: { text: pp(st.dtir), cls: (st.dtir || 0) <= 0 ? 'px-up' : 'px-down' },
+      dtem: { text: pp(st.dtem), cls: (st.dtem || 0) <= 0 ? 'px-up' : 'px-down' },
+      tir: st.tir == null ? '—' : fmt(st.tir * 100, 1) + '%',
+      tem: st.tem == null ? '—' : fmt(st.tem * 100, 2) + '%',
+      dur: st.dur == null ? '—' : fmt(st.dur, 2)
+    };
+  }
+  window.qpSegStats = qpSegStats;
+  window.qpSegCells = qpSegCells;
+  if (typeof document === 'undefined') return;                      // harness de Node
+  function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { return {}; } }
+  function save(all) { try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) { /* Safari con cookies bloqueadas */ } }
+  function rowsOf(tb) {
+    var trs = tb.querySelectorAll('tr[data-code]'), out = [];
+    for (var i = 0; i < trs.length; i++) {
+      var d = trs[i].dataset;
+      out.push({ code: d.code, dprice: num(d.dprice), dtir: num(d.dtir), dtem: num(d.dtem), cup: num(d.cup),
+                 tir1: num(d.tir1), tem1: num(d.tem1), dur: num(d.dur) });
+    }
+    return out;
+  }
+  function setCell(tb, sel, v) {
+    var td = tb.querySelector(sel);
+    if (!td) return;
+    var span = td.querySelector('.sem-v');
+    if (typeof v === 'string') { (span || td).textContent = v; return; }
+    (span || td).textContent = v.text;
+    td.classList.remove('px-up', 'px-down');
+    td.classList.add(v.cls);
+  }
+  function apply(tb) {
+    var seg = tb.getAttribute('data-seg'), excl = load()[seg] || [];
+    var ex = {}; for (var i = 0; i < excl.length; i++) ex[excl[i]] = true;
+    var trs = tb.querySelectorAll('tr[data-code]');
+    for (var j = 0; j < trs.length; j++) {
+      var off = !!ex[trs[j].dataset.code], chk = trs[j].querySelector('.sem-chk');
+      if (chk) chk.checked = !off;
+      trs[j].classList.toggle('sem-off', off);
+    }
+    var ms = tb.querySelectorAll('.sem-m');
+    for (var k = 0; k < ms.length; k++) ms[k].classList.toggle('sem-excl', !!ex[ms[k].dataset.m]);
+    var st = qpSegStats(rowsOf(tb), excl), c = qpSegCells(st);
+    setCell(tb, '.sem-c-n', c.n);
+    setCell(tb, '.sem-c-dprice', c.dprice); setCell(tb, '.sem-c-dtir', c.dtir); setCell(tb, '.sem-c-dtem', c.dtem);
+    setCell(tb, '.sem-c-tir', c.tir); setCell(tb, '.sem-c-tem', c.tem); setCell(tb, '.sem-c-dur', c.dur);
+    var cup = tb.querySelector('.sem-c-cup');
+    if (cup) { cup.textContent = c.cup; cup.style.display = c.cup ? '' : 'none'; }
+    var nEl = tb.querySelector('.sem-c-n');
+    if (nEl) nEl.classList.toggle('sem-n-excl', st.n !== st.total);
+    var all = tb.querySelector('.sem-all');
+    if (all) all.style.display = st.n !== st.total ? '' : 'none';
+  }
+  function applyAll(root) {
+    var tbs = (root && root.querySelectorAll ? root : document).querySelectorAll('tbody[data-seg]');
+    for (var i = 0; i < tbs.length; i++) apply(tbs[i]);
+  }
+  function setExcl(tb, list) {
+    var all = load(), seg = tb.getAttribute('data-seg');
+    if (list.length) all[seg] = list; else delete all[seg];
+    save(all);
+    apply(tb);
+  }
+  document.body.addEventListener('change', function (evt) {
+    var chk = evt.target;
+    if (!chk || !chk.classList || !chk.classList.contains('sem-chk')) return;
+    var tb = chk.closest('tbody[data-seg]'), tr = chk.closest('tr[data-code]');
+    if (!tb || !tr) return;
+    var code = tr.dataset.code, list = (load()[tb.getAttribute('data-seg')] || []).filter(function (c) { return c !== code; });
+    if (!chk.checked) list.push(code);
+    setExcl(tb, list);
+  });
+  document.body.addEventListener('click', function (evt) {
+    var btn = evt.target.closest && evt.target.closest('.sem-all');
+    if (!btn) return;
+    var tb = btn.closest('tbody[data-seg]');
+    if (tb) setExcl(tb, []);
+  });
+  document.body.addEventListener('htmx:afterSwap', function (evt) {
+    if (evt.detail && evt.detail.target) applyAll(evt.detail.target);
+  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { applyAll(document); });
+  else applyAll(document);
+})();
