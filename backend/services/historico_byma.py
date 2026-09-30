@@ -692,16 +692,24 @@ def _weekly_segments_compute(days: int, data: Dict[str, Any]) -> Dict[str, Any]:
     # fila lleva sus fechas y precios inicial → final.
     ruedas = _ruedas_base(data)
     i0 = bisect.bisect_right(ruedas, start_req)
-    start = ruedas[i0 - 1] if i0 else start_req
+    antes = ruedas[i0 - 1] if i0 else None                       # última rueda ≤ inicio pedido
+    despues = next((d for d in ruedas[i0:] if d < end), None)   # primera rueda > inicio (y antes del fin)
+
+    def _dist(d: str) -> int:
+        return abs((date.fromisoformat(d) - date.fromisoformat(start_req)).days)
+    # La rueda MÁS CERCANA al inicio pedido, de un lado o del otro (empate → la
+    # anterior): con el hueco de agosto 2026 (05/08 → 31/08 sin ruedas) "1 mes"
+    # desde el 30/09 tomaba el 04/08 (27 días antes) cuando el 01/09 estaba a
+    # 1 día — y medía 57 días en vez de 30.
+    candidatas = [d for d in (antes, despues) if d]
+    start = min(candidatas, key=lambda d: (_dist(d), d)) if candidatas else start_req
     n_ruedas = sum(1 for d in ruedas if start <= d <= end)
-    hueco_dias = (date.fromisoformat(start_req) - date.fromisoformat(start)).days if i0 else 0
+    hueco_dias = _dist(start) if candidatas else 0
     aviso = None
     if hueco_dias > 4:
-        sig = next((d for d in ruedas if d > start), None)
-        aviso = (f"La base no tiene ruedas entre el {_ar_fecha(start)} y el "
-                 f"{_ar_fecha(sig) if sig else '—'}: el precio inicial es del {_ar_fecha(start)} "
-                 f"y la ventana efectiva abarca {(date.fromisoformat(end) - date.fromisoformat(start)).days} días, "
-                 f"no {int(days)}.")
+        aviso = (f"La base no tiene ruedas entre el {_ar_fecha(antes)} y el {_ar_fecha(despues)}: "
+                 f"la ventana arranca el {_ar_fecha(start)} y abarca "
+                 f"{(date.fromisoformat(end) - date.fromisoformat(start)).days} días, no {int(days)}.")
     codes_by_curve = curves.build_curve_codes()
     # Benchmark (TAMAR/BADLAR, en %) al inicio/fin de la ventana — una vez, igual
     # para todos los bonos del índice (alimenta el margen TNA histórico).

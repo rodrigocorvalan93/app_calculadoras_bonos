@@ -205,21 +205,23 @@ def test_quepaso_harness_js():
 
 
 def test_weekly_segments_ventana_efectiva_y_hueco():
-    """El inicio de la ventana es la última RUEDA de la base ≤ inicio pedido (no
-    la fecha calendario), se informan las ruedas que abarca y, si la base tiene
-    un hueco grande justo ahí, un aviso con la ventana efectiva; cada fila
-    lleva precio y fechas reales del Δ (`desfasado` cuando no son las de la
-    ventana). Antes '1 mes' podía medir mes y medio sin decirlo."""
+    """El inicio de la ventana es la RUEDA de la base más cercana al inicio
+    pedido (no la fecha calendario ni "la última anterior"), se informan las
+    ruedas que abarca y, si la rueda más cercana queda lejos (hueco grande),
+    un aviso con la ventana efectiva; cada fila lleva precio y fechas reales
+    del Δ (`desfasado` cuando no son las de la ventana). Antes '1 mes' desde
+    el 30/09/2026 arrancaba el 04/08 (hueco de agosto) y medía 57 días."""
     bond_universe.ensure_loaded()
     cer = curves.build_curve_codes().get("cer", [])
     if len(cer) < 3:
         pytest.skip("sin curva cer")
     a, b, c = cer[0], cer[1], cer[2]
     prev = hb._cache
-    # base con ruedas 05-20, 06-01 y 06-19…06-25 (hueco de 18 días): '7 días' pide
-    # el 06-18 → la rueda efectiva es el 06-01 → aviso. b sólo cotiza desde el
-    # 06-22 (sin dato inicial → sin Δ, no se inventa uno); c no tiene dato el
-    # 06-01 y su inicial es del 05-20 → Δ desfasado, con las fechas reales.
+    # ruedas 05-20, 06-01, 06-19, 06-22, 06-25: '7 días' pide el 06-18 → la más
+    # cercana es el 06-19 (a 1 día; el 06-01 queda a 17) → sin aviso. b sólo
+    # cotiza desde el 06-22 (sin dato inicial → sin Δ, no se inventa uno); c
+    # no tiene dato el 06-19 y su inicial es del 05-20 → Δ desfasado, con las
+    # fechas reales.
     hb._cache = {
         "loaded": True, "error": None, "bounds": ("2026-05-20", "2026-06-25"), "ver": next(_VER),
         "by_code": {
@@ -238,19 +240,32 @@ def test_weekly_segments_ventana_efectiva_y_hueco():
         res = hb.weekly_segments(7)
     finally:
         hb._cache = prev
-    assert res["start_req"] == "2026-06-18" and res["start"] == "2026-06-01"
-    assert res["hueco_dias"] == 17 and res["dias_efectivos"] == 24 and res["n_ruedas"] == 4
-    assert res["aviso"] and "01/06/2026" in res["aviso"] and "19/06/2026" in res["aviso"] and "24 días" in res["aviso"]
+    assert res["start_req"] == "2026-06-18" and res["start"] == "2026-06-19"
+    assert res["hueco_dias"] == 1 and res["dias_efectivos"] == 6 and res["n_ruedas"] == 3 and res["aviso"] is None
     seg = next(s for s in res["segments"] if a in s["members"])
     ra = next(r for r in seg["rows"] if r["code"] == a)
-    assert ra["p0"] == 100.0 and ra["p1"] == 104.0 and ra["f0"] == "2026-06-01" and ra["f1"] == "2026-06-25"
-    assert abs(ra["dprice"] - 0.04) < 1e-9 and ra["desfasado"] is False
+    assert ra["p0"] == 103.0 and ra["p1"] == 104.0 and ra["f0"] == "2026-06-19" and ra["f1"] == "2026-06-25"
+    assert abs(ra["dprice"] - (104.0 / 103.0 - 1)) < 1e-9 and ra["desfasado"] is False
     rb = next(r for r in seg["rows"] if r["code"] == b)
     assert rb["p0"] is None and rb["dprice"] is None and rb["desfasado"] is False
     rc = next(r for r in seg["rows"] if r["code"] == c)
     assert rc["f0"] == "2026-05-20" and rc["desfasado"] is True and rc["f0_ar"] == "20/05/2026"
     assert abs(rc["dprice"] - 0.03) < 1e-9 and rc["p0"] == 300.0
-    assert abs(seg["dprice"] - (0.04 + 0.03) / 2) < 1e-9                  # b (sin Δ) no entra al promedio
+    assert abs(seg["dprice"] - ((104.0 / 103.0 - 1) + 0.03) / 2) < 1e-9   # b (sin Δ) no entra al promedio
+    # hueco sin rueda cercana de ningún lado (06-01 y 06-25 solas; la del fin no
+    # vale como inicio): arranca el 06-01, a 17 días → aviso con la ventana real
+    hb._cache = {
+        "loaded": True, "error": None, "bounds": ("2026-06-01", "2026-06-25"), "ver": next(_VER),
+        "by_code": {a: {"dates": ["2026-06-01", "2026-06-25"],
+                        "vals": {"Last Price": [100.0, 104.0], "TIREA": [0.50, 0.48],
+                                 "TEM": [0.030, 0.029], "Duration": [0.3, 0.3]}}},
+    }
+    try:
+        res3 = hb.weekly_segments(7)
+    finally:
+        hb._cache = prev
+    assert res3["start"] == "2026-06-01" and res3["hueco_dias"] == 17 and res3["dias_efectivos"] == 24
+    assert res3["aviso"] and "01/06/2026" in res3["aviso"] and "24 días" in res3["aviso"] and "no 7" in res3["aviso"]
     # sin hueco: sin aviso, inicio = rueda pedida
     hb._cache = _cache_sintetico(a)
     try:
