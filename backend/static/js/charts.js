@@ -616,13 +616,21 @@
     // Generación por pedido: sólo la respuesta del ÚLTIMO load() se dibuja.
     // Sin esto, dos cambios de filtro seguidos con respuestas que llegaban
     // invertidas dejaban el gráfico de la selección anterior (auditoría E05).
-    var loadGen = 0;
+    // Además, UNA petición en vuelo: la anterior se aborta (AbortController)
+    // y cada fetch tiene plazo — con red lenta, dos cambios de filtro seguidos
+    // acumulaban requests que igual se descartaban al llegar.
+    var loadGen = 0, loadCtrl = null, LOAD_TIMEOUT_MS = 20000;
     function load(recreate) {
       var mine = ++loadGen;
-      fetch("/graficos/data?" + params())
+      if (loadCtrl) { try { loadCtrl.abort(); } catch (e) { /* noop */ } }
+      var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+      loadCtrl = ctrl;
+      var tm = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) { /* noop */ } }, LOAD_TIMEOUT_MS) : null;
+      fetch("/graficos/data?" + params(), ctrl ? { signal: ctrl.signal } : undefined)
         .then(function (r) { return r.json(); })
         .then(function (j) { if (mine !== loadGen) return; lastJ = j; render(j, recreate); })
-        .catch(function () { /* sin red → mantiene el último chart */ });
+        .catch(function () { /* sin red / abortado → mantiene el último chart */ })
+        .then(function () { if (tm) clearTimeout(tm); if (loadCtrl === ctrl) loadCtrl = null; });
     }
 
     // Textarea de emisiones: re-dibuja con el ÚLTIMO payload (sin re-fetch),

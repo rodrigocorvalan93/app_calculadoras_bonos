@@ -16,12 +16,16 @@
     <div class="alert">No se cargaron las posiciones: {{ status.error or "archivo no encontrado" }}</div>
   {% endif %}
 
-  <div class="curve-picker card">
+  {# El fondo/plazo ELEGIDOS viven en Alpine: el link "↻ Cartera" se arma con
+     lo que está seleccionado AHORA. Antes el href salía del server con el
+     fondo de la carga inicial, así que después de cambiar de fondo en el
+     desplegable (htmx, sin recargar) "↻ Cartera" volvía al fondo viejo. #}
+  <div class="curve-picker card" x-data="{ fondo: '{{ selected if selected is not none else '' }}', plazo: '{{ plazo }}' }">
     <div class="card-body">
       <div class="row-fields">
         <label class="field">
           <span>Fondo</span>
-          <select name="fondo" hx-get="/posiciones/table" hx-trigger="change"
+          <select name="fondo" x-model="fondo" hx-get="/posiciones/table" hx-trigger="change"
                   hx-target="#pos-fondo" hx-swap="innerHTML" hx-include="[name=plazo]">
             {% for f in fondos %}
               <option value="{{ f.cod }}" {% if f.cod == selected %}selected{% endif %}>
@@ -32,7 +36,7 @@
         </label>
         <label class="field">
           <span>Plazo</span>
-          <select name="plazo" hx-get="/posiciones/table" hx-trigger="change"
+          <select name="plazo" x-model="plazo" hx-get="/posiciones/table" hx-trigger="change"
                   hx-target="#pos-fondo" hx-swap="innerHTML" hx-include="[name=fondo]">
             <option value="24hs" {% if plazo == "24hs" %}selected{% endif %}>24hs</option>
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
@@ -44,7 +48,8 @@
                 title="Trae los últimos precios BYMA a la tabla. La tabla NO se refresca sola para no pisar lo que tipeás en la columna Last.">↻ Precios BYMA</button>
         <a class="btn-primary" style="align-self:flex-end"
            href="/posiciones?refresh=1{% if selected is not none %}&fondo={{ selected }}{% endif %}&plazo={{ plazo }}"
-           title="Re-lee la cartera del Delta desde el archivo (lectura completa).">↻ Cartera</a>
+           :href="'/posiciones?refresh=1' + (fondo ? '&fondo=' + encodeURIComponent(fondo) : '') + '&plazo=' + encodeURIComponent(plazo)"
+           title="Re-lee la cartera del Delta desde el archivo (lectura completa). Conserva el fondo y el plazo elegidos.">↻ Cartera</a>
       </div>
     </div>
   </div>
@@ -83,4 +88,35 @@
        hx-trigger="load, change from:select[name='fondo']">
   </div>
 </section>
+{# La página recuerda el ÚLTIMO fondo mirado (localStorage, por navegador):
+   entrando por el menú (sin ?fondo=) vuelve a ese fondo en vez del primero
+   de la lista — sólo si sigue entre los visibles para este usuario. Con
+   ?fondo= en la URL manda la URL. #}
+<script>
+(function () {
+  var KEY = "pos_fondo";
+  function restaurar() {
+    var sel = document.querySelector("select[name=fondo]");
+    if (!sel) return;
+    sel.addEventListener("change", function () {
+      try { localStorage.setItem(KEY, sel.value); } catch (e) { /* storage bloqueado */ }
+    });
+    var enUrl = false;
+    try { enUrl = new URL(location.href).searchParams.has("fondo"); } catch (e) { /* noop */ }
+    if (enUrl) {
+      try { localStorage.setItem(KEY, sel.value); } catch (e) { /* noop */ }
+      return;
+    }
+    var guardado = null;
+    try { guardado = localStorage.getItem(KEY); } catch (e) { /* noop */ }
+    if (!guardado || guardado === sel.value) return;
+    if (!sel.querySelector('option[value="' + guardado.replace(/"/g, "") + '"]')) return;
+    sel.value = guardado;
+    // htmx (tabla, targets, vencimientos) y Alpine (href de ↻ Cartera) escuchan el change
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  if (document.readyState === "complete") restaurar();
+  else window.addEventListener("load", restaurar);
+})();
+</script>
 {% endblock %}

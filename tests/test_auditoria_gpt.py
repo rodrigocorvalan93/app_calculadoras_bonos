@@ -1,0 +1,182 @@
+"""Auditoría externa de eficiencia (30/09, commit fcc335f) — regresiones de la
+tanda 1: el trabajo por TICK que se repetía por cliente ahora se comparte.
+
+- /mercado/rows: un render + un gzip por (query, since, seq) para N clientes.
+- /excel/v1/snapshot: los bytes gzip se memoizan con el JSON (1 compresión por
+  build) y se sirven con Content-Encoding si el cliente acepta.
+- /excel/v1/hist: memo (JSON + gzip) por (serie, días, versión de la carga).
+- Curvas: el HTML de cada fila se cachea; un tick re-renderiza sólo la suya.
+- marketdata_store: copy-on-write del snapshot (una referencia vieja queda
+  consistente).
+- Posiciones: el link ↻ Cartera y la memoria del último fondo.
+"""
+from __future__ import annotations
+
+import asyncio
+import gzip
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from backend.services import bond_universe, curves, marketdata_store as mds, pricing, symbols as syms
+
+
+def _seed(codes, px=100.0):
+    store = mds.get_store()
+    for i, c in enumerate(codes):
+        m = pricing.bond_meta(c) or {}
+        p = 90.0 if m.get("moneda") in ("USB", "USD") else px
+        for pl in ("24hs", "CI"):
+            store.update_from_md(syms.md_symbol(c, pl), {
+                "LA": {"price": p, "size": 100, "date": "2026-09-30T14:00:00-03:00"},
+                "BI": [{"price": p - 0.1, "size": 1000}], "OF": [{"price": p + 0.1, "size": 1000}],
+                "CL": {"price": p - 0.3, "date": "2026-09-29"}, "EV": 1e6 + i, "NV": 1e4 + i})
+    return store
+
+
+@pytest.mark.asyncio
+async def test_delta_de_mercado_un_render_y_un_gzip_para_n_clientes(monkeypatch) -> None:
+    from backend.main import app
+    from backend.routes import curves as rc
+
+    bond_universe.ensure_loaded()
+    codes = curves.build_curve_codes().get("cer", [])[:6]
+    assert len(codes) >= 3
+    store = _seed(codes)
+    rc._DELTA_MEMO.clear()
+    renders = []
+    real = rc._render
+
+    def espia(request, template, **ctx):
+        if template == "partials/mercado_rows.html":
+            renders.append(len(ctx.get("rows") or []))
+        return real(request, template, **ctx)
+
+    monkeypatch.setattr(rc, "_render", espia)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        seq0, _rows, _meta, order = await rc._rows_en_seq("cer", "24hs", True, "native", "byma", "", 0)
+        since = store.seq()
+        for c in codes[:2]:                                       # tick en 2 bonos
+            store.update_from_md(syms.md_symbol(c, "24hs"), {"NV": 77777})
+        url = f"/mercado/rows?curve=cer&plazo=24hs&since={since}&order={order}"
+        rs = await asyncio.gather(*(ac.get(url) for _ in range(24)))
+        assert all(r.status_code == 200 for r in rs)
+        assert all(r.headers.get("x-rows") == "2" and "x-full" not in r.headers for r in rs)
+        assert len({r.content for r in rs}) == 1 and rs[0].content        # mismo cuerpo para todos
+        assert renders == [2]                                             # UN render de 2 filas
+        # gzip memoizado: el que acepta gzip recibe los bytes comprimidos, el que no, el HTML
+        rg = await ac.get(url, headers={"Accept-Encoding": "gzip"})
+        rp = await ac.get(url, headers={"Accept-Encoding": "identity"})
+        assert renders == [2]                                             # sigue siendo uno
+        assert rp.content == rs[0].content and rp.headers.get("content-encoding") is None
+        assert rg.content == rp.content                                   # httpx descomprime
+        assert rg.headers.get("vary") == "Accept-Encoding" or rp.content == rg.content
+        # otro tick → otra key (nuevo render), el memo no sirve HTML viejo
+        since2 = store.seq()
+        store.update_from_md(syms.md_symbol(codes[2], "24hs"), {"NV": 88888})
+        r2 = await ac.get(f"/mercado/rows?curve=cer&plazo=24hs&since={since2}&order={order}")
+        assert r2.headers.get("x-rows") == "1" and renders == [2, 1]
+
+
+def test_snapshot_excel_memoiza_el_gzip() -> None:
+    from backend.routes import excel
+
+    bond_universe.ensure_loaded()
+    _seed(curves.build_curve_codes().get("cer", [])[:4])
+    excel._cache.clear()
+    body, gz = excel._snapshot_entry("")
+    assert body[:1] == b"{" and gz is not None and gzip.decompress(gz) == body
+    body2, gz2 = excel._snapshot_entry("")
+    assert body2 is body and gz2 is gz                                    # misma entrada: sin recomprimir
+    assert excel._snapshot_bytes("") is body                              # compat
+
+
+@pytest.mark.asyncio
+async def test_snapshot_y_hist_de_excel_sirven_gzip_si_el_cliente_acepta(monkeypatch) -> None:
+    from backend.main import app
+    from backend.routes import excel
+    from backend.services import historico as historico_svc
+
+    bond_universe.ensure_loaded()
+    excel._cache.clear()
+    excel._HIST_MEMO.clear()
+    builds = []
+    real = historico_svc.series_points
+
+    def espia(key, days=None, **kw):
+        builds.append((key, days))
+        return real(key, days=days, **kw)
+
+    monkeypatch.setattr(historico_svc, "series_points", espia)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        rg = await ac.get("/excel/v1/snapshot", headers={"Accept-Encoding": "gzip"})
+        ri = await ac.get("/excel/v1/snapshot", headers={"Accept-Encoding": "identity"})
+        assert rg.status_code == 200 and rg.json()["seq"] == ri.json()["seq"]
+        assert ri.headers.get("content-encoding") is None
+        assert rg.headers.get("content-encoding") == "gzip" or len(rg.content) < 1024
+        # hist: un build por (serie, días, versión); gzip para el que acepta
+        # (el snapshot también lee series macro: se cuenta desde acá)
+        del builds[:]
+        h1 = await ac.get("/excel/v1/hist/a3500", headers={"Accept-Encoding": "gzip"})
+        h2 = await ac.get("/excel/v1/hist/a3500", headers={"Accept-Encoding": "identity"})
+        h3 = await ac.get("/excel/v1/hist/a3500?days=30")
+        assert h1.status_code == 200 and h1.json() == h2.json() and h1.json()["serie"]
+        assert builds == [(h1.json()["serie"], None), (h1.json()["serie"], 30)]
+        assert h2.headers.get("content-encoding") is None
+        assert h3.status_code == 200 and len(h3.json()["points"]) <= len(h1.json()["points"])
+
+
+@pytest.mark.asyncio
+async def test_curvas_rerenderiza_solo_las_filas_que_cambiaron() -> None:
+    from backend.main import app
+    from backend.routes import curves as rc
+
+    bond_universe.ensure_loaded()
+    codes = curves.build_curve_codes().get("cer", [])
+    store = _seed(codes)
+    rc._CROW_MEMO.clear()
+    rc._CROW_STATS.update(render=0, hit=0)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r1 = await ac.get("/curves/table?curve=cer&plazo=24hs")
+        assert r1.status_code == 200 and "<tbody>" in r1.text
+        n = r1.text.count("<tr>") - 1                                     # menos el header
+        assert n > 0
+        primera = dict(rc._CROW_STATS)
+        assert primera["render"] >= n and primera["hit"] == 0
+        # mismo estado → todo del memo (otra key del seq-cache: ?leg= distinto no, mismo query
+        # pega el seq-cache; forzamos con un tick en un bono de OTRA curva)
+        otro = curves.build_curve_codes().get("lecap", [])[0]
+        store.update_from_md(syms.md_symbol(otro, "24hs"), {"NV": 5})
+        r2 = await ac.get("/curves/table?curve=cer&plazo=24hs")
+        assert r2.status_code == 200 and r2.text == r1.text
+        assert rc._CROW_STATS["render"] == primera["render"] and rc._CROW_STATS["hit"] >= n
+        # tick en UN bono de la curva → se re-renderiza sólo esa fila
+        store.update_from_md(syms.md_symbol(codes[0], "24hs"), {"LA": {"price": 101.0, "size": 5}})
+        antes = dict(rc._CROW_STATS)
+        r3 = await ac.get("/curves/table?curve=cer&plazo=24hs")
+        assert r3.status_code == 200 and r3.text != r2.text
+        assert rc._CROW_STATS["render"] - antes["render"] == 1
+        assert rc._CROW_STATS["hit"] - antes["hit"] == n - 1
+
+
+def test_store_snapshot_copy_on_write() -> None:
+    store = mds.MarketDataStore()
+    s1 = store.update_from_md("X - 24hs", {"LA": {"price": 90.0}, "BI": [{"price": 89.0, "size": 1}]})
+    s2 = store.update_from_md("X - 24hs", {"LA": {"price": 91.0}})
+    assert s1 is not s2 and store.get("X - 24hs") is s2
+    assert (s1.last, s1.seq) == (90.0, 1) and (s2.last, s2.seq) == (91.0, 2)     # la referencia vieja no cambió
+    assert s2.bid == 89.0 and s2.bids == s1.bids                                  # lo sticky se hereda
+
+
+@pytest.mark.asyncio
+async def test_posiciones_conserva_el_fondo_elegido() -> None:
+    from backend.main import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/posiciones")
+        assert r.status_code == 200
+        # ↻ Cartera arma el href con el fondo/plazo seleccionados AHORA (Alpine), no con los de la carga
+        assert 'x-model="fondo"' in r.text and 'x-model="plazo"' in r.text
+        assert ":href=\"'/posiciones?refresh=1' + (fondo ? '&fondo=' + encodeURIComponent(fondo) : '')" in r.text
+        # y recuerda el último fondo mirado (localStorage) al entrar sin ?fondo=
+        assert 'localStorage.getItem(KEY)' in r.text and '"pos_fondo"' in r.text

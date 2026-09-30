@@ -535,11 +535,27 @@ function guard(fn) {
   };
 }
 
+// OMS.HIST: UNA promesa en vuelo por (serie, días) — un recálculo con 20 celdas
+// HIST iguales hacía 20 fetches idénticos — y plazo total (el runtime headless
+// no tiene forma de cortar un fetch colgado: la celda quedaba en #¡OCUPADO!).
+var HIST_TIMEOUT_MS = 20000;
+var histInflight = {};
 function histFn(serie, dias) {
   var qs = dias ? ("?days=" + encodeURIComponent(dias)) : "";
-  return OMSFeed.loadToken().then(function (t) {
-    return fetch("/excel/v1/hist/" + encodeURIComponent(String(serie || "").trim()) + qs,
-                 { headers: { "X-OMS-Token": t }, cache: "no-store" });
+  var k = String(serie || "").trim().toUpperCase() + "|" + (dias || "");
+  if (histInflight[k]) return histInflight[k];
+  var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  var tm = null;
+  var guard = new Promise(function (_resolve, reject) {
+    tm = setTimeout(function () {
+      try { if (ctrl) ctrl.abort(); } catch (e) { /* noop */ }
+      reject(naError("Sin respuesta del server (HIST " + serie + ")"));
+    }, HIST_TIMEOUT_MS);
+  });
+  var work = OMSFeed.loadToken().then(function (t) {
+    var opts = { headers: { "X-OMS-Token": t }, cache: "no-store" };
+    if (ctrl) opts.signal = ctrl.signal;
+    return fetch("/excel/v1/hist/" + encodeURIComponent(String(serie || "").trim()) + qs, opts);
   }).then(function (r) {
     if (r.status === 401) { throw naError("Token de Excel inválido"); }
     if (!r.ok) { throw naError("HTTP " + r.status); }
@@ -551,6 +567,13 @@ function histFn(serie, dias) {
     for (var i = 0; i < pts.length; i++) { out.push([pts[i][0], pts[i][1]]); }
     return out;
   });
+  var p = Promise.race([work, guard]).then(function (v) {
+    clearTimeout(tm); delete histInflight[k]; return v;
+  }, function (e) {
+    clearTimeout(tm); delete histInflight[k]; throw e;
+  });
+  histInflight[k] = p;
+  return p;
 }
 
 // ── Calculadora YAS en celdas (TIREA / PRECIO / TNA / TICKET / CALC) ────────

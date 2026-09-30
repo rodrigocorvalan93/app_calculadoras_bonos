@@ -94,20 +94,26 @@ async def alertas_crear(request: Request,
                         valor: str = Form(""),
                         email: str = Form("")) -> HTMLResponse:
     v = parse_ar_num(valor)
-    err = "Valor inválido." if v is None else alertas_svc.add(code, metric, op, v, email)
-    ctx = await asyncio.get_running_loop().run_in_executor(None, _tabla_ctx, err)
+    # alta / baja / rearme = leer + escribir el JSON (OneDrive, antivirus):
+    # al executor, como el render — un disco lento no frena el event loop.
+    loop = asyncio.get_running_loop()
+    err = "Valor inválido." if v is None else await loop.run_in_executor(
+        None, alertas_svc.add, code, metric, op, v, email)
+    ctx = await loop.run_in_executor(None, _tabla_ctx, err)
     return _render(request, "partials/alertas_table.html", **ctx)
 
 
 @router.post("/borrar", response_class=HTMLResponse)
 async def alertas_borrar(request: Request, id: str = Form("")) -> HTMLResponse:
-    alertas_svc.delete(id)
-    ctx = await asyncio.get_running_loop().run_in_executor(None, _tabla_ctx)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, alertas_svc.delete, id)
+    ctx = await loop.run_in_executor(None, _tabla_ctx)
     return _render(request, "partials/alertas_table.html", **ctx)
 
 
 @router.post("/rearmar", response_class=HTMLResponse)
 async def alertas_rearmar(request: Request, id: str = Form("")) -> HTMLResponse:
-    alertas_svc.rearm(id)
-    ctx = await asyncio.get_running_loop().run_in_executor(None, _tabla_ctx)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, alertas_svc.rearm, id)
+    ctx = await loop.run_in_executor(None, _tabla_ctx)
     return _render(request, "partials/alertas_table.html", **ctx)

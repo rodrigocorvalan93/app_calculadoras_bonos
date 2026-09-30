@@ -228,7 +228,22 @@ window.lsSet = function (k, v) {
     if (timer) { clearInterval(timer); timer = null; }
     if (sse) { try { sse.close(); } catch (e) { } sse = null; }
     if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+    // un md-update coalescido que quedó pendiente al ocultar la pestaña no
+    // tiene que disparar N refreshes en una pestaña que nadie mira
+    if (pendingDispatch) { clearTimeout(pendingDispatch); pendingDispatch = null; }
   }
+  // Los `hx-trigger="every Ns"` (fallbacks de los paneles live, tape, riel,
+  // blotter) seguían pidiendo al server con la pestaña OCULTA: 16 pestañas
+  // de fondo eran ~1,7 requests/s sin nadie mirando. Se cancela SÓLO el
+  // request que dispara el poll de htmx (hx:poll:trigger); load / change /
+  // click / md-update siguen igual. Al volver, el md-update del primer seq
+  // refresca los paneles live y cada `every` sigue con su intervalo.
+  document.addEventListener('htmx:beforeRequest', function (e) {
+    if (!document.hidden) return;
+    var d = e.detail || {}, cfg = d.requestConfig || {};
+    var ev = cfg.triggeringEvent;
+    if (ev && ev.type === 'hx:poll:trigger') e.preventDefault();
+  });
   function armPoll() {
     if (timer) clearInterval(timer);
     timer = setInterval(poll, POLL_MS);
