@@ -360,6 +360,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--solo", default="", help="subconjunto: warm,tick,delta,burst")
     ap.add_argument("--json", default=None, help="archivo de salida para --compare")
     ap.add_argument("--slo", type=float, default=None, help="exit 1 si un p95 de 1 cliente pasa este umbral (ms)")
+    ap.add_argument("--no-gc", action="store_true", help="no aplicar el gc.freeze / umbrales del lifespan")
     ap.add_argument("--compare", nargs=2, metavar=("ANTES", "DESPUES"))
     args = ap.parse_args(argv)
     if args.compare:
@@ -380,6 +381,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     t1 = time.perf_counter()
     n_warm = calentar()
     t_warm = time.perf_counter() - t1
+    if not args.no_gc:
+        # El mismo GC que deja el lifespan (freeze del estado de larga vida +
+        # umbrales altos): sin esto las ráfagas muestran las pausas gen-2 de
+        # ~100 ms que en producción no existen (p99 de todos los casos).
+        import gc
+        gc.collect()
+        gc.freeze()
+        gc.set_threshold(10_000, 20, 100)
     print(f"universo {t_univ:.1f} s · {siembra['bonos_con_precio']} bonos con precio · {siembra['simbolos']} símbolos "
           f"· warm {n_warm} métricas en {t_warm:.1f} s · python {platform.python_version()} · {platform.platform()}")
     out = asyncio.run(correr(args))
