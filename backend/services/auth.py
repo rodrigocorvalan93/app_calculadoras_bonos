@@ -24,6 +24,7 @@ login; los roles son tiers de UX, no un sandbox de seguridad duro.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import hmac
 import json
@@ -177,26 +178,52 @@ def _save_locked(data: Dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
-def _persist(data: Dict[str, Any]) -> None:
-    """Guarda el store (bajo _lock) y, si el disco falla, DESCARTA la copia en
-    memoria: el próximo `_store()` relee el archivo y el cambio fallido no
-    queda vivo en el proceso. Antes, una promoción / clave / token que no se
-    pudo escribir (disco lleno, permisos, lock de OneDrive) seguía aplicada en
-    RAM mientras el request devolvía 500 — permisos distintos a los del disco
-    hasta el próximo reinicio."""
+_disk_lock = threading.Lock()      # serializa las escrituras a disco; los LECTORES no lo tocan
+
+
+def _mutar(fn):
+    """Copy-on-write del store: `fn(data)` muta una COPIA (bajo _lock, µs), la
+    copia se escribe a disco FUERA de _lock (fsync + replace: decenas o cientos
+    de ms con OneDrive / antivirus) y recién entonces se publica. Así
+
+      - los lectores (`_store()`: el middleware en cada request, el feed) nunca
+        esperan el disco — antes compartían el RLock con el guardado y un
+        guardado lento de /admin frenaba /market/seq de toda la mesa
+        (auditoría 30/09: 150 ms de disco = 153 ms de latencia);
+      - un cambio se ve recién cuando ya es durable: si el disco falla, el
+        store en memoria queda como estaba (F05 — antes: descartar la copia
+        mutada y releer).
+
+    Dos mutaciones cruzadas: la segunda se reaplica sobre el resultado de la
+    primera (`fn` se re-ejecuta, tiene que ser determinista sobre `data`; una
+    AuthError sube sin escribir nada). Devuelve lo que devuelva `fn`."""
     global _cache, _excel_index
-    try:
-        _save_locked(data)
-    except Exception:
-        _cache = None
-        _nav_cache.clear()
-        _feat_cache.clear()
-        _excel_index = None
-        raise
+    for _ in range(16):
+        with _lock:
+            base = _store()
+            nuevo = copy.deepcopy(base)
+            out = fn(nuevo)
+        with _disk_lock:
+            with _lock:
+                if _cache is not base:        # se publicó otra versión: reaplicar
+                    continue
+            _save_locked(nuevo)               # el disco, sin _lock tomado
+            with _lock:
+                _cache = nuevo
+                _nav_cache.clear()
+                _feat_cache.clear()
+                _excel_index = None
+            return out
+    raise RuntimeError("auth: demasiadas mutaciones concurrentes del store")
 
 
 def _store() -> Dict[str, Any]:
+    """Store en memoria. Lectura de la referencia SIN lock (atómica por el
+    GIL): `_mutar` nunca muta lo publicado, publica una versión nueva."""
     global _cache
+    c = _cache
+    if c is not None:
+        return c
     with _lock:
         if _cache is None:
             _cache = _load()
@@ -268,12 +295,16 @@ def get_secret_key() -> str:
     from backend.config import settings
     if settings.app_secret_key:
         return settings.app_secret_key
-    with _lock:
-        data = _store()
-        if not data.get("secret"):
-            data["secret"] = secrets.token_hex(32)
-            _persist(data)
-        return data["secret"]
+    secret = _store().get("secret")
+    if secret:
+        return secret
+
+    def fn(d: Dict[str, Any]) -> str:
+        if not d.get("secret"):
+            d["secret"] = secrets.token_hex(32)
+        return d["secret"]
+
+    return _mutar(fn)
 
 
 # ── Bootstrap del superuser ──────────────────────────────────────────────────
@@ -281,30 +312,35 @@ def ensure_bootstrapped() -> Dict[str, Any]:
     """Crea el superuser desde APP_SUPERUSER_* si el store no tiene ninguno.
     Idempotente. Devuelve {created, user, warning}."""
     from backend.config import settings
-    with _lock:
-        data = _store()
-        # Registros anteriores a la versión con `uid`: se les asigna uno (una
-        # sola vez, persistido). Hasta acá su uid es "" y una cookie con "" los
-        # autentica; desde acá, sólo las cookies emitidas para este uid.
-        sin_uid = [u for u in data["users"].values() if isinstance(u, dict) and not u.get("uid")]
-        if sin_uid:
-            for u in sin_uid:
-                u["uid"] = secrets.token_hex(8)
-            _persist(data)
-        has_su = any(u.get("role") == "superuser" for u in data["users"].values())
-        if has_su:
-            return {"created": False, "user": None, "warning": None}
-        user = _norm(settings.app_superuser_user)
-        pwd = settings.app_superuser_password
-        if not user or not pwd:
-            msg = ("No hay superuser y faltan APP_SUPERUSER_USER / APP_SUPERUSER_PASSWORD; "
-                   "nadie podrá loguearse. Seteá esas env vars y reiniciá.")
-            logger.warning("[auth] %s", msg)
-            return {"created": False, "user": None, "warning": msg}
-        data["users"][user] = _make_record(pwd, "superuser", settings.app_superuser_email)
-        _persist(data)
-        logger.info("[auth] superuser '%s' creado desde env (bootstrap)", user)
-        return {"created": True, "user": user, "warning": None}
+    data = _store()
+    # Registros anteriores a la versión con `uid`: se les asigna uno (una
+    # sola vez, persistido). Hasta acá su uid es "" y una cookie con "" los
+    # autentica; desde acá, sólo las cookies emitidas para este uid.
+    sin_uid = any(isinstance(u, dict) and not u.get("uid") for u in data["users"].values())
+    has_su = any(u.get("role") == "superuser" for u in data["users"].values())
+    user = _norm(settings.app_superuser_user)
+    pwd = settings.app_superuser_password
+    # PBKDF2 (~0,2 s) fuera del lock, sólo si hay que crear el superuser
+    rec = _make_record(pwd, "superuser", settings.app_superuser_email) if (not has_su and user and pwd) else None
+    if sin_uid or rec is not None:
+        def fn(d: Dict[str, Any]) -> bool:
+            for u in d["users"].values():
+                if isinstance(u, dict) and not u.get("uid"):
+                    u["uid"] = secrets.token_hex(8)
+            if rec is not None and not any(u.get("role") == "superuser" for u in d["users"].values()):
+                d["users"][user] = dict(rec)
+                return True
+            return False
+
+        if _mutar(fn):
+            logger.info("[auth] superuser '%s' creado desde env (bootstrap)", user)
+            return {"created": True, "user": user, "warning": None}
+    if has_su or any(u.get("role") == "superuser" for u in _store()["users"].values()):
+        return {"created": False, "user": None, "warning": None}
+    msg = ("No hay superuser y faltan APP_SUPERUSER_USER / APP_SUPERUSER_PASSWORD; "
+           "nadie podrá loguearse. Seteá esas env vars y reiniciá.")
+    logger.warning("[auth] %s", msg)
+    return {"created": False, "user": None, "warning": msg}
 
 
 def has_any_superuser() -> bool:
@@ -436,38 +472,37 @@ def create_user(username: str, password: str, role: str, email: str = "") -> Non
         raise AuthError(f"Rol inválido: {role!r}.")
     if not password or len(password) < 6:
         raise AuthError("La contraseña debe tener al menos 6 caracteres.")
-    with _lock:
-        if name in _store()["users"]:
-            raise AuthError(f"El usuario '{name}' ya existe.")
+    if name in _store()["users"]:
+        raise AuthError(f"El usuario '{name}' ya existe.")
     # El PBKDF2 (200k iteraciones, ~0,2 s) corre FUERA del lock: `_store()` lo
     # toma en cada request (auth_guard, ~4 veces) y el feed también → un alta
     # o cambio de clave frenaba a toda la mesa mientras se calculaba el hash.
     rec = _make_record(password, role, email)
-    with _lock:
-        data = _store()
-        if name in data["users"]:
+
+    def fn(d: Dict[str, Any]) -> None:
+        if name in d["users"]:
             raise AuthError(f"El usuario '{name}' ya existe.")
-        data["users"][name] = rec
-        _persist(data)
+        d["users"][name] = dict(rec)
+
+    _mutar(fn)
 
 
 def _perfil_para_clave(name: str) -> Tuple[str, str]:
     """(role, email) del usuario para armar el registro nuevo; AuthError si
-    no existe. Sólo lo mínimo bajo el lock."""
-    with _lock:
-        u = _store()["users"].get(name)
-        if not u:
-            raise AuthError(f"El usuario '{name}' no existe.")
-        return u.get("role", "basico"), u.get("email", "")
+    no existe."""
+    u = _store()["users"].get(name)
+    if not u:
+        raise AuthError(f"El usuario '{name}' no existe.")
+    return u.get("role", "basico"), u.get("email", "")
 
 
-def _aplicar_clave(name: str, rec: Dict[str, Any]) -> None:
-    """Instala `rec` (registro con la clave nueva, ya hasheada) conservando
-    lo que NO es clave. Llamar con _lock tomado."""
-    data = _store()
+def _aplicar_clave(data: Dict[str, Any], name: str, rec: Dict[str, Any]) -> None:
+    """Instala `rec` (registro con la clave nueva, ya hasheada) en `data`
+    conservando lo que NO es clave. Corre adentro de `_mutar` (sobre la copia)."""
     u = data["users"].get(name)
     if not u:
         raise AuthError(f"El usuario '{name}' no existe.")
+    rec = dict(rec)
     # rol / mail vigentes (por si cambiaron mientras se hasheaba)
     rec["role"] = u.get("role", rec.get("role", "basico"))
     if "email" in rec:
@@ -484,7 +519,6 @@ def _aplicar_clave(name: str, rec: Dict[str, Any]) -> None:
     # borrar y recrear el usuario).
     rec["uid"] = u.get("uid") or rec["uid"]
     data["users"][name] = rec
-    _persist(data)
 
 
 def set_password(username: str, password: str) -> None:
@@ -493,8 +527,7 @@ def set_password(username: str, password: str) -> None:
         raise AuthError("La contraseña debe tener al menos 6 caracteres.")
     role, email = _perfil_para_clave(name)
     rec = _make_record(password, role, email)        # hash fuera del lock
-    with _lock:
-        _aplicar_clave(name, rec)
+    _mutar(lambda d: _aplicar_clave(d, name, rec))
 
 
 def session_uid(username: Optional[str]) -> str:
@@ -522,14 +555,15 @@ def session_version(username: Optional[str]) -> int:
 def bump_session_version(username: str) -> int:
     """Invalida todas las sesiones web del usuario (Excel NO: su token es aparte)."""
     name = _norm(username)
-    with _lock:
-        data = _store()
-        u = data["users"].get(name)
+
+    def fn(d: Dict[str, Any]) -> int:
+        u = d["users"].get(name)
         if not u:
             raise AuthError(f"El usuario '{name}' no existe.")
         u["sv"] = int(u.get("sv") or 0) + 1
-        _persist(data)
         return u["sv"]
+
+    return _mutar(fn)
 
 
 def reset_with_token(token: str, password: str) -> str:
@@ -540,52 +574,57 @@ def reset_with_token(token: str, password: str) -> str:
     Devuelve el username."""
     if not password or len(password) < 6:
         raise AuthError("La contraseña debe tener al menos 6 caracteres.")
-    with _lock:
-        user = check_reset_token(token)
-        if not user:
-            raise AuthError("El enlace no es válido, expiró o ya se usó.")
+    user = check_reset_token(token)
+    if not user:
+        raise AuthError("El enlace no es válido, expiró o ya se usó.")
     name = _norm(user)
     role, email = _perfil_para_clave(name)
     rec = _make_record(password, role, email)
-    with _lock:
+
+    def fn(d: Dict[str, Any]) -> None:
+        # re-chequeo adentro de la mutación (bajo _lock, sobre la misma base
+        # que la copia): el primero que publica cambia la huella y el segundo
+        # ya ve el token usado — aunque los dos hayan hasheado en paralelo.
         if check_reset_token(token) != user:
             raise AuthError("El enlace no es válido, expiró o ya se usó.")
-        _aplicar_clave(name, rec)
-        return user
+        _aplicar_clave(d, name, rec)
+
+    _mutar(fn)
+    return user
 
 
 def update_user(username: str, role: Optional[str] = None, email: Optional[str] = None) -> None:
     name = _norm(username)
-    with _lock:
-        data = _store()
-        u = data["users"].get(name)
+
+    def fn(d: Dict[str, Any]) -> None:
+        u = d["users"].get(name)
         if not u:
             raise AuthError(f"El usuario '{name}' no existe.")
         if role is not None:
             if role not in ROLES:
                 raise AuthError(f"Rol inválido: {role!r}.")
             # no dejar el sistema sin superuser
-            if u.get("role") == "superuser" and role != "superuser" and _count_superusers(data) <= 1:
+            if u.get("role") == "superuser" and role != "superuser" and _count_superusers(d) <= 1:
                 raise AuthError("No podés degradar al último superuser.")
             u["role"] = role
         if email is not None:
             u["email"] = email.strip()
-        _persist(data)
+
+    _mutar(fn)
 
 
 def delete_user(username: str) -> None:
-    global _excel_index
     name = _norm(username)
-    with _lock:
-        data = _store()
-        u = data["users"].get(name)
+
+    def fn(d: Dict[str, Any]) -> None:
+        u = d["users"].get(name)
         if not u:
             raise AuthError(f"El usuario '{name}' no existe.")
-        if u.get("role") == "superuser" and _count_superusers(data) <= 1:
+        if u.get("role") == "superuser" and _count_superusers(d) <= 1:
             raise AuthError("No podés borrar al último superuser.")
-        del data["users"][name]
-        _persist(data)
-        _excel_index = None    # su token de Excel (si tenía) deja de valer ya
+        del d["users"][name]
+
+    _mutar(fn)      # su token de Excel (si tenía) deja de valer ya (_excel_index se rearma)
 
 
 def set_role_tabs(role: str, tabs: List[str]) -> None:
@@ -593,11 +632,11 @@ def set_role_tabs(role: str, tabs: List[str]) -> None:
         raise AuthError("Sólo se configuran las pestañas de premium y básico "
                         "(el superuser ve todo).")
     clean = [t for t in tabs if t in TAB_KEYS]
-    with _lock:
-        data = _store()
-        data["role_tabs"][role] = clean
-        _persist(data)
-        _nav_cache.pop(role, None)
+
+    def fn(d: Dict[str, Any]) -> None:
+        d["role_tabs"][role] = clean
+
+    _mutar(fn)
 
 
 # ── Features por rol ─────────────────────────────────────────────────────────
@@ -631,11 +670,11 @@ def set_role_features(role: str, keys: List[str]) -> None:
         raise AuthError("Sólo se configuran features de premium y básico "
                         "(el superuser las tiene todas).")
     clean = [k for k in keys if k in FEATURE_KEYS]
-    with _lock:
-        data = _store()
-        data.setdefault("role_features", {})[role] = clean
-        _persist(data)
-        _feat_cache.pop(role, None)
+
+    def fn(d: Dict[str, Any]) -> None:
+        d.setdefault("role_features", {})[role] = clean
+
+    _mutar(fn)
 
 
 def _count_superusers(data: Dict[str, Any]) -> int:
@@ -681,9 +720,9 @@ def visible_fondos_for(request: Any) -> Optional[FrozenSet[int]]:
 def set_visible_fondos(username: str, cods: Optional[List[int]]) -> None:
     """None = todos (borra la restricción); lista = allowlist de cod_fondo."""
     name = _norm(username)
-    with _lock:
-        data = _store()
-        u = data["users"].get(name)
+
+    def fn(d: Dict[str, Any]) -> None:
+        u = d["users"].get(name)
         if not u:
             raise AuthError(f"El usuario '{name}' no existe.")
         if u.get("role") == "superuser":
@@ -695,7 +734,8 @@ def set_visible_fondos(username: str, cods: Optional[List[int]]) -> None:
                 u["fondos"] = sorted({int(c) for c in cods})
             except (TypeError, ValueError):
                 raise AuthError("Códigos de fondo inválidos.") from None
-        _persist(data)
+
+    _mutar(fn)
 
 
 # ── Acceso Excel (add-in) por usuario ────────────────────────────────────────
@@ -737,34 +777,34 @@ def set_excel_access(username: str, enabled: bool) -> Optional[str]:
     habilitar por primera vez genera el token; al deshabilitar lo CONSERVA
     (re-habilitar no obliga a reconfigurar los libros ya armados) pero deja de
     validar. Devuelve el token vigente si quedó habilitado."""
-    global _excel_index
     name = _norm(username)
-    with _lock:
-        data = _store()
-        u = data["users"].get(name)
+    nuevo_token = secrets.token_urlsafe(24)
+
+    def fn(d: Dict[str, Any]) -> Optional[str]:
+        u = d["users"].get(name)
         if not u:
             raise AuthError(f"El usuario '{name}' no existe.")
         u["excel_enabled"] = bool(enabled)
         if enabled and not u.get("excel_token"):
-            u["excel_token"] = secrets.token_urlsafe(24)
-        _persist(data)
-        _excel_index = None
+            u["excel_token"] = nuevo_token
         return u.get("excel_token") if enabled else None
+
+    return _mutar(fn)       # _excel_index se rearma al publicar
 
 
 def regen_excel_token(username: str) -> str:
     """Rota el token de Excel del usuario (el anterior deja de valer ya)."""
-    global _excel_index
     name = _norm(username)
-    with _lock:
-        data = _store()
-        u = data["users"].get(name)
+    nuevo_token = secrets.token_urlsafe(24)
+
+    def fn(d: Dict[str, Any]) -> str:
+        u = d["users"].get(name)
         if not u:
             raise AuthError(f"El usuario '{name}' no existe.")
-        u["excel_token"] = secrets.token_urlsafe(24)
-        _persist(data)
-        _excel_index = None
+        u["excel_token"] = nuevo_token
         return u["excel_token"]
+
+    return _mutar(fn)
 
 
 # ── Tokens de reset (firmados, con expiración, single-use) ───────────────────

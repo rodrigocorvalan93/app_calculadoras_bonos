@@ -515,6 +515,14 @@ def estado_cierre() -> Dict[str, Any]:
             out["detalle"] = ("Base histórica con el cierre de hoy"
                               + (f" (guardado {hora})" if hora else "")
                               + (f" · {r['rows']} filas" if r.get("rows") else ""))
+            pend = r.get("pendientes") or []
+            if pend:
+                # base guardada, pero fx / acciones / cierre completo fallaron:
+                # que no parezca un cierre entero
+                out["parcial"] = list(pend)
+                out["texto"] += " · parcial"
+                out["detalle"] += (f" · PARCIAL: falta {', '.join(pend)} (se reintenta cada "
+                                   f"{int(_REINTENTO_FEED_S // 60)} min; la recaptura también)")
         else:
             out["texto"] = f"✓ cierre {dm}"
             quien = (f"hoy se guarda solo a las {hh:02d}:{mm:02d} — dejá la app abierta (o la captura programada)"
@@ -956,16 +964,25 @@ def save_today(force: bool = False) -> Dict[str, Any]:
         res["journal"] = write_journal(df)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[historico_writer] journal local no guardado: %s", exc)
+        res["journal_error"] = str(exc)
 
     # 2) Base compartida (OneDrive) — sólo si esta máquina es writer (el
     #    botón manual la escribe siempre).
     if not settings.historico_base_writer and not force:
+        if res.get("journal_error"):
+            # En una máquina que NO es writer el journal ES el guardado: sin
+            # él no hay nada capturado. Antes devolvía ok=True igual y el
+            # autosave cortaba ahí (éxito falso, auditoría 30/09).
+            res["error"] = f"journal local no guardado: {res['journal_error']}"
+            res["retry"] = True
+            return res
         res["ok"] = True
         res["skipped"] = "base_writer=0: sólo journal local (la consolida otra máquina)"
         try:                                   # cierre completo: también al journal local
             _guardar_cierre(hist_dir, df, force=force, solo_journal=True)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[historico_writer] journal del cierre completo falló: %s", exc)
+            res["pendientes"] = ["cierre"]
         return res
     try:
         saved = append_and_save(df, xlsx)
@@ -977,24 +994,29 @@ def save_today(force: bool = False) -> Dict[str, Any]:
         logger.exception("[historico_writer] guardado falló")
         res["error"] = str(exc)
         return res
+    # Los componentes que siguen son best-effort respecto de la BASE (un FX
+    # caído jamás voltea el cierre de bonos ya guardado), pero un fallo no
+    # es "éxito": queda en `pendientes` y el autosave lo reintenta sólo a él
+    # (`completar_cierre`); la recaptura también vuelve sobre los tres.
+    pendientes: List[str] = []
     # Historial FX del día (cable/MEP/canje/A3500): 1 fila, archivo propio.
-    # Best-effort: un FX caído jamás voltea el cierre de bonos ya guardado.
     try:
         fxres = _guardar_fx(hist_dir)
         if fxres:
             res["fx_filas"] = fxres["filas"]
     except Exception as exc:  # noqa: BLE001
         logger.warning("[historico_writer] historial FX falló: %s", exc)
+        pendientes.append("fx")
     # Cierre de acciones / CEDEARs / Merval (price action en Históricos).
-    # Best-effort igual que el FX: nunca voltea el cierre de bonos.
     try:
         acres = _guardar_acciones(hist_dir)
         if acres:
             res["acciones_filas"] = acres["hoy"]
     except Exception as exc:  # noqa: BLE001
         logger.warning("[historico_writer] historial de acciones falló: %s", exc)
+        pendientes.append("acciones")
     # Cierre COMPLETO del día (todos los símbolos del store + métricas de los
-    # bonos): partición cierres/AAAA/AAAA-MM-DD.parquet. Best-effort.
+    # bonos): partición cierres/AAAA/AAAA-MM-DD.parquet.
     try:
         cres = _guardar_cierre(hist_dir, df, force=force)
         if cres:
@@ -1002,6 +1024,11 @@ def save_today(force: bool = False) -> Dict[str, Any]:
             res["cierre_opero"] = cres["opero"]
     except Exception as exc:  # noqa: BLE001
         logger.warning("[historico_writer] cierre completo falló: %s", exc)
+        pendientes.append("cierre")
+    if pendientes:
+        res["pendientes"] = pendientes
+        logger.warning("[historico_writer] base guardada pero el cierre quedó PARCIAL: falta %s "
+                       "— se reintenta cada %d min", ", ".join(pendientes), int(_REINTENTO_FEED_S // 60))
     try:
         historico_byma.refresh()          # Qué pasó / Históricos ven el día nuevo ya
     except Exception:  # noqa: BLE001
@@ -2060,6 +2087,51 @@ def _guardar_cierre(hist_dir: str, df_bonos: "Any" = None, *, force: bool = Fals
     return res
 
 
+def completar_cierre(pendientes: List[str], force: bool = False) -> Dict[str, Any]:
+    """Reintenta SÓLO los componentes del cierre de hoy que fallaron después
+    de guardar la base (`fx` / `acciones` / `cierre` completo). Son
+    idempotentes (merge por columna, dedup keep-last, partición que se pisa)
+    y NO tocan la base px/tasas. {hechos, pendientes, errores}."""
+    from backend.services import deltapaths
+
+    out: Dict[str, Any] = {"hechos": [], "pendientes": [], "errores": {}}
+    hist_dir = deltapaths.historico_dir()
+    if not hist_dir:
+        out["pendientes"] = list(pendientes)
+        return out
+    df_bonos = None
+    if "cierre" in pendientes:
+        try:
+            df_bonos = build_rows()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] completar cierre: build_rows falló (%s) — sin métricas", exc)
+    for comp in pendientes:
+        try:
+            if comp == "fx":
+                _guardar_fx(hist_dir)
+            elif comp == "acciones":
+                _guardar_acciones(hist_dir)
+            elif comp == "cierre":
+                _guardar_cierre(hist_dir, df_bonos, force=force)
+            else:
+                continue
+            out["hechos"].append(comp)
+        except Exception as exc:  # noqa: BLE001
+            out["pendientes"].append(comp)
+            out["errores"][comp] = str(exc)
+            logger.warning("[historico_writer] %s del cierre sigue fallando: %s", comp, exc)
+    if out["hechos"]:
+        try:
+            from backend.services import acciones_hist, cierres, fx_hist
+            acciones_hist.refresh()
+            cierres.refresh()
+            fx_hist.refresh()
+        except Exception:  # noqa: BLE001
+            pass
+        logger.info("[historico_writer] cierre completado: %s", ", ".join(out["hechos"]))
+    return out
+
+
 def recapturar_cierre(force: bool = False) -> Dict[str, Any]:
     """Segunda captura del día (~30 min después del cierre): pisa la partición
     con los prints tardíos y re-escribe el parquet de acciones (dedup
@@ -2239,10 +2311,40 @@ class HistoricoAutosave:
                     return                             # shutdown durante la espera
                 except asyncio.TimeoutError:
                     continue
+            # Base guardada pero con componentes fallidos (fx / acciones /
+            # cierre completo): reintentar SÓLO esos hasta la recaptura.
+            if guardado_hoy and (self.last_result or {}).get("pendientes"):
+                await self._completar_pendientes(loop, disparo, limite)
             # RE-captura del cierre completo N min después del disparo: la
             # partición del día se pisa con los prints tardíos (y el parquet de
             # acciones se re-escribe keep-last). La base px/tasas no se toca.
             await self._recaptura(loop, disparo, guardado_hoy)
+
+    async def _completar_pendientes(self, loop, disparo: datetime, limite: datetime) -> None:
+        """Reintentos (cada _REINTENTO_FEED_S) de los componentes del cierre que
+        fallaron después de guardar la base, hasta la recaptura o el fin de la
+        ventana. Idempotentes; la base no se vuelve a tocar."""
+        from backend.config import settings
+        mins = int(getattr(settings, "historico_recaptura_min", 0) or 0)
+        tope = min(limite, disparo + timedelta(minutes=mins)) if mins > 0 else limite
+        while (self.last_result or {}).get("pendientes"):
+            if _now() + timedelta(seconds=_REINTENTO_FEED_S) > tope:
+                break
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=_REINTENTO_FEED_S)
+                return                                 # shutdown durante la espera
+            except asyncio.TimeoutError:
+                pass
+            pend = list(self.last_result["pendientes"])
+            try:
+                r2 = await loop.run_in_executor(None, completar_cierre, pend)
+            except Exception:  # noqa: BLE001
+                logger.exception("[historico_writer] completar el cierre reventó")
+                continue
+            self.last_result["pendientes"] = list(r2.get("pendientes") or [])
+        if (self.last_result or {}).get("pendientes"):
+            logger.warning("[historico_writer] cierre de HOY PARCIAL: falta %s — la recaptura vuelve a intentar",
+                           ", ".join(self.last_result["pendientes"]))
 
     async def _avisar_feed_muerto(self, loop, r: Dict[str, Any]) -> None:
         """Aviso al superuser, UNA vez por día: log + mail (best-effort, en el
@@ -2319,6 +2421,16 @@ class HistoricoAutosave:
             if r.get("ok"):
                 logger.info("[historico_writer] recaptura del cierre OK: %s símbolos (%s operados)",
                             r.get("filas"), r.get("opero"))
+                # la recaptura rehízo el cierre completo (y acciones / FX si no
+                # fallaron): lo que quedaba pendiente de la tarde ya está
+                pend = (self.last_result or {}).get("pendientes") or []
+                if pend:
+                    hechos = {"cierre"} | ({"acciones"} if "acciones_filas" in r else set()) \
+                        | ({"fx"} if "fx" in r else set())
+                    self.last_result["pendientes"] = [p for p in pend if p not in hechos]
+                    if self.last_result["pendientes"]:
+                        logger.warning("[historico_writer] cierre de HOY sigue PARCIAL tras la recaptura: falta %s",
+                                       ", ".join(self.last_result["pendientes"]))
             else:
                 logger.info("[historico_writer] recaptura del cierre: %s",
                             r.get("skipped") or r.get("error"))

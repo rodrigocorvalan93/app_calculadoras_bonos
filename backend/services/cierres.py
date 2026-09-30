@@ -25,6 +25,7 @@ import bisect
 import logging
 import os
 import threading
+import time
 import warnings
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -44,8 +45,12 @@ CAMPOS = ("last", "close", "open", "high", "low", "bid", "offer", "volume", "nom
 # el resto (OHLC, puntas, volúmenes) en float32 — mitad de RAM.
 _F64 = {"last", "close", "tirea", "paridad", "duration"}
 _lock = threading.Lock()
-_cache: Dict[str, Any] = {"sig": None, "data": None}
+# `completa`: la matriz publicada se armó con TODAS las particiones legibles;
+# `retry_at`: hasta cuándo no volver a intentar una carga degradada.
+_cache: Dict[str, Any] = {"sig": None, "data": None, "completa": True, "retry_at": 0.0,
+                          "degradada_sig": None}
 _vref_cache: Dict[tuple, Dict[str, tuple]] = {}
+_RETRY_S = 60.0
 
 
 class Matriz:
@@ -94,16 +99,25 @@ def particiones(strict: bool = False) -> List[Tuple[str, str]]:
 
 
 def signature() -> tuple:
-    """(n particiones, última fecha, mtime de la última): cambia con el cierre,
-    con la recaptura (pisa la última) y con un backfill."""
+    """(n particiones, última fecha, mtime de la última, mtimes de las carpetas
+    por año): cambia con el cierre, con la recaptura (pisa la última), con un
+    backfill y con la corrección de una partición VIEJA — `os.replace` toca el
+    mtime del directorio aunque la última no cambie (antes esa corrección no
+    invalidaba la matriz hasta reiniciar)."""
     parts = particiones()
     if not parts:
-        return (0, "", 0)
+        return (0, "", 0, ())
     try:
         m = os.stat(parts[-1][1]).st_mtime_ns
     except OSError:
         m = 0
-    return (len(parts), parts[-1][0], m)
+    dm = []
+    for d in sorted({os.path.dirname(p) for _, p in parts}):
+        try:
+            dm.append(os.stat(d).st_mtime_ns)
+        except OSError:
+            dm.append(0)
+    return (len(parts), parts[-1][0], m, tuple(dm))
 
 
 def _build(df: pd.DataFrame) -> Optional[Matriz]:
@@ -150,10 +164,15 @@ def _build(df: pd.DataFrame) -> Optional[Matriz]:
 
 def _load() -> Optional[Matriz]:
     sig = signature()
+    now = time.monotonic()
     with _lock:
-        if _cache["sig"] == sig:
+        if _cache["sig"] == sig and (_cache["completa"] or now < _cache["retry_at"]):
             return _cache["data"]
+        if _cache["degradada_sig"] == sig and now < _cache["retry_at"]:
+            return _cache["data"]           # intento degradado reciente: la anterior hasta el reintento
+        previa, previa_completa = _cache["data"], _cache["completa"]
     data: Optional[Matriz] = None
+    fallidas = 0
     parts = particiones()
     if parts:
         frames = []
@@ -161,6 +180,7 @@ def _load() -> Optional[Matriz]:
             try:
                 frames.append(pd.read_parquet(p))
             except Exception as exc:  # noqa: BLE001 — una partición rota no voltea la matriz
+                fallidas += 1
                 logger.warning("[cierres] partición ilegible %s: %s", p, exc)
         if frames:
             try:
@@ -168,10 +188,27 @@ def _load() -> Optional[Matriz]:
             except Exception:  # noqa: BLE001
                 logger.exception("[cierres] build de la matriz falló")
                 data = None
+                fallidas += 1
     with _lock:
+        if fallidas and previa is not None and previa_completa:
+            # Carga DEGRADADA (un lock de OneDrive, un parquet a medio bajar):
+            # no se publica una matriz a la que le falta un día como si fuera
+            # completa — antes ese día desaparecía hasta un refresh explícito.
+            # Se conserva la íntegra anterior y se reintenta en _RETRY_S.
+            _cache["degradada_sig"] = sig
+            _cache["retry_at"] = now + _RETRY_S
+            logger.warning("[cierres] %d partición(es) ilegible(s): sigo con la matriz anterior "
+                           "(%s → %s) y reintento en %d s", fallidas, previa.fechas[0], previa.fechas[-1], int(_RETRY_S))
+            return previa
         _cache["sig"] = sig
         _cache["data"] = data
+        _cache["completa"] = fallidas == 0
+        _cache["retry_at"] = now + _RETRY_S
+        _cache["degradada_sig"] = None
         _vref_cache.clear()
+    if fallidas:
+        logger.warning("[cierres] matriz PARCIAL (%d partición(es) ilegible(s)): reintento en %d s",
+                       fallidas, int(_RETRY_S))
     if data is not None:
         logger.info("[cierres] matriz: %d ruedas × %d símbolos (%s → %s)",
                     len(data.fechas), len(data.simbolos), data.fechas[0], data.fechas[-1])
@@ -186,6 +223,9 @@ def refresh() -> None:
     with _lock:
         _cache["sig"] = None
         _cache["data"] = None
+        _cache["completa"] = True
+        _cache["retry_at"] = 0.0
+        _cache["degradada_sig"] = None
         _vref_cache.clear()
 
 

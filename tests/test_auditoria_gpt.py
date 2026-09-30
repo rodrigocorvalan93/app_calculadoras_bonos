@@ -180,3 +180,104 @@ async def test_posiciones_conserva_el_fondo_elegido() -> None:
         assert ":href=\"'/posiciones?refresh=1' + (fondo ? '&fondo=' + encodeURIComponent(fondo) : '')" in r.text
         # y recuerda el último fondo mirado (localStorage) al entrar sin ?fondo=
         assert 'localStorage.getItem(KEY)' in r.text and '"pos_fondo"' in r.text
+
+
+def test_auth_los_lectores_no_esperan_el_disco(monkeypatch) -> None:
+    """Copy-on-write del store de auth: un guardado lento (OneDrive / antivirus)
+    ya no frena `_store()` — el middleware lo llama en CADA request — y el
+    cambio se publica recién cuando es durable (si el disco falla, nada
+    cambia en memoria)."""
+    import threading
+    import time
+
+    from backend.services import auth
+
+    real_save = auth._save_locked
+    lento = threading.Event()
+
+    def save_lento(data):
+        lento.set()
+        time.sleep(0.4)                      # disco lento con el cambio en curso
+        real_save(data)
+
+    monkeypatch.setattr(auth, "_save_locked", save_lento)
+    antes = list(auth._store()["role_tabs"]["basico"])
+    nuevas = [t for t in antes if t != "nueva"] if "nueva" in antes else antes + ["nueva"]
+    t = threading.Thread(target=auth.set_role_tabs, args=("basico", nuevas))
+    t.start()
+    assert lento.wait(2.0)
+    # mientras escribe: leer es instantáneo y todavía se ve lo viejo (aún no durable)
+    t0 = time.perf_counter()
+    visto = list(auth._store()["role_tabs"]["basico"])
+    assert (time.perf_counter() - t0) < 0.05
+    assert visto == antes
+    t.join(5.0)
+    assert not t.is_alive() and list(auth._store()["role_tabs"]["basico"]) == nuevas
+    # disco roto → la mutación falla y la memoria queda como estaba
+    monkeypatch.setattr(auth, "_save_locked", lambda data: (_ for _ in ()).throw(OSError("disco lleno")))
+    with pytest.raises(OSError):
+        auth.set_role_tabs("basico", antes)
+    assert list(auth._store()["role_tabs"]["basico"]) == nuevas
+    monkeypatch.setattr(auth, "_save_locked", real_save)
+    auth.set_role_tabs("basico", antes)
+    assert list(auth._store()["role_tabs"]["basico"]) == antes
+
+
+def test_cierres_una_particion_ilegible_no_deja_una_matriz_parcial_pegajosa(tmp_path, monkeypatch) -> None:
+    """Una partición que falla UNA vez (lock de OneDrive) no publica una matriz
+    sin ese día como si estuviera completa: se conserva la íntegra anterior y
+    se reintenta; y corregir una partición VIEJA invalida la matriz (mtime de
+    la carpeta en la firma)."""
+    import os
+    from datetime import date
+
+    import pandas as pd
+    from backend.services import cierres, historico_writer as hw
+
+    monkeypatch.setenv("DELTA_HISTORICO_DIR", str(tmp_path))
+    monkeypatch.delenv("DELTA_HISTORICO_PATH", raising=False)
+    monkeypatch.delenv("DELTA_BASES_DIR", raising=False)
+
+    def part(d, last):
+        df = pd.DataFrame([{"fecha_hoy": d, "symbol": "MERV - XMEV - TX26 - 24hs", "code": "TX26", "plazo": "24hs",
+                            "last": last, "close": last - 1, "opero": True, "tirea": 0.3}])
+        for col in ("symbol", "code", "plazo"):
+            df[col] = df[col].astype("string")
+        return hw.escribir_particion(df, str(tmp_path), d)
+
+    d1, d2, d3 = date(2026, 9, 23), date(2026, 9, 24), date(2026, 9, 25)
+    p1 = part(d1, 100.0)
+    part(d2, 101.0)
+    cierres.refresh()
+    m = cierres.ensure_loaded()
+    assert m is not None and m.fechas == ["2026-09-23", "2026-09-24"]
+    # llega el 25 pero el 24 no se puede leer (una vez)
+    p3 = part(d3, 102.0)
+    real = pd.read_parquet
+    fallar = {"n": 0}
+
+    def read_falla(path, *a, **k):
+        if str(path).endswith("2026-09-24.parquet") and fallar["n"] < 1:
+            fallar["n"] += 1
+            raise OSError("lock")
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(pd, "read_parquet", read_falla)
+    m2 = cierres.ensure_loaded()
+    assert m2 is m and m2.fechas == ["2026-09-23", "2026-09-24"]          # la íntegra anterior, no una sin el 24
+    assert cierres._cache["completa"] is True
+    # dentro del backoff sigue la anterior; pasado el backoff, reintenta y ahora carga los 3
+    assert cierres.ensure_loaded() is m
+    cierres._cache["retry_at"] = 0.0
+    m3 = cierres.ensure_loaded()
+    assert m3 is not m and m3.fechas == ["2026-09-23", "2026-09-24", "2026-09-25"]
+    assert cierres._cache["completa"] is True and fallar["n"] == 1
+    # corregir una partición VIEJA (reescribirla) cambia la firma aunque la última no cambie
+    sig_antes = cierres.signature()
+    os.utime(os.path.dirname(p1), None)
+    part(d1, 150.0)
+    assert cierres.signature() != sig_antes
+    m4 = cierres.ensure_loaded()
+    assert m4 is not m3 and float(m4.mat["last"][0, 0]) == 150.0
+    assert p3.endswith("2026-09-25.parquet")
+    cierres.refresh()

@@ -433,3 +433,70 @@ def test_filas_base_en_ignora_ruedas_reconstruidas() -> None:
     assert [r["Código"] for r in hw._filas_base_en(base, d)] == ["C2"]
     assert hw._filas_base_en(base.drop(columns=["Price Source"]), d) and \
         len(hw._filas_base_en(base.drop(columns=["Price Source"]), d)) == 3   # sin la columna: como antes
+
+
+# ── Cierre PARCIAL: componentes fallidos después de guardar la base ──────────
+def test_save_today_no_es_exito_si_falla_el_journal_sin_writer(hist_env, monkeypatch) -> None:
+    """Máquina que NO es writer: el journal ES el guardado. Si falla, el
+    resultado no puede ser ok (antes: ok=True, el autosave cortaba ahí)."""
+    hoy = _ahora_habil()
+    monkeypatch.setattr(hw, "_now", lambda: hoy)
+    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date(), ts=_epoch_ms(hoy)))
+    monkeypatch.setattr(settings, "historico_autosave_min_operados", 1)
+    monkeypatch.setattr(settings, "historico_base_writer", False)
+    monkeypatch.setattr(hw, "write_journal", lambda df, dia=None: (_ for _ in ()).throw(OSError("disco lleno")))
+    res = hw.save_today()
+    assert res["ok"] is False and res.get("retry") is True
+    assert "journal local no guardado" in (res.get("error") or "")
+
+
+def test_save_today_marca_pendientes_y_completar_cierre_los_reintenta(hist_env, monkeypatch) -> None:
+    """Writer: la base se guarda pero FX / acciones / cierre completo fallan →
+    ok=True (la base está) con `pendientes`; completar_cierre reintenta SÓLO
+    esos, sin tocar la base, y devuelve lo que sigue faltando."""
+    # después de las 17:01: el cierre esperado por el chip es el de HOY
+    hoy = _ahora_habil().replace(hour=17, minute=30, second=0, microsecond=0)
+    monkeypatch.setattr(hw, "_now", lambda: hoy)
+    monkeypatch.setattr(hw, "build_rows", lambda plazo="24hs": _rows_df(hoy.date(), ts=_epoch_ms(hoy)))
+    monkeypatch.setattr(settings, "historico_autosave_min_operados", 1)
+    monkeypatch.setattr(settings, "historico_base_writer", True)
+    llamadas = {"fx": 0, "acciones": 0, "cierre": 0}
+
+    def fx_falla(hist_dir, **kw):
+        llamadas["fx"] += 1
+        raise OSError("FX lockeado")
+
+    def acciones_ok(hist_dir):
+        llamadas["acciones"] += 1
+        return {"hoy": 3}
+
+    def cierre_falla(hist_dir, df=None, **kw):
+        llamadas["cierre"] += 1
+        raise OSError("cierres/ sin permisos")
+
+    monkeypatch.setattr(hw, "_guardar_fx", fx_falla)
+    monkeypatch.setattr(hw, "_guardar_acciones", acciones_ok)
+    monkeypatch.setattr(hw, "_guardar_cierre", cierre_falla)
+    res = hw.save_today()
+    assert res["ok"] is True and res["pendientes"] == ["fx", "cierre"] and res["acciones_filas"] == 3
+    assert (hist_env / hw.HIST_FILENAME).exists()
+    # el chip lo muestra como parcial (lee el último resultado del autosave)
+    auto = hw.get_autosave()
+    prev = auto.last_result
+    auto.last_result = res
+    try:
+        est = hw.estado_cierre()
+        assert est["estado"] == "ok" and est.get("parcial") == ["fx", "cierre"] and "parcial" in est["texto"]
+    finally:
+        auto.last_result = prev
+    # reintento: el FX ya anda, el cierre sigue fallando; la base no se toca
+    monkeypatch.setattr(hw, "_guardar_fx", lambda hist_dir, **kw: {"filas": 1})
+    guardados = []
+    monkeypatch.setattr(hw, "append_and_save", lambda *a, **k: guardados.append(1))
+    r2 = hw.completar_cierre(["fx", "cierre"])
+    assert r2["hechos"] == ["fx"] and r2["pendientes"] == ["cierre"] and "cierre" in r2["errores"]
+    assert llamadas["cierre"] == 2 and not guardados
+    monkeypatch.setattr(hw, "_guardar_cierre", lambda hist_dir, df=None, **kw: {"filas": 9, "opero": 9, "path": "x"})
+    r3 = hw.completar_cierre(["cierre"])
+    assert r3["hechos"] == ["cierre"] and r3["pendientes"] == []
+    historico_byma.refresh()
