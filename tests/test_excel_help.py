@@ -41,7 +41,7 @@ def test_panel_explica_en_vivo_vs_puntuales_y_tiene_recalcular() -> None:
     fj = json.loads((EXCEL / "functions.json").read_text(encoding="utf-8"))
     streaming = {f["id"] for f in fj["functions"] if (f.get("options") or {}).get("stream")}
     puntuales = {f["id"] for f in fj["functions"] if f["id"] not in streaming and f["id"] not in ("PING", "DIAG")}
-    assert streaming == {"QUOTE", "FX", "ROFEX", "CAUCION", "TABLA"}
+    assert streaming == {"QUOTE", "FX", "ROFEX", "CAUCION", "TABLA", "MACRO"}   # MACRO en vivo desde v25
     vivo = tp.split("<strong>Puntuales</strong>")[0].split("<strong>En vivo</strong>")[1]
     punt = tp.split("<strong>Puntuales</strong>")[1].split("<strong>Series macro</strong>")[0]
     for fid in streaming:

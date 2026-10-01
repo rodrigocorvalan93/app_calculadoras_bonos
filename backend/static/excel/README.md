@@ -17,7 +17,7 @@ tick y todos los libros conectados comparten ese único build.
 | `=OMS.CAUCION(7;"tasa")` | `RtGet("IDN";"ARS…RP=BA";…)` |
 | `=OMS.TABLA("futuros")` (spill) | hoja Rofex completa |
 | `=OMS.HIST("a3500";365)` (spill) | `RHistory("ARS=BCRA";…)` |
-| `=OMS.MACRO("tamar")` / `=OMS.MACRO("a3500";VERDADERO)` | último dato BCRA en una celda (valor / fecha del dato); `tamar5` = promedio 5 ruedas |
+| `=OMS.MACRO("tamar")` / `=OMS.MACRO("a3500";VERDADERO)` | último dato BCRA en una celda, en vivo (valor / fecha del dato); `tamar5` = promedio 5 ruedas |
 | `=OMS.TIREA("GD30";78,5)` / `=OMS.PRECIO("GD30";0,14)` / `=OMS.TNA(…)` / `=OMS.MARGEN("TTM26";99,8)` | calculadora YAS en la celda (MARGEN: floaters TAMAR/BADLAR) |
 | `=OMS.DURATION("GD30";78,5)` / `=OMS.VENCIMIENTO("GD30")` / `=OMS.VENCIMIENTO("GD30";"fecha")` | duration a un precio · vencimiento de la ficha (texto o fecha de Excel) |
 | `=OMS.TICKET("GD30";78,5;1000000)` (spill) / `=OMS.CALC(…;"duration";…)` | ticket + cualquier métrica YAS |
@@ -56,7 +56,7 @@ es-AR: `ultimo`, `compra`, `venta`, `cierre`, `volumen`…). Plazos: `24hs`
   (Windows ≥ 1904, Mac o Excel web). Para Excel perpetuo (2016/2019/2021) usar
   el **modo hoja CRUDA** del panel: escribe todo en la hoja `OMS_DATA` una vez
   por tick y el libro sigue con `VLOOKUP` (keys `GD30|24hs`, `FX|MEP`,
-  `FUT|DLR/AGO26M`, `CAU|ARS|7D`, `MAE|GD30`).
+  `MACRO|TAMAR`, `FUT|DLR/AGO26M`, `CAU|ARS|7D`, `MAE|GD30`).
 - **Office exige HTTPS para el runtime de las funciones custom.** Con un
   manifest `http://localhost:…` el add-in CARGA y engaña: el taskpane anda
   (conecta, Probar da OK — a los webviews visibles Office les tolera http en

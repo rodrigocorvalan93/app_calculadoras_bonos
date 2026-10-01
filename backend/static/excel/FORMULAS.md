@@ -1,8 +1,9 @@
 # Referencia completa de fórmulas `=OMS.*`
 
-Las funciones de mercado (`QUOTE`, `FX`, `ROFEX`, `CAUCION`, `TABLA`) son
-*streaming*: se actualizan solas ~1 s después de cada tick de mercado, sin
-recalcular a mano. `HIST`, `MACRO` y la calculadora YAS (`TIREA`…) son
+Las funciones de mercado (`QUOTE`, `FX`, `ROFEX`, `CAUCION`, `TABLA`) y
+`MACRO` son *streaming*: se actualizan solas ~1 s después de cada tick de
+mercado (las series macro, hasta 30 s después de que la app refresca el dato
+del BCRA), sin recalcular a mano. `HIST` y la calculadora YAS (`TIREA`…) son
 puntuales: corren al abrir el libro, al cambiar sus argumentos o con un
 **recálculo completo** (`Ctrl+Alt+F9`, o el botón «Recalcular puntuales» del
 panel, que además vacía el memo del add-in). F9 solo NO las vuelve a correr
@@ -199,11 +200,13 @@ con `Ctrl+Alt+F9`. Reemplaza los `RHistory` del modelo Reuters.
 
 Último dato de una serie macro del BCRA en **una** celda (escalar, sin
 spill): el valor, o la fecha de ese dato. Misma fuente que `HIST` y que el
-riel del dólar de la web (el backup BCRA que la app refresca 1×/día), así la
-celda muestra lo mismo que la pantalla. No streamea: se recalcula al abrir el
-libro, al cambiar los argumentos o con `Ctrl+Alt+F9` (memo de 5 min en el
-add-in, que el botón «Recalcular puntuales» del panel vacía; valor y fecha de
-la misma serie comparten un solo request).
+riel del dólar de la web (el backup BCRA que la app refresca al cambiar el
+día, a las 11:00 / 15:30 y por la tarde hasta conseguir el A3500 del día),
+así la celda muestra lo mismo que la pantalla. **Streamea** como `FX`: las
+series viajan en el mismo snapshot que las cotizaciones y, cuando la app
+refresca el dato, la celda se actualiza sola (hasta 30 s después, sin
+recalcular ni tocar la celda). Hasta la build v24 era puntual (memo de 5 min)
+y había que hacer `Ctrl+Alt+F9` para ver el dato nuevo.
 
     =OMS.MACRO("a3500")               → 1515,11    (último A3500)
     =OMS.MACRO("a3500";VERDADERO)     → 09/09/2026 (fecha del dato — formatear la celda como fecha)
@@ -346,6 +349,7 @@ CLOSE · CLOSE_DATE · VAR · VOL · NOMINAL · VWAP · TNA · TEM`:
 |---|---|
 | Especie BYMA | `GD30\|24hs`, `S31L6\|CI` |
 | Dólares | `FX\|MEP`, `FX\|CCL`, `FX\|CANJE`, `FX\|MAYORISTA` |
+| Macro BCRA | `MACRO\|TAMAR`, `MACRO\|A3500`, `MACRO\|TAMAR5` (valor en LAST, fecha del dato en CLOSE_DATE) |
 | Futuros | `FUT\|DLR/AGO26M` (TNA y TEM en sus columnas) |
 | Cauciones | `CAU\|ARS\|7D`, `CAU\|USD\|30D` |
 | Cinta MAE | `MAE\|GD30` |

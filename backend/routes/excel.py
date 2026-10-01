@@ -148,6 +148,16 @@ def _build(codes: Optional[FrozenSet[str]]) -> Dict[str, Any]:
         logger.exception("[excel] a3500 section failed")
         out["a3500"] = {}
     try:
+        # Último dato de cada serie BCRA (valor + fecha) para =OMS.MACRO EN
+        # VIVO: la misma `_calc_macro` del batch, así la celda, el botón
+        # "Probar" y el riel de la web muestran el mismo número. Cambia 1×/día,
+        # pero antes MACRO era una async clásica con memo de 5 min y la celda
+        # no se enteraba del refresh de la app hasta tocarla o un Ctrl+Alt+F9.
+        out["macro"] = _macro_section()
+    except Exception:  # noqa: BLE001
+        logger.exception("[excel] macro section failed")
+        out["macro"] = {}
+    try:
         out["futuros"] = {"may": futuros_svc.rows("may"), "min": futuros_svc.rows("min")}
     except Exception:  # noqa: BLE001
         logger.exception("[excel] futuros section failed")
@@ -767,6 +777,19 @@ def _calc_macro(serie: str) -> Dict[str, Any]:
         valor = sum(vals) / len(vals)
     return {"serie": key.lower() + (str(prom) if prom else ""), "label": str(ser.get("label") or key),
             "valor": float(valor), "fecha": str(fecha)[:10], "n": len(pts)}
+
+
+# Series que viajan en CADA snapshot (sección `macro`; ~µs: lookups sobre el
+# backup en memoria) para que =OMS.MACRO streamee como =OMS.FX("a3500"): el
+# poller del add-in rebaja el snapshot con cada tick y, con la seq quieta,
+# cada 30 s, así un refresh de la serie en la app llega solo a la celda. El
+# item `tipo: "macro"` del batch /excel/v1/calc queda para los add-ins con un
+# functions.js viejo cacheado (misma función, mismos números).
+_MACRO_SNAPSHOT_SERIES = ("a3500", "badlar", "tamar", "cer", "uva", "inflamom", "tamar5", "badlar5")
+
+
+def _macro_section() -> Dict[str, Dict[str, Any]]:
+    return {s: _calc_macro(s) for s in _MACRO_SNAPSHOT_SERIES}
 
 
 def _calc_batch(items: list) -> list:

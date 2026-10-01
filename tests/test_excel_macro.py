@@ -1,10 +1,16 @@
 """OMS.MACRO en el add-in de Excel: último dato macro del BCRA en una celda.
 
-Item `tipo: "macro"` en el batch /excel/v1/calc (sin especie ni precio): la
-fuente es services.historico — el mismo backup BCRA de OMS.HIST y del riel del
-dólar — así la celda muestra lo que muestra la web. El add-in devuelve el
+La fuente es services.historico — el mismo backup BCRA de OMS.HIST y del riel
+del dólar — así la celda muestra lo que muestra la web. El add-in devuelve el
 valor o, con VERDADERO, la fecha del dato como serial de Excel. `tamar5` /
-`badlar5` = promedio de las últimas 5 ruedas, el benchmark de OMS.MARGEN."""
+`badlar5` = promedio de las últimas 5 ruedas, el benchmark de OMS.MARGEN.
+
+Desde la build v25 la función STREAMEA como OMS.FX: las 8 series viajan en la
+sección `macro` de /excel/v1/snapshot (`_macro_section`, la misma
+`_calc_macro`) y la celda se actualiza sola cuando la app refresca el dato —
+antes era una async clásica con memo de 5 min y había que tocar la celda o
+Ctrl+Alt+F9. El item `tipo: "macro"` del batch /excel/v1/calc queda para los
+add-ins con el functions.js viejo cacheado."""
 from __future__ import annotations
 
 import json
@@ -92,21 +98,82 @@ async def test_macro_en_el_batch_de_excel(tmp_path, monkeypatch) -> None:
         auth.refresh()
 
 
+def test_snapshot_lleva_la_seccion_macro_para_la_celda_en_vivo(monkeypatch) -> None:
+    """La sección `macro` del snapshot = `_calc_macro` de las 8 series (los
+    mismos números que el batch), con y sin filtro ?codes=; y es failure-silent
+    como las demás secciones (un hiccup no deja sin cotizaciones al libro)."""
+    from backend.routes import excel as excel_route
+    from backend.routes.excel import _MACRO_SNAPSHOT_SERIES, _calc_macro
+
+    series = _series()
+    for codes in (None, frozenset({"GD30"})):
+        snap = excel_route._build(codes)
+        m = snap["macro"]
+        assert set(m) == set(_MACRO_SNAPSHOT_SERIES) == {
+            "a3500", "badlar", "tamar", "cer", "uva", "inflamom", "tamar5", "badlar5"}
+        assert m["tamar"] == _calc_macro("tamar") and m["a3500"] == _calc_macro("a3500")
+        tam = series["tamar"]["points"]
+        assert m["tamar"]["valor"] == float(tam[-1][1]) and m["tamar"]["fecha"] == str(tam[-1][0])[:10]
+        vals = [float(v) for _, v in tam[-5:]]
+        assert m["tamar5"]["valor"] == pytest.approx(sum(vals) / len(vals)) and m["tamar5"]["serie"] == "tamar5"
+        for k, v in m.items():                       # valor+fecha o un error legible por serie, nunca una excepción
+            assert ("error" in v) or (v["valor"] is not None and date.fromisoformat(v["fecha"])), k
+        json.dumps(snap, default=str)
+    # una sección rota no voltea el snapshot
+    monkeypatch.setattr(excel_route, "_macro_section", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    snap = excel_route._build(None)
+    assert snap["macro"] == {} and "quotes" in snap and isinstance(snap.get("a3500"), dict)
+
+
+@pytest.mark.asyncio
+async def test_endpoint_snapshot_incluye_macro(tmp_path, monkeypatch) -> None:
+    from backend.main import app
+    from backend.routes import excel as excel_route
+    from backend.routes.excel import _calc_macro
+    from backend.services import auth
+
+    _series()
+    esperado = _calc_macro("tamar")
+    excel_route._cache.clear()
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "app_users_path", str(tmp_path / "store.json"))
+    auth.refresh()
+    auth.ensure_bootstrapped()
+    try:
+        auth.create_user("mesa_macro_snap", "clave123", "basico")
+        tok = auth.set_excel_access("mesa_macro_snap", True)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+            r = await ac.get("/excel/v1/snapshot", headers={"X-OMS-Token": tok})
+        assert r.status_code == 200
+        m = r.json()["macro"]
+        assert m["tamar"] == esperado and m["a3500"]["valor"] > 0 and "tamar5" in m
+    finally:
+        excel_route._cache.clear()
+        auth.refresh()
+
+
 def test_metadata_js_y_docs_de_macro() -> None:
     fj = json.loads((ROOT / "backend/static/excel/functions.json").read_text(encoding="utf-8"))
     por_id = {f["id"]: f for f in fj["functions"]}
     assert por_id["MACRO"]["result"]["type"] == "any"
     assert [p["name"] for p in por_id["MACRO"]["parameters"]] == ["serie", "fecha"]
     assert por_id["MACRO"]["parameters"][1]["optional"] is True
+    # streaming como FX: Office lo necesita en la metadata para aceptar setResult repetidos
+    assert por_id["MACRO"]["options"] == {"stream": True, "cancelable": True}
     js = (ROOT / "backend/static/excel/functions.js").read_text(encoding="utf-8")
-    assert 'CustomFunctions.associate("MACRO", guard(macroFn))' in js
-    assert int(js.split('OMS_BUILD = "v')[1].split(" ")[0]) >= 21     # el sello subió con la función
-    assert 'it.tipo !== "macro"' in js                      # no es "a precio de mercado": se memoiza (TTL 5 min)
+    assert 'CustomFunctions.associate("MACRO", makeStreaming("MACRO", macroGet))' in js
+    assert "guard(macroFn)" not in js and "function macroFn" not in js      # la async clásica se fue
+    assert "function macroGet(s, serie, fecha)" in js and "s.macro" in js   # lee la sección del snapshot
+    assert int(js.split('OMS_BUILD = "v')[1].split(" ")[0]) >= 25     # el sello subió con el cambio
     assert "function isoToSerial" in js and "Date.UTC(1899, 11, 30)" in js
     assert "function wantsDate" in js and '"verdadero"' in js
+    # el modo cruda también la escribe (VLOOKUP en Excel perpetuo)
+    tp_js = (ROOT / "backend/static/excel/taskpane.js").read_text(encoding="utf-8")
+    assert '"MACRO|" + mks[i].toUpperCase()' in tp_js
     for doc in ("FORMULAS.md", "README.md", "taskpane.html"):
         t = (ROOT / "backend/static/excel" / doc).read_text(encoding="utf-8")
         assert "OMS.MACRO" in t, doc
+    assert "MACRO\\|TAMAR" in (ROOT / "backend/static/excel/FORMULAS.md").read_text(encoding="utf-8")
 
 
 def test_serial_de_excel_de_la_fecha_del_dato() -> None:

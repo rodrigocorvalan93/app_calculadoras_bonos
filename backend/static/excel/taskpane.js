@@ -130,6 +130,14 @@
       rows.push(["FX|CANJE", nn(fx.canje), "", "", "", "", "", "", "", "", "", "", "", ""]);
       rows.push(["FX|MAYORISTA", nn(may.last), nn(may.bid), nn(may.offer), "", "",
                  nn(may.close), nn(may.date), nn(may.var_pct), nn(may.volume), "", "", "", ""]);
+      // Series macro del BCRA (las de OMS.MACRO): LAST = valor, CLOSE_DATE = fecha del dato.
+      var macro = s.macro || {}, mks = Object.keys(macro).sort();
+      for (i = 0; i < mks.length; i++) {
+        r = macro[mks[i]];
+        if (!r || r.error) { continue; }
+        rows.push(["MACRO|" + mks[i].toUpperCase(), nn(r.valor), "", "", "", "", "",
+                   nn(r.fecha), "", "", "", "", "", ""]);
+      }
       var canales = ["may", "min"];
       for (i = 0; i < canales.length; i++) {
         var futs = (s.futuros || {})[canales[i]] || [];
@@ -194,7 +202,7 @@
       if (crudaOn) { crudaLastSeq = null; crudaTick(OMSFeed.snapshot()); }
     };
 
-    // ── Recalcular las funciones PUNTUALES (HIST / MACRO / calculadora YAS) ──
+    // ── Recalcular las funciones PUNTUALES (HIST / calculadora YAS) ──────────
     // No son volátiles: F9 solo no las vuelve a correr si los argumentos no
     // cambiaron. Esto es el Ctrl+Alt+F9 (recálculo completo) desde el panel,
     // vaciando antes el memo del add-in para que vuelvan a pedir al server.

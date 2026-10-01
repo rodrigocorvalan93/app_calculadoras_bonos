@@ -319,6 +319,22 @@ escritura por tormenta (coalescida 3 s, en el executor, atómica) y flush en
 corre con 0 vía `conftest`). Regresión:
 `test_marketdata.test_rechazados_persisten_por_host_con_ttl`.
 
+## Add-in de Excel — OMS.MACRO en vivo (01/10)
+
+`=OMS.MACRO(serie; [fecha])` streamea como `OMS.FX`: el snapshot de
+`/excel/v1/snapshot` lleva la sección `macro` (`routes/excel._macro_section`
+= `_calc_macro` de las 8 series `_MACRO_SNAPSHOT_SERIES`, µs sobre el backup
+en memoria, failure-silent como las demás secciones) y `functions.js` la lee
+con `macroGet` (`makeStreaming("MACRO", …)`, `options.stream` en
+functions.json, `MACRO_ALIAS` = la misma tabla de alias que el server). Un
+refresh de la serie en la app (cambio de día, 11:00 / 15:30, A3500 del día)
+llega solo a la celda en ≤ 30 s (refresco por edad del poller con la seq
+quieta); hasta v24 era una async clásica con memo de 5 min y la celda no se
+movía hasta tocarla o Ctrl+Alt+F9. El item `tipo: "macro"` del batch
+`/excel/v1/calc` queda para los add-ins con el functions.js viejo cacheado.
+El modo cruda escribe `MACRO|<SERIE>` (LAST = valor, CLOSE_DATE = fecha).
+Regresión: `tests/test_excel_macro.py` + `excel_getters_harness.cjs`.
+
 ## Posiciones — Categoría de las tenencias
 
 `routes/posiciones._clasif(h, obj)` → `(categoría, fuente)`. Con ficha en

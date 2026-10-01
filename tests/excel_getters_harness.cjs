@@ -7,6 +7,8 @@
 //   - OMS.ROFEX acepta "minorista" / "mayorista" como canal.
 //   - OMS.FX("a3500") = A3500 OFICIAL con fecha (serial) / anterior / var;
 //     sin sección a3500 cae al cierre del feed; "cierre" = cierre del feed.
+//   - OMS.MACRO en vivo (v25): macroGet lee la sección `macro` del snapshot con
+//     los mismos alias que el server; valor o fecha (serial); errores legibles.
 "use strict";
 const fs = require("fs"), vm = require("vm"), path = require("path");
 const source = fs.readFileSync(path.join(__dirname, "..", "backend", "static", "excel", "functions.js"), "utf8");
@@ -34,10 +36,21 @@ const snap = {
   fx: { mep: 1539.12, ccl: 1606.87, canje: 0.044 },
   mayorista: { source: "SIOPEL", last: 1512.5, close: 1510.0 },
   a3500: { source: "A3500", last: 1515.1105, close: 1512.3, var_pct: 0.0019, date: "2026-09-09" },
+  macro: {
+    a3500: { serie: "a3500", label: "Dólar mayorista A3500", valor: 1515.1105, fecha: "2026-09-09", n: 500 },
+    badlar: { serie: "badlar", label: "BADLAR", valor: 33.5, fecha: "2026-09-09", n: 500 },
+    tamar: { serie: "tamar", label: "TAMAR", valor: 36.25, fecha: "2026-09-09", n: 500 },
+    cer: { serie: "cer", label: "CER", valor: 650.1234, fecha: "2026-09-09", n: 500 },
+    uva: { serie: "uva", label: "UVA", valor: 1800.5, fecha: "2026-09-09", n: 500 },
+    inflamom: { serie: "inflamom", label: "Inflación mensual", valor: 1.9, fecha: "2026-08-31", n: 100 },
+    tamar5: { serie: "tamar5", label: "TAMAR", valor: 36.9, fecha: "2026-09-09", n: 500 },
+    badlar5: { serie: "badlar5", label: "BADLAR", valor: 33.9, fecha: "2026-09-09", n: 500 },
+  },
 };
 const T = (panel, opcion) => sandbox.tablaGet(snap, panel, opcion);
 const ultimo = (tabla) => (tabla[1] || [])[3];          // columna "Últ"
 const eq = (a, b) => (a === b ? true : { got: a, want: b });
+const isErr = (r) => (r instanceof FakeCfError ? true : { got: r });
 const throws = (fn) => { try { fn(); return { got: "no tiró" }; } catch (e) { return e instanceof FakeCfError ? true : { got: String(e) }; } };
 
 const out = {};
@@ -85,5 +98,33 @@ out.wantsDate = (() => {
 })();
 out.wantsDate_invalido_tira = throws(() => sandbox.wantsDate("zzz"));
 out.isoToSerial = eq(sandbox.isoToSerial("2026-09-09"), 46274) === true && sandbox.isoToSerial("nada") === null ? true : { got: sandbox.isoToSerial("2026-09-09") };
+// MACRO en vivo: getter contra la sección `macro` del snapshot (alias como _MACRO_ALIAS del server)
+const M = (serie, fecha) => sandbox.macroGet(snap, serie, fecha);
+out.macro_tamar = eq(M("tamar"), 36.25);
+out.macro_alias_espacios_mayusculas = eq(M(" TAMAR "), 36.25);
+out.macro_valor_con_false = eq(M("badlar", false), 33.5);
+out.macro_fecha_serial = eq(M("a3500", true), 46274);               // 09/09/2026
+out.macro_fecha_texto = eq(M("inflamom", "fecha"), 46265);          // 31/08/2026
+out.macro_alias_mayorista = eq(M("mayorista"), 1515.1105);
+out.macro_alias_inflacion = eq(M("inflación"), 1.9);
+out.macro_alias_ipc = eq(M("IPC"), 1.9);
+out.macro_tamar5 = eq(M("tamar5"), 36.9);
+out.macro_tamar_aplicable = eq(M("tamar aplicable"), 36.9);
+out.macro_badlar_5_guion_bajo = eq(M("badlar_5"), 33.9);
+out.macro_cer = eq(M("cer"), 650.1234);
+out.macro_serie_desconocida = isErr(M("nada"));
+out.macro_serie_vacia = isErr(M(""));
+out.macro_serie_null = isErr(M(null));
+out.macro_cer5_no_existe = isErr(M("cer5"));
+out.macro_sin_seccion_es_error = isErr(sandbox.macroGet({ fx: {} }, "tamar"));
+out.macro_error_del_server = isErr(sandbox.macroGet({ macro: { tamar: { error: "Sin datos de tamar en el backup BCRA" } } }, "tamar"));
+out.macro_serie_sin_dato = isErr(sandbox.macroGet({ macro: { tamar: { valor: null, fecha: "2026-09-09" } } }, "tamar"));
+out.macro_fecha_invalida = isErr(sandbox.macroGet({ macro: { tamar: { valor: 1, fecha: "nada" } } }, "tamar", true));
+out.macro_segundo_arg_invalido_tira = throws(() => M("tamar", "zzz"));   // makeStreaming lo convierte en #N/A legible
+out.macro_registrada_streaming = (() => {
+  // el registro va por makeStreaming (no por guard/async clásica): se chequea sobre el fuente
+  return /associate\("MACRO", makeStreaming\("MACRO", macroGet\)\)/.test(source) && !/function macroFn/.test(source)
+    ? true : { got: "registro de MACRO no es streaming" };
+})();
 
 process.stdout.write(JSON.stringify(out));
