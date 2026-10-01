@@ -382,6 +382,30 @@ formatea en UTC (`utcTz` / `utcDia`, opción `tzDate`) — con el reloj local
 Buenos Aires (UTC-3) etiquetaba un día antes. Regresión:
 `tests/test_historico_comp.py`.
 
+**Qué pasó (30/09)**: los segmentos son las categorías de Escenario SIN los
+duales que entraron ahí para el multi-activo, más los seis `DUAL_CATEGORIES`
+juntos al final (sumar las dos listas a secas mostraba Dual TAMAR/CER, Dual
+CER/TAMAR y Dual TAMAR/DLK dos veces). **Tilde por bono**: cada fila del
+detalle lleva sus valores en `data-*` (dprice / dtir / dtem / cup / tir1 /
+tem1 / dur, fracciones) y un checkbox `.sem-chk`; `app.js` (`qpSegStats` /
+`qpSegCells`, puras) rehace las celdas `.sem-c-*` del encabezado con la misma
+media simple del server (`_avg_seg`) sin los destildados — cero requests; la
+selección vive en `localStorage` (`qp_excl`, por `data-seg`) y se re-aplica
+tras cada swap. El CSV y el gráfico "antes/ahora" siguen con todos los bonos.
+Regresión: `tests/quepaso_harness.cjs` (vía `test_historico_semanal`).
+**Ventana efectiva**: el inicio es la RUEDA de la base más cercana a
+(fin − días), de un lado o del otro (empate → la anterior; la rueda del fin
+no vale como inicio), no la fecha calendario ni "la última anterior": con el
+hueco de agosto 2026 (05/08 → 31/08 sin ruedas) "1 mes" arrancaba el 04/08 y
+medía 57 días. El título dice cuántas ruedas abarca, hay un aviso ⚠ si la
+rueda más cercana queda a más de 4 días (`aviso`, `hueco_dias`,
+`dias_efectivos`) y cada fila del detalle lleva `p0 → p1` con
+las fechas reales cuando no son las de la ventana (`desfasado`: ilíquido sin
+dato en la rueda inicial). Un bono sin observación ≤ inicio NO tiene Δ (no se
+inventa una desde su primera rueda). Antes "1 mes" podía medir mes y medio sin
+decirlo (CER +4,35 % con el mercado en 2-3 %, 30/09). El CSV lleva las
+mismas columnas (Precio ini/fin, Fecha ini/fin) y el aviso.
+
 ## Visual style (FastAPI rewrite)
 
 Bloomberg palette + Notion/Apple/Linear typography. System sans
@@ -463,6 +487,16 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   que salir idénticas. Server: `_rows_en_seq` (1 build por params+seq,
   single-flight) + `_ROW_MEMO` (fila por seq del símbolo: un tick re-arma
   sólo su fila). Si agregás columnas a Mercado, van en la macro.
+- **Acciones / CEDEARs** (`partials/equities_table.html`, `services/equities.py`):
+  las columnas Open / Close / Low / High / Rango llevan `col-oclh` (el toggle
+  OCLH de la página es CSS puro: sin la clase no hacía nada, 30/09). El panel
+  Líderes (y Líder + General, badge `I`) arranca con la fila del índice
+  Merval (`equities.merval_row`: nivel por IV, OCLH del feed, var vs cierre;
+  sin puntas / VWAP / volumen, no abre libro, no cuenta como especie). Va
+  DESPUÉS de `_finish_rows` y con `data-pin`: el sort por columna de `app.js`
+  deja las filas `tr[data-pin]` fijadas arriba (sirve para cualquier tabla
+  `data-sortable`). Regresión:
+  `test_tape_equities.test_panel_lideres_encabeza_con_el_merval_y_oclh_ocultable`.
 
 ## Seguridad — invariantes (no regresar sin querer)
 

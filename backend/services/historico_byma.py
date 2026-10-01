@@ -629,6 +629,27 @@ def _margen_tna(entry: Dict[str, Any], bench_pct: Optional[float],
     return tna30 - bench_pct / 100.0
 
 
+def _ruedas_base(data: Dict[str, Any]) -> List[str]:
+    """Ruedas (ISO, ascendente) de la base: `dates_all` de `_build` o, para
+    un dict armado a mano (tests), la unión de las fechas por código."""
+    if data.get("dates_all"):
+        return list(data["dates_all"])
+    todas: set = set()
+    for e in (data.get("by_code") or {}).values():
+        todas.update(e.get("dates") or [])
+    return sorted(todas)
+
+
+def _ar_fecha(iso: Optional[str]) -> str:
+    """'AAAA-MM-DD' → 'DD/MM/AAAA' (texto de avisos y de las fechas por bono)."""
+    if not iso:
+        return "—"
+    try:
+        return date.fromisoformat(str(iso)[:10]).strftime("%d/%m/%Y")
+    except ValueError:
+        return str(iso)
+
+
 def weekly_segments(days: int = 7) -> Dict[str, Any]:
     """Resumen de la ventana por segmento, CACHEADO por (ventana, versión de la
     base): el cómputo recorre todas las curvas × bonos × fechas (~25 ms con base
@@ -660,15 +681,48 @@ def _weekly_segments_compute(days: int, data: Dict[str, Any]) -> Dict[str, Any]:
     if not data.get("loaded") or not end:
         return {"loaded": False, "error": data.get("error") or "sin fechas",
                 "segments": [], "days": days}
-    start = (date.fromisoformat(end) - timedelta(days=int(days))).isoformat()
+    start_req = (date.fromisoformat(end) - timedelta(days=int(days))).isoformat()
     by_code = data["by_code"]
+    # Inicio EFECTIVO = última rueda de la base ≤ inicio pedido. Antes el
+    # inicio era la fecha calendario y cada bono tomaba "la última observación
+    # ≤ inicio" sin decir cuál: con un hueco en la base (app apagada unos
+    # días) el precio inicial venía de semanas antes y el Δ Precio de "1 mes"
+    # medía un mes y medio sin avisar (30/09). Ahora la ventana muestra la
+    # rueda real, cuántas ruedas abarca y un aviso si el hueco es grande; cada
+    # fila lleva sus fechas y precios inicial → final.
+    ruedas = _ruedas_base(data)
+    i0 = bisect.bisect_right(ruedas, start_req)
+    antes = ruedas[i0 - 1] if i0 else None                       # última rueda ≤ inicio pedido
+    despues = next((d for d in ruedas[i0:] if d < end), None)   # primera rueda > inicio (y antes del fin)
+
+    def _dist(d: str) -> int:
+        return abs((date.fromisoformat(d) - date.fromisoformat(start_req)).days)
+    # La rueda MÁS CERCANA al inicio pedido, de un lado o del otro (empate → la
+    # anterior): con el hueco de agosto 2026 (05/08 → 31/08 sin ruedas) "1 mes"
+    # desde el 30/09 tomaba el 04/08 (27 días antes) cuando el 01/09 estaba a
+    # 1 día — y medía 57 días en vez de 30.
+    candidatas = [d for d in (antes, despues) if d]
+    start = min(candidatas, key=lambda d: (_dist(d), d)) if candidatas else start_req
+    n_ruedas = sum(1 for d in ruedas if start <= d <= end)
+    hueco_dias = _dist(start) if candidatas else 0
+    aviso = None
+    if hueco_dias > 4:
+        aviso = (f"La base no tiene ruedas entre el {_ar_fecha(antes)} y el {_ar_fecha(despues)}: "
+                 f"la ventana arranca el {_ar_fecha(start)} y abarca "
+                 f"{(date.fromisoformat(end) - date.fromisoformat(start)).days} días, no {int(days)}.")
     codes_by_curve = curves.build_curve_codes()
     # Benchmark (TAMAR/BADLAR, en %) al inicio/fin de la ventana — una vez, igual
     # para todos los bonos del índice (alimenta el margen TNA histórico).
     bench_ini = {"TAMAR": _index_at("tamar", "TAMAR", start), "BADLAR": _index_at("badlar", "BADLAR", start)}
     bench_fin = {"TAMAR": _index_at("tamar", "TAMAR", end), "BADLAR": _index_at("badlar", "BADLAR", end)}
     segments: List[Dict[str, Any]] = []
-    for cat in esc.CATEGORIES + esc.DUAL_CATEGORIES:
+    # Segmentos: las categorías de Escenario (sin los duales que entraron ahí
+    # para el multi-activo — Dual TAMAR/CER, Dual CER/TAMAR, Dual TAMAR/DLK) y
+    # después los seis duales juntos. Sumar las dos listas a secas mostraba
+    # esos tres segmentos DOS veces (30/09).
+    duales = {c.key for c in esc.DUAL_CATEGORIES}
+    cats = [c for c in esc.CATEGORIES if c.key not in duales] + list(esc.DUAL_CATEGORIES)
+    for cat in cats:
         dprices: List[float] = []
         dtirs: List[float] = []
         dtems: List[float] = []
@@ -731,7 +785,14 @@ def _weekly_segments_compute(days: int, data: Dict[str, Any]) -> Dict[str, Any]:
                          # TIREA absoluta al inicio/fin de la ventana → alimenta el
                          # gráfico "curva antes/ahora" (TIR vs duration). El Δ ya está
                          # en dtir; acá van los niveles para poder trazar las 2 curvas.
-                         "tir0": t0, "tir1": t1})
+                         "tir0": t0, "tir1": t1,
+                         # Precios y fechas REALES del Δ (para leer de dónde sale el
+                         # número): `desfasado` cuando el bono no tiene dato en la
+                         # rueda inicial o final de la ventana y el Δ abarca otro
+                         # tramo (dato viejo de un ilíquido, alta reciente).
+                         "p0": p0, "p1": p1, "f0": f0, "f1": f1,
+                         "f0_ar": _ar_fecha(f0), "f1_ar": _ar_fecha(f1),
+                         "desfasado": bool(f0 and f1 and (f0 != start or f1 != end))})
         if members:
             rows.sort(key=lambda r: (r["dur"] is None, r["dur"] or 0.0))
             segments.append({"key": cat.key, "label": cat.label, "n": len(members),
@@ -742,4 +803,6 @@ def _weekly_segments_compute(days: int, data: Dict[str, Any]) -> Dict[str, Any]:
                              "members": members, "rows": rows,
                              "has_margen": any(r["margen"] is not None for r in rows)})
     return {"loaded": True, "start": start, "end": end, "days": days,
+            "start_req": start_req, "n_ruedas": n_ruedas, "hueco_dias": hueco_dias, "aviso": aviso,
+            "dias_efectivos": (date.fromisoformat(end) - date.fromisoformat(start)).days,
             "segments": segments, "indices": _window_indices(start, end)}

@@ -1090,6 +1090,10 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 }
 .hide-oclh .col-oclh { display: none; }
 .hide-mae  .col-mae  { display: none; }
+/* Fila del índice (Merval encabezando el panel líderes): fijada arriba, sin
+   libro; un fondo apenas distinto para que no se lea como un papel más. */
+.mercado-table tr.row-indice td { background: rgba(127, 127, 127, .07); }
+.mercado-table tr.row-indice td:first-child { color: var(--text); }
 .table-tools {
   display: flex; gap: 14px; align-items: center;
   font-size: 12px; margin: 0 0 6px; padding: 0 2px;
@@ -1446,6 +1450,15 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .sem-detail tbody tr:last-child td { border-bottom: none; }
 .sem-detail tbody tr:hover { background: var(--accent-soft); }
 .sem-dm { font-size: 10px; }
+/* Tilde por bono (Qué pasó): un bono destildado sale de los promedios del
+   segmento (client-side) y se lee tachado en la lista y en el detalle. */
+.sem-chk { margin: 0 6px 0 0; vertical-align: -1px; cursor: pointer; }
+.sem-detail tr.sem-off td { opacity: .45; }
+.sem-detail tr.sem-off td:first-child b { text-decoration: line-through; }
+.sem-m.sem-excl { text-decoration: line-through; opacity: .5; }
+.sem-n-excl { color: var(--accent); font-style: normal; }
+.sem-px { white-space: nowrap; }
+.sem-fechas { font-size: 10px; color: var(--yellow, #d29922); }
 .sem-curve { padding: 10px 14px 4px 32px; border-bottom: 1px solid var(--border-soft); }
 .sem-curve-head { display: flex; justify-content: space-between; align-items: baseline;
   flex-wrap: wrap; gap: 4px 12px; margin-bottom: 4px;

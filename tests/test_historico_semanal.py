@@ -110,6 +110,187 @@ def test_weekly_segments_duales_separados(monkeypatch):
     assert segs["dual_tamar_fija"]["rows"][0]["margen"] is not None
 
 
+_VER = iter(range(10_000, 20_000))
+
+
+def _cache_sintetico(code: str) -> dict:
+    return {
+        "loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"), "ver": next(_VER),
+        "by_code": {code: {"dates": ["2026-06-18", "2026-06-25"],
+                           "vals": {"Last Price": [100.0, 101.0], "TIREA": [0.50, 0.495],
+                                    "TEM": [0.030, 0.029], "Duration": [0.3, 0.3]}}},
+    }
+
+
+def test_weekly_segments_sin_segmentos_repetidos(monkeypatch):
+    """Los tres duales que también son categoría de Escenario (Dual TAMAR/CER,
+    Dual CER/TAMAR, Dual TAMAR/DLK) salían DOS veces en Qué pasó (CATEGORIES +
+    DUAL_CATEGORIES a secas). Cada key una vez y los seis duales juntos al
+    final, después de Globales / Bonares."""
+    from backend.services import escenario as esc
+
+    bond_universe.ensure_loaded()
+    codes = curves.build_curve_codes()
+    monkeypatch.setattr(hb, "_index_at", lambda key, col, target: 30.0 if key == "tamar" else None)
+    prev = hb._cache
+    # un bono con dato en CADA curva de las categorías → todos los segmentos presentes
+    by_code = {}
+    for cat in esc.CATEGORIES + esc.DUAL_CATEGORIES:
+        for c in codes.get(cat.curve, [])[:1]:
+            by_code[c] = _cache_sintetico(c)["by_code"][c]
+    hb._cache = {"loaded": True, "error": None, "bounds": ("2026-06-18", "2026-06-25"), "by_code": by_code}
+    try:
+        res = hb.weekly_segments(7)
+    finally:
+        hb._cache = prev
+    keys = [s["key"] for s in res["segments"]]
+    assert len(keys) == len(set(keys)), keys
+    duales = [k for k in keys if k.startswith("dual_")]
+    if duales:
+        assert keys[-len(duales):] == duales                       # todos los duales al final, juntos
+        assert "globales" not in keys[-len(duales):] and "bonares" not in keys[-len(duales):]
+    assert keys.count("dual_tamar_cer") <= 1 and keys.count("dual_cer") <= 1 and keys.count("dual_tamar_dlk") <= 1
+
+
+@pytest.mark.asyncio
+async def test_partial_semanal_lleva_los_datos_por_bono_para_el_tilde():
+    """El detalle por bono lleva sus valores en data-* y un checkbox por fila;
+    el encabezado del segmento tiene las celdas `.sem-c-*` que app.js rehace
+    sin los destildados (tests/quepaso_harness.cjs prueba el cálculo)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    bond_universe.ensure_loaded()
+    cer = curves.build_curve_codes().get("cer", [])
+    if not cer:
+        pytest.skip("sin curva cer")
+    code = cer[0]
+    prev = hb._cache
+    hb._cache = _cache_sintetico(code)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+            r = await ac.get("/historicos/semanal?dias=7")
+    finally:
+        hb._cache = prev
+    assert r.status_code == 200
+    h = r.text
+    assert 'data-seg="cer_corto"' in h
+    assert f'data-code="{code}"' in h and 'data-dprice="0.01' in h and 'data-tir1="0.495"' in h
+    assert 'data-dur="0.3"' in h and 'class="sem-chk"' in h
+    for cls in ("sem-c-n", "sem-c-dprice", "sem-c-dtir", "sem-c-dtem", "sem-c-tir", "sem-c-tem", "sem-c-dur", "sem-c-cup"):
+        assert cls in h, cls
+    assert f'class="sem-m" data-m="{code}"' in h and 'class="lnk sem-all"' in h
+    # precio inicial → final por bono (y las fechas reales sólo si difieren de la ventana)
+    assert "Precio ini → fin" in h and "100,00 → 101,00" in h and "sem-fechas" not in h
+    assert "2 ruedas" in h and "⚠" not in h
+
+
+def test_quepaso_harness_js():
+    """Las funciones puras de app.js (promedios sin los destildados + formatos
+    es-AR del encabezado) corren en Node contra filas de muestra."""
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node no disponible")
+    harness = Path(__file__).resolve().parent / "quepaso_harness.cjs"
+    out = subprocess.run([node, str(harness)], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stdout + out.stderr
+    res = json.loads(out.stdout.strip().splitlines()[-1])
+    assert res["ok"] is True, res["fallos"]
+
+
+def test_weekly_segments_ventana_efectiva_y_hueco():
+    """El inicio de la ventana es la RUEDA de la base más cercana al inicio
+    pedido (no la fecha calendario ni "la última anterior"), se informan las
+    ruedas que abarca y, si la rueda más cercana queda lejos (hueco grande),
+    un aviso con la ventana efectiva; cada fila lleva precio y fechas reales
+    del Δ (`desfasado` cuando no son las de la ventana). Antes '1 mes' desde
+    el 30/09/2026 arrancaba el 04/08 (hueco de agosto) y medía 57 días."""
+    bond_universe.ensure_loaded()
+    cer = curves.build_curve_codes().get("cer", [])
+    if len(cer) < 3:
+        pytest.skip("sin curva cer")
+    a, b, c = cer[0], cer[1], cer[2]
+    prev = hb._cache
+    # ruedas 05-20, 06-01, 06-19, 06-22, 06-25: '7 días' pide el 06-18 → la más
+    # cercana es el 06-19 (a 1 día; el 06-01 queda a 17) → sin aviso. b sólo
+    # cotiza desde el 06-22 (sin dato inicial → sin Δ, no se inventa uno); c
+    # no tiene dato el 06-19 y su inicial es del 05-20 → Δ desfasado, con las
+    # fechas reales.
+    hb._cache = {
+        "loaded": True, "error": None, "bounds": ("2026-05-20", "2026-06-25"), "ver": next(_VER),
+        "by_code": {
+            a: {"dates": ["2026-06-01", "2026-06-19", "2026-06-25"],
+                "vals": {"Last Price": [100.0, 103.0, 104.0], "TIREA": [0.50, 0.49, 0.48],
+                         "TEM": [0.030, 0.0295, 0.029], "Duration": [0.3, 0.3, 0.3]}},
+            b: {"dates": ["2026-06-22", "2026-06-25"],
+                "vals": {"Last Price": [200.0, 202.0], "TIREA": [0.40, 0.39],
+                         "TEM": [0.028, 0.0275], "Duration": [0.3, 0.3]}},
+            c: {"dates": ["2026-05-20", "2026-06-25"],
+                "vals": {"Last Price": [300.0, 309.0], "TIREA": [0.45, 0.44],
+                         "TEM": [0.029, 0.0285], "Duration": [0.3, 0.3]}},
+        },
+    }
+    try:
+        res = hb.weekly_segments(7)
+    finally:
+        hb._cache = prev
+    assert res["start_req"] == "2026-06-18" and res["start"] == "2026-06-19"
+    assert res["hueco_dias"] == 1 and res["dias_efectivos"] == 6 and res["n_ruedas"] == 3 and res["aviso"] is None
+    seg = next(s for s in res["segments"] if a in s["members"])
+    ra = next(r for r in seg["rows"] if r["code"] == a)
+    assert ra["p0"] == 103.0 and ra["p1"] == 104.0 and ra["f0"] == "2026-06-19" and ra["f1"] == "2026-06-25"
+    assert abs(ra["dprice"] - (104.0 / 103.0 - 1)) < 1e-9 and ra["desfasado"] is False
+    rb = next(r for r in seg["rows"] if r["code"] == b)
+    assert rb["p0"] is None and rb["dprice"] is None and rb["desfasado"] is False
+    rc = next(r for r in seg["rows"] if r["code"] == c)
+    assert rc["f0"] == "2026-05-20" and rc["desfasado"] is True and rc["f0_ar"] == "20/05/2026"
+    assert abs(rc["dprice"] - 0.03) < 1e-9 and rc["p0"] == 300.0
+    assert abs(seg["dprice"] - ((104.0 / 103.0 - 1) + 0.03) / 2) < 1e-9   # b (sin Δ) no entra al promedio
+    # hueco sin rueda cercana de ningún lado (06-01 y 06-25 solas; la del fin no
+    # vale como inicio): arranca el 06-01, a 17 días → aviso con la ventana real
+    hb._cache = {
+        "loaded": True, "error": None, "bounds": ("2026-06-01", "2026-06-25"), "ver": next(_VER),
+        "by_code": {a: {"dates": ["2026-06-01", "2026-06-25"],
+                        "vals": {"Last Price": [100.0, 104.0], "TIREA": [0.50, 0.48],
+                                 "TEM": [0.030, 0.029], "Duration": [0.3, 0.3]}}},
+    }
+    try:
+        res3 = hb.weekly_segments(7)
+    finally:
+        hb._cache = prev
+    assert res3["start"] == "2026-06-01" and res3["hueco_dias"] == 17 and res3["dias_efectivos"] == 24
+    assert res3["aviso"] and "01/06/2026" in res3["aviso"] and "24 días" in res3["aviso"] and "no 7" in res3["aviso"]
+    # sin hueco: sin aviso, inicio = rueda pedida
+    hb._cache = _cache_sintetico(a)
+    try:
+        res2 = hb.weekly_segments(7)
+    finally:
+        hb._cache = prev
+    assert res2["start"] == "2026-06-18" and res2["aviso"] is None and res2["n_ruedas"] == 2
+    # CSV: precios y fechas por bono + aviso
+    from backend.services import quepaso_report
+    hb._cache = {
+        "loaded": True, "error": None, "bounds": ("2026-06-01", "2026-06-25"), "ver": next(_VER),
+        "by_code": {a: {"dates": ["2026-06-01", "2026-06-25"],
+                        "vals": {"Last Price": [100.0, 104.0], "TIREA": [0.50, 0.48],
+                                 "TEM": [0.030, 0.029], "Duration": [0.3, 0.3]}}},
+    }
+    try:
+        csv = quepaso_report.csv_es_ar(7)
+    finally:
+        hb._cache = prev
+    assert "AVISO;" in csv and "Precio ini;Precio fin;Fecha ini;Fecha fin" in csv
+    fila = next(l for l in csv.splitlines() if l.startswith(f"CER corto;{a};"))
+    assert fila.startswith(f"CER corto;{a};0,30;4,00;")                      # cupones: depende del bono
+    assert fila.endswith(";-2,00;-0,10;50,00;48,00;100,00;104,00;01/06/2026;25/06/2026")
+
+
 def test_weekly_segments_sin_data():
     prev = hb._cache
     hb._cache = {"loaded": False, "error": "x", "bounds": (None, None), "by_code": {}}

@@ -1,5 +1,10 @@
 {# Resumen de la ventana por segmento (mismas categorías que Escenario):
-   Δ Precio % (≈ total return realizado) y Δ TIR (pp). Carga vía /historicos/semanal. #}
+   Δ Precio % (≈ total return realizado) y Δ TIR (pp). Carga vía /historicos/semanal.
+   Tilde por bono (30/09): cada fila del detalle lleva sus valores en data-*
+   y app.js (qpSegStats / qpSegCells) rehace los promedios del encabezado
+   (`.sem-c-*`) sin los destildados — cero requests; la selección vive en
+   localStorage por segmento (`data-seg`). El CSV y el gráfico antes/ahora
+   siguen con todos los bonos. #}
 {% if not w.loaded %}
   <div class="alert">Sin histórico cargado para el resumen{% if w.error %} ({{ w.error }}){% endif %}.</div>
 {% elif not w.segments %}
@@ -8,8 +13,13 @@
 <div class="card">
   <div class="card-title">
     <span>Qué pasó · {{ w.days }} días</span>
-    <span class="card-title-aux">{{ w.start }} → {{ w.end }} · Δprecio ≈ total return (hard-dollar en USD) · Δ TIR en pp (negativo = compresión) · clic en un segmento → detalle por bono</span>
+    <span class="card-title-aux">{{ w.start }} → {{ w.end }}{% if w.n_ruedas %} · {{ w.n_ruedas }} ruedas{% endif %} · Δprecio ≈ total return (hard-dollar en USD) · Δ TIR en pp (negativo = compresión) · clic en un segmento → detalle por bono · destildá un bono para sacarlo del promedio</span>
   </div>
+  {% if w.aviso %}
+  {# Hueco en la base alrededor del inicio pedido: el Δ mide más días que la
+     ventana. Antes el inicio calendario tapaba esto y "1 mes" podía ser mes y medio. #}
+  <div class="alert" style="margin:8px 14px 0">⚠ {{ w.aviso }}</div>
+  {% endif %}
   {% if w.indices %}
   <div class="sem-idx">
     <span class="sem-idx-chip"><b>CER</b> {% if w.indices.cer is not none %}<span class="{{ 'px-up' if w.indices.cer >= 0 else 'px-down' }}">{{ '+' if w.indices.cer >= 0 else '' }}{{ (w.indices.cer * 100) | ar_num(2) }}%</span>{% else %}—{% endif %}</span>
@@ -27,7 +37,7 @@
               class="{{ 'btn-primary' if dias == d else '' }}" style="font-size:11px">{{ lbl }}</button>
       {% endfor %}
       <a href="/historicos/semanal.csv?dias={{ dias }}" class="lnk" style="font-size:11px"
-         title="Descargar el resumen (segmentos + detalle por bono) como CSV es-AR — abre directo en Excel">⬇ CSV</a>
+         title="Descargar el resumen (segmentos + detalle por bono, todos los bonos) como CSV es-AR — abre directo en Excel">⬇ CSV</a>
       <span style="margin-left:14px">Tasa:</span>
       {# Toggle TIR ↔ TEM client-side: los dos datasets ya viajan en el render
          (cero requests extra); Alpine sólo cambia qué columnas se ven. #}
@@ -46,31 +56,29 @@
         <th style="text-align:left">Bonos</th>
       </tr></thead>
         {% for s in w.segments %}
-        <tbody x-data="{ open: false }">
+        <tbody x-data="{ open: false }" data-seg="{{ s.key }}">
           <tr class="sem-row" :class="{ open: open }" @click="open = !open"
               tabindex="0" @keydown.enter="open = !open" @keydown.space.prevent="open = !open"
               title="Ver detalle por bono">
             <td style="text-align:left">
               <span class="sem-caret" :class="{ open: open }" aria-hidden="true">▸</span>
-              <b>{{ s.label }}</b> <i class="muted">({{ s.n }})</i>
+              <b>{{ s.label }}</b> <i class="muted sem-c-n">({{ s.n }})</i>
             </td>
-            <td class="{{ 'px-up' if (s.dprice or 0) >= 0 else 'px-down' }}">{{
-              ((s.dprice * 100) | ar_num(2)) ~ '%' if s.dprice is not none else '—' }}
-              {%- if s.cup_pct and s.cup_pct > 0.0001 %}
+            <td class="sem-c-dprice {{ 'px-up' if (s.dprice or 0) >= 0 else 'px-down' }}"><span class="sem-v">{{
+              ((s.dprice * 100) | ar_num(2)) ~ '%' if s.dprice is not none else '—' }}</span>
               {# Se opera dirty: el corte de cupón tira el precio un escalón. Acá
                  va el cobro promedio de la ventana — Δ Precio + cupones ≈ TR. #}
-              <div class="muted" style="font-size:10px;white-space:nowrap"
+              <div class="muted sem-c-cup" style="font-size:10px;white-space:nowrap{{ '' if (s.cup_pct and s.cup_pct > 0.0001) else ';display:none' }}"
                    title="Promedio de cupones/amortizaciones cobrados en la ventana (% del precio inicial). Δ Precio + cupones ≈ TR realizado.">
-                ✂ cupones +{{ (s.cup_pct * 100) | ar_num(2) }}%</div>
-              {%- endif %}</td>
-            <td x-show="ym==='tir'" class="{{ 'px-up' if (s.dtir or 0) <= 0 else 'px-down' }}">{{
-              (('+' if s.dtir >= 0 else '') ~ ((s.dtir * 100) | ar_num(2)) ~ ' pp') if s.dtir is not none else '—' }}</td>
-            <td x-show="ym==='tem'" x-cloak class="{{ 'px-up' if (s.dtem or 0) <= 0 else 'px-down' }}">{{
-              (('+' if s.dtem >= 0 else '') ~ ((s.dtem * 100) | ar_num(2)) ~ ' pp') if s.dtem is not none else '—' }}</td>
-            <td x-show="ym==='tir'">{{ ((s.tir_avg * 100) | ar_num(1)) ~ '%' if s.tir_avg is not none else '—' }}</td>
-            <td x-show="ym==='tem'" x-cloak>{{ ((s.tem_avg * 100) | ar_num(2)) ~ '%' if s.tem_avg is not none else '—' }}</td>
-            <td>{{ (s.dur_avg | ar_num(2)) if s.dur_avg is not none else '—' }}</td>
-            <td style="text-align:left" class="sem-codes muted">{{ s.members | join(' · ') }}</td>
+                {%- if s.cup_pct and s.cup_pct > 0.0001 %}✂ cupones +{{ (s.cup_pct * 100) | ar_num(2) }}%{% endif -%}</div></td>
+            <td x-show="ym==='tir'" class="sem-c-dtir {{ 'px-up' if (s.dtir or 0) <= 0 else 'px-down' }}"><span class="sem-v">{{
+              (('+' if s.dtir >= 0 else '') ~ ((s.dtir * 100) | ar_num(2)) ~ ' pp') if s.dtir is not none else '—' }}</span></td>
+            <td x-show="ym==='tem'" x-cloak class="sem-c-dtem {{ 'px-up' if (s.dtem or 0) <= 0 else 'px-down' }}"><span class="sem-v">{{
+              (('+' if s.dtem >= 0 else '') ~ ((s.dtem * 100) | ar_num(2)) ~ ' pp') if s.dtem is not none else '—' }}</span></td>
+            <td x-show="ym==='tir'" class="sem-c-tir">{{ ((s.tir_avg * 100) | ar_num(1)) ~ '%' if s.tir_avg is not none else '—' }}</td>
+            <td x-show="ym==='tem'" x-cloak class="sem-c-tem">{{ ((s.tem_avg * 100) | ar_num(2)) ~ '%' if s.tem_avg is not none else '—' }}</td>
+            <td class="sem-c-dur">{{ (s.dur_avg | ar_num(2)) if s.dur_avg is not none else '—' }}</td>
+            <td style="text-align:left" class="sem-codes muted">{% for m in s.members %}<span class="sem-m" data-m="{{ m }}">{{ m }}</span>{{ ' · ' if not loop.last }}{% endfor %}</td>
           </tr>
           {% if s.rows %}
           <tr x-show="open" x-cloak class="sem-detail-row">
@@ -102,14 +110,25 @@
               {% endif %}
               <table class="sem-detail">
                 <thead><tr>
-                  <th style="text-align:left">Bono</th>
+                  <th style="text-align:left">Bono
+                    <button type="button" class="lnk sem-all" style="font-size:10px;margin-left:8px;display:none"
+                            title="Volver a tildar todos los bonos del segmento">✓ todos</button></th>
                   <th>Δ Precio</th><th>Δ TIR</th><th>Δ TEM</th>
                   {% if s.has_margen %}<th title="Margen = TNA 30d de la TIR − TAMAR/BADLAR del día">Margen</th>{% endif %}
+                  <th title="Precio inicial → final del Δ (dirty, de la base). Si las fechas no son las de la ventana, van abajo: el bono no tiene dato en esa rueda.">Precio ini → fin</th>
                 </tr></thead>
                 <tbody>
                   {% for b in s.rows %}
-                  <tr>
-                    <td style="text-align:left"><b>{{ b.code }}</b></td>
+                  <tr data-code="{{ b.code }}"
+                      data-dprice="{{ b.dprice if b.dprice is not none else '' }}"
+                      data-dtir="{{ b.dtir if b.dtir is not none else '' }}"
+                      data-dtem="{{ b.dtem if b.dtem is not none else '' }}"
+                      data-cup="{{ b.cup_pct if b.cup_pct is not none else '' }}"
+                      data-tir1="{{ b.tir1 if b.tir1 is not none else '' }}"
+                      data-tem1="{{ b.tem1 if b.tem1 is not none else '' }}"
+                      data-dur="{{ b.dur if b.dur is not none else '' }}">
+                    <td style="text-align:left"><label style="cursor:pointer"><input type="checkbox" class="sem-chk" checked
+                          title="Destildar: el bono no entra en los promedios del segmento"> <b>{{ b.code }}</b></label></td>
                     <td class="{{ 'px-up' if (b.dprice or 0) >= 0 else 'px-down' }}">{{
                       ((b.dprice * 100) | ar_num(2)) ~ '%' if b.dprice is not none else '—' }}
                       {%- if b.cup_pct and b.cup_pct > 0.0001 %} <span class="muted" style="font-size:10px"
@@ -119,6 +138,7 @@
                     <td class="{{ 'px-up' if (b.dtem or 0) <= 0 else 'px-down' }}">{{
                       (('+' if b.dtem >= 0 else '') ~ ((b.dtem * 100) | ar_num(2)) ~ ' pp') if b.dtem is not none else '—' }}</td>
                     {% if s.has_margen %}<td>{% if b.margen is not none %}{{ (b.margen * 100) | ar_num(2) }}%{% if b.dmargen is not none %} <span class="sem-dm {{ 'px-up' if b.dmargen <= 0 else 'px-down' }}">({{ '+' if b.dmargen >= 0 else '' }}{{ (b.dmargen * 100) | ar_num(2) }})</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+                    <td class="sem-px">{% if b.p0 is not none and b.p1 is not none %}{{ b.p0 | ar_num(2) }} → {{ b.p1 | ar_num(2) }}{% if b.desfasado %}<div class="muted sem-fechas" title="Fechas reales del dato inicial y final de este bono">{{ b.f0_ar }} → {{ b.f1_ar }}</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
                   </tr>
                   {% endfor %}
                 </tbody>

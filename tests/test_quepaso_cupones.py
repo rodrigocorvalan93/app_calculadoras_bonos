@@ -84,7 +84,11 @@ def test_ventana_dias_reacciona(base_lecaps) -> None:
     from datetime import date as _d
     w7, w14 = historico_byma.weekly_segments(7), historico_byma.weekly_segments(14)
     assert w7["days"] == 7 and w14["days"] == 14
-    assert (_d.fromisoformat(w14["end"]) - _d.fromisoformat(w14["start"])).days == 14
+    # el inicio PEDIDO es fin − días; el inicio real es la rueda de la base más
+    # cercana a esa fecha (acá la base tiene sólo dos ruedas: arranca en la previa)
+    assert (_d.fromisoformat(w14["end"]) - _d.fromisoformat(w14["start_req"])).days == 14
+    assert w14["start"] in historico_byma._ruedas_base(historico_byma.ensure_loaded()) and w14["start"] < w14["end"]
+    assert w7["start"] == w14["start"] and w7["start_req"] != w14["start_req"]
 
 
 def test_falla_de_ficha_no_se_cachea_ni_rompe(base_lecaps, monkeypatch) -> None:
