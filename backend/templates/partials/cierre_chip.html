@@ -4,7 +4,9 @@
      falta      → cierre esperado ausente: Guardar ahora (si es HOY) o Reconstruir
                   (rueda anterior: desde los cierres del feed / la rueda siguiente)
      pendiente  → feed caído a la hora del autosave: aviso + Guardar igual (force)
-     hueco      → chip en verde pero una rueda anterior falta en la base #}
+     hueco      → chip en verde pero una rueda anterior falta en la base:
+                  Reconstruir (si hay de dónde) / Ignorar (deja de reclamarse,
+                  JSON compartido en la carpeta de la base) #}
 {%- if e.estado != "sin_base" -%}
 <a class="cierre-chip" data-state="{{ e.estado }}" href="/historicos" title="{{ e.detalle }}">{{ e.texto }}</a>
 {%- endif -%}
@@ -28,9 +30,10 @@
 {%- elif request.state.is_superuser and e.hueco %}
   <div class="alert cierre-banner">
     <span>ℹ La base histórica tiene un <strong>hueco el {{ e.hueco_fmt }}</strong>{% if e.huecos|length > 1 %} (y {{ e.huecos|length - 1 }} más){% endif %}.
-      {% if e.hueco_reconstruible == "feed" %}Se reconstruye con los cierres de esa rueda que trae el feed hoy (filas RC):{% elif e.hueco_reconstruible == "base" %}Se reconstruye desde la rueda siguiente que ya está en la base (filas RC):{% else %}No hay de dónde reconstruirlo: ni el feed trae los cierres de esa rueda ni la base tiene la rueda siguiente.{% endif %}
+      {% if e.hueco_reconstruible == "feed" %}Se reconstruye con los cierres de esa rueda que trae el feed hoy (filas RC):{% elif e.hueco_reconstruible == "base" %}Se reconstruye desde la rueda siguiente que ya está en la base (filas RC):{% else %}No hay de dónde reconstruirlo: ni el feed trae los cierres de esa rueda ni la base tiene la rueda siguiente. Si no importa, ignoralo y el aviso no vuelve:{% endif %}
     </span>
     {% if e.hueco_reconstruible %}<button type="button" class="btn-primary" style="font-size:11px" hx-post="/historicos/reconstruir-cierre" hx-vals='{"dia": "{{ e.hueco }}"}' hx-target="#cierre-banner-msg" hx-swap="innerHTML" hx-disabled-elt="this">Reconstruir {{ e.hueco_fmt[:5] }}</button>{% endif %}
+    <button type="button" class="btn-ghost" style="font-size:11px;padding:8px 14px;border-radius:8px" hx-post="/historicos/ignorar-hueco" hx-vals='{"dia": "{{ e.hueco }}"}' hx-target="#cierre-banner-msg" hx-swap="innerHTML" hx-disabled-elt="this" hx-confirm="Deja de reclamar el {{ e.hueco_fmt }}: la base queda sin esa rueda (Qué pasó, COMP y Curva por fecha la saltean) y no se reconstruye sola. Vale para todas las máquinas. ¿Ignorarlo?" title="No reconstruir: la base queda sin esa rueda y el aviso no vuelve en ninguna máquina (huecos_ignorados.json en la carpeta de la base)">Ignorar {{ e.hueco_fmt[:5] }}</button>
     <span id="cierre-banner-msg"></span>
   </div>
 {%- endif %}

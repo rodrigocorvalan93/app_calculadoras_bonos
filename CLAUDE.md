@@ -201,6 +201,18 @@ snapshot hasta 4 min), a las 17:01 antes de guardar hoy, en
 `tools/cierre.py`, y a mano: POST `/historicos/reconstruir-cierre`
 (superuser; botón "Reconstruir DD/MM" del banner, también para huecos
 anteriores al cierre esperado: `estado_cierre()["huecos"]`).
+**Ignorar un hueco** (02/10): botón "Ignorar DD/MM" del mismo banner (también
+cuando no hay de dónde reconstruir) → POST `/historicos/ignorar-hueco`
+(superuser; `deshacer=1` lo revierte; con éxito manda `HX-Trigger:
+cierre-refresh` y el chip del pie se refresca a los 2,5 s) →
+`huecos_ignorados.json` EN LA CARPETA DE LA BASE (viaja por OneDrive: todas
+las máquinas, la writer incluida, dejan de reclamarlo; `huecos_ignorados()`
+cacheado por mtime, `ignorar_hueco()` escritura atómica, archivo ilegible =
+vacío). `huecos_base` lo saltea (banner, log del arranque,
+`reconstruir_faltantes`, `tools/cierre.py`) y el tooltip del chip los cuenta
+(`estado_cierre()["ignorados"]`). NO es `sin_rueda`: para
+`_fuente_reconstruccion` / `reconstruir_cierre` de la rueda anterior sigue
+siendo una rueda que falta (no se fabrica una RC desde un día ignorado).
 `HISTORICO_RECONSTRUIR=0` apaga lo automático. `_fecha_dato`: ISO sin zona =
 hora BA y un instante 00:00Z es sello de FECHA (no las 21:00 BA del día
 anterior). Regresión: `tests/test_cierre_reconstruccion.py`.

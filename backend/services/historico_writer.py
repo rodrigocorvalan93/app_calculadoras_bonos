@@ -538,6 +538,127 @@ def _sin_rueda_days() -> set:
     return out
 
 
+# ── Huecos IGNORADOS (decisión del desk, compartida) ───────────────────────
+# Una rueda perdida que no se va a reconstruir (dos huecos seguidos: el más
+# viejo no tiene de dónde salir; o simplemente no importa) quedaba en el
+# banner del superuser y en el log de cada arranque para siempre. "Ignorar
+# DD/MM" la anota en `huecos_ignorados.json` EN LA CARPETA DE LA BASE (viaja
+# por OneDrive: todas las máquinas, la writer incluida, dejan de reclamarla)
+# y `huecos_base` la saltea. NO es "sin rueda": para la reconstrucción de la
+# rueda anterior sigue siendo una rueda que falta (no se fabrica una RC desde
+# un día ignorado). `deshacer` la vuelve a reclamar.
+IGNORADOS_FILENAME = "huecos_ignorados.json"
+_ignorados_cache: tuple = ()          # (path, mtime_ns, size, {date: info})
+
+
+def _ignorados_path() -> Optional[str]:
+    from backend.services import deltapaths
+    hist_dir = deltapaths.historico_dir()
+    return os.path.join(hist_dir, IGNORADOS_FILENAME) if hist_dir else None
+
+
+def _leer_ignorados(path: str) -> Dict[date, Dict[str, Any]]:
+    """{fecha: {quien, cuando}} del JSON. Entradas inválidas se saltean; un
+    archivo ilegible cuenta como vacío (queda en el log, no rompe el chip)."""
+    import json
+    out: Dict[date, Dict[str, Any]] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except OSError:
+        return out
+    except ValueError as exc:
+        logger.warning("[historico_writer] %s ilegible (%s): se lee como vacío", path, exc)
+        return out
+    items = raw.get("ignorados") if isinstance(raw, dict) else None
+    if not isinstance(items, dict):
+        return out
+    for k, v in items.items():
+        try:
+            out[date.fromisoformat(str(k))] = dict(v) if isinstance(v, dict) else {}
+        except ValueError:
+            continue
+    return out
+
+
+def huecos_ignorados() -> Dict[date, Dict[str, Any]]:
+    """Ruedas que el desk decidió no reclamar, cacheadas por (mtime, size) del
+    JSON: un stat por llamada (el chip lo pide 1×/min por pestaña); sin
+    carpeta de bases o sin archivo, vacío."""
+    global _ignorados_cache
+    path = _ignorados_path()
+    if not path:
+        return {}
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {}
+    key = (path, st.st_mtime_ns, st.st_size)
+    c = _ignorados_cache
+    if c and c[:3] == key:
+        return c[3]
+    data = _leer_ignorados(path)
+    _ignorados_cache = key + (data,)
+    return data
+
+
+def _texto_ignorados(ignorados: Dict[date, Any]) -> str:
+    ds = sorted(ignorados)
+    n = len(ds)
+    muestra = ", ".join(d.strftime("%d/%m") for d in ds[-3:])
+    if n > 3:
+        muestra = "… " + muestra
+    return f"{n} hueco{'s' if n != 1 else ''} ignorado{'s' if n != 1 else ''}: {muestra}"
+
+
+def ignorar_hueco(dia: date, *, deshacer: bool = False, quien: str = "") -> Dict[str, Any]:
+    """Anota (o borra, con `deshacer`) `dia` en el JSON compartido de huecos
+    ignorados. Lee el archivo fresco (otra máquina pudo escribir), escritura
+    atómica, nunca lanza: {ok, dia, dia_fmt, accion (ignorado | ya | vuelve |
+    no_estaba), ignorados, error}."""
+    global _ignorados_cache
+    import json
+    dia_fmt = dia.strftime("%d/%m/%Y")
+    res: Dict[str, Any] = {"ok": False, "dia": dia.isoformat(), "dia_fmt": dia_fmt, "accion": None,
+                           "ignorados": [], "error": None}
+    path = _ignorados_path()
+    if not path:
+        res["error"] = ("No encontré la carpeta 'Delta Bases' (DELTA_HISTORICO_DIR / "
+                        "DELTA_BASES_DIR en secrets.txt).")
+        return res
+    if dia >= _now().date():
+        res["error"] = f"{dia_fmt} no es una rueda pasada"
+        return res
+    actual = dict(_leer_ignorados(path))
+    if deshacer:
+        res["accion"] = "vuelve" if actual.pop(dia, None) is not None else "no_estaba"
+    elif dia in actual:
+        res["accion"] = "ya"
+    else:
+        actual[dia] = {"quien": quien or "", "cuando": _now().strftime("%Y-%m-%d %H:%M")}
+        res["accion"] = "ignorado"
+    if res["accion"] in ("ignorado", "vuelve"):
+        cuerpo = {"ignorados": {d.isoformat(): actual[d] for d in sorted(actual)}}
+        tmp = _tmp_de(path)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cuerpo, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, path)
+        except OSError as exc:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            res["error"] = f"no pude escribir {IGNORADOS_FILENAME}: {exc}"
+            return res
+        _ignorados_cache = ()
+        logger.info("[historico_writer] hueco del %s %s (%s)", dia_fmt,
+                    "vuelve a reclamarse" if deshacer else "ignorado", quien or "superuser")
+    res["ok"] = True
+    res["ignorados"] = [d.isoformat() for d in sorted(actual)]
+    return res
+
+
 def estado_cierre() -> Dict[str, Any]:
     """Estado del cierre para el chip de la topbar, el banner y /admin/salud.
     Costo ~50 µs (stat + listdir + fechas); nunca abre el Excel.
@@ -578,8 +699,10 @@ def estado_cierre() -> Dict[str, Any]:
     hasta = (disparo + timedelta(minutes=_VENTANA_MIN)).strftime("%H:%M")
     # Huecos: ruedas anteriores al cierre esperado que a la base le faltan (el
     # chip sólo reclama el ÚLTIMO cierre; un día perdido en el medio quedaba
-    # invisible). Sólo el más nuevo lleva de dónde se reconstruye.
-    huecos = [d for d in huecos_base(fechas, sin_rueda, hoy) if d != esperado]
+    # invisible). Sólo el más nuevo lleva de dónde se reconstruye. Los que el
+    # desk decidió ignorar (JSON compartido) no se reclaman.
+    ignorados = huecos_ignorados()
+    huecos = [d for d in huecos_base(fechas, sin_rueda, hoy, ignorados=ignorados) if d != esperado]
     out.update({"ultima": ultima.isoformat() if ultima else None,
                 "esperado": esperado.isoformat(), "esperado_fmt": esperado.strftime("%d/%m/%Y"),
                 "atraso": atraso, "hoy_en_base": hoy in fechas, "hoy_en_journal": hoy in journal,
@@ -587,6 +710,7 @@ def estado_cierre() -> Dict[str, Any]:
                 "reintento_min": int(_intervalo_reintento(r) // 60),
                 "reconstruible": None,
                 "huecos": [d.isoformat() for d in huecos],
+                "ignorados": [d.isoformat() for d in sorted(ignorados)],
                 "hueco": huecos[-1].isoformat() if huecos else None,
                 "hueco_fmt": huecos[-1].strftime("%d/%m/%Y") if huecos else None,
                 "hueco_reconstruible": (_fuente_reconstruccion(huecos[-1], fechas, sin_rueda, hoy)
@@ -616,6 +740,8 @@ def estado_cierre() -> Dict[str, Any]:
             out["detalle"] = f"Base histórica al día (último cierre {dm}); {quien}"
         if huecos:
             out["detalle"] += f" · hueco el {huecos[-1]:%d/%m}" + (f" (+{len(huecos) - 1})" if len(huecos) > 1 else "")
+        if ignorados:
+            out["detalle"] += " · " + _texto_ignorados(ignorados)
         return out
     if esperado in journal:
         out["estado"] = "capturado"
@@ -1175,11 +1301,14 @@ def _settle_24hs(dia: date) -> str:
 
 
 def huecos_base(fechas: Optional[set] = None, sin_rueda: Optional[set] = None,
-                hoy: Optional[date] = None, max_ruedas: int = _MAX_HUECOS) -> List[date]:
+                hoy: Optional[date] = None, max_ruedas: int = _MAX_HUECOS,
+                ignorados: Optional[Dict[date, Any]] = None) -> List[date]:
     """Ruedas de las últimas `max_ruedas` (anteriores a HOY, hoy es cosa de
     `save_today`) que a la base le faltan, ascendente. Feriados y días
-    marcados sin rueda no cuentan. Con la base vacía sólo la última rueda: no
-    hay historia contra la que medir un hueco. ~µs con `fechas` dado."""
+    marcados sin rueda no cuentan; las ruedas que el desk decidió IGNORAR
+    (`huecos_ignorados`) faltan igual pero no se reclaman. Con la base vacía
+    sólo la última rueda: no hay historia contra la que medir un hueco. ~µs
+    con `fechas` dado."""
     if fechas is None or sin_rueda is None:
         from backend.services import deltapaths
         hist_dir = deltapaths.historico_dir()
@@ -1187,6 +1316,8 @@ def huecos_base(fechas: Optional[set] = None, sin_rueda: Optional[set] = None,
             return []
         fechas = _fechas_base_cached(os.path.join(hist_dir, HIST_FILENAME))
         sin_rueda = _sin_rueda_days()
+    if ignorados is None:
+        ignorados = huecos_ignorados()
     hoy = hoy or _now().date()
     d = _habil_anterior(hoy, sin_rueda)
     piso = min(fechas) if fechas else d
@@ -1194,7 +1325,7 @@ def huecos_base(fechas: Optional[set] = None, sin_rueda: Optional[set] = None,
     for _ in range(max_ruedas):
         if d < piso:
             break
-        if d not in fechas:
+        if d not in fechas and d not in ignorados:
             out.append(d)
         d = _habil_anterior(d, sin_rueda)
     return sorted(out)
