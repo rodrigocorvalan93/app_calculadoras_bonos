@@ -3,7 +3,8 @@
 "rofex_min" / "futuros_min" minorista (el canal en el nombre gana a la opción),
 canal "minorista" / "mayorista" en OMS.ROFEX, OMS.FX("a3500") oficial con
 fecha / anterior / variación y fallback al cierre del feed, wantsDate e
-isoToSerial de OMS.MACRO."""
+isoToSerial de OMS.MACRO y macroGet (OMS.MACRO en vivo contra la sección
+`macro` del snapshot: alias del server, valor / fecha, errores legibles)."""
 from __future__ import annotations
 
 import json

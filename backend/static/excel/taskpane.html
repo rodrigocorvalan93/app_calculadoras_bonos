@@ -104,16 +104,17 @@
   <div class="card">
     <h2>Cómo se actualizan</h2>
     <ul class="muted">
-      <li><strong>En vivo</strong>, sin recalcular: <code>QUOTE</code> · <code>FX</code> · <code>ROFEX</code> · <code>CAUCION</code> · <code>TABLA</code>.
+      <li><strong>En vivo</strong>, sin recalcular: <code>QUOTE</code> · <code>FX</code> · <code>ROFEX</code> · <code>CAUCION</code> · <code>TABLA</code> · <code>MACRO</code>.
         Un solo feed por libro: 1-2 s después de cada tick BYMA (bonos, acciones, cauciones, futuros DLR);
-        lo que no viene por el feed (mayorista SIOPEL, cinta MAE, A3500 oficial) tarda hasta 30 s.</li>
-      <li><strong>Puntuales</strong>, no streamean: <code>HIST</code> · <code>MACRO</code> · <code>TIREA</code> · <code>PRECIO</code> ·
+        lo que no viene por el feed (mayorista SIOPEL, cinta MAE, A3500 oficial, series macro) tarda hasta 30 s.</li>
+      <li><strong>Puntuales</strong>, no streamean: <code>HIST</code> · <code>TIREA</code> · <code>PRECIO</code> ·
         <code>TNA</code> · <code>MARGEN</code> · <code>DURATION</code> · <code>VENCIMIENTO</code> · <code>TICKET</code> ·
         <code>CALC</code> · <code>TR</code>. Corren al abrir el libro, al cambiar un argumento o con un recálculo
         completo (<code>Ctrl+Alt+F9</code>). F9 solo <em>no</em> las vuelve a correr si los argumentos no cambiaron.
         Precio vacío en la calculadora = último del mercado en ese momento.</li>
       <li><strong>Series macro</strong> (MACRO / HIST / A3500): la app las trae del BCRA al cambiar el día y, por la
-        tarde, cada 15 min entre las 16 y las 19 h hasta conseguir el A3500 del día.</li>
+        tarde, cada 15 min entre las 16 y las 19 h hasta conseguir el A3500 del día. <code>MACRO</code> y
+        <code>FX("a3500")</code> muestran el dato nuevo solas (hasta 30 s después); <code>HIST</code> con <code>Ctrl+Alt+F9</code>.</li>
     </ul>
     <div class="row">
       <button id="recalc">Recalcular puntuales</button>
@@ -134,9 +135,9 @@
       <li><code>=OMS.CAUCION(7;"tasa")</code> — caución ARS a 7 días, en puntos · <code>(30;"bid";"USD")</code></li>
       <li><code>=OMS.TABLA("futuros")</code> — tabla completa (spill), mayorista · <code>("rofex_min")</code> minorista · <code>("cauciones";"USD")</code> · <code>("fx")</code> · <code>("quotes";"CI")</code> · <code>("mae")</code></li>
     </ul>
-    <div class="grp">Macro BCRA</div>
+    <div class="grp">Macro BCRA · MACRO en vivo, HIST puntual</div>
     <ul class="muted">
-      <li><code>=OMS.MACRO("tamar")</code> — último dato: <code>a3500 · badlar · tamar · cer · uva · inflamom</code></li>
+      <li><code>=OMS.MACRO("tamar")</code> — último dato, se actualiza solo: <code>a3500 · badlar · tamar · cer · uva · inflamom</code></li>
       <li><code>=OMS.MACRO("a3500";VERDADERO)</code> — fecha del dato en otra celda (formatear como fecha)</li>
       <li><code>=OMS.MACRO("tamar5")</code> — promedio de las últimas 5 ruedas (el benchmark de MARGEN); ídem <code>"badlar5"</code></li>
       <li><code>=OMS.HIST("a3500";365)</code> — serie histórica Fecha · Valor (spill); sin días = toda la serie</li>

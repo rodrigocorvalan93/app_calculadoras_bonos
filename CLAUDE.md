@@ -319,6 +319,22 @@ escritura por tormenta (coalescida 3 s, en el executor, atómica) y flush en
 corre con 0 vía `conftest`). Regresión:
 `test_marketdata.test_rechazados_persisten_por_host_con_ttl`.
 
+## Add-in de Excel — OMS.MACRO en vivo (01/10)
+
+`=OMS.MACRO(serie; [fecha])` streamea como `OMS.FX`: el snapshot de
+`/excel/v1/snapshot` lleva la sección `macro` (`routes/excel._macro_section`
+= `_calc_macro` de las 8 series `_MACRO_SNAPSHOT_SERIES`, µs sobre el backup
+en memoria, failure-silent como las demás secciones) y `functions.js` la lee
+con `macroGet` (`makeStreaming("MACRO", …)`, `options.stream` en
+functions.json, `MACRO_ALIAS` = la misma tabla de alias que el server). Un
+refresh de la serie en la app (cambio de día, 11:00 / 15:30, A3500 del día)
+llega solo a la celda en ≤ 30 s (refresco por edad del poller con la seq
+quieta); hasta v24 era una async clásica con memo de 5 min y la celda no se
+movía hasta tocarla o Ctrl+Alt+F9. El item `tipo: "macro"` del batch
+`/excel/v1/calc` queda para los add-ins con el functions.js viejo cacheado.
+El modo cruda escribe `MACRO|<SERIE>` (LAST = valor, CLOSE_DATE = fecha).
+Regresión: `tests/test_excel_macro.py` + `excel_getters_harness.cjs`.
+
 ## Posiciones — Categoría de las tenencias
 
 `routes/posiciones._clasif(h, obj)` → `(categoría, fuente)`. Con ficha en
@@ -497,6 +513,35 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   deja las filas `tr[data-pin]` fijadas arriba (sirve para cualquier tabla
   `data-sortable`). Regresión:
   `test_tape_equities.test_panel_lideres_encabeza_con_el_merval_y_oclh_ocultable`.
+- **Recuadro quieto al actualizar (02/10)**: el flash de un tick es SÓLO
+  color (`.tick-up` / `.tick-down`: nada de `transform` / `font-weight` /
+  `padding` — hubo un `tick-pop` de escala que agrandaba la celda en cada
+  tick); el botón ⧉ (`.tbl-copy`, que app.js inyecta ADENTRO del swap) tiene
+  alto neto cero (`height: 14px` + `margin-bottom: -14px`; con -18 px la
+  tabla saltaba 4 px por un frame en cada swap completo — acciones = cada
+  tick) y se inyecta en `htmx:afterSwap` (antes del paint); el dim
+  `.htmx-request` excluye `[data-delta-scope]` (Mercado no lleva md-update
+  en su trigger); el `scrollLeft` de cada `.table-scroll` del target se
+  conserva a través del swap (app.js, "Scroll horizontal…"); `.live-meta`
+  con `min-width` (la métrica del feed corría la nav). **Anchos de columna
+  congelados** (app.js "Anchos de columna estables", tablas `.mercado-table`
+  / `.curve-table`): con layout auto la columna mide su celda más ancha y
+  cuando el valor más largo cambia de dígitos corre todo lo de la derecha
+  (medido: VWAP 85 → 73 px). Se miden los th una vez, se fijan como `width`
+  y el PADRE de la tabla lleva `data-cols-fijas` (CSS → `table-layout:
+  fixed`); los anchos sólo crecen (ratchet: una celda que desborda,
+  `scrollWidth > clientWidth`, re-mide y toma el máximo), se reaplican en
+  `htmx:afterSwap` y tras el delta por filas, y se olvidan en `resize`.
+  Gotcha htmx 2: al asentar el swap (settle, 20 ms) re-escribe los atributos
+  de los nodos nuevos CON id tal como vinieron del server — un `style`
+  inline puesto en afterSwap sobre `<table id=…>` desaparece; por eso el
+  atributo va en el padre (sin id) y los th (sin id) conservan su width.
+  Medición:
+  `python backend/tools/dev_ticks.py 8765` (server sembrado con ticks) +
+  `python backend/tools/flicker_probe.py http://127.0.0.1:8765/mercado 45
+  1920 1080 [lideres]` (Playwright): alto del card, anchos de columna,
+  frames sin ⧉, opacidad, scrollLeft y layout-shifts por frame. Regresión:
+  `tests/test_mercado_sin_saltos.py` (antes/después en el docstring).
 
 ## Seguridad — invariantes (no regresar sin querer)
 

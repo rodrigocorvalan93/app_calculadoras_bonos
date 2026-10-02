@@ -350,10 +350,10 @@ window.lsSet = function (k, v) {
       el.classList.add(cls);
       (function (el, cls) {
         el.addEventListener('animationend', function h(e) {
-          // La clase corre DOS animaciones: el flash de color (tick-up/tick-down,
-          // 0,9s) y un tick-pop de escala (0,22s). Sin filtrar por animationName,
-          // el animationend del pop (que termina primero) removía la clase y
-          // cortaba el flash a 0,22s. Esperamos la de color (nombre = cls).
+          // Sólo el animationend del flash de color (nombre = cls) remueve la
+          // clase: si algún día vuelve a haber una segunda animación más corta
+          // (hubo un tick-pop de escala, sacado el 02/10 porque cambiaba el
+          // tamaño del recuadro en cada tick), su fin no corta el flash.
           if (e.animationName !== cls) return;
           el.classList.remove(cls);
           el.removeEventListener('animationend', h);
@@ -437,7 +437,7 @@ window.lsSet = function (k, v) {
     var tpl = document.createElement('template');
     tpl.innerHTML = '<table><tbody>' + html + '</tbody></table>';
     var nuevas = tpl.content.querySelectorAll('tr[data-code]');
-    var n = 0;
+    var n = 0, aplicadas = [];
     for (var i = 0; i < nuevas.length; i++) {
       var nu = nuevas[i], code = nu.getAttribute('data-code') || '';
       if (/["\\]/.test(code)) return false;
@@ -457,8 +457,11 @@ window.lsSet = function (k, v) {
         if (++n > MAX_CELLS) break;
         flash(nu.cells[difs[d]], difs[d + 1]);
       }
+      aplicadas.push(nu);
     }
     flashFlush();
+    // anchos congelados: una fila nueva más ancha que su columna la ensancha (ratchet)
+    if (window.__anchosCol) window.__anchosCol.chequear(tbl, aplicadas);
     return true;
   }
   // Plazo total del delta (headers + cuerpo): un fetch que nunca vuelve
@@ -497,6 +500,148 @@ window.lsSet = function (k, v) {
     for (var i = 0; i < scopes.length; i++) deltaTick(scopes[i]);
   });
   window.__mercadoDelta = { tick: deltaTick, apply: deltaApply };   // tests visuales
+})();
+
+// ── Anchos de columna estables en las tablas live (ratchet) ───────────────
+// Con table-layout auto cada columna mide lo que mide su celda más ancha:
+// cuando el valor más largo de una columna cambia de cantidad de dígitos
+// (999,50 → 1.000,50; un size de 7 a 8 cifras; el VWAP que pierde un dígito)
+// la columna se ensancha o se achica y TODO lo que está a su derecha se corre
+// unos px — con ticks a 1/s la tabla "respira" y se lee como parpadeo del
+// recuadro (medido: VWAP 85 → 73 px y las 6 columnas siguientes corridas).
+// Acá, tras el primer render, se miden los anchos naturales de la cabecera,
+// se fijan como width de cada <th> y la tabla pasa a table-layout: fixed: un
+// tick no mueve columnas. Los anchos sólo CRECEN (ratchet): si una celda
+// nueva desborda su columna (scrollWidth > clientWidth) se vuelve a medir
+// con layout auto y se toma el máximo entre lo medido y lo guardado — un
+// corrimiento una sola vez, nunca el ida y vuelta. Las medidas viven por id
+// de tabla + textos de la cabecera (sobreviven al swap completo: se reaplican
+// en afterSwap, antes del primer paint) y se descartan cuando cambia el
+// juego de columnas (otro panel, TIREA↔Margen). Columnas ocultas por CSS
+// (OCLH / MAE) no se miden ni cuentan: table-layout fixed sólo mira las
+// celdas visibles de la primera fila. Con width: 100 % el sobrante se
+// reparte igual que antes; si la suma supera el ancho, scrollea como siempre.
+(function () {
+  var memo = {};
+  var SEL = 'table.mercado-table, table.curve-table';
+  function ths(tbl) {
+    var fila = tbl.tHead && tbl.tHead.rows[0];
+    return fila ? Array.prototype.slice.call(fila.cells) : [];
+  }
+  function visible(el) { return el.offsetParent !== null || el.getClientRects().length > 0; }
+  function clave(tbl, cab) {
+    var t = [];
+    for (var i = 0; i < cab.length; i++) t.push((cab[i].textContent || '').trim());
+    return (tbl.id || '') + '|' + t.join('\u001f');
+  }
+  // table-layout: fixed va por un atributo del PADRE de la tabla (CSS
+  // `[data-cols-fijas] > table`), no por style inline en la <table>: htmx 2
+  // asienta (settle, 20 ms después del swap) los nodos nuevos CON id
+  // re-escribiendo sus atributos tal como vinieron del server — un
+  // style="table-layout: fixed" puesto en afterSwap sobre <table id="…">
+  // desaparecía y la tabla volvía a auto (medido en Curvas). Los <th> no
+  // tienen id y conservan su width; el padre (.table-scroll) tampoco.
+  function padre(tbl) { return tbl.parentNode && tbl.parentNode.setAttribute ? tbl.parentNode : null; }
+  // Mide con layout auto (sin widths): ancho natural de cada th visible.
+  function medir(tbl, cab) {
+    var p = padre(tbl);
+    if (p) p.removeAttribute('data-cols-fijas');
+    for (var i = 0; i < cab.length; i++) cab[i].style.width = '';
+    var ws = [];
+    for (var j = 0; j < cab.length; j++) ws.push(visible(cab[j]) ? cab[j].getBoundingClientRect().width : 0);
+    return ws;
+  }
+  function aplicar(tbl, cab, ws) {
+    for (var i = 0; i < cab.length; i++) { if (ws[i] > 0) cab[i].style.width = ws[i] + 'px'; }
+    var p = padre(tbl);
+    if (p) p.setAttribute('data-cols-fijas', '');
+  }
+  function desborda(rows) {
+    for (var r = 0; r < rows.length; r++) {
+      var cs = rows[r].cells;
+      for (var c = 0; c < cs.length; c++) {
+        if (cs[c].scrollWidth > cs[c].clientWidth + 1) return true;
+      }
+    }
+    return false;
+  }
+  function maximo(a, b) {
+    var out = [];
+    for (var i = 0; i < Math.max(a.length, b.length); i++) out.push(Math.max(a[i] || 0, b[i] || 0));
+    return out;
+  }
+  // Congela la tabla con lo memorizado (o mide si es la primera vez) y, si
+  // alguna fila desborda, ensancha (ratchet) una vez.
+  function congelar(tbl, rows) {
+    var cab = ths(tbl);
+    if (!cab.length || !visible(tbl)) return;
+    var k = clave(tbl, cab), ws = memo[k];
+    if (!ws) {
+      ws = medir(tbl, cab);
+      if (!ws.some(function (w) { return w > 0; })) return;   // sin layout (pestaña oculta): no tocar
+      memo[k] = ws;
+    }
+    aplicar(tbl, cab, ws);
+    var filas = rows || (tbl.tBodies[0] ? tbl.tBodies[0].rows : []);
+    if (desborda(filas)) {
+      memo[k] = maximo(ws, medir(tbl, cab));
+      aplicar(tbl, cab, memo[k]);
+    }
+  }
+  function todas(root) {
+    if (!root || !root.querySelectorAll) return;
+    var ts = root.querySelectorAll(SEL);
+    for (var i = 0; i < ts.length; i++) congelar(ts[i]);
+    if (root.matches && root.matches(SEL)) congelar(root);
+  }
+  document.body.addEventListener('htmx:afterSwap', function (evt) { todas(evt.detail.target); });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { todas(document); });
+  else todas(document);
+  // Cambió el ancho de la ventana: los anchos medidos eran para ese ancho
+  // (con layout auto una tabla que entra reparte el sobrante entre columnas);
+  // se olvidan y se vuelve a medir, así una ventana más angosta no gana una
+  // barra de scroll que antes no tenía.
+  var rsz = null;
+  if (window.addEventListener) {                 // el harness de Node no tiene window real
+    window.addEventListener('resize', function () {
+      clearTimeout(rsz);
+      rsz = setTimeout(function () {
+        for (var k in memo) { if (Object.prototype.hasOwnProperty.call(memo, k)) delete memo[k]; }
+        todas(document);
+      }, 150);
+    });
+  }
+  window.__anchosCol = { congelar: congelar, chequear: congelar, todas: todas, _memo: memo };
+})();
+
+// ── Scroll horizontal de las tablas a través de un swap completo ──────────
+// Un swap innerHTML recrea el .table-scroll y el nuevo arranca en scrollLeft
+// 0: en el panel de acciones de Mercado (swap completo en cada tick) quien
+// había scrolleado a la derecha para ver Vol / Últ. op volvía al principio
+// cada segundo; en Renta Fija pasaba con el swap de respaldo cada 30 s. Se
+// guarda el scrollLeft de cada .table-scroll del target antes del swap y se
+// repone en afterSwap (síncrono, antes del primer paint → sin salto). Vale
+// para cualquier target de htmx; un swap cancelado (HTML idéntico) no entra.
+(function () {
+  var guardado = {};
+  function key(t) { return t.id || '_'; }
+  document.body.addEventListener('htmx:beforeSwap', function (evt) {
+    if (evt.detail.shouldSwap === false) return;
+    var t = evt.detail.target;
+    if (!t || !t.querySelectorAll) return;
+    var ts = t.querySelectorAll('.table-scroll'), sl = [], alguno = false;
+    for (var i = 0; i < ts.length; i++) { sl.push(ts[i].scrollLeft || 0); if (sl[i] > 0) alguno = true; }
+    if (alguno) guardado[key(t)] = sl; else delete guardado[key(t)];
+  });
+  document.body.addEventListener('htmx:afterSwap', function (evt) {
+    var t = evt.detail.target;
+    if (!t || !t.querySelectorAll) return;
+    var sl = guardado[key(t)];
+    if (!sl) return;
+    delete guardado[key(t)];
+    var ts = t.querySelectorAll('.table-scroll');
+    for (var i = 0; i < ts.length && i < sl.length; i++) { if (sl[i]) ts[i].scrollLeft = sl[i]; }
+  });
 })();
 
 // ── Orden por columna (client-side, genérico) ─────────────────────────────
@@ -1380,6 +1525,12 @@ window.lsSet = function (k, v) {
     ta.remove();
   }
 
+  // En afterSwap (síncrono, antes del primer paint del contenido nuevo) y no
+  // sólo en afterSettle (20 ms después): el botón vive adentro del swap y el
+  // panel de acciones de Mercado se swapea entero en cada tick — con la
+  // inyección diferida la esquina quedaba sin ⧉ un frame por tick (02/10).
+  // inject() es idempotente (mira si el hermano anterior ya es el botón).
+  document.body.addEventListener('htmx:afterSwap', function (evt) { inject(evt.detail.elt || evt.target); });
   document.body.addEventListener('htmx:afterSettle', function (evt) { inject(evt.detail.elt || evt.target); });
   // Tablas armadas por JS (p. ej. "Ver datos" de Macro) avisan con este evento.
   document.body.addEventListener('tables:injected', function (evt) { inject(evt.detail && evt.detail.root); });

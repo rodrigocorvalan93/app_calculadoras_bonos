@@ -211,7 +211,7 @@
     {
       "id": "MACRO",
       "name": "MACRO",
-      "description": "Último dato macro del BCRA en una celda: a3500, badlar, tamar, cer, uva, inflamom; tamar5 / badlar5 = promedio de las últimas 5 ruedas (el benchmark de OMS.MARGEN). Default el valor; con fecha=VERDADERO devuelve la fecha del dato como número de Excel (formateá la celda como fecha). Ej: =OMS.MACRO(\"tamar\") · =OMS.MACRO(\"a3500\";VERDADERO).",
+      "description": "Último dato macro del BCRA en una celda, EN VIVO (se actualiza sola cuando la app refresca la serie, como OMS.FX): a3500, badlar, tamar, cer, uva, inflamom; tamar5 / badlar5 = promedio de las últimas 5 ruedas (el benchmark de OMS.MARGEN). Default el valor; con fecha=VERDADERO devuelve la fecha del dato como número de Excel (formateá la celda como fecha). Ej: =OMS.MACRO(\"tamar\") · =OMS.MACRO(\"a3500\";VERDADERO).",
       "result": {
         "type": "any"
       },
@@ -227,7 +227,11 @@
           "description": "VERDADERO = fecha del dato (número de Excel, formatear como fecha) · FALSO / vacío = valor (default)",
           "optional": true
         }
-      ]
+      ],
+      "options": {
+        "stream": true,
+        "cancelable": true
+      }
     },
     {
       "id": "TIREA",

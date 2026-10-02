@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v24 · 2026-09-23 (OMS.TABLA('rofex_min') / ('futuros_min') = futuros minoristas, canal 'minorista'/'mayorista' también en OMS.ROFEX; ayuda completa en el panel + botón Recalcular puntuales (OMSCalc.reset + recálculo completo); OMS.FX('a3500') = A3500 OFICIAL del BCRA con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.MACRO: último dato macro del BCRA — a3500 / badlar / tamar / cer / uva / inflamom, tamar5 / badlar5 = promedio 5 ruedas — valor o, con VERDADERO, la fecha del dato como fecha de Excel; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
+var OMS_BUILD = "v25 · 2026-10-01 (OMS.MACRO EN VIVO: la celda se actualiza sola cuando la app refresca el dato del BCRA — a3500 / badlar / tamar / cer / uva / inflamom / tamar5 / badlar5 viajan en la sección 'macro' del snapshot, como OMS.FX('a3500'); ya no hace falta tocar la celda ni Ctrl+Alt+F9; fila MACRO|<serie> en la hoja OMS_DATA del modo cruda. Antes: OMS.TABLA('rofex_min') / ('futuros_min') = futuros minoristas, canal 'minorista'/'mayorista' en OMS.ROFEX; ayuda completa en el panel + botón Recalcular puntuales; OMS.FX('a3500') = A3500 OFICIAL con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -612,10 +612,10 @@ var OMSCalc = (function () {
     var k = keyOf(it);
     // Sin precio explícito el server resuelve el last del MOMENTO: no se
     // memoiza (cada F9 re-pide); el dedup en vuelo del mismo tick sí corre.
-    // La ficha estática (tipo "meta": OMS.VENCIMIENTO) y el último dato macro
-    // (tipo "macro": OMS.MACRO, cambia 1×/día) no dependen del mercado y sí se
-    // memoizan (con el TTL de siempre).
-    var live = (it.valor == null) && it.tipo !== "meta" && it.tipo !== "macro";
+    // La ficha estática (tipo "meta": OMS.VENCIMIENTO) no depende del mercado
+    // y sí se memoiza (con el TTL de siempre). OMS.MACRO ya no pasa por acá:
+    // desde v25 streamea desde la sección `macro` del snapshot (macroGet).
+    var live = (it.valor == null) && it.tipo !== "meta";
     if (!live && Object.prototype.hasOwnProperty.call(memo, k)) {
       var m = memo[k];
       if ((Date.now() - m.t) < MEMO_TTL_MS) { return Promise.resolve(m.v); }
@@ -689,8 +689,8 @@ var OMSCalc = (function () {
   }
 
   // Vacía el memo: lo usa el botón «Recalcular puntuales» del panel antes del
-  // recálculo completo, así HIST / MACRO / calculadora vuelven a pedir al
-  // server aunque no hayan pasado los 5 min del TTL.
+  // recálculo completo, así HIST / calculadora vuelven a pedir al server
+  // aunque no hayan pasado los 5 min del TTL.
   function reset() { memo = {}; memoN = 0; }
 
   return { request: request, reset: reset };
@@ -872,27 +872,51 @@ function wantsDate(arg) {
   throw naError("2º argumento inválido: '" + arg + "' — VERDADERO = fecha del dato · FALSO / vacío = valor");
 }
 
+// Alias de serie de OMS.MACRO: el MISMO cuadro que _MACRO_ALIAS del server
+// (case-insensitive, sin espacios / guiones / guiones bajos); "tamar5" /
+// "badlar5" / "tamar aplicable" = promedio de 5 ruedas (key propia en la
+// sección `macro` del snapshot). null = serie desconocida.
+var MACRO_ALIAS = { a3500: "a3500", mayorista: "a3500", oficial: "a3500", dolar: "a3500", "dólar": "a3500",
+                    badlar: "badlar", tamar: "tamar", cer: "cer", uva: "uva",
+                    inflamom: "inflamom", inflacion: "inflamom", "inflación": "inflamom", ipc: "inflamom" };
+var MACRO_SERIES_TXT = "a3500 | badlar | tamar | cer | uva | inflamom | tamar5 | badlar5";
+
+function macroKey(serie) {
+  var s = String(serie == null ? "" : serie).trim().toLowerCase().replace(/[\s_\-]/g, "");
+  if (!s) { return null; }
+  if (s === "tamar5" || s === "badlar5") { return s; }
+  if (s === "tamaraplicable" || s === "badlaraplicable") { return s.replace("aplicable", "5"); }
+  return Object.prototype.hasOwnProperty.call(MACRO_ALIAS, s) ? MACRO_ALIAS[s] : null;
+}
+
 // Último dato macro del BCRA (a3500, badlar, tamar, cer, uva, inflamom; tamar5
-// / badlar5 = promedio de las últimas 5 ruedas, el benchmark de OMS.MARGEN):
-// el mismo backup que alimenta OMS.HIST y el riel del dólar de la web. Default
-// el VALOR; con fecha=VERDADERO devuelve la FECHA del dato como número de
-// Excel (formatear la celda como fecha). No depende del mercado: viaja en el
-// mismo batch que la calculadora YAS y se memoiza (TTL 5 min); valor y fecha
-// de la misma serie comparten UN request.
-function macroFn(serie, fecha) {
-  var s = String(serie == null ? "" : serie).trim().toLowerCase();
-  if (!s) { throw naError("Serie vacía (a3500 | badlar | tamar | cer | uva | inflamom | tamar5 | badlar5)"); }
-  var conFecha = wantsDate(fecha);
-  return OMSCalc.request({ code: s.toUpperCase(), serie: s, tipo: "macro" }).then(function (m) {
-    if (m.error) { throw naError(m.error); }
-    if (conFecha) {
-      var serial = isoToSerial(m.fecha);
-      if (serial == null) { throw naError("Fecha inválida en la serie " + s + ": " + m.fecha); }
-      return serial;
-    }
-    if (m.valor === undefined || m.valor === null) { throw naError("Sin dato para " + s); }
-    return m.valor;
-  });
+// / badlar5 = promedio de las últimas 5 ruedas, el benchmark de OMS.MARGEN),
+// EN VIVO desde la sección `macro` del snapshot — el mismo backup que alimenta
+// OMS.HIST y el riel del dólar de la web: cuando la app refresca la serie
+// (cambio de día, 11:00 / 15:30, A3500 del día) la celda se mueve sola, igual
+// que OMS.FX("a3500"). Hasta v24 era una async clásica con memo de 5 min y la
+// celda no se enteraba hasta tocarla o un Ctrl+Alt+F9. Default el VALOR; con
+// fecha=VERDADERO devuelve la FECHA del dato como número de Excel (formatear
+// la celda como fecha).
+function macroGet(s, serie, fecha) {
+  var k = macroKey(serie);
+  if (k === null) {
+    var raw = String(serie == null ? "" : serie).trim();
+    return naError(raw ? "Serie desconocida: '" + raw + "' (" + MACRO_SERIES_TXT + ")"
+                       : "Serie vacía (" + MACRO_SERIES_TXT + ")");
+  }
+  var conFecha = wantsDate(fecha);              // tira #N/A legible si el 2º argumento es basura
+  var sec = s.macro;
+  if (!sec) { return naError("El server no manda la sección macro (actualizá la app / revisá el backup BCRA)"); }
+  var m = sec[k];
+  if (!m) { return naError("Sin dato para " + k); }
+  if (m.error) { return naError(m.error); }
+  if (conFecha) {
+    var serial = isoToSerial(m.fecha);
+    return serial == null ? naError("Fecha inválida en la serie " + k + ": " + m.fecha) : serial;
+  }
+  if (m.valor === undefined || m.valor === null) { return naError("Sin dato para " + k); }
+  return m.valor;
 }
 
 var CALC_MODOS = { "": "precio", "precio": "precio", "px": "precio",
@@ -995,7 +1019,7 @@ function registerFunctions() {
   CustomFunctions.associate("CAUCION", makeStreaming("CAUCION", caucionGet));
   CustomFunctions.associate("TABLA", makeStreaming("TABLA", tablaGet));
   CustomFunctions.associate("HIST", histFn);
-  CustomFunctions.associate("MACRO", guard(macroFn));
+  CustomFunctions.associate("MACRO", makeStreaming("MACRO", macroGet));
   CustomFunctions.associate("TIREA", guard(tireaFn));
   CustomFunctions.associate("PRECIO", guard(precioFn));
   CustomFunctions.associate("TNA", guard(tnaFn));
