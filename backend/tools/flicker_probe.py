@@ -14,7 +14,9 @@ registra POR FRAME lo que un ojo lee como "salto del recuadro":
     python backend/tools/flicker_probe.py <url> [segundos] [ancho] [alto] [panel]
 
 `panel` = valor del select de /mercado (lideres, general, cedears…); sin
-panel mide Renta Fija (delta por filas: un swap completo cada 30 s). Playwright
+panel mide Renta Fija (delta por filas: un swap completo cada 30 s).
+`PROBE_SCOPE=<selector>` mide otro panel live (default `#mercado-table`; p. ej.
+`PROBE_SCOPE=#forwards-matrix … http://127.0.0.1:8765/forwards`). Playwright
 no es dependencia del proyecto: `pip install playwright && playwright install
 chromium`, o `PW_CHROMIUM=/ruta/a/chrome` para usar un Chromium ya instalado.
 Imprime un JSON con los conteos (lo que importa: card_height_changes_n,
@@ -47,7 +49,7 @@ PROBE = r"""
   po.observe({ type: 'layout-shift', buffered: true });
   document.body.addEventListener('md-update', () => rec.mdu.push(Math.round(performance.now() - rec.t0)));
   document.body.addEventListener('htmx:afterSwap', (e) => {
-    const t = e.detail && e.detail.target; if (t && t.id === 'mercado-table') rec.swaps.push(Math.round(performance.now() - rec.t0));
+    const t = e.detail && e.detail.target; if (t && t.matches && t.matches('#mercado-table')) rec.swaps.push(Math.round(performance.now() - rec.t0));
   });
   let lastH = null, lastW = null, lastHS = null, lastSL = null;
   function tick() {
@@ -102,26 +104,27 @@ def main() -> None:
     w = int(sys.argv[3]) if len(sys.argv) > 3 else 1920
     h = int(sys.argv[4]) if len(sys.argv) > 4 else 1080
     panel = sys.argv[5] if len(sys.argv) > 5 else ""
+    scope = os.environ.get("PROBE_SCOPE", "#mercado-table")      # contenedor del panel live a medir
     launch = {"executable_path": os.environ["PW_CHROMIUM"]} if os.environ.get("PW_CHROMIUM") else {}
     with sync_playwright() as p:
         b = p.chromium.launch(**launch)
         pg = b.new_page(viewport={"width": w, "height": h})
         pg.goto(url, wait_until="networkidle")
-        pg.wait_for_selector("#mercado-table tbody tr")
+        pg.wait_for_selector(scope + " tbody tr")
         if panel:
             pg.select_option("select[name=panel]", panel)
             pg.wait_for_timeout(2500)
-            pg.wait_for_selector("#mercado-table tbody tr")
+            pg.wait_for_selector(scope + " tbody tr")
         pg.wait_for_timeout(1500)
         # scroll horizontal adentro de la tabla (si desborda): un swap NO debe resetearlo
-        pg.evaluate("() => { const t = document.querySelector('#mercado-table .table-scroll'); if (t) t.scrollLeft = 150; }")
+        pg.evaluate("() => { const t = document.querySelector('" + scope + " .table-scroll'); if (t) t.scrollLeft = 150; }")
         pg.wait_for_timeout(300)
-        pg.evaluate(PROBE)
+        pg.evaluate(PROBE.replace("#mercado-table", scope))
         time.sleep(segs)
         rec = pg.evaluate("() => window.__probe")
         b.close()
     out = {
-        "viewport": [w, h], "panel": panel or "rf", "frames": rec["frames"], "rows": rec["rowsN"],
+        "viewport": [w, h], "panel": panel or "rf", "scope": scope, "frames": rec["frames"], "rows": rec["rowsN"],
         "md_update_n": len(rec["mdu"]), "full_swaps_n": len(rec["swaps"]),
         "card_height_changes_n": len(rec["cardH"]), "card_height_changes": rec["cardH"][:12],
         "col_width_changes_n": len(rec["colW"]), "col_width_changes": rec["colW"][:12],

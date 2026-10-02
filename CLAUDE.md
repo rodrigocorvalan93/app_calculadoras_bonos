@@ -540,8 +540,11 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `python backend/tools/dev_ticks.py 8765` (server sembrado con ticks) +
   `python backend/tools/flicker_probe.py http://127.0.0.1:8765/mercado 45
   1920 1080 [lideres]` (Playwright): alto del card, anchos de columna,
-  frames sin ⧉, opacidad, scrollLeft y layout-shifts por frame. Regresión:
-  `tests/test_mercado_sin_saltos.py` (antes/después en el docstring).
+  frames sin ⧉, opacidad, scrollLeft y layout-shifts por frame; otro panel
+  live con `PROBE_SCOPE=#forwards-matrix … /forwards` (la matriz de
+  forwards usa las mismas clases y el mismo ⧉: mismo salto de 4 px antes,
+  0 después). Regresión: `tests/test_mercado_sin_saltos.py` (antes/después
+  en el docstring).
 
 ## Seguridad — invariantes (no regresar sin querer)
 
