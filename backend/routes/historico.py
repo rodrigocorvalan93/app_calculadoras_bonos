@@ -135,6 +135,44 @@ async def historicos_reconstruir_cierre(request: Request) -> HTMLResponse:
     return HTMLResponse(f'<span class="{cls} muted" style="font-size:12px">{msg}</span>')
 
 
+@router.post("/historicos/ignorar-hueco", response_class=HTMLResponse)
+async def historicos_ignorar_hueco(request: Request) -> HTMLResponse:
+    """"Ignorar DD/MM" del banner: la base deja de reclamar esa rueda perdida
+    (`historico_writer.ignorar_hueco`: JSON compartido en la carpeta de la
+    base; `deshacer=1` la vuelve a reclamar). SÓLO superuser (gateado en
+    main._SUPERUSER_ONLY). Con éxito manda `HX-Trigger: cierre-refresh`: el
+    chip del pie (y con él el banner oob) se refresca a los pocos segundos en
+    vez de esperar el poll del minuto."""
+    from datetime import date as _date
+
+    from backend.services import historico_writer
+
+    form = await request.form()
+    dia_s = str(form.get("dia") or "").strip()
+    deshacer = str(form.get("deshacer") or "").strip().lower() in ("1", "true", "on", "si", "sí")
+    try:
+        dia = _date.fromisoformat(dia_s)
+    except ValueError:
+        return HTMLResponse('<span class="guardar-err muted" style="font-size:12px">⚠ fecha inválida</span>',
+                            status_code=400)
+    user = getattr(request.state, "user", None)
+    quien = str(user.get("username") or "") if isinstance(user, dict) else ""
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(
+        None, lambda: historico_writer.ignorar_hueco(dia, deshacer=deshacer, quien=quien))
+    if res.get("ok"):
+        if deshacer:
+            msg = f"↩ El {res['dia_fmt']} vuelve a reclamarse como hueco"
+        elif res.get("accion") == "ya":
+            msg = f"✓ El {res['dia_fmt']} ya estaba ignorado"
+        else:
+            msg = f"✓ Hueco del {res['dia_fmt']} ignorado: la base queda sin esa rueda y el aviso no vuelve"
+        cls, headers = "guardar-ok", {"HX-Trigger": "cierre-refresh"}
+    else:
+        msg, cls, headers = f"⚠ {res.get('error') or 'no se pudo'}", "guardar-err", None
+    return HTMLResponse(f'<span class="{cls} muted" style="font-size:12px">{msg}</span>', headers=headers)
+
+
 def _line_chart(serie: str, rango: str, desde: Optional[str] = None,
                 hasta: Optional[str] = None, width: int = 960, height: int = 420) -> Dict[str, Any]:
     days = None if (desde or hasta) else _RANGOS.get(rango, 365)

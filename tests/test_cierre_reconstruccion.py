@@ -375,6 +375,126 @@ async def test_reconstruir_cierre_solo_superuser(auth_on, monkeypatch) -> None: 
         assert r.status_code == 403 and llamadas == [D]
 
 
+# ── huecos ignorados ────────────────────────────────────────────────────────
+D_SIG2 = date(2026, 9, 25)      # viernes: base en 22 y 25/09 → huecos 23 y 24/09
+
+
+def _base_con_dos_huecos(env) -> list:
+    codes = _codigos_calculables(3)
+    xlsx = str(env / hw.HIST_FILENAME)
+    hw.append_and_save(_df_base(D_ANT, [(c, 100.0 + i, 99.0) for i, c in enumerate(codes)]), xlsx)
+    hw.append_and_save(_df_base(D_SIG2, [(c, 105.0 + i, 103.0 + i) for i, c in enumerate(codes)]), xlsx)
+    return codes
+
+
+def test_ignorar_hueco_persistente_y_no_es_sin_rueda(env, monkeypatch) -> None:
+    """Dos huecos seguidos (23 y 24/09) con la base en 22 y 25/09: "Ignorar
+    24/09" deja de reclamarlo (banner / arranque / reconstruir_faltantes) vía
+    el JSON compartido en la carpeta de la base, pero NO lo convierte en "sin
+    rueda": el 23/09 sigue sin fuente (su rueda siguiente real, 24/09, falta).
+    `deshacer` lo vuelve a reclamar."""
+    _base_con_dos_huecos(env)
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 28, 10, 0))
+    assert hw.huecos_base() == [D, D_SIG]
+    e = hw.estado_cierre()
+    assert e["huecos"] == [D.isoformat(), D_SIG.isoformat()] and e["hueco"] == D_SIG.isoformat()
+    assert e["hueco_reconstruible"] == "base" and e["ignorados"] == []
+
+    r = hw.ignorar_hueco(D_SIG, quien="rodrigo")
+    assert r["ok"] is True and r["accion"] == "ignorado" and r["ignorados"] == [D_SIG.isoformat()]
+    assert (env / hw.IGNORADOS_FILENAME).is_file()
+    assert hw.huecos_base() == [D]
+    e = hw.estado_cierre()
+    assert e["huecos"] == [D.isoformat()] and e["ignorados"] == [D_SIG.isoformat()]
+    assert e["hueco_reconstruible"] is None                      # el 24/09 ignorado no es fuente ni "sin rueda"
+    assert "1 hueco ignorado: 24/09" in e["detalle"]
+    res = hw.reconstruir_cierre(D)
+    assert res["ok"] is False and res["sin_rueda"] is False and "no hay de dónde" in res["error"], res
+    assert "24/09" in res["error"] and D not in hw._sin_rueda_days()
+    # idempotente; el segundo hueco también se puede ignorar → nada que reclamar
+    assert hw.ignorar_hueco(D_SIG)["accion"] == "ya"
+    assert hw.ignorar_hueco(D, quien="rodrigo")["ok"] is True
+    assert hw.huecos_base() == [] and hw.estado_cierre()["huecos"] == []
+    assert "2 huecos ignorados: 23/09, 24/09" in hw.estado_cierre()["detalle"]
+    r = hw.reconstruir_faltantes()
+    assert r["huecos"] == [] and r["pendientes"] == [] and r["reconstruidos"] == []
+    # otra máquina (otro proceso) lee lo mismo: el cache es por mtime del JSON
+    hw._ignorados_cache = ()
+    assert sorted(hw.huecos_ignorados()) == [D, D_SIG]
+    assert hw.huecos_ignorados()[D_SIG]["quien"] == "rodrigo"
+    # deshacer: vuelve a reclamarse y, con el 25/09 en la base, se reconstruye
+    r = hw.ignorar_hueco(D_SIG, deshacer=True)
+    assert r["ok"] is True and r["accion"] == "vuelve" and r["ignorados"] == [D.isoformat()]
+    assert hw.huecos_base() == [D_SIG] and hw.estado_cierre()["hueco_reconstruible"] == "base"
+    assert hw.ignorar_hueco(D_SIG, deshacer=True)["accion"] == "no_estaba"
+    # hoy / futuro no se ignoran; un JSON roto se lee como vacío (no rompe el chip)
+    assert hw.ignorar_hueco(date(2026, 9, 28))["ok"] is False
+    (env / hw.IGNORADOS_FILENAME).write_text("{ esto no es json", encoding="utf-8")
+    hw._ignorados_cache = ()
+    assert hw.huecos_ignorados() == {} and hw.huecos_base() == [D, D_SIG]
+
+
+@pytest.mark.asyncio
+async def test_http_banner_ignorar_hueco(env, monkeypatch) -> None:
+    from backend.main import app
+
+    _base_con_dos_huecos(env)
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 28, 10, 0))
+    base_html = (os.path.join(os.path.dirname(hw.__file__), "..", "templates", "base.html"))
+    with open(base_html, encoding="utf-8") as f:
+        assert "cierre-refresh from:body" in f.read()             # el chip escucha el HX-Trigger
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/cierre/chip")
+        assert "hueco el 24/09/2026" in r.text and "(y 1 más)" in r.text
+        assert "Reconstruir 24/09" in r.text and "Ignorar 24/09" in r.text
+        assert 'hx-post="/historicos/ignorar-hueco"' in r.text and 'hx-confirm="Deja de reclamar el 24/09/2026' in r.text
+        r = await ac.post("/historicos/ignorar-hueco", data={"dia": "2026-09-24"})
+        assert r.status_code == 200 and "Hueco del 24/09/2026 ignorado" in r.text
+        assert r.headers.get("hx-trigger") == "cierre-refresh"
+        r = await ac.get("/cierre/chip")
+        # queda el 23/09, ya sin fuente: sólo Ignorar; el tooltip del chip cuenta el ignorado
+        assert "hueco el 23/09/2026" in r.text and " más)" not in r.text
+        assert "Ignorar 23/09" in r.text and "Reconstruir" not in r.text and "No hay de dónde" in r.text
+        assert "1 hueco ignorado: 24/09" in r.text
+        r = await ac.post("/historicos/ignorar-hueco", data={"dia": "2026-09-23"})
+        assert r.status_code == 200
+        r = await ac.get("/cierre/chip")
+        assert "hueco el" not in r.text and "Ignorar" not in r.text and "2 huecos ignorados" in r.text
+        r = await ac.post("/historicos/ignorar-hueco", data={"dia": "2026-09-24", "deshacer": "1"})
+        assert r.status_code == 200 and "vuelve a reclamarse" in r.text
+        r = await ac.get("/cierre/chip")
+        assert "hueco el 24/09/2026" in r.text and "Reconstruir 24/09" in r.text
+        r = await ac.post("/historicos/ignorar-hueco", data={"dia": "no-es-fecha"})
+        assert r.status_code == 400 and "hx-trigger" not in r.headers
+        r = await ac.post("/historicos/ignorar-hueco", data={"dia": "2026-09-28"})   # hoy: no
+        assert r.status_code == 200 and "⚠" in r.text and "hx-trigger" not in r.headers
+
+
+@pytest.mark.asyncio
+async def test_ignorar_hueco_solo_superuser(auth_on, monkeypatch) -> None:  # noqa: F811
+    llamadas = []
+    monkeypatch.setattr(hw, "ignorar_hueco", lambda dia, deshacer=False, quien="": llamadas.append((dia, quien)) or {
+        "ok": True, "dia": dia.isoformat(), "dia_fmt": dia.strftime("%d/%m/%Y"), "accion": "ignorado",
+        "ignorados": [dia.isoformat()], "error": None})
+    async with _client() as ac:
+        r = await ac.post("/historicos/ignorar-hueco", data={"dia": "2026-09-23"})
+        assert r.status_code in (302, 401)                            # sin sesión → al login
+    async with _client() as su:
+        r = await su.post("/login", data={"username": "su_test", "password": "clave-de-test-2026!",
+                                          "next": "/yas"})
+        assert r.status_code in (200, 303)
+        r = await su.post("/admin/users", data={"username": "juan", "password": "clave123",
+                                                "role": "basico", "email": ""})
+        assert r.status_code < 400, r.text[:200]
+        r = await su.post("/historicos/ignorar-hueco", data={"dia": "2026-09-23"})
+        assert r.status_code == 200 and "23/09/2026 ignorado" in r.text and llamadas == [(D, "su_test")]
+    async with _client() as ac:
+        r = await ac.post("/login", data={"username": "juan", "password": "clave123", "next": "/yas"})
+        assert r.status_code in (200, 303)
+        r = await ac.post("/historicos/ignorar-hueco", data={"dia": "2026-09-23"})
+        assert r.status_code == 403 and llamadas == [(D, "su_test")]
+
+
 # ── autosave con el feed caído ──────────────────────────────────────────────
 def test_feed_estado_sin_broker_es_vivo(monkeypatch) -> None:
     monkeypatch.setattr(settings, "primary_user", "")
