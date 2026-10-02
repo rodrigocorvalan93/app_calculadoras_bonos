@@ -832,7 +832,17 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 /* Anchos de columna congelados por app.js ("Anchos de columna estables"):
    los <th> llevan su width medido y el padre de la tabla este atributo (no
    un style inline en la <table id=…>: htmx lo pisa al asentar el swap). */
-[data-cols-fijas] > table.mercado-table, [data-cols-fijas] > table.curve-table { table-layout: fixed; }
+[data-cols-fijas] > table { table-layout: fixed; }
+/* Libro: filas de relleno hasta la profundidad fija (5 niveles por punta): el
+   card no cambia de alto cuando aparece o desaparece un nivel. */
+.depth-pad td { color: transparent; user-select: none; }
+/* Órdenes PROPIAS en el libro (el broker las lista como vivas, o salieron de
+   esta app): toda la fila en negrita y en verde (compra) / rojo (venta) —
+   una fila normal sólo colorea la celda del precio. */
+.cashflows tr.own-order td { font-weight: 700; }
+.cashflows tr.own-buy td  { color: var(--green); }
+.cashflows tr.own-sell td { color: var(--red); }
+.cashflows tr.own-order td:first-child::before { content: "●"; font-size: 8px; margin-right: 5px; vertical-align: 1px; }
 .mercado-table tbody tr:hover { background: var(--accent-soft); }
 /* Matriz de tenencias (~17k celdas) — ver partials/matriz_table.html.
    Panel tipo planilla: scrollea en las dos direcciones con cabecera y

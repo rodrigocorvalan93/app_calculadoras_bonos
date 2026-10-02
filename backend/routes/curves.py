@@ -987,6 +987,14 @@ async def mercado_book(
         return r, bids, offers
 
     row, bids, offers = await loop.run_in_executor(_row_pool, _build_book)
+    # Órdenes PROPIAS vivas en este símbolo → el nivel se resalta (negrita,
+    # verde compra / rojo venta). Dict en memoria (µs); la relectura de las
+    # vivas del broker corre en background, nunca en este request.
+    from backend.services import oms as oms_svc
+    propias = oms_svc.own_levels(symbol)
+    oms_svc.marcar_niveles(bids, propias["buy"])
+    oms_svc.marcar_niveles(offers, propias["sell"])
+    oms_svc.maybe_refresh_activas()
     niveles = bids + offers
     margen_ok = _finito((row or {}).get("margen_tna")) or any(_finito(lv.get("margen")) for lv in niveles)
     if y == "margen" and not margen_ok:

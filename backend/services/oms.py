@@ -528,7 +528,189 @@ async def accounts() -> List[Dict[str, Any]]:
 async def live_orders(account: str) -> List[Dict[str, Any]]:
     from backend.services.primary_ws import get_ws_client
     d = await get_ws_client().get_json_checked("rest/order/actives", {"accountId": account})
-    return d.get("orders", []) if isinstance(d, dict) else []
+    orders = d.get("orders", []) if isinstance(d, dict) else []
+    recordar_activas(account, orders)
+    return orders
+
+
+# ── Órdenes PROPIAS vivas (para resaltarlas en el libro) ─────────────────────
+# Dos fuentes y cero red en el hot path del libro (1 render/s por pestaña):
+# (1) `_OWN`: lo que ESTA app envió y el broker aceptó (status OK), hasta que
+#     el seguimiento ve un estado final, se cancela o la lista del broker ya
+#     no la trae; (2) `_ACTIVES`: la última lista de órdenes vivas del broker
+#     por comitente (rest/order/actives) — la carga el panel de Órdenes (cada
+#     15 s para la cuenta elegida) y `maybe_refresh_activas()` en background
+#     desde el libro (throttle 15 s, nunca se espera). El libro cruza símbolo +
+#     lado + precio en un dict (`own_levels`): µs. Una orden mandada desde
+#     otro front (la Matriz del broker) entra por (2) en ≤ 15 s.
+_OWN: Dict[str, Dict[str, Any]] = {}          # id del broker (o client_order_id) → orden
+_ACTIVES: Dict[str, tuple] = {}               # comitente → (monotonic, [órdenes vivas normalizadas])
+_OWN_TTL = 14 * 3600.0                        # Day orders: no sobreviven la rueda
+_ACTIVES_TTL = 600.0                          # sin relectura en 10 min → no se afirma nada
+_ACTIVES_EVERY = 15.0
+_actives_next = 0.0
+_ESTADO_VIVO = {"NEW", "PENDING_NEW", "PARTIALLY_FILLED", "PENDING_REPLACE", "REPLACED", ""}
+
+
+def _norm_symbol(s: Any) -> str:
+    return " ".join(str(s or "").split()).upper()
+
+
+def _lado(s: Any) -> str:
+    return "sell" if str(s or "").strip().lower().startswith("s") else "buy"
+
+
+def _own_from_rec(rec: Dict[str, Any], cid: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Ticket enviado (payload del OMS) → orden propia normalizada; None si es
+    market (sin precio no hay nivel que marcar) o no se puede leer."""
+    try:
+        px = float(rec.get("price")) if rec.get("price") not in (None, "") else None
+        qty = float(rec.get("qty") or 0)
+    except (TypeError, ValueError):
+        return None
+    if px is None or qty <= 0:
+        return None
+    return {"cid": str(cid or rec.get("client_order_id") or ""), "symbol": _norm_symbol(rec.get("symbol")),
+            "side": _lado(rec.get("side")), "price": px, "qty": qty,
+            "account": str(rec.get("account") or ""), "ts": time.time()}
+
+
+def _own_from_broker(o: Any) -> Optional[Dict[str, Any]]:
+    """Orden de rest/order/actives → el mismo formato. Sólo estados vivos; la
+    cantidad es lo que queda (leavesQty, o orderQty − cumQty)."""
+    if not isinstance(o, dict):
+        return None
+    if str(o.get("status") or "").upper() not in _ESTADO_VIVO:
+        return None
+    inst = o.get("instrumentId") if isinstance(o.get("instrumentId"), dict) else {}
+    symbol = _norm_symbol(inst.get("symbol") or o.get("symbol"))
+    try:
+        px = float(o.get("price")) if o.get("price") not in (None, "") else None
+        qty = o.get("leavesQty")
+        if qty in (None, ""):
+            qty = float(o.get("orderQty") or 0) - float(o.get("cumQty") or 0)
+        qty = float(qty)
+    except (TypeError, ValueError):
+        return None
+    if not symbol or px is None or qty <= 0:
+        return None
+    acc = o.get("accountId")
+    acc = acc.get("id") if isinstance(acc, dict) else acc
+    return {"cid": str(o.get("clOrdId") or o.get("clientId") or ""), "symbol": symbol,
+            "side": _lado(o.get("side")), "price": px, "qty": qty,
+            "account": str(acc or ""), "ts": time.time()}
+
+
+def recordar_propia(rec: Dict[str, Any], cid: Optional[str] = None) -> None:
+    o = _own_from_rec(rec, cid)
+    if o and o["cid"]:
+        _OWN[o["cid"]] = o
+
+
+def olvidar_propia(cid: Any) -> None:
+    if cid:
+        _OWN.pop(str(cid), None)
+
+
+def actualizar_propia(cid: Any, order_qty: Any, cum_qty: Any) -> None:
+    """Ejecución parcial vista por el seguimiento: queda lo no ejecutado."""
+    o = _OWN.get(str(cid or ""))
+    if not o:
+        return
+    try:
+        resto = float(order_qty) - float(cum_qty or 0)
+    except (TypeError, ValueError):
+        return
+    if resto > 0:
+        o["qty"] = resto
+    else:
+        _OWN.pop(str(cid), None)
+
+
+def recordar_activas(account: str, orders: List[Dict[str, Any]]) -> None:
+    """Lista de órdenes vivas del broker para una cuenta: reemplaza la anterior
+    y da de baja las propias de esa cuenta que el broker ya no lista (ejecutada
+    o cancelada por otro camino) — con 20 s de gracia para la recién enviada."""
+    vivas = [x for x in (_own_from_broker(o) for o in (orders or [])) if x]
+    acc = str(account)
+    _ACTIVES[acc] = (time.monotonic(), vivas)
+    cids = {v["cid"] for v in vivas if v["cid"]}
+    ahora = time.time()
+    for cid, o in list(_OWN.items()):
+        if o.get("account") == acc and cid not in cids and (ahora - o["ts"]) > 20:
+            _OWN.pop(cid, None)
+
+
+def own_levels(symbol: str) -> Dict[str, Dict[float, float]]:
+    """{'buy': {precio: VN propio}, 'sell': {…}} de las órdenes propias vivas en
+    el símbolo del libro (precio redondeado a 6 decimales; VN sumado por nivel).
+    Broker y app se deduplican por id. Puro dict en memoria: µs."""
+    sym = _norm_symbol(symbol)
+    out: Dict[str, Dict[float, float]] = {"buy": {}, "sell": {}}
+    if not sym or (not _OWN and not _ACTIVES):
+        return out
+    ahora, mono = time.time(), time.monotonic()
+    vistas: Dict[str, Dict[str, Any]] = {}
+    for _acc, (t, vivas) in _ACTIVES.items():
+        if (mono - t) > _ACTIVES_TTL:
+            continue
+        for o in vivas:
+            if o["symbol"] == sym:
+                vistas[o["cid"] or str(id(o))] = o
+    for cid, o in _OWN.items():
+        if o["symbol"] == sym and (ahora - o["ts"]) <= _OWN_TTL:
+            vistas.setdefault(cid, o)
+    for o in vistas.values():
+        px = round(o["price"], 6)
+        out[o["side"]][px] = out[o["side"]].get(px, 0.0) + o["qty"]
+    return out
+
+
+def marcar_niveles(levels: List[Dict[str, Any]], own: Dict[float, float]) -> None:
+    """Deja `own` (VN propio) en cada nivel del libro cuyo precio coincide."""
+    if not own:
+        return
+    for lv in levels:
+        px = lv.get("price")
+        if px is not None:
+            q = own.get(round(float(px), 6))
+            if q:
+                lv["own"] = q
+
+
+async def _refresh_activas_bg(accounts: List[str]) -> None:
+    for acc in accounts:
+        try:
+            await live_orders(acc)
+        except Exception:  # noqa: BLE001 — best-effort: el próximo ciclo reintenta
+            return
+
+
+def maybe_refresh_activas() -> None:
+    """Desde el libro (1 render/s por pestaña): dispara EN BACKGROUND, como
+    mucho cada 15 s, la relectura de las órdenes vivas de las cuentas conocidas
+    (las que el panel ya consultó, las de órdenes enviadas desde acá y las
+    comitentes configuradas). Nunca espera la red: el libro se renderiza con lo
+    último que hay. Sin sesión REST no toca nada."""
+    global _actives_next
+    now = time.monotonic()
+    if now < _actives_next:
+        return
+    try:
+        from backend.services.primary_ws import get_ws_client
+        if not get_ws_client().authenticated:
+            return
+        accounts = set(_ACTIVES) | {o["account"] for o in _OWN.values() if o.get("account")}
+        accounts |= {str(a.get("id")) for a in configured_comitentes() if a.get("id")}
+    except Exception:  # noqa: BLE001 — jamás molestar al libro
+        return
+    if not accounts:
+        return
+    try:
+        _spawn(_refresh_activas_bg(sorted(accounts)))
+    except RuntimeError:                        # sin event loop (llamada síncrona): nada que disparar
+        return
+    _actives_next = now + _ACTIVES_EVERY
 
 
 # Seguimiento post-envío: cuándo re-consultar el estado (seg tras el envío);
@@ -563,7 +745,10 @@ async def _order_followup(client_id: str, proprietary: str, rec: Dict[str, Any])
             await audit_async("live_estado", {**rec, "estado": st,
                                               "texto": o.get("text") or "",
                                               "cum_qty": o.get("cumQty")})
+            if st == "PARTIALLY_FILLED":
+                actualizar_propia(client_id, o.get("orderQty") or rec.get("qty"), o.get("cumQty"))
         if st in _ESTADO_FINAL:
+            olvidar_propia(client_id)                 # ejecutada / rechazada / cancelada: ya no está en el libro
             return
 
 
@@ -676,6 +861,7 @@ async def place(payload: Dict[str, Any]) -> Dict[str, Any]:
         await audit_async("live_rechazo_broker", {**rec, "broker": d, "motivo": msg})
         return {"status": "RECHAZADA", "motivo": f"el broker rechazó la orden: {msg}", "broker": d, **rec}
     await audit_async("live_respuesta", {**rec, "broker": d})
+    recordar_propia(rec, str(o["clientId"]))           # la resalta el libro desde ya
     _spawn(_order_followup(str(o["clientId"]), str(o.get("proprietary") or "api"), rec))
     return {"status": "OK", "broker": d, **rec}
 
@@ -852,6 +1038,7 @@ async def cancel(client_order_id: str, proprietary: str = "api") -> Dict[str, An
         # OK = el broker ACEPTÓ el pedido de cancelar; el estado final lo
         # confirma el seguimiento / la Matriz (CANCELLED), no esta respuesta.
         await audit_async("live_cancel_respuesta", {**rec, "broker": d})
+        olvidar_propia(client_order_id)      # si el broker la rechaza, la lista de vivas la devuelve en ≤ 15 s
         return {"status": "OK", "broker": d, **rec}
     # HTTP 200 con JSON de rechazo: la orden SIGUE VIVA. Antes se auditaba
     # como live_cancel_respuesta y el blotter la mostraba CANCELADA (R03).

@@ -71,32 +71,40 @@
       <div class="alert">Sin profundidad en el store para este instrumento (¿no operó / broker offline?).</div>
     {% else %}
     {# Columna de tasa = la métrica elegida (y). El Acum lleva data-noflash:
-       corre con cada nivel nuevo y flashearlo era puro ruido. #}
+       corre con cada nivel nuevo y flashearlo era puro ruido.
+       Profundidad FIJA: las dos puntas se rellenan hasta `depth` filas
+       (5, o más si el broker manda más niveles) — el card no cambia de alto
+       cuando entra o sale un nivel y lo de abajo no salta en cada tick.
+       `l.own` = VN propio en ese precio (órdenes vivas del broker + las
+       enviadas desde acá): la fila va en negrita y en verde / rojo. #}
+    {% set depth = [bids | length, offers | length, 5] | max %}
     <div class="book-grid">
       <table class="cashflows">
         <thead><tr><th>Bid {{ y_label }}</th><th>Acum</th><th>Cant</th><th>Bid</th></tr></thead>
         <tbody>
           {% for l in bids %}
-          <tr class="depth-bid" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
+          <tr class="depth-bid{% if l.own %} own-order own-buy{% endif %}" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%"{% if l.own %} title="Orden propia de COMPRA: {{ l.own | ar_int }} VN de los {{ l.size | ar_int }} de este nivel"{% endif %}>
             <td style="color:var(--cyan)">{{ l[y] | ar_pct(2) }}</td>
             <td style="color:var(--text-muted)" data-noflash>{{ l.cum | ar_int }}</td>
             <td>{{ l.size | ar_int }}</td>
             <td class="px-up" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
           </tr>
           {% else %}<tr><td colspan="4" style="color:var(--text-muted)">— sin bids —</td></tr>{% endfor %}
+          {% for _ in range(depth - ([bids | length, 1] | max)) %}<tr class="depth-pad"><td>·</td><td>·</td><td>·</td><td>·</td></tr>{% endfor %}
         </tbody>
       </table>
       <table class="cashflows">
         <thead><tr><th>Offer</th><th>Cant</th><th>Acum</th><th>Offer {{ y_label }}</th></tr></thead>
         <tbody>
           {% for l in offers %}
-          <tr class="depth-ask" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
+          <tr class="depth-ask{% if l.own %} own-order own-sell{% endif %}" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%"{% if l.own %} title="Orden propia de VENTA: {{ l.own | ar_int }} VN de los {{ l.size | ar_int }} de este nivel"{% endif %}>
             <td class="px-down" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
             <td>{{ l.size | ar_int }}</td>
             <td style="color:var(--text-muted)" data-noflash>{{ l.cum | ar_int }}</td>
             <td style="color:var(--cyan)">{{ l[y] | ar_pct(2) }}</td>
           </tr>
           {% else %}<tr><td colspan="4" style="color:var(--text-muted)">— sin offers —</td></tr>{% endfor %}
+          {% for _ in range(depth - ([offers | length, 1] | max)) %}<tr class="depth-pad"><td>·</td><td>·</td><td>·</td><td>·</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
