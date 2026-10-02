@@ -11062,6 +11062,46 @@ RAC8C = {
     "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/175cc20d-b409-4d4e-89c8-a9bb6eeec14e",
     "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/71e07210-f397-4213-bbdd-b0eec42fab52"
 }
+BF48C = {
+    "Nombre Security": "ON Banco BBVA Argentina S.A. Clase 48 Vto 24 01 2028 C",
+    "Código": "BF48C",
+    "ISIN": "AR0751637247", # MAE / Aviso de Resultados 21/07/2026
+    "Calificación": "AAA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Financials",
+    "Moneda": "USD",
+    "Quote Price Convention": "DIRTY",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "24/07/2026",
+    "Vencimiento": "24/01/2028",
+    "Fecha Primer Cupón": "24/01/2027",
+    "Cupón / Spread": 3.75,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": ["24/01/2027", "24/07/2027", "24/01/2028"],
+    "Amortización": None,
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "USD Cable, integrada en dólares. Tasa fija 3,75% n.a., intereses semestrales, amortización íntegra al vencimiento. VN emitido USD 42.074.070. Licitación 21/07/2026, emisión y liquidación 24/07/2026 (T+3). Emitida junto con las Clases 49 (USD MEP, 12 meses) y 50 (USD MEP, 24 meses).",
+    "Aviso Resultados": "https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQDZpJws9ETtTLzQ_yIRw_ltARDnMPCpXu-bWgKFay5Thno",
+    "Suplemento Prospecto": "https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQCoG_KxUZydT4Qlf1Zi2cKeAfGVQ339qbCC7AnKUP39zUo",
+}
 VSCVO = {
     "Nombre Security": "ON Vista Oil & Gas Argentina S.A.U. Clase XXIX Vto 10 06 2033",
     "Código": "VISTAA 33",
@@ -29538,6 +29578,7 @@ NPCED = rentafija.Bono(NPCED)
 NPCCO = rentafija.Bono(NPCCO)
 NPCCC = rentafija.Bono(NPCCC)
 RAC8C = rentafija.Bono(RAC8C)
+BF48C = rentafija.Bono(BF48C)
 PN38O = rentafija.Bono(PN38O)
 PN38C = rentafija.Bono(PN38C)
 YCAMO = rentafija.Bono(YCAMO)
@@ -30070,7 +30111,7 @@ todos_los_bonos = [
     YMCXO, YMCXC, IRCFO, IRCFC, YMCUO, YMCUC, YMC1O, YMC1C, YM39O, YM39C, MGCOO, MGCOC, MGCRO, MGCRC, RUCDO, RUCDC,
     DNC7O, DNC7C, TLCMO, TLCMC, LMS8D, IRCPO, IRCPC, VSCOD, VSCUO, VSCUC, VSCVO, VSCVC,
     CP38O, CP38C, TLCTO, TLCTC, VSCXO, VSCXC, BACHO, BACHC, TTCAO, TTCAC, DNCAO, DNCAC, T673C,
-    BYY3C, EAC4C, PLC7O, PLC7C, DNCBC, VSCYO, VSCYC, RAC8C, 
+    BYY3C, EAC4C, PLC7O, PLC7C, DNCBC, VSCYO, VSCYC, RAC8C, BF48C,
 
     # CORPORATIVOS HARD DÓLAR MEP
 
