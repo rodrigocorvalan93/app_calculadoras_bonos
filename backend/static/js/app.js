@@ -372,7 +372,11 @@ window.lsSet = function (k, v) {
     }
   });
   document.body.addEventListener('htmx:afterSwap', function (evt) {
+    // Swap outerHTML sobre sí mismo (el libro: hx-target="this"): con htmx 2
+    // detail.target es el nodo VIEJO, ya fuera del DOM, y el evento se dispara
+    // sobre el NUEVO (evt.target). Diffear contra el viejo = nunca flashea.
     var t = evt.detail.target;
+    if (t && !t.isConnected && evt.target && evt.target.hasAttribute) t = evt.target;
     if (!t || !t.hasAttribute || !t.hasAttribute('data-flash-scope')) return;
     var old = pre[t.id || 'x'];
     delete pre[t.id || 'x'];
@@ -523,10 +527,17 @@ window.lsSet = function (k, v) {
 // reparte igual que antes; si la suma supera el ancho, scrollea como siempre.
 (function () {
   var memo = {};
-  var SEL = 'table.mercado-table, table.curve-table';
+  // Mercado / Curvas / matriz de forwards + toda tabla de un panel live
+  // ([data-flash-scope]: el libro con sus puntas y la tenencia, …).
+  var SEL = 'table.mercado-table, table.curve-table, [data-flash-scope] table.cashflows';
   function ths(tbl) {
     var fila = tbl.tHead && tbl.tHead.rows[0];
-    return fila ? Array.prototype.slice.call(fila.cells) : [];
+    if (!fila) return [];
+    var cs = Array.prototype.slice.call(fila.cells);
+    // Cabecera agrupada (colspan / rowspan): las celdas no mapean 1:1 a las
+    // columnas y el layout fixed las repartiría distinto — esa tabla se deja.
+    for (var i = 0; i < cs.length; i++) { if (cs[i].colSpan > 1 || cs[i].rowSpan > 1) return []; }
+    return cs;
   }
   function visible(el) { return el.offsetParent !== null || el.getClientRects().length > 0; }
   function clave(tbl, cab) {
@@ -594,7 +605,13 @@ window.lsSet = function (k, v) {
     for (var i = 0; i < ts.length; i++) congelar(ts[i]);
     if (root.matches && root.matches(SEL)) congelar(root);
   }
-  document.body.addEventListener('htmx:afterSwap', function (evt) { todas(evt.detail.target); });
+  // Nodo vivo del swap: detail.target, salvo en un outerHTML sobre sí mismo
+  // (el libro), donde ese nodo ya no está en el DOM y el nuevo es evt.target.
+  function vivo(evt) {
+    var t = evt.detail && evt.detail.target;
+    return (t && t.isConnected) ? t : evt.target;
+  }
+  document.body.addEventListener('htmx:afterSwap', function (evt) { todas(vivo(evt)); });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { todas(document); });
   else todas(document);
   // Cambió el ancho de la ventana: los anchos medidos eran para ese ancho
@@ -635,10 +652,12 @@ window.lsSet = function (k, v) {
   });
   document.body.addEventListener('htmx:afterSwap', function (evt) {
     var t = evt.detail.target;
+    var k = t ? key(t) : '_';                       // la key es la del target original
+    if (t && !t.isConnected) t = evt.target;        // outerHTML sobre sí mismo: el nuevo
     if (!t || !t.querySelectorAll) return;
-    var sl = guardado[key(t)];
+    var sl = guardado[k];
     if (!sl) return;
-    delete guardado[key(t)];
+    delete guardado[k];
     var ts = t.querySelectorAll('.table-scroll');
     for (var i = 0; i < ts.length && i < sl.length; i++) { if (sl[i]) ts[i].scrollLeft = sl[i]; }
   });

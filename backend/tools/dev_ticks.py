@@ -78,14 +78,24 @@ def main() -> None:
         print("equities:", exc)
     print(f"sembrados {n} símbolos · tick cada {intervalo:g} s · http://127.0.0.1:{port}/mercado", flush=True)
 
+    # DEV_TICKS_FOCUS=S13N6,TX26 → esos códigos tickean en CADA ciclo, alternando
+    # un tick de sólo tamaños (mismos precios: el libro flashea las cantidades)
+    # con uno de precios (los niveles se corren) — para mirar un libro puntual.
+    foco = [syms.md_symbol(c.strip().upper(), "24hs") for c in os.environ.get("DEV_TICKS_FOCUS", "").split(",") if c.strip()]
+    foco = [s for s in foco if s in estado]
+
     def ticker() -> None:
         rnd = random.Random(7)
         todos = list(estado)
+        n_tick = 0
         while True:
             time.sleep(intervalo)
-            for sym in rnd.sample(todos, min(40, len(todos))):
+            n_tick += 1
+            elegidos = rnd.sample(todos, min(40, len(todos)))
+            for sym in elegidos + foco:
                 e = estado[sym]
-                e["px"] *= 1 + rnd.uniform(-0.003, 0.003)
+                if sym not in foco or n_tick % 2:
+                    e["px"] *= 1 + rnd.uniform(-0.003, 0.003)
                 e["bsz"] = rnd.choice(SIZES); e["osz"] = rnd.choice(SIZES)
                 e["ev"] *= 1 + rnd.uniform(0, 0.4); e["nv"] *= 1 + rnd.uniform(0, 0.4); e["tv"] += 1
                 md(sym, e["px"], e["bsz"], e["osz"], e["ev"], e["nv"], e["tv"])

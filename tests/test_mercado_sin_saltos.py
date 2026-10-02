@@ -62,7 +62,7 @@ def test_boton_copiar_se_inyecta_en_after_swap_y_el_scroll_se_conserva() -> None
 def test_anchos_de_columna_congelados_con_ratchet() -> None:
     # Medido: con table-layout auto el VWAP pasaba de 85 a 73 px y corría las 6
     # columnas de la derecha; app.js mide una vez, fija los th y sólo ensancha.
-    assert "[data-cols-fijas] > table.mercado-table, [data-cols-fijas] > table.curve-table { table-layout: fixed; }" in CSS
+    assert "[data-cols-fijas] > table { table-layout: fixed; }" in CSS      # también las tablas del libro
     i = JS.index("Anchos de columna estables en las tablas live (ratchet)")
     bloque = JS[i:JS.index("Scroll horizontal de las tablas a través de un swap completo")]
     assert "p.setAttribute('data-cols-fijas', '')" in bloque          # fixed vía el padre (sobrevive al settle de htmx)

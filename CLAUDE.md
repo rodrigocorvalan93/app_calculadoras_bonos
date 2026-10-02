@@ -545,6 +545,31 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   forwards usa las mismas clases y el mismo ⧉: mismo salto de 4 px antes,
   0 después). Regresión: `tests/test_mercado_sin_saltos.py` (antes/después
   en el docstring).
+- **Libro (Mercado / Órdenes) quieto y con órdenes propias (02/10)**: el
+  card del libro se reemplaza A SÍ MISMO (`hx-target="this"`,
+  `hx-swap="outerHTML"`) en cada md-update. **Gotcha htmx 2**: en
+  `htmx:afterSwap` el `detail.target` es el nodo VIEJO ya fuera del DOM y el
+  evento se dispara sobre el NUEVO (`evt.target`) — el flash diffeaba contra
+  el viejo (el libro NUNCA flasheaba) y el congelado de columnas no lo veía.
+  Los tres handlers (flash, anchos, scrollLeft) usan el nodo vivo
+  (`isConnected ? detail.target : evt.target`). El freeze cubre toda tabla
+  `.cashflows` de un `[data-flash-scope]` (puntas y tenencia del libro) y
+  saltea cabeceras con colspan/rowspan; CSS `[data-cols-fijas] > table`.
+  **Profundidad fija**: las dos puntas se rellenan con `tr.depth-pad` hasta
+  5 filas (o más si el broker manda más) → el card no cambia de alto cuando
+  entra o sale un nivel. **Órdenes propias**: `oms.own_levels(symbol)` →
+  `{buy: {px: VN}, sell: {…}}` desde `_OWN` (lo que esta app envió y el
+  broker aceptó: `recordar_propia` en `place`, baja por estado final del
+  seguimiento / `cancel` OK / lista del broker que ya no la trae) y
+  `_ACTIVES` (última `rest/order/actives` por comitente: la carga el panel
+  de Órdenes y `maybe_refresh_activas()` en background desde el libro,
+  throttle 15 s, NUNCA en el request; vencida a los 10 min). `marcar_niveles`
+  deja `l.own` y el template pone `own-order own-buy|own-sell` (negrita,
+  verde / rojo, ● y tooltip con el VN propio). El libro se cachea por seq
+  (`seq_cached`): una orden nueva se ve en el tick siguiente (≤ 2 s).
+  Tests: `tests/test_book_ordenes_propias.py`. Para mirar un libro con ticks
+  constantes: `DEV_TICKS_FOCUS=S13N6 python backend/tools/dev_ticks.py 8765`
+  (alterna un tick de sólo tamaños —flashea— con uno de precios).
 
 ## Seguridad — invariantes (no regresar sin querer)
 
