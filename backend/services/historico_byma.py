@@ -153,6 +153,19 @@ def _build(df) -> Dict[str, Any]:
 _load_ver = __import__("itertools").count(1)
 
 
+def _version_de(data: Dict[str, Any]) -> int:
+    """Versión de una carga para las keys de los memos (weekly_segments, ref_5d).
+    `_load()` la estampa; un dict armado a mano (tests, `_empty`) no la trae y
+    antes caía a `id(data)`: CPython reutiliza el id de un dict liberado, así
+    que dos datasets distintos con los mismos bounds podían compartir la key y
+    el memo servía el resumen del otro (falló en el runner de macOS, 02/10).
+    Acá se estampa una vez en el dict mismo → única por carga, para siempre."""
+    v = data.get("ver")
+    if v is None:
+        v = data["ver"] = next(_load_ver)
+    return v
+
+
 def _load() -> Dict[str, Any]:
     xlsx = _resolve_path()
     path, fmt = _pick_source(xlsx)
@@ -454,7 +467,7 @@ def ref_5d(hoy: Optional[date] = None, ruedas: int = 5) -> Dict[str, tuple]:
         cierres_id = id(_cierres.loaded())          # None → id(None): cambia al cargar/recargar
     except Exception:  # noqa: BLE001
         cierres_id = 0
-    key = (data.get("ver") or id(data), hoy_iso, int(ruedas), cierres_id)
+    key = (_version_de(data), hoy_iso, int(ruedas), cierres_id)
     c = _ref5d_cache
     if c is not None and c[0] == key:
         return c[1]
@@ -663,9 +676,9 @@ def weekly_segments(days: int = 7) -> Dict[str, Any]:
     data = ensure_loaded()
     # ver: contador de carga (no id(dict) — CPython reusa direcciones y un
     # refresh sin fechas nuevas podía servir el resumen viejo hasta el TTL).
-    # `ver` lo estampa _load(); un dict armado a mano (tests) no lo trae → cae a
-    # id(data) para no colisionar entre datasets distintos con mismos días/bounds.
-    key = (int(days), data.get("ver") or id(data), (data.get("bounds") or (None, None))[1])
+    # `ver` lo estampa _load(); a un dict armado a mano (tests) se lo estampa
+    # _version_de la primera vez (id(data) se reutiliza entre dicts liberados).
+    key = (int(days), _version_de(data), (data.get("bounds") or (None, None))[1])
     return _weekly_cache.get_or_compute(key, lambda: _weekly_segments_compute(days, data))
 
 
