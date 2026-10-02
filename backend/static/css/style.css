@@ -807,11 +807,17 @@ select {
 .table-scroll { overflow-x: auto; max-width: 100%; }
 /* Botón "copiar tabla" (app.js lo inyecta como hermano ANTES de cada
    .table-scroll): alineado a la derecha con margen negativo para no ocupar
-   alto — cero corrimiento de layout, re sutil (opacidad baja). */
+   alto — cero corrimiento de layout, re sutil (opacidad baja).
+   El margen negativo tiene que ser EXACTAMENTE el alto del botón (12 px de
+   línea + 1 px de padding arriba y abajo = 14 px): con -18 px el botón
+   restaba 4 px de alto y, como vive adentro del swap de htmx y se re-inyecta
+   recién después, cada swap completo (acciones: uno por tick) hacía saltar
+   la tabla 4 px por un frame — el "parpadeo del recuadro" (02/10). */
 .tbl-copy {
-  display: block; margin: 0 2px -18px auto; position: relative; z-index: 3;
+  display: block; margin: 0 2px -14px auto; position: relative; z-index: 3;
   background: none; border: none; cursor: pointer; padding: 1px 4px;
-  font-size: 12px; line-height: 1; color: var(--text-muted); opacity: 0.35;
+  font-size: 12px; line-height: 1; height: 14px; box-sizing: border-box;
+  color: var(--text-muted); opacity: 0.35;
   transition: opacity 0.15s ease;
 }
 .tbl-copy:hover { opacity: 0.9; }
@@ -823,6 +829,10 @@ select {
 td[data-fwc] { cursor: pointer; }
 td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .mercado-table th, .mercado-table td { white-space: nowrap; }
+/* Anchos de columna congelados por app.js ("Anchos de columna estables"):
+   los <th> llevan su width medido y el padre de la tabla este atributo (no
+   un style inline en la <table id=…>: htmx lo pisa al asentar el swap). */
+[data-cols-fijas] > table.mercado-table, [data-cols-fijas] > table.curve-table { table-layout: fixed; }
 .mercado-table tbody tr:hover { background: var(--accent-soft); }
 /* Matriz de tenencias (~17k celdas) — ver partials/matriz_table.html.
    Panel tipo planilla: scrollea en las dos direcciones con cabecera y
@@ -1058,7 +1068,10 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 /* Atenuar el panel mientras carga: sólo en paneles que se piden A MANO. Los
    que se refrescan con el motor live (md-update, ~1 request por tick) y se
    swapean enteros — el libro — parpadeaban a 1 Hz con este dim. */
-[data-flash-scope]:not([hx-trigger*="md-update"]).htmx-request { opacity: 0.93; transition: opacity 0.12s ease; }
+/* Los paneles live por delta (Mercado: hx-trigger "refresh, every 30s", el
+   tick entra por md-update en app.js) tampoco se atenúan: el panel de
+   acciones hace swap completo en cada tick y el dim parpadeaba 1×/s. */
+[data-flash-scope]:not([hx-trigger*="md-update"]):not([data-delta-scope]).htmx-request { opacity: 0.93; transition: opacity 0.12s ease; }
 
 /* ── Micro-polish (hover/transiciones, costo cero) ──────────────────── */
 .card { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
@@ -1247,12 +1260,15 @@ html, body, .topbar, .card, .fx-rail, .tape, .news-marquee, .footer {
   background: var(--accent); border-radius: 1px;
   transform: translateX(-1px); transition: left 0.4s ease;
 }
-/* Pop sutil al flashear un tick (junto al fade verde/rojo existente). */
-@keyframes tick-pop { 0% { transform: scale(1.045); } 100% { transform: none; } }
-.tick-up   { animation: tick-up 0.9s ease-out, tick-pop 0.22s ease-out; }
-.tick-down { animation: tick-down 0.9s ease-out, tick-pop 0.22s ease-out; }
-/* Métrica del feed junto al dot: '14 t/min · 9 ms'. */
-.live-meta { font-size: 10.5px; font-variant-numeric: tabular-nums; min-width: 0; }
+/* El flash de un tick es SÓLO color (tick-up / tick-down, más arriba). Hubo
+   un "pop" de escala (transform: scale(1.045) 0,22 s) junto al fade: cada
+   celda que cambiaba agrandaba y achicaba su recuadro con cada tick — el
+   usuario lo leía como parpadeo del tamaño (02/10). Nada de transform /
+   font-weight / padding en el flash: el recuadro no cambia, sólo el color. */
+/* Métrica del feed junto al dot: '14 t/min · 9 ms'. Ancho mínimo fijo: el
+   texto cambia de largo con los dígitos y, como la topbar es flex, corría el
+   botón «más» de la navegación 7 px con cada actualización (02/10). */
+.live-meta { font-size: 10.5px; font-variant-numeric: tabular-nums; min-width: 9.5em; }
 /* Brand con gradiente ámbar. */
 .brand-text {
   background: linear-gradient(90deg, var(--accent), var(--accent-strong));

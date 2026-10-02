@@ -85,6 +85,6 @@ def test_front_no_apila_ni_parpadea() -> None:
     # la elección se guarda en pointerdown: antes del blur del input de la
     # especie en Órdenes, cuyo `change` vuelve a pedir el libro
     assert "addEventListener('pointerdown', guardar)" in js
-    assert '[data-flash-scope]:not([hx-trigger*="md-update"]).htmx-request' in css
+    assert '[data-flash-scope]:not([hx-trigger*="md-update"]):not([data-delta-scope]).htmx-request' in css
     assert "[data-flash-scope].htmx-request {" not in css
     assert ".tbl-wrap" in css
