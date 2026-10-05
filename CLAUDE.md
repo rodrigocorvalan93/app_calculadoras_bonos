@@ -213,6 +213,37 @@ vacío). `huecos_base` lo saltea (banner, log del arranque,
 (`estado_cierre()["ignorados"]`). NO es `sin_rueda`: para
 `_fuente_reconstruccion` / `reconstruir_cierre` de la rueda anterior sigue
 siendo una rueda que falta (no se fabrica una RC desde un día ignorado).
+**La base nunca pierde ruedas** (05/10): la notebook arrancó con una réplica
+de OneDrive atrasada y escribió la base → 5 ruedas perdidas que el chip
+acusaba como huecos y Reconstruir rearmaba con RC (y la otra máquina volvía a
+pisar). Defensas en `historico_writer`: (1) `_resumen_base` = {rueda: (filas,
+reales)} desde la fuente FIEL — el espejo si `espejo_valido` (la firma lleva
+ahora también `pq_size`), si no el Excel (segundos, una vez por cambio; cache
+`_fechas_cache` por firmas de los dos archivos) — lo usan `huecos_base`,
+`_ya_guardado_hoy`, consolidación y reconstrucción; (2) memoria local
+`journal_dir()/base_vista.json` (máximo de filas/reales visto por rueda y por
+carpeta de base, ventana `_MEMORIA_DIAS` = 120) + manifiesto compartido
+`base_manifest.json` (host, hora, ruedas del último guardado) →
+`regresion_detalle()`: ruedas que faltan / pasaron a RC / perdieron la mitad
+de las filas; `recuperables` = el journal propio las tiene con filas reales,
+el resto `bloqueantes`; (3) `_append_and_save_locked` lanza `BaseEnRegresion`
+con bloqueantes (salvo `ignorar_regresion`) y repone del journal las
+degradadas → `save_today` = skipped+retry con el día en el journal,
+`consolidar_journal` frenado (`reponer=True` escribe igual, sin exigir
+writer), `reconstruir_cierre` / `reconstruir_faltantes` / arranque frenados;
+`reconstruir_cierre` tampoco pisa una rueda con filas reales aunque sea
+`force`; (4) `estado_cierre` estado `regresion` (manda sobre falta / hueco) +
+banner rojo con "Reponer del journal (n)" (`POST /historicos/reponer-journal`)
+y "Aceptar la base como está" (`POST /historicos/aceptar-base`: memoria y
+manifiesto pasan a describir el disco), superuser; (5) `_disparo_vencido`: el
+temporizador del autosave que salta al despertar con la ventana vencida se
+rearma sin evaluar (antes "feed caído al cierre" falso sobre el WS recién
+reconectado por el resume); (6) el journal de la rueda que se está
+escribiendo no se "consolida" dos veces. Diagnóstico sólo lectura en
+cualquier máquina: `python -m backend.tools.base_check` (archivos, espejo
+fiel, ruedas base / memoria / manifiesto / journal, regresión, copias de
+conflicto). Una sola máquina writer: `HISTORICO_BASE_WRITER=0` en las demás.
+Regresión: `tests/test_base_regresion.py`.
 `HISTORICO_RECONSTRUIR=0` apaga lo automático. `_fecha_dato`: ISO sin zona =
 hora BA y un instante 00:00Z es sello de FECHA (no las 21:00 BA del día
 anterior). Regresión: `tests/test_cierre_reconstruccion.py`.

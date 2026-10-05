@@ -51,9 +51,11 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
 import os
 import re
+import socket
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -377,40 +379,403 @@ def consolidar_cierres_journal() -> Optional[Dict[str, Any]]:
     return {"consolidados": len(hechos), "dias": hechos, "errores": errores}
 
 
-def _fechas_base(xlsx_path: str) -> set:
-    """Fechas presentes en la base según el espejo parquet (ms, sin abrir el
-    Excel). Sin espejo → set(): la consolidación procede y el dedup protege."""
-    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
-    if not os.path.isfile(pq):
-        return set()
+# ── Resumen FIEL de la base + memoria de lo visto + manifiesto compartido ──
+# Lo que la app cree que tiene la base (huecos del chip, "ya guardado hoy",
+# consolidación, reconstrucción) sale de `_resumen_base`: {rueda: (filas,
+# filas REALES)} leído del espejo parquet si es copia fiel del Excel y, si no,
+# del Excel (segundos, UNA vez por cambio: cache por la firma de los dos
+# archivos). Antes se miraba sólo el parquet: con OneDrive trayendo el xlsx de
+# una máquina y el parquet de otra, el chip acusaba huecos falsos y el botón
+# Reconstruir pisaba filas reales con filas RC.
+#
+# "LA BASE NUNCA PIERDE RUEDAS" (05/10/2026): cada máquina recuerda en su
+# journal local (`base_vista.json`, por carpeta de base) la mayor cantidad de
+# filas y de filas reales que vio por rueda, y cada guardado deja en la carpeta
+# compartida un manifiesto (`base_manifest.json`: host, hora, ruedas) de lo que
+# escribió. Si la base en disco tiene MENOS que eso — una rueda que falta,
+# filas reales que pasaron a RC, menos de la mitad de las filas — es que
+# OneDrive trajo una versión vieja o la pisó otra máquina (la notebook arrancó
+# con una réplica atrasada y la escribió: se perdieron 5 ruedas). Mientras
+# dure la regresión NO se escribe la base compartida (ni autosave, ni catch-up,
+# ni reconstrucción; el journal local sí) salvo que el journal propio pueda
+# reponer TODO lo perdido — entonces el guardado lo repone. El superuser ve el
+# detalle en el banner: "Reponer del journal" / "Aceptar la base como está".
+VISTA_FILENAME = "base_vista.json"            # journal_dir(): memoria de ESTA máquina
+MANIFEST_FILENAME = "base_manifest.json"      # carpeta de la base: lo que escribió el último guardado
+_MEMORIA_DIAS = 120                           # ventana (calendario) que se vigila
+_fechas_cache: tuple = ()                     # ((firma pq, firma xlsx), resumen): el chip lo sondea 1×/min
+_vista_mem: tuple = ()                        # (path del json, {xlsx: {rueda: (n, reales)}})
+_vista_lock = threading.Lock()
+_manifest_cache: tuple = ()                   # (path, firma, data)
+
+
+class BaseEnRegresion(RuntimeError):
+    """La base compartida perdió ruedas que tenía y el journal de esta máquina
+    no las puede reponer: no se escribe encima."""
+
+    def __init__(self, detalle: Dict[str, Any]) -> None:
+        self.detalle = detalle
+        ruedas = ", ".join(d.strftime("%d/%m") for d in detalle.get("bloqueantes") or [])
+        m = detalle.get("manifest") or {}
+        quien = f" (última escritura: {m['host']} {m['cuando']})" if m.get("host") else ""
+        super().__init__(f"la base compartida perdió ruedas que tenía ({ruedas}): OneDrive trajo una versión "
+                         f"vieja o la pisó otra máquina{quien} — no escribo encima hasta que vuelvan")
+
+
+def _host() -> str:
     try:
-        import pandas as pd
-        f = pd.read_parquet(pq, columns=["fecha_hoy"])["fecha_hoy"]
-        return set(pd.to_datetime(f).dt.date)
+        return socket.gethostname() or "?"
     except Exception:  # noqa: BLE001
-        return set()
+        return "?"
 
 
-_fechas_cache: tuple = ()      # (parquet, mtime_ns, size, fechas)
+def _xlsx_default() -> Optional[str]:
+    from backend.services import deltapaths
+    hist_dir = deltapaths.historico_dir()
+    return os.path.join(hist_dir, HIST_FILENAME) if hist_dir else None
+
+
+def _firma_archivo(path: str) -> Optional[Tuple[int, int]]:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (int(st.st_mtime_ns), int(st.st_size))
+
+
+def _firmas_base(xlsx_path: str) -> tuple:
+    return (_firma_archivo(os.path.splitext(xlsx_path)[0] + ".parquet"), _firma_archivo(xlsx_path))
+
+
+def _resumen_de_frame(fechas: "Any", fuente: "Any" = None) -> Dict[date, Tuple[int, int]]:
+    """{rueda: (filas, filas reales)} de una columna fecha_hoy (+ Price Source;
+    sin ella todas cuentan como reales). Filas sin fecha se ignoran."""
+    import pandas as pd
+    if fechas is None or len(fechas) == 0:
+        return {}
+    f = pd.to_datetime(pd.Series(list(fechas)), errors="coerce")
+    ok = f.notna()
+    if fuente is None:
+        r = pd.Series([True] * len(f))
+    else:
+        r = pd.Series(list(fuente)).astype(str).str.strip().ne(PRICE_SOURCE_RC)
+    t = pd.DataFrame({"f": f[ok].dt.date.values, "r": r[ok].values})
+    if not len(t):
+        return {}
+    g = t.groupby("f")["r"].agg(["size", "sum"])
+    return {d: (int(n), int(s)) for d, n, s in zip(g.index, g["size"], g["sum"])}
+
+
+def _resumen_parquet(pq: str, pd) -> Optional[Dict[date, Tuple[int, int]]]:
+    try:
+        try:
+            t = pd.read_parquet(pq, columns=["fecha_hoy", "Price Source"])
+        except Exception:  # noqa: BLE001 — espejo viejo sin Price Source
+            t = pd.read_parquet(pq, columns=["fecha_hoy"])
+        return _resumen_de_frame(t["fecha_hoy"], t["Price Source"] if "Price Source" in t.columns else None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] espejo parquet ilegible para las ruedas (%s)", exc)
+        return None
+
+
+def _resumen_base(xlsx_path: str) -> Dict[date, Tuple[int, int]]:
+    """{rueda: (filas, filas reales)} según la fuente FIEL: el espejo parquet si
+    es copia del Excel, si no el Excel; sin archivos → {} (la consolidación
+    procede y el dedup protege)."""
+    import pandas as pd
+    from backend.services import espejo
+    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+    hay_pq, hay_xlsx = os.path.isfile(pq), os.path.isfile(xlsx_path)
+    if not hay_pq and not hay_xlsx:
+        return {}
+    if hay_pq and (not hay_xlsx or espejo.espejo_valido(pq, xlsx_path)):
+        r = _resumen_parquet(pq, pd)
+        if r is not None:
+            return r
+    if hay_xlsx:
+        t0 = time.monotonic()
+        try:
+            t = pd.read_excel(xlsx_path, usecols=lambda c: c in ("fecha_hoy", "Price Source"))
+            r = _resumen_de_frame(t["fecha_hoy"], t["Price Source"] if "Price Source" in t.columns else None)
+            logger.info("[historico_writer] ruedas de la base leídas del Excel (el espejo parquet no es copia "
+                        "fiel): %d ruedas en %.1f s", len(r), time.monotonic() - t0)
+            return r
+        except Exception as exc:  # noqa: BLE001 — xlsx corrupto / a medio sincronizar
+            logger.warning("[historico_writer] no pude leer las ruedas del Excel (%s)%s", exc,
+                           " — uso el espejo parquet aunque no sea fiel" if hay_pq else "")
+    if hay_pq:
+        return _resumen_parquet(pq, pd) or {}
+    return {}
+
+
+def _fechas_base(xlsx_path: str) -> set:
+    """Ruedas presentes en la base (fuente fiel), lectura fresca; deja el
+    resumen en el cache y alimenta la memoria de lo visto."""
+    global _fechas_cache
+    key = _firmas_base(xlsx_path)
+    r = _resumen_base(xlsx_path)
+    _fechas_cache = (key, r)
+    _recordar_vista(xlsx_path, r)
+    return set(r)
+
+
+def _resumen_base_cached(xlsx_path: str) -> Dict[date, Tuple[int, int]]:
+    """`_resumen_base` cacheado por la firma (mtime, tamaño) del parquet y del
+    xlsx: dos stat por llamada (~µs), la lectura real UNA vez por cambio de
+    archivo. Es lo que sondea el chip de la topbar (1 req/min por pestaña)."""
+    key = _firmas_base(xlsx_path)
+    if key == (None, None):
+        return {}
+    c = _fechas_cache
+    if c and c[0] == key:
+        return c[1]
+    _fechas_base(xlsx_path)                      # relee y repuebla el cache
+    c = _fechas_cache
+    return c[1] if c else {}
 
 
 def _fechas_base_cached(xlsx_path: str) -> set:
-    """Como _fechas_base pero cacheado por (mtime, size) del espejo parquet:
-    os.stat por llamada (~µs) y la lectura real UNA vez por cambio del archivo.
-    Es lo que sondea el chip de la topbar (1 req/min por pestaña)."""
-    global _fechas_cache
-    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+    return set(_resumen_base_cached(xlsx_path))
+
+
+# Memoria LOCAL (por máquina y por carpeta de base) de lo que se vio en la base.
+def _vista_path() -> str:
+    return os.path.join(journal_dir(), VISTA_FILENAME)
+
+
+def _clave_base(xlsx_path: str) -> str:
+    return os.path.normcase(os.path.abspath(xlsx_path))
+
+
+def _vista_todo() -> Dict[str, Dict[date, Tuple[int, int]]]:
+    """{base: {rueda: (n, reales)}} de la memoria local, cacheada por path."""
+    global _vista_mem
+    path = _vista_path()
+    with _vista_lock:
+        if _vista_mem and _vista_mem[0] == path:
+            return _vista_mem[1]
+        todo: Dict[str, Dict[date, Tuple[int, int]]] = {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            for base, fechas in (raw.get("bases") or {}).items():
+                mem: Dict[date, Tuple[int, int]] = {}
+                for k, v in (fechas or {}).items():
+                    try:
+                        mem[date.fromisoformat(k)] = (int(v[0]), int(v[1]))
+                    except (TypeError, ValueError, IndexError):
+                        continue
+                todo[str(base)] = mem
+        except (OSError, ValueError, AttributeError):
+            pass
+        _vista_mem = (path, todo)
+        return todo
+
+
+def _vista_de(xlsx_path: str) -> Dict[date, Tuple[int, int]]:
+    return dict(_vista_todo().get(_clave_base(xlsx_path), {}))
+
+
+def _vista_guardar(xlsx_path: str, mem: Dict[date, Tuple[int, int]]) -> None:
+    global _vista_mem
+    path = _vista_path()
+    todo = dict(_vista_todo())
+    todo[_clave_base(xlsx_path)] = dict(mem)
+    tmp = _tmp_de(path)
     try:
-        st = os.stat(pq)
-    except OSError:
-        return set()
-    key = (pq, st.st_mtime_ns, st.st_size)
-    c = _fechas_cache
-    if c and c[:3] == key:
-        return c[3]
-    fechas = _fechas_base(xlsx_path)
-    _fechas_cache = key + (fechas,)
-    return fechas
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"host": _host(), "actualizado": _now().strftime("%Y-%m-%d %H:%M"),
+                       "bases": {b: {d.isoformat(): [n, r] for d, (n, r) in sorted(m.items())}
+                                 for b, m in todo.items()}}, f)
+        os.replace(tmp, path)
+    except OSError as exc:
+        logger.info("[historico_writer] no pude guardar la memoria de la base (%s)", exc)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    with _vista_lock:
+        _vista_mem = (path, todo)
+
+
+def _recordar_vista(xlsx_path: str, resumen: Dict[date, Tuple[int, int]]) -> None:
+    """La memoria sólo CRECE: máximo de filas y de filas reales visto por
+    rueda, dentro de la ventana `_MEMORIA_DIAS`."""
+    if not resumen:
+        return
+    piso = _now().date() - timedelta(days=_MEMORIA_DIAS)
+    mem = _vista_de(xlsx_path)
+    cambio = False
+    for d, (n, r) in resumen.items():
+        if d < piso:
+            continue
+        p = mem.get(d)
+        if p is None or n > p[0] or r > p[1]:
+            mem[d] = (max(n, p[0] if p else 0), max(r, p[1] if p else 0))
+            cambio = True
+    for d in [d for d in mem if d < piso]:
+        del mem[d]
+        cambio = True
+    if cambio:
+        _vista_guardar(xlsx_path, mem)
+
+
+# Manifiesto COMPARTIDO: qué ruedas (y cuántas filas) dejó el último guardado.
+def _manifest_path(xlsx_path: str) -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(xlsx_path)), MANIFEST_FILENAME)
+
+
+def _manifest_leer(xlsx_path: str) -> Dict[str, Any]:
+    """{host, cuando, fechas: {rueda: (n, reales)}} del manifiesto (cacheado
+    por firma del archivo); vacío si no hay o no se lee."""
+    global _manifest_cache
+    path = _manifest_path(xlsx_path)
+    firma = _firma_archivo(path)
+    if firma is None:
+        return {"host": None, "cuando": None, "fechas": {}}
+    c = _manifest_cache
+    if c and c[0] == path and c[1] == firma:
+        return c[2]
+    out: Dict[str, Any] = {"host": None, "cuando": None, "fechas": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            out["host"] = raw.get("host")
+            out["cuando"] = raw.get("cuando")
+            for k, v in (raw.get("fechas") or {}).items():
+                try:
+                    out["fechas"][date.fromisoformat(k)] = (int(v[0]), int(v[1]))
+                except (TypeError, ValueError, IndexError):
+                    continue
+    except (OSError, ValueError):
+        logger.warning("[historico_writer] %s ilegible — se ignora", path)
+    _manifest_cache = (path, firma, out)
+    return out
+
+
+def _manifest_escribir(xlsx_path: str, resumen: Dict[date, Tuple[int, int]]) -> None:
+    """Best-effort: sin manifiesto sólo se pierde la detección cruzada entre
+    máquinas (la memoria local sigue)."""
+    global _manifest_cache
+    path = _manifest_path(xlsx_path)
+    tmp = _tmp_de(path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"host": _host(), "cuando": _now().strftime("%Y-%m-%d %H:%M:%S"),
+                       "xlsx": os.path.basename(xlsx_path),
+                       "fechas": {d.isoformat(): [n, r] for d, (n, r) in sorted(resumen.items())}}, f)
+        os.replace(tmp, path)
+        _manifest_cache = ()
+    except OSError as exc:
+        logger.info("[historico_writer] no pude escribir %s (%s)", MANIFEST_FILENAME, exc)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def regresion_base(xlsx_path: Optional[str] = None,
+                   resumen: Optional[Dict[date, Tuple[int, int]]] = None) -> Dict[date, Dict[str, Any]]:
+    """Ruedas que la base TENÍA (memoria local ∪ manifiesto compartido, ventana
+    `_MEMORIA_DIAS`) y hoy en disco faltan o se degradaron: {rueda: {motivo,
+    antes, ahora}}. {} = sana."""
+    if xlsx_path is None:
+        xlsx_path = _xlsx_default()
+        if not xlsx_path:
+            return {}
+    if resumen is None:
+        resumen = _resumen_base_cached(xlsx_path)
+    if not resumen and _firmas_base(xlsx_path) == (None, None):
+        return {}                                    # base nueva: no hay nada que perder
+    esperado: Dict[date, Tuple[int, int]] = _vista_de(xlsx_path)
+    for d, v in _manifest_leer(xlsx_path)["fechas"].items():
+        p = esperado.get(d)
+        esperado[d] = v if p is None else (max(v[0], p[0]), max(v[1], p[1]))
+    piso = _now().date() - timedelta(days=_MEMORIA_DIAS)
+    out: Dict[date, Dict[str, Any]] = {}
+    for d in sorted(esperado):
+        n_esp, r_esp = esperado[d]
+        if d < piso or n_esp <= 0:
+            continue
+        n, r = resumen.get(d, (0, 0))
+        if n == 0:
+            motivo = "falta"
+        elif r_esp > 0 and r == 0:
+            motivo = "sus filas reales pasaron a RC"
+        elif n * 2 < n_esp:
+            motivo = f"quedaron {n} de {n_esp} filas"
+        else:
+            continue
+        out[d] = {"motivo": motivo, "antes": (n_esp, r_esp), "ahora": (n, r)}
+    return out
+
+
+def _journal_reales(path: str) -> int:
+    """Filas con precio REAL (no RC) de un parquet del journal; 0 si no se lee."""
+    try:
+        import pandas as pd
+        try:
+            t = pd.read_parquet(path, columns=["Price Source"])
+            return int(t["Price Source"].astype(str).str.strip().ne(PRICE_SOURCE_RC).sum())
+        except Exception:  # noqa: BLE001 — journal viejo sin la columna
+            return int(len(pd.read_parquet(path, columns=["fecha_hoy"])))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def regresion_detalle(xlsx_path: Optional[str] = None,
+                      resumen: Optional[Dict[date, Tuple[int, int]]] = None) -> Dict[str, Any]:
+    """Para el guard de escritura y el banner: {ruedas, recuperables (el journal
+    local las tiene con filas reales), bloqueantes, detalle, manifest}."""
+    if xlsx_path is None:
+        xlsx_path = _xlsx_default()
+    out: Dict[str, Any] = {"ruedas": [], "recuperables": [], "bloqueantes": [], "detalle": {}, "manifest": None}
+    if not xlsx_path:
+        return out
+    reg = regresion_base(xlsx_path, resumen)
+    out["detalle"] = reg
+    out["ruedas"] = sorted(reg)
+    if not reg:
+        return out
+    jd = _journal_days()
+    for d in out["ruedas"]:
+        p = jd.get(d)
+        if p and _journal_reales(p) >= max(1, reg[d]["antes"][1] // 2):
+            out["recuperables"].append(d)
+        else:
+            out["bloqueantes"].append(d)
+    m = _manifest_leer(xlsx_path)
+    out["manifest"] = {"host": m.get("host"), "cuando": m.get("cuando")}
+    return out
+
+
+def aceptar_base_actual() -> Dict[str, Any]:
+    """El superuser da por buena la base TAL COMO ESTÁ: la memoria local y el
+    manifiesto compartido pasan a describir el disco (lo perdido deja de
+    reclamarse y los guardados vuelven a escribir)."""
+    global _fechas_cache
+    xlsx = _xlsx_default()
+    if not xlsx:
+        return {"ok": False, "error": "carpeta Delta Bases no montada en esta máquina"}
+    _fechas_cache = ()
+    resumen = _resumen_base(xlsx)
+    piso = _now().date() - timedelta(days=_MEMORIA_DIAS)
+    _vista_guardar(xlsx, {d: v for d, v in resumen.items() if d >= piso})
+    _manifest_escribir(xlsx, resumen)
+    _fechas_cache = ()
+    logger.warning("[historico_writer] base ACEPTADA tal como está por el superuser: %d ruedas, última %s",
+                   len(resumen), max(resumen).isoformat() if resumen else "—")
+    return {"ok": True, "ruedas": len(resumen), "ultima": max(resumen).isoformat() if resumen else None}
+
+
+def _disparo_vencido(disparo: datetime, ahora: datetime) -> bool:
+    """El temporizador del autosave venció mientras el equipo dormía (notebook
+    suspendida un fin de semana: el disparo del sábado 17:01 saltó el lunes a
+    las 11:14 y evaluó el cierre con el WS recién desconectado por el resume →
+    "feed caído al cierre" falso + aviso). Pasada la ventana de reintentos el
+    disparo ya no vale: se rearma para el próximo."""
+    return ahora > disparo + timedelta(minutes=_VENTANA_MIN)
 
 
 def _hora_archivo(xlsx_path: str) -> Optional[str]:
@@ -683,7 +1048,8 @@ def estado_cierre() -> Dict[str, Any]:
     if not hist_dir:
         return out
     xlsx = os.path.join(hist_dir, HIST_FILENAME)
-    fechas = _fechas_base_cached(xlsx)
+    resumen = _resumen_base_cached(xlsx)
+    fechas = set(resumen)
     ultima = max(fechas) if fechas else None
     sin_rueda = _sin_rueda_days()
     esperado = _ultimo_cierre_esperado(ahora, settings.historico_autosave_hhmm, sin_rueda)
@@ -716,6 +1082,26 @@ def estado_cierre() -> Dict[str, Any]:
                 "hueco_reconstruible": (_fuente_reconstruccion(huecos[-1], fechas, sin_rueda, hoy)
                                         if huecos else None),
                 "reconstruccion": _ultima_reconstruccion})
+    # Regresión ("la base nunca pierde ruedas"): manda sobre falta / hueco —
+    # esos son el síntoma; esto es el diagnóstico y frena las escrituras.
+    reg = regresion_detalle(xlsx, resumen=resumen)
+    m = reg.get("manifest") or {}
+    out.update({"regresion": [d.isoformat() for d in reg["ruedas"]],
+                "regresion_fmt": ", ".join(d.strftime("%d/%m") for d in reg["ruedas"]),
+                "regresion_recuperables": [d.isoformat() for d in reg["recuperables"]],
+                "regresion_bloqueantes": [d.isoformat() for d in reg["bloqueantes"]],
+                "regresion_host": m.get("host"), "regresion_cuando": m.get("cuando")})
+    if reg["ruedas"]:
+        n, nr = len(reg["ruedas"]), len(reg["recuperables"])
+        pl = "s" if n != 1 else ""
+        out["estado"] = "regresion"
+        out["texto"] = f"⚠ la base perdió {n} rueda{pl}"
+        out["detalle"] = (f"La base histórica perdió {n} rueda{pl} que tenía ({out['regresion_fmt']}): OneDrive "
+                          "trajo una versión vieja o la pisó otra máquina"
+                          + (f" (última escritura: {m['host']} {m['cuando']})" if m.get("host") else "")
+                          + ". No se escribe encima hasta que vuelvan"
+                          + (f"; el journal de esta máquina puede reponer {nr}" if nr else "") + ".")
+        return out
     dm = esperado.strftime("%d/%m")
     if esperado in fechas:
         out["estado"] = "ok"
@@ -796,7 +1182,8 @@ _save_lock = threading.Lock()
 _LOCK_ESPERAS = (2.0, 5.0, 15.0)
 
 
-def append_and_save(df: "Any", xlsx_path: str, incluir_journal: bool = True) -> Dict[str, Any]:
+def append_and_save(df: "Any", xlsx_path: str, incluir_journal: bool = True,
+                    ignorar_regresion: bool = False) -> Dict[str, Any]:
     """Appendea `df` a la base (Excel + espejo Parquet) con la semántica de
     bymaapi.guardar_excel: concat con lo existente, dedup (symbol, Código,
     fecha_hoy) keep last, dropna de métricas, Proy por sufijo 'j'. Escritura
@@ -805,14 +1192,18 @@ def append_and_save(df: "Any", xlsx_path: str, incluir_journal: bool = True) -> 
 
     `df` puede ser None (consolidación pura). Con `incluir_journal`, mergea
     además los días del journal local que a la base le FALTEN — un cierre que
-    la base se perdió se repara solo. Reintenta ante un xlsx lockeado."""
+    la base se perdió se repara solo. Reintenta ante un xlsx lockeado.
+
+    Lanza `BaseEnRegresion` si la base en disco perdió ruedas que tenía y el
+    journal local no las repone (ver el bloque "la base nunca pierde ruedas");
+    `ignorar_regresion` = el superuser pidió escribir igual (Reponer del journal)."""
     import numpy as np
     import pandas as pd
 
     with _save_lock:
         for i in range(len(_LOCK_ESPERAS) + 1):
             try:
-                return _append_and_save_locked(df, xlsx_path, np, pd, incluir_journal)
+                return _append_and_save_locked(df, xlsx_path, np, pd, incluir_journal, ignorar_regresion)
             except (PermissionError, OSError) as exc:
                 if i == len(_LOCK_ESPERAS):
                     raise
@@ -903,7 +1294,8 @@ def _leer_base(xlsx_path: str, pd) -> "Any":
 
 
 def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
-                            incluir_journal: bool = True) -> Dict[str, Any]:
+                            incluir_journal: bool = True, ignorar_regresion: bool = False) -> Dict[str, Any]:
+    global _fechas_cache
     prev = None
     pq_solo = os.path.splitext(xlsx_path)[0] + ".parquet"
     if os.path.exists(xlsx_path):
@@ -925,22 +1317,43 @@ def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
         logger.warning("[historico_writer] sin %s: base leída del espejo parquet (%d filas)",
                        os.path.basename(xlsx_path), len(prev))
 
+    # "La base nunca pierde ruedas": lo que se va a reescribir (prev) contra lo
+    # que esta máquina vio y lo que dice el manifiesto compartido. Si a la base
+    # le faltan ruedas que el journal local no puede reponer, NO se escribe —
+    # escribir desde una réplica vieja de OneDrive propaga la pérdida a todos.
+    res_prev = (_resumen_de_frame(prev["fecha_hoy"], prev["Price Source"] if "Price Source" in prev.columns else None)
+                if prev is not None and len(prev) else {})
+    reg = regresion_detalle(xlsx_path, resumen=res_prev)
+    if reg["bloqueantes"] and not ignorar_regresion:
+        raise BaseEnRegresion(reg)
+    if reg["ruedas"]:
+        logger.warning("[historico_writer] la base perdió %s — %s",
+                       ", ".join(d.strftime("%d/%m") for d in reg["ruedas"]),
+                       "las repongo desde el journal local" if not reg["bloqueantes"]
+                       else "escribo igual por pedido del superuser y repongo del journal lo que hay")
+    degradadas = set(reg["ruedas"])
+
     frames = [prev] if prev is not None else []
     consolidados = 0
     if incluir_journal:
         en_base = set(prev["fecha_hoy"]) if prev is not None else set()
-        hoy = _now().date()
+        dias_df = set(df["fecha_hoy"]) if df is not None and len(df) else set()
         for dia, path in sorted(_journal_days().items()):
-            # el día de HOY viene fresco en `df` (si hay); del journal entran
-            # sólo los días que a la base le faltan
-            if dia in en_base or (df is not None and len(df) and dia == hoy):
+            # La rueda que viene fresca en `df` (hoy, o la que la reconstrucción
+            # acaba de journalear) no se duplica desde el journal; de ahí entran
+            # las que a la base le FALTAN y las que perdió (regresión) si el
+            # journal las tiene con filas reales.
+            if dia in dias_df:
+                continue
+            if dia in en_base and (dia not in degradadas or _journal_reales(path) == 0):
                 continue
             try:
                 jf = pd.read_parquet(path)
                 jf["fecha_hoy"] = pd.to_datetime(jf["fecha_hoy"]).dt.date
                 frames.append(jf)
                 consolidados += 1
-                logger.info("[historico_writer] consolidando %s desde el journal local", dia)
+                logger.info("[historico_writer] %s %s desde el journal local",
+                            "reponiendo" if dia in degradadas else "consolidando", dia)
             except Exception as exc:  # noqa: BLE001 — un journal roto no frena la base
                 logger.warning("[historico_writer] journal %s ilegible: %s", path, exc)
     if df is not None and len(df):
@@ -995,6 +1408,12 @@ def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
     # posterior del Excel (mtime o tamaño) hace ganar al Excel.
     from backend.services import espejo
     espejo.marcar_espejo(pq_path, xlsx_path)
+    # Manifiesto compartido + memoria local de lo que quedó escrito.
+    resumen_final = _resumen_de_frame(df_last["fecha_hoy"],
+                                      df_last["Price Source"] if "Price Source" in df_last.columns else None)
+    _manifest_escribir(xlsx_path, resumen_final)
+    _recordar_vista(xlsx_path, resumen_final)
+    _fechas_cache = ()
 
     return {"total_rows": len(df_last), "xlsx": xlsx_path, "parquet": pq_path,
             "consolidados": consolidados}
@@ -1030,14 +1449,18 @@ def _ya_guardado_hoy(xlsx_path: str) -> bool:
     return _now().date() in _fechas_base(xlsx_path)
 
 
-def consolidar_journal() -> Optional[Dict[str, Any]]:
-    """Mergea a la base los días del journal local que le FALTEN, sin armar
-    filas nuevas. Corre al ARRANCAR la app (catch-up): si la base se perdió
-    un cierre que esta máquina sí capturó (app caída a las 17:01, xlsx
-    lockeado, conflicto de OneDrive), se repara acá. None = nada para hacer."""
+def consolidar_journal(*, reponer: bool = False) -> Optional[Dict[str, Any]]:
+    """Mergea a la base los días del journal local que le FALTEN (o que perdió:
+    regresión con filas reales en el journal), sin armar filas nuevas. Corre al
+    ARRANCAR la app (catch-up): si la base se perdió un cierre que esta máquina
+    sí capturó (app caída a las 17:01, xlsx lockeado, conflicto de OneDrive),
+    se repara acá. None = nada para hacer. Con la base en regresión por ruedas
+    que este journal NO tiene, no escribe (`skipped`); `reponer` = el botón
+    "Reponer del journal" del banner: escribe igual lo que hay, sin exigir
+    ser writer."""
     from backend.config import settings
     from backend.services import deltapaths
-    if not settings.historico_base_writer:
+    if not settings.historico_base_writer and not reponer:
         return None
     hist_dir = deltapaths.historico_dir()
     if not hist_dir:
@@ -1046,13 +1469,29 @@ def consolidar_journal() -> Optional[Dict[str, Any]]:
     if not dias:
         return None
     xlsx = os.path.join(hist_dir, HIST_FILENAME)
-    fechas = _fechas_base(xlsx)
-    pendientes = sorted(d for d in dias if d not in fechas)
+    resumen = _resumen_base_cached(xlsx)
+    fechas = set(resumen)
+    reg = regresion_detalle(xlsx, resumen=resumen)
+    pendientes = sorted(d for d, p in dias.items()
+                        if d not in fechas or (d in reg["detalle"] and _journal_reales(p) > 0))
     if not pendientes:
         return None
+    fmt = ", ".join(str(d) for d in pendientes)
+    if reg["bloqueantes"] and not reponer:
+        logger.warning("[historico_writer] catch-up frenado: la base perdió %s y este journal no las tiene "
+                       "(sí podría reponer %s) — ver el banner",
+                       ", ".join(str(d) for d in reg["bloqueantes"]),
+                       ", ".join(str(d) for d in reg["recuperables"]) or "ninguna")
+        return {"skipped": "base en regresión", "consolidados": 0,
+                "bloqueantes": [d.isoformat() for d in reg["bloqueantes"]],
+                "recuperables": [d.isoformat() for d in reg["recuperables"]]}
     logger.warning("[historico_writer] catch-up: a la base le faltan %s — consolidando "
-                   "desde el journal local", ", ".join(str(d) for d in pendientes))
-    res = append_and_save(None, xlsx)
+                   "desde el journal local", fmt)
+    try:
+        res = append_and_save(None, xlsx, ignorar_regresion=reponer)
+    except BaseEnRegresion as exc:           # el disco cambió entre el chequeo y la escritura
+        logger.warning("[historico_writer] catch-up frenado: %s", exc)
+        return {"skipped": str(exc), "consolidados": 0}
     try:
         from backend.services import historico_byma
         historico_byma.refresh()
@@ -1079,6 +1518,7 @@ def estado() -> Dict[str, Any]:
     out["atraso_habiles"] = e["atraso"]
     out["ok"] = e["estado"] == "ok"
     out["detalle"] = e["detalle"]
+    out["regresion"] = e.get("regresion") or []
     dias_j = _journal_days()
     out["journal_dias"] = len(dias_j)
     pend = sorted(d for d in dias_j if d not in fechas)
@@ -1202,6 +1642,15 @@ def save_today(force: bool = False) -> Dict[str, Any]:
         res["ok"] = True
         res["hora"] = _now().strftime("%H:%M")
         _prune_journal()
+    except BaseEnRegresion as exc:
+        # El día ya quedó en el journal local; la base compartida no se toca
+        # hasta que vuelvan las ruedas perdidas (o el superuser las reponga /
+        # acepte la base). El autosave reintenta dentro de su ventana.
+        res["skipped"] = str(exc)
+        res["retry"] = True
+        res["regresion"] = [d.isoformat() for d in exc.detalle.get("bloqueantes") or []]
+        logger.warning("[historico_writer] cierre de hoy sólo en el journal local: %s", exc)
+        return res
     except Exception as exc:  # noqa: BLE001
         logger.exception("[historico_writer] guardado falló")
         res["error"] = str(exc)
@@ -1464,6 +1913,16 @@ def _filas_base_en(base_df: "Any", dia: date) -> List[Dict[str, Any]]:
     return out
 
 
+def _filas_reales_en(base_df: "Any", dia: date) -> int:
+    """Filas de la rueda `dia` en la base con precio REAL (Price Source ≠ RC)."""
+    if base_df is None or not len(base_df):
+        return 0
+    sub = base_df[base_df["fecha_hoy"] == dia]
+    if "Price Source" in sub.columns:
+        sub = sub[sub["Price Source"].astype(str).str.strip() != PRICE_SOURCE_RC]
+    return int(len(sub))
+
+
 def _evidencia_rueda(filas_sig: List[Dict[str, Any]], previos: Dict[tuple, float]) -> Optional[Tuple[int, int]]:
     """(comparados, movidos): cuántos cierres previos de la rueda siguiente
     difieren del último de la rueda anterior. Si casi ninguno se movió, en el
@@ -1684,6 +2143,13 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
         if dia in fechas and not force:
             res["skipped"] = f"la base ya tiene el {dia_fmt}"
             return res
+        reg = regresion_detalle(xlsx)
+        if reg["bloqueantes"]:
+            # Reconstruir sobre una réplica vieja fabrica RC y propaga la pérdida.
+            res["skipped"] = ("la base compartida está en regresión (perdió "
+                              + ", ".join(d.strftime("%d/%m") for d in reg["bloqueantes"])
+                              + "): no reconstruyo encima — primero reponer o aceptar la base (banner)")
+            return res
         if not settings.historico_base_writer and not force and dia in _journal_days():
             # Máquina secundaria: ya lo journaleó; no recalcular 500 TIRs en
             # cada arranque hasta que la writer consolide.
@@ -1692,6 +2158,13 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
             return res
         minimo = int(settings.historico_autosave_min_operados)
         base_df = _leer_base_lectura(xlsx)
+        ya = _filas_reales_en(base_df, dia)
+        if ya > 0:
+            # El "hueco" venía de un espejo parquet desactualizado: la base real
+            # tiene la rueda con precios de verdad — jamás se pisa con RC.
+            res["skipped"] = (f"la base ya tiene el {dia_fmt} con {ya} filas reales — no se pisa "
+                              "(el aviso de hueco venía de un espejo parquet desactualizado)")
+            return res
         previos = _ultimos_previos(base_df, dia)
         settle = _settle_24hs(dia)
         rows: List[Dict[str, Any]] = []
@@ -1789,6 +2262,13 @@ def reconstruir_faltantes(*, force: bool = False) -> Dict[str, Any]:
                            "resultados": [], "skipped": None}
     if not settings.historico_reconstruir and not force:
         out["skipped"] = "historico_reconstruir=0"
+        return out
+    reg = regresion_detalle()
+    if reg["bloqueantes"]:
+        out["skipped"] = ("base en regresión (perdió "
+                          + ", ".join(d.strftime("%d/%m") for d in reg["bloqueantes"])
+                          + "): no se reconstruye nada hasta reponer o aceptar la base")
+        logger.warning("[historico_writer] reconstrucción frenada: %s", out["skipped"])
         return out
     huecos = huecos_base()
     out["huecos"] = [d.isoformat() for d in huecos]
@@ -2448,7 +2928,7 @@ class HistoricoAutosave:
         # OneDrive), se consolida acá mismo, sin esperar al próximo cierre.
         try:
             r0 = await loop.run_in_executor(None, consolidar_journal)
-            if r0:
+            if r0 and r0.get("consolidados"):
                 logger.info("[historico_writer] catch-up del journal OK: %s día(s) "
                             "consolidados (%s filas totales)",
                             r0.get("consolidados"), r0.get("total_rows"))
@@ -2478,6 +2958,13 @@ class HistoricoAutosave:
                 break                                  # stop durante la espera
             except asyncio.TimeoutError:
                 pass
+            if _disparo_vencido(disparo, _now()):
+                # El equipo durmió (notebook suspendida): el temporizador saltó
+                # con la ventana ya vencida. Evaluarlo igual daba "feed caído al
+                # cierre" sobre el WS recién reconectado por el resume.
+                logger.info("[historico_writer] disparo de las %s del %s vencido al despertar — rearmo para el próximo",
+                            self.hhmm, disparo.strftime("%d/%m"))
+                continue
             # Antes de guardar HOY: huecos anteriores (el feed todavía trae los
             # cierres de ayer; a partir de mañana ya no).
             try:
@@ -2589,6 +3076,14 @@ class HistoricoAutosave:
     async def _reconstruir_al_arrancar(self, loop) -> None:
         from backend.config import settings
         if not settings.historico_reconstruir:
+            return
+        reg = await loop.run_in_executor(None, regresion_detalle)
+        if reg["bloqueantes"]:
+            logger.warning("[historico_writer] la base perdió %s%s — no reconstruyo ni escribo hasta que "
+                           "vuelvan (OneDrive / otra máquina; ver el banner)",
+                           ", ".join(d.strftime("%d/%m") for d in reg["bloqueantes"]),
+                           f" (última escritura: {reg['manifest']['host']} {reg['manifest']['cuando']})"
+                           if (reg.get("manifest") or {}).get("host") else "")
             return
         huecos = await loop.run_in_executor(None, huecos_base)
         if not huecos:

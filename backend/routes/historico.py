@@ -173,6 +173,47 @@ async def historicos_ignorar_hueco(request: Request) -> HTMLResponse:
     return HTMLResponse(f'<span class="{cls} muted" style="font-size:12px">{msg}</span>', headers=headers)
 
 
+def _span(msg: str, ok: bool, refrescar: bool = False) -> HTMLResponse:
+    cls = "guardar-ok" if ok else "guardar-err"
+    return HTMLResponse(f'<span class="{cls} muted" style="font-size:12px">{msg}</span>',
+                        headers={"HX-Trigger": "cierre-refresh"} if refrescar else None)
+
+
+@router.post("/historicos/aceptar-base", response_class=HTMLResponse)
+async def historicos_aceptar_base(request: Request) -> HTMLResponse:
+    """"Aceptar la base como está" (banner de regresión): la memoria local y el
+    manifiesto compartido pasan a describir el disco — las ruedas perdidas
+    dejan de reclamarse y los guardados vuelven a escribir. SÓLO superuser."""
+    from datetime import date as _date
+
+    from backend.services import historico_writer
+
+    res = await asyncio.get_running_loop().run_in_executor(None, historico_writer.aceptar_base_actual)
+    if not res.get("ok"):
+        return _span(f"⚠ {res.get('error') or 'no se pudo'}", False)
+    ult = res.get("ultima")
+    ult_fmt = _date.fromisoformat(ult).strftime("%d/%m/%Y") if ult else "—"
+    return _span(f"✓ Base aceptada tal como está: {res['ruedas']} ruedas, última {ult_fmt}", True, refrescar=True)
+
+
+@router.post("/historicos/reponer-journal", response_class=HTMLResponse)
+async def historicos_reponer_journal(request: Request) -> HTMLResponse:
+    """"Reponer del journal" (banner de regresión): consolida a la base las
+    ruedas que el journal de ESTA máquina tiene con precios reales, aunque la
+    base siga en regresión por otras. SÓLO superuser."""
+    from backend.services import historico_writer
+
+    res = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: historico_writer.consolidar_journal(reponer=True))
+    if res is None:
+        return _span("✓ Nada para reponer: la base ya tiene todo lo que guarda el journal de esta máquina",
+                     True, refrescar=True)
+    if res.get("consolidados"):
+        return _span(f"✅ Repuestas {res['consolidados']} rueda(s) desde el journal local · total "
+                     f"{res.get('total_rows')} filas", True, refrescar=True)
+    return _span(f"⚠ {res.get('skipped') or res.get('error') or 'no se repuso nada'}", False)
+
+
 def _line_chart(serie: str, rango: str, desde: Optional[str] = None,
                 hasta: Optional[str] = None, width: int = 960, height: int = 420) -> Dict[str, Any]:
     days = None if (desde or hasta) else _RANGOS.get(rango, 365)

@@ -1,6 +1,9 @@
 {# Chip "cierre" del pie de página + banner (oob) — historico_writer.estado_cierre.
    Sin carpeta de bases (sin_base) el chip queda vacío (CSS lo oculta).
    Banner (sólo superuser):
+     regresion  → la base perdió ruedas que tenía (OneDrive trajo una versión
+                  vieja / otra máquina la pisó): no se escribe encima;
+                  Reponer del journal (si esta máquina las tiene) / Aceptar
      falta      → cierre esperado ausente: Guardar ahora (si es HOY) o Reconstruir
                   (rueda anterior: desde los cierres del feed / la rueda siguiente)
      pendiente  → feed caído a la hora del autosave: aviso + Guardar igual (force)
@@ -11,7 +14,15 @@
 <a class="cierre-chip" data-state="{{ e.estado }}" href="/historicos" title="{{ e.detalle }}">{{ e.texto }}</a>
 {%- endif -%}
 <div id="cierre-banner" hx-swap-oob="true">
-{%- if request.state.is_superuser and e.estado == "falta" %}
+{%- if request.state.is_superuser and e.estado == "regresion" %}
+  <div class="alert alert-error cierre-banner">
+    <span>⚠ <strong>La base histórica perdió {{ e.regresion|length }} rueda{% if e.regresion|length != 1 %}s{% endif %} que tenía</strong> ({{ e.regresion_fmt }}). OneDrive trajo una versión vieja o la pisó otra máquina{% if e.regresion_host %} (última escritura: {{ e.regresion_host }} {{ e.regresion_cuando }}){% endif %}. Hasta que vuelvan no se escribe nada encima: ni el cierre de hoy, ni consolidación, ni reconstrucción (el journal local sigue guardando). Revisá el historial de versiones del xlsx en OneDrive y que una sola máquina sea writer (<code>HISTORICO_BASE_WRITER=0</code> en las demás).{% if e.regresion_recuperables %} El journal de esta máquina tiene {{ e.regresion_recuperables|length }} de esas ruedas con precios reales:{% endif %}
+    </span>
+    {% if e.regresion_recuperables %}<button type="button" class="btn-primary" style="font-size:11px" hx-post="/historicos/reponer-journal" hx-target="#cierre-banner-msg" hx-swap="innerHTML" hx-disabled-elt="this" hx-confirm="Repone desde el journal de esta máquina las {{ e.regresion_recuperables|length }} rueda(s) que tiene con precios reales y escribe la base compartida aunque sigan faltando otras. ¿Seguir?">Reponer del journal ({{ e.regresion_recuperables|length }})</button>{% endif %}
+    <button type="button" class="btn-ghost" style="font-size:11px;padding:8px 14px;border-radius:8px" hx-post="/historicos/aceptar-base" hx-target="#cierre-banner-msg" hx-swap="innerHTML" hx-disabled-elt="this" hx-confirm="Da por buena la base TAL COMO ESTÁ: las ruedas perdidas dejan de reclamarse y los guardados vuelven a escribir. Antes conviene restaurar el xlsx desde el historial de versiones de OneDrive. ¿Aceptar?" title="La memoria de esta máquina y el manifiesto compartido pasan a describir la base actual">Aceptar la base como está</button>
+    <span id="cierre-banner-msg"></span>
+  </div>
+{%- elif request.state.is_superuser and e.estado == "falta" %}
   <div class="alert alert-error cierre-banner">
     <span>⚠ <strong>La base histórica no tiene el cierre del {{ e.esperado_fmt }}</strong>{% if e.atraso and e.atraso > 1 %} (atraso {{ e.atraso }} ruedas){% endif %}.
       {% if e.error %}Último intento: {{ e.error }}.{% elif e.feed_muerto %}A las {{ e.hhmm }} el feed estaba caído ({{ e.feed_muerto }}) y el autosave reintentó hasta las {{ e.hasta }} sin datos frescos.{% else %}¿La app estaba cerrada a las {{ e.hhmm }}?{% endif %}

@@ -760,7 +760,7 @@ select {
 .cierre-chip[data-state="ok"] { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
 .cierre-chip[data-state="pendiente"], .cierre-chip[data-state="capturado"] {
   color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 45%, transparent); }
-.cierre-chip[data-state="falta"] { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, transparent); font-weight: 600; }
+.cierre-chip[data-state="falta"], .cierre-chip[data-state="regresion"] { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, transparent); font-weight: 600; }
 .cierre-banner { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 8px 16px 0; }
 
 /* ── Chip de usuario en la topbar ─────────────────────────────────── */

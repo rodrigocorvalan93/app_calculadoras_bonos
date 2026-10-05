@@ -91,6 +91,11 @@ def espejo_valido(pq_path: str, xlsx_path: Optional[str]) -> bool:
     if sc is not None and "xlsx_mtime_ns" in sc:
         try:
             ok = (int(sc.get("xlsx_mtime_ns")) == k_x[0] and int(sc.get("xlsx_size")) == k_x[1])
+            # La firma también describe al PARQUET (tamaño): OneDrive puede
+            # traer el espejo de otra máquina y dejar el sidecar local — con
+            # sólo la huella del Excel ese parquet ajeno pasaba por fiel.
+            if ok and sc.get("pq_size") is not None:
+                ok = int(sc.get("pq_size")) == k_pq[1]
         except (TypeError, ValueError):
             ok = False
     else:
@@ -119,10 +124,12 @@ def marcar_espejo(pq_path: str, xlsx_path: Optional[str]) -> bool:
         except OSError:
             pass
         return False
+    k_pq = _stat_key(pq_path)
     tmp = sc + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({**f, "xlsx": os.path.basename(xlsx_path or "")}, fh)
+            json.dump({**f, "xlsx": os.path.basename(xlsx_path or ""),
+                       **({"pq_size": k_pq[1]} if k_pq is not None else {})}, fh)
         os.replace(tmp, sc)
         return True
     except OSError as exc:

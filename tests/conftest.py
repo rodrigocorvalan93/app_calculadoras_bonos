@@ -20,6 +20,11 @@ os.environ.setdefault("AUTH_ENABLED", "0")
 # el cache local de símbolos rechazados por el broker (primary_ws) no se toca
 # desde la suite: un test que lo necesite lo apunta a un tmp_path
 os.environ.setdefault("PRIMARY_REJECTED_CACHE", "0")
+# Journal LOCAL por máquina (historico_writer.journal_dir: px_tasas_*, marcas
+# sin_rueda, memoria de la base `base_vista.json`): la suite nunca toca el
+# real — un tmp nuevo por corrida (los tests que lo necesitan aislado por test
+# lo apuntan a su tmp_path).
+os.environ.setdefault("HISTORICO_JOURNAL_DIR", tempfile.mkdtemp(prefix="bonos_test_journal_"))
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")
 os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_auth_store.json"))
 # Bootstrap del superuser de la suite: valores SINTÉTICOS (nunca una cuenta
