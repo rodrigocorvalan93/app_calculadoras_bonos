@@ -158,6 +158,12 @@ def main(argv: Optional[list] = None) -> int:
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     res = asyncio.run(capturar(force=args.force, timeout=args.timeout))
+    if res.get("regresion"):
+        # El día quedó en el journal local; la base compartida NO se escribió
+        # (perdió ruedas que esta máquina no puede reponer): que el scheduler lo vea.
+        print(f"cierre: SIN ESCRIBIR la base compartida — {res['skipped']} (el día quedó en el journal local; "
+              f"python -m backend.tools.base_check)", file=sys.stderr)
+        return 1
     if res.get("skipped"):
         print(f"cierre: salteado — {res['skipped']}")
         return 0

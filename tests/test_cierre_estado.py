@@ -41,10 +41,14 @@ def env(tmp_path, monkeypatch):
 
 
 def _base(tmp_path, *dias: date) -> str:
-    """Espejo parquet con esas fechas (lo único que lee el estado)."""
+    """Espejo parquet con esas fechas (lo único que lee el estado). Cada
+    siembra es un MUNDO NUEVO: la máquina acepta esa base como la suya — si
+    no, pasar de una base con el 31/08 a una que termina el 27/08 es,
+    con razón, una regresión (`test_base_regresion`), no un cierre que falta."""
     pq = str(tmp_path / hw.HIST_FILENAME).replace(".xlsx", ".parquet")
     pd.DataFrame({"fecha_hoy": list(dias), "Código": ["X"] * len(dias)}).to_parquet(pq, index=False)
     hw._fechas_cache = ()
+    hw.aceptar_base_actual()
     return pq
 
 
