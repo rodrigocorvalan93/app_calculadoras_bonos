@@ -222,7 +222,9 @@ def test_e08_filtro_codes_por_lookup_directo(monkeypatch) -> None:
 
 
 # ── E07 · cashflows una sola vez por valuación, mismos números ───────────────
-_PRECIOS_MUESTRA = {"GD30C": 62.0, "AL30D": 58.0, "TX26": 1250.0, "TTM26": 100.0, "PBA28j": 78.0}
+# Precios de paridad razonable: TX26 a 1250 (67 % sobre su pago de 11/2026) daba
+# TIR −99 % → 1+r ≈ 0,005 y el round-trip precio→TIR→precio dependía del día.
+_PRECIOS_MUESTRA = {"GD30C": 62.0, "AL30D": 58.0, "TX26": 750.0, "TTM26": 100.0, "PBA28j": 78.0}
 
 
 def _codigos_muestra():
@@ -254,7 +256,11 @@ def test_e07_una_valuacion_genera_los_flujos_una_vez_y_da_lo_mismo(monkeypatch) 
         gens.clear()
         m2 = pricing.compute_metrics(code, "tir", m["tirea"], settle=settle, include_cashflows=False)
         assert not m2.get("error") and len(gens) == 1
-        assert m2["precio"] == pytest.approx(m["precio"], rel=1e-5)   # round-trip precio→TIR→precio (tolerancia del Newton)
+        # round-trip precio→TIR→precio: el Newton de calcula_tirea corta con un
+        # paso < 1e-4 en la TASA; en precio eso vale hasta P · D_mod · 1e-4
+        # (D_mod = duration / (1 + TIREA)) — la cota, no un 1e-5 fijo.
+        d_mod = float(m["duration"]) / (1.0 + float(m["tirea"]))
+        assert m2["precio"] == pytest.approx(m["precio"], rel=max(1e-5, 2.0 * d_mod * 1e-4)), code
     monkeypatch.undo()
     # equivalencia numérica: intereses corridos reutilizando los flujos ==
     # regenerándolos (mismo objeto, misma fecha), en todos los atributos
