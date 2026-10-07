@@ -159,6 +159,80 @@ async def test_curvas_rerenderiza_solo_las_filas_que_cambiaron() -> None:
         assert rc._CROW_STATS["hit"] - antes["hit"] == n - 1
 
 
+@pytest.mark.asyncio
+async def test_mercado_rerenderiza_solo_las_filas_que_cambiaron() -> None:
+    """Revisión 07/10: la tabla COMPLETA de Mercado rehacía el Jinja de las 163
+    filas en cada tick (46 ms p50 con un solo símbolo cambiado). Memo de HTML
+    por fila como Curvas (14 ms): un tick re-renderiza sólo su fila, y el delta
+    (/mercado/rows) devuelve exactamente la misma fila que la tabla."""
+    import re
+
+    from backend.main import app
+    from backend.routes import curves as rc
+
+    bond_universe.ensure_loaded()
+    codes = curves.build_curve_codes().get("cer", [])
+    store = _seed(codes)
+    rc._MROW_MEMO.clear()
+    rc._MROW_STATS.update(render=0, hit=0)
+    q = "curve=cer&plazo=24hs&only_quoting=true&leg=native&fuente=byma&ym=tir&panel=rf&q=&mas=0"
+
+    def cuerpo(t: str) -> str:                     # el <tbody> (el card lleva data-seq, que cambia por tick)
+        return t.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r1 = await ac.get("/mercado/table?" + q)
+        assert r1.status_code == 200 and "<tbody>" in r1.text
+        n = r1.text.count("<tr data-code=")
+        assert n > 0
+        primera = dict(rc._MROW_STATS)
+        assert primera["render"] >= n and primera["hit"] == 0
+        otro = curves.build_curve_codes().get("lecap", [])[0]      # tick en OTRA curva: todo del memo
+        store.update_from_md(syms.md_symbol(otro, "24hs"), {"NV": 5})
+        r2 = await ac.get("/mercado/table?" + q)
+        assert r2.status_code == 200 and cuerpo(r2.text) == cuerpo(r1.text)
+        assert rc._MROW_STATS["render"] == primera["render"] and rc._MROW_STATS["hit"] >= n
+        seq_cli = int(re.search(r'data-seq="(\d+)"', r2.text).group(1))
+        order = re.search(r'data-order="([^"]+)"', r2.text).group(1)
+        # tick en UN bono de la curva → se re-renderiza sólo esa fila…
+        store.update_from_md(syms.md_symbol(codes[0], "24hs"), {"LA": {"price": 101.0, "size": 5}})
+        antes = dict(rc._MROW_STATS)
+        r3 = await ac.get("/mercado/table?" + q)
+        assert r3.status_code == 200 and cuerpo(r3.text) != cuerpo(r2.text)
+        assert rc._MROW_STATS["render"] - antes["render"] == 1
+        assert rc._MROW_STATS["hit"] - antes["hit"] == n - 1
+        # …y el delta manda ESA fila, byte a byte la misma que la tabla (mismo memo)
+        rd = await ac.get(f"/mercado/rows?{q}&since={seq_cli}&order={order}")
+        assert rd.status_code == 200 and rd.headers.get("x-rows") == "1" and not rd.headers.get("x-full")
+        fila = rd.text.strip()
+        assert fila.startswith(f'<tr data-code="{codes[0]}"') and fila in cuerpo(r3.text)
+
+
+def test_forwards_matrix_cells_html_igual_al_template() -> None:
+    """Revisión 07/10: la matriz arma cada fila en Python (`cells_html`, celdas
+    memoizadas por valor) y el template la pinta tal cual; el loop de Jinja por
+    celda queda de fallback y tiene que dar EXACTAMENTE el mismo markup."""
+    from backend.main import app
+    from backend.routes import curves as rc
+
+    rows = [{"code": f"B{i}", "tirea": 0.30 + i * 0.01, "duration": 0.5 + i * 0.4, "volume": 1.0}
+            for i in range(6)]
+    rows.append({"code": "X<y", "tirea": 0.35, "duration": 3.0, "volume": 1.0})      # se escapa
+    fwd = rc._forwards_matrix(rows)
+    assert fwd["n"] == 7 and all("cells_html" in r for r in fwd["rows"])
+    celdas = {(r["code"], fwd["header"][j]["code"]): c["txt"] for r in fwd["rows"] for j, c in enumerate(r["cells"])}
+    assert celdas[("B0", "B1")] != "·" and celdas[("B1", "B0")] == "·"                 # triangular
+    assert 'data-fwl="X&lt;y"' in fwd["rows"][0]["cells_html"]
+    tpl = app.state.templates.env.get_template("partials/_fwd_matrix.html")
+    con = tpl.render(fwd=fwd)
+    sin = tpl.render(fwd={**fwd, "rows": [{k: v for k, v in r.items() if k != "cells_html"} for r in fwd["rows"]]})
+    assert con == sin and con.count("<td") == fwd["n"] * (fwd["n"] + 1)
+    # memo por valor: la misma matriz dos veces no vuelve a formatear nada
+    antes = len(rc._FWD_CELL)
+    rc._forwards_matrix(rows)
+    assert len(rc._FWD_CELL) == antes
+
+
 def test_store_snapshot_copy_on_write() -> None:
     store = mds.MarketDataStore()
     s1 = store.update_from_md("X - 24hs", {"LA": {"price": 90.0}, "BI": [{"price": 89.0, "size": 1}]})

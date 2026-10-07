@@ -244,6 +244,29 @@ cualquier máquina: `python -m backend.tools.base_check` (archivos, espejo
 fiel, ruedas base / memoria / manifiesto / journal, regresión, copias de
 conflicto). Una sola máquina writer: `HISTORICO_BASE_WRITER=0` en las demás.
 Regresión: `tests/test_base_regresion.py`.
+**Copias en conflicto y archivos viejos** (07/10, tarjeta de /admin,
+`services/copias.py`): OneDrive deja al lado del archivo compartido la versión
+perdedora con el nombre de la máquina (`…-NOTEBOOK-RC.xlsx`, `(conflicted
+copy …)`), la app aparta `.corrupto-<fecha>`, el backfill deja `.bak-<fecha>`
+y una escritura cortada un `.<pid>-<n>.tmp`. `carpetas()` = carpeta de la app
+(+ `data/`), Delta Bases, `cierres/<año>`, Carteras y el journal local;
+`clasificar(nombre, vecinos)` decide por nombre (principal = el archivo con
+la misma extensión cuyo stem es prefijo, separado por `-`/espacio/`(`; un
+punto NO: `cer_completo.generated.csv` no es copia) y `escanear()` es listdir +
+stat (µs). "Revisar" (`analizar()`, executor) lee cada copia y su principal
+(`stats_de`, cache por mtime+tamaño; una copia Excel de un año tarda
+segundos) → filas / ruedas / desde-hasta / reales y el veredicto: `aporta`
+True = tiene ruedas que la principal no (botón "Incorporar": `incorporar()`
+mete SÓLO esas ruedas por el camino de siempre — `append_and_save(…,
+ignorar_regresion=True)` para px/tasas, también las ruedas que la base tiene
+sólo como RC; `escribir_fx` para FX; `append_acciones(gana_previo=True)` para
+acciones), False = sus datos ya están en la principal / temporal / apartado
+ilegible ("Borrar las que no aportan"), None = sin fechas para comparar
+(sólo borrado a mano). `borrar()` re-valida en el momento (adentro de una
+carpeta escaneada y clasificado como copia: nunca un principal) y loguea
+quién/qué. GET `/admin/copias` pinta lo ya revisado (`solo_cache`) sin leer
+nada; `base_check` usa el mismo escaneo (`resumen_bases`). Regresión:
+`tests/test_copias.py`.
 `HISTORICO_RECONSTRUIR=0` apaga lo automático. `_fecha_dato`: ISO sin zona =
 hora BA y un instante 00:00Z es sello de FECHA (no las 21:00 BA del día
 anterior). Regresión: `tests/test_cierre_reconstruccion.py`.
@@ -761,7 +784,20 @@ heartbeat del loop). Regresiones en `tests/test_auditoria_gpt.py`.
   del símbolo) + plazo + fracción de volumen). La macro
   `partials/curve_row.html` es la ÚNICA fuente de la fila (tabla completa y
   memo salen idénticas, `compact` por fila): un tick re-renderiza sólo su
-  fila. Si agregás columnas a Curvas, van en la macro.
+  fila. Si agregás columnas a Curvas, van en la macro. **Mercado igual**
+  (07/10, `_mercado_rows_html` / `_MROW_MEMO`, key = `_rk` + plazo/leg/fuente/ym
+  + fracción de nominal): la tabla completa (`/mercado/table`, la que piden
+  el `every 30s` y los `X-Full`) rehacía las 163 filas por tick — 46 → 14 ms
+  p50 — y el delta (`/mercado/rows`) sale del MISMO memo, así la fila es
+  idéntica por los dos caminos y queda cebada para el próximo swap completo.
+  Regresión: `test_auditoria_gpt.test_mercado_rerenderiza_solo_las_filas_que_cambiaron`.
+  **Matriz de forwards** (07/10): los N² pares salen de numpy (`_forwards_matrix`,
+  11 → < 1 ms), el texto/fondo de cada celda se memoiza por valor
+  (`_fwd_cell`) y cada fila llega al template como UN string (`cells_html`;
+  `_fwd_matrix.html` deja el loop por celda sólo de fallback) — 30 → 17 ms
+  p50 por tick en corp_hdmep y sin los picos de 150-190 ms que dejaban
+  2.500 celdas de Jinja por request. `cells` (dicts) sigue para los tests.
+  Regresión: `test_auditoria_gpt.test_forwards_matrix_cells_html_igual_al_template`.
 - **Excel**: `_snapshot_entry` guarda `(seq, at, body, gz)` — un gzip por
   build, servido con `Content-Encoding` si el cliente acepta
   (`_json_gz_response`); `/excel/v1/hist` memo `_HIST_MEMO` por (serie, días,

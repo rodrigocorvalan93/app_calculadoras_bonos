@@ -1,3 +1,9 @@
 {% from "partials/mercado_row.html" import fila -%}
-{#- Delta de Mercado: sólo las filas cambiadas, mismo markup que la tabla. -#}
+{#- Delta de Mercado: sólo las filas cambiadas, mismo markup que la tabla
+    (pre-renderizadas por routes/curves._mercado_rows_html, el mismo memo que
+    usa la tabla completa; sin `rows_html` se renderizan acá con la macro). -#}
+{%- if rows_html is defined and rows_html is not none -%}
+{% for h in rows_html %}{{ h | safe }}{% endfor %}
+{%- else -%}
 {% filter compact %}{% for r in rows %}{{ fila(r, plazo, leg, fuente, ym) }}{% endfor %}{% endfilter %}
+{%- endif -%}

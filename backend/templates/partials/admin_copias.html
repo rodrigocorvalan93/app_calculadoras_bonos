@@ -1,0 +1,74 @@
+{# Copias en conflicto / archivos viejos (OneDrive -HOST, .corrupto-*, .bak-*, .tmp,
+   "- copia") en la carpeta de la app, Delta Bases, cierres/, Carteras y el journal.
+   Tarjeta on-demand del superuser: GET lista (listdir + stat) y pinta lo ya
+   revisado; "Revisar" lee cada copia y la compara con su principal. #}
+<div id="admin-copias-body">
+  {% if msg %}<div class="alert alert-ok" style="margin-bottom:8px">{{ msg }}</div>{% endif %}
+  {% if error %}<div class="alert alert-error" style="margin-bottom:8px">{{ error }}</div>{% endif %}
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    <button class="btn-primary" style="font-size:12px" hx-post="/admin/copias/revisar"
+            hx-target="#admin-copias-body" hx-swap="outerHTML" hx-indicator="#copias-ind"
+            title="Lee cada copia (filas, ruedas, última) y la compara con su principal: cuál es más reciente, cuál tiene más datos y qué ruedas aporta">Revisar copias</button>
+    <span id="copias-ind" class="htmx-indicator muted" style="font-size:12px">Revisando… (una copia Excel grande tarda unos segundos)</span>
+    {% if analizado and n_inutiles %}
+    <button class="btn-ghost btn-danger" hx-post="/admin/copias/borrar-inutiles"
+            hx-target="#admin-copias-body" hx-swap="outerHTML"
+            hx-confirm="¿Borrar las {{ n_inutiles }} copias que no aportan nada? (sus datos ya están en la principal, temporales de escrituras cortadas, apartados ilegibles). No se puede deshacer desde la app.">
+      Borrar las que no aportan ({{ n_inutiles }})</button>
+    {% endif %}
+    <span class="muted" style="font-size:11.5px">{{ n_copias }} copia{{ 's' if n_copias != 1 else '' }} en
+      {{ carpetas | length }} carpetas{% if n_copias and not analizado %} · sin revisar{% endif %}</span>
+  </div>
+  {% if not grupos %}
+  <p class="muted" style="font-size:12px;margin:0">No hay copias en conflicto ni archivos viejos en:
+    {% for c in carpetas %}<code title="{{ c.path }}">{{ c.label }}</code>{{ ' · ' if not loop.last else '' }}{% endfor %}.</p>
+  {% else %}
+  <div class="table-scroll">
+    <table class="cashflows copias-table" style="font-size:11.5px">
+      <thead><tr><th style="text-align:left">archivo</th><th>tipo</th><th>tamaño</th><th>modificado</th>
+        <th>filas</th><th>ruedas</th><th style="text-align:left">veredicto</th><th></th></tr></thead>
+      <tbody>
+        {% for g in grupos %}
+        <tr class="copias-grupo"><td colspan="8" style="text-align:left">
+          <b>{{ g.carpeta }}</b> · {% if g.principal_nombre %}principal <code>{{ g.principal_nombre }}</code>{% else %}sin principal al lado{% endif %}
+          {% if g.principal_stats and not g.principal_stats.error %}<span class="muted">({{ g.principal_stats.filas }} filas{% if g.principal_stats.ruedas is defined %} · {{ g.principal_stats.ruedas }} ruedas{% if g.principal_stats.hasta %} hasta {{ g.principal_stats.hasta }}{% endif %}{% endif %})</span>
+          {% elif g.principal_stats and g.principal_stats.error %}<span style="color:var(--red)">principal ilegible: {{ g.principal_stats.error }}</span>{% endif %}
+          <span class="muted" title="{{ g.carpeta_path }}">· {{ g.carpeta_path }}</span></td></tr>
+        {% for e in g.copias %}
+        <tr>
+          <td style="text-align:left" title="{{ e.path }}">{{ e.nombre }}{% if e.local %} <span class="muted">(local)</span>{% endif %}</td>
+          <td><span class="pill">{{ e.tipo_label }}</span></td>
+          <td style="white-space:nowrap">{{ e.tam }}</td>
+          <td style="white-space:nowrap">{{ e.mtime }} <span class="muted">· {{ e.edad_dias }} d</span>{% if e.mas_reciente %} <span title="más reciente que la principal">⬆</span>{% endif %}</td>
+          <td>{% if e.stats and e.stats.filas is defined %}{{ e.stats.filas }}{% elif e.stats and e.stats.entradas is defined %}{{ e.stats.entradas }} <span class="muted">entr.</span>{% else %}—{% endif %}</td>
+          <td style="white-space:nowrap">{% if e.stats and e.stats.ruedas is defined %}{{ e.stats.ruedas }} <span class="muted">{{ e.stats.desde }} → {{ e.stats.hasta }}</span>{% else %}—{% endif %}</td>
+          <td style="text-align:left">
+            {% if e.veredicto %}<span class="{{ 'copias-aporta' if e.aporta else ('copias-inutil' if e.aporta is false else '') }}">{{ e.veredicto }}</span>
+            {% else %}<span class="muted">sin revisar</span>{% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            {% if e.incorporable %}
+            <form hx-post="/admin/copias/incorporar" hx-target="#admin-copias-body" hx-swap="outerHTML" style="display:inline"
+                  hx-confirm="¿Incorporar a {{ e.principal_nombre }} las ruedas {{ e.ruedas_extra_fmt }} que sólo están en {{ e.nombre }}? La copia queda como está (borrarla es otro click).">
+              <input type="hidden" name="path" value="{{ e.path }}">
+              <button type="submit" class="btn-mini" title="Pasar a la base las ruedas que sólo tiene esta copia">⤵ Incorporar</button>
+            </form>
+            {% endif %}
+            <form hx-post="/admin/copias/borrar" hx-target="#admin-copias-body" hx-swap="outerHTML" style="display:inline"
+                  hx-confirm="¿Borrar {{ e.nombre }} ({{ e.tam }})? No se puede deshacer desde la app.">
+              <input type="hidden" name="path" value="{{ e.path }}">
+              <button type="submit" class="btn-mini btn-danger" title="Borrar este archivo">✕ Borrar</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="font-size:11px;margin:8px 0 0">Carpetas revisadas:
+    {% for c in carpetas %}<code title="{{ c.path }}">{{ c.label }}</code>{{ ' · ' if not loop.last else '' }}{% endfor %}.
+    Una copia de OneDrive puede tener ruedas que la principal perdió: primero <b>Incorporar</b>, después borrar.
+    Lo que se borra no pasa por la papelera de la app (OneDrive conserva su propia papelera online).</p>
+  {% endif %}
+</div>

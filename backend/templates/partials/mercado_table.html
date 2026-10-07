@@ -74,11 +74,17 @@
         </tr>
       </thead>
       <tbody>
-        {# `compact` (filtro de main.py) saca la indentación entre celdas: era
-           el 24 % de los bytes y ~5.500 nodos de texto por swap en cada tick. #}
-        {% filter compact %}
-        {% for r in rows %}{{ fila(r, plazo, leg, fuente, ym) }}{% endfor %}
-        {% endfilter %}
+        {# Filas pre-renderizadas y compactadas (routes/curves._mercado_rows_html,
+           macro partials/mercado_row.html): un tick re-renderiza sólo las que
+           cambiaron, el resto sale del memo. Sin `rows_html` (un caller viejo)
+           se renderizan acá con la misma macro; `compact` (filtro de main.py)
+           saca la indentación entre celdas (era el 24 % de los bytes y ~5.500
+           nodos de texto por swap en cada tick). #}
+        {%- if rows_html is defined and rows_html is not none -%}
+          {% for h in rows_html %}{{ h | safe }}{% endfor %}
+        {%- else -%}
+          {% filter compact %}{% for r in rows %}{{ fila(r, plazo, leg, fuente, ym) }}{% endfor %}{% endfilter %}
+        {%- endif -%}
       </tbody>
     </table>
     </div>
