@@ -9,7 +9,7 @@
   <tbody>
   {% for r in rows %}
   <tr>
-    <td class="ini-l">{{ r.label }}{% if r.sub %} <span class="muted">· {{ r.sub }}</span>{% endif %}</td>
+    <td class="ini-l"{% if r.tip %} title="{{ r.tip }}"{% endif %}>{{ r.label }}{% if r.sub %} <span class="muted">· {{ r.sub }}</span>{% endif %}</td>
     <td class="ini-v">
       {%- if r.fmt == 'pct' %}{{ r.value | ar_pct(2) }}
       {%- elif r.fmt == 'pp' %}{{ r.value | ar_pct_pp(2) }}

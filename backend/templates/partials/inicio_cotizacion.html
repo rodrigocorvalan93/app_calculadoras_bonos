@@ -2,29 +2,33 @@
 {# Cuadro "cotización" de la pizarra: la ficha de pantalla estilo BYMA de un
    bono (último · puntas con cantidad · var · máx/mín · volumen · apertura /
    cierre) más TIR / TEM / duration de la app. `r` = fila de curva con book
-   (routes.curves._row_for_code book=True); `piz` = {"idx", "n"}. #}
+   (routes.curves._row_for_code book=True); `piz` = {"idx", "n"}.
+   La tabla NO lleva .cashflows a propósito (fuera del ratchet de anchos de
+   app.js; layout fijo por porcentajes) y las métricas absurdas de un precio
+   basura (|TIR| > 500 %) salen "—". #}
+{% macro met(v) %}{% if v is not none and v == v and (v | abs) <= 5 %}{{ v | ar_pct(2) }}{% else %}—{% endif %}{% endmacro %}
 <div class="card piz-cot">
   <div class="card-title">
-    <span><a class="ini-code" href="/yas?code={{ code | urlencode }}">{{ code }}</a> <span class="muted" style="font-weight:500">· {{ plazo }}</span></span>
-    <span class="card-title-aux">{{ nombre }}{% include "partials/_pizarra_tools.html" %}</span>
+    <span title="{{ nombre }}"><a class="ini-code" href="/yas?code={{ code | urlencode }}">{{ code }}</a> <span class="muted" style="font-weight:500">· cotización · {{ plazo }}</span></span>
+    <span class="card-title-aux">{% include "partials/_pizarra_tools.html" %}</span>
   </div>
   {% if r %}
-  <table class="cashflows piz-cot-tbl">
+  <table class="piz-cot-tbl">
     <tbody>
       <tr>
         <td>Último</td>
-        <td class="{{ r.last_cls }}" style="font-size:16px;font-weight:650">{{ r.last | ar_num(2) }}</td>
+        <td class="{{ r.last_cls }}" style="font-size:15px;font-weight:650">{{ r.last | ar_num(2) }}</td>
         <td class="var-cell {{ r.var_pct | var_cls }}" style="--vw:{{ r.var_pct | var_w(2) }}%">{{ r.var_pct | ar_pct_pp(2) }}</td>
       </tr>
-      <tr><td>Compra</td><td class="px-up" style="font-weight:600">{{ r.bid | ar_num(2) }}</td><td class="muted">{{ r.bid_size | ar_int }} VN</td></tr>
-      <tr><td>Venta</td><td class="px-down" style="font-weight:600">{{ r.offer | ar_num(2) }}</td><td class="muted">{{ r.offer_size | ar_int }} VN</td></tr>
-      <tr><td>TIR</td><td style="color:var(--accent);font-weight:600">{{ r.tirea_last | ar_pct(2) }}</td><td class="muted">{{ r.tirea_bid | ar_pct(2) }} / {{ r.tirea_offer | ar_pct(2) }}</td></tr>
-      <tr><td>TEM · Dur</td><td>{{ r.tem | ar_pct(2) }}</td><td class="muted">{{ r.duration | ar_num(2) }}</td></tr>
-      {% if r.margen_last is defined and r.margen_last is not none and r.margen_last == r.margen_last %}
+      <tr><td>Compra</td><td class="px-up" style="font-weight:600">{{ r.bid | ar_num(2) }}</td><td class="muted">{{ r.bid_size | ar_hum }} VN</td></tr>
+      <tr><td>Venta</td><td class="px-down" style="font-weight:600">{{ r.offer | ar_num(2) }}</td><td class="muted">{{ r.offer_size | ar_hum }} VN</td></tr>
+      <tr><td>TIR</td><td style="color:var(--accent);font-weight:600">{{ met(r.tirea_last) }}</td><td class="muted">{{ met(r.tirea_bid) }} / {{ met(r.tirea_offer) }}</td></tr>
+      <tr><td>TEM · Dur</td><td>{% if r.tem is not none and r.tem == r.tem and (r.tem | abs) <= 1 %}{{ r.tem | ar_pct(2) }}{% else %}—{% endif %}</td><td class="muted">{{ r.duration | ar_num(2) }}</td></tr>
+      {% if r.margen_last is defined and r.margen_last is not none and r.margen_last == r.margen_last and (r.margen_last | abs) <= 5 %}
       <tr><td>Margen</td><td>{{ r.margen_last | ar_pct(2) }}</td><td class="muted">s/ benchmark</td></tr>
       {% endif %}
       <tr><td>Máx · Mín</td><td>{{ r.high | ar_num(2) }}</td><td class="muted">{{ r.low | ar_num(2) }}</td></tr>
-      <tr><td>Apertura · Cierre</td><td>{{ r.open | ar_num(2) }}</td><td class="muted">{{ r.close | ar_num(2) }}</td></tr>
+      <tr><td>Apert. · Cierre</td><td>{{ r.open | ar_num(2) }}</td><td class="muted">{{ r.close | ar_num(2) }}</td></tr>
       <tr><td>Volumen</td><td>{{ r.nominal | ar_hum }} <small class="muted">VN</small></td><td class="muted">{{ r.volume | ar_hum }} efvo</td></tr>
     </tbody>
   </table>

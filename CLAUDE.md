@@ -417,6 +417,23 @@ movía hasta tocarla o Ctrl+Alt+F9. El item `tipo: "macro"` del batch
 El modo cruda escribe `MACRO|<SERIE>` (LAST = valor, CLOSE_DATE = fecha).
 Regresión: `tests/test_excel_macro.py` + `excel_getters_harness.cjs`.
 
+## Add-in de Excel — dólar BNA (07/10)
+
+`=OMS.FX("bna_billete_compra" | "bna_billete_venta" | "bna_divisa_compra" |
+"bna_divisa_venta")` y la fecha del dato `("bna_fecha")` / `("bna_divisa_fecha")`
+(serial de Excel). Pedido del desk SÓLO para el add-in: `services/bna_fx.py`
+parsea las páginas públicas del BNA (`/Personas` → tabla `id="billetes"`,
+`/Empresas` → `id="divisas"`; fila "Dolar U.S.A", compra / venta es-AR y la
+fecha `DD/MM/AAAA` del bloque) con expresiones tolerantes, en un THREAD DE FONDO
+1×/hora (10 min si falló), NUNCA en un request; el último dato queda en
+`data/bna_fx.json` (fuera de git) y el snapshot (`routes/excel` sección
+`bna`, `functions.js` `fxGet`) sólo lee memoria. `BNA_FX=0` apaga el poller
+(la suite corre así vía `conftest`), `BNA_FX_URLS` / `BNA_FX_PATH` overrides.
+El sandbox de desarrollo no llega a bna.com.ar: el parser está probado contra
+un fixture con la estructura conocida de la página (`tests/test_bna_fx.py`) —
+si el BNA cambia el HTML, `snapshot()["error"]` lo dice y las celdas quedan
+en el último dato guardado.
+
 ## Posiciones — Categoría de las tenencias
 
 `routes/posiciones._clasif(h, obj)` → `(categoría, fuente)`. Con ficha en
@@ -537,7 +554,9 @@ Duales → `mix:dualfija,dualcer,dualdlk`). Duales = patas base (`dualfija` +
 CER (no le corresponde — desk 07/10; tooltip propio de la columna). La pata
 TAMAR (v) de los duales CER va como SUBDIVISIÓN de la tarjeta TAMAR
 (`SUB_DUALES_V`, curva `dualtamar_cer`; `secciones` de la tarjeta, cada una
-con su tope de filas, su "+N más" y su curva) con su TIR / TEM / margen. Las
+con su tope de filas, su "+N más" y su curva — /curves sólo reconoce las
+`CurveDef` y las combinadas `mix:a,b`, así que `duales` y `dualtamar_cer`
+linkean como `mix:`) con su TIR / TEM / margen. Las
 tablas son `.cashflows` para que el
 diff de flashes las vea (id propio por tarjeta: el ratchet de anchos de
 app.js keyea por id + cabecera). Medido con el
@@ -557,10 +576,18 @@ red. Primer arranque sin dos puntos locales → serie completa una vez; después
 `partials/inicio_pizarra.html` + `inicio_cotizacion.html` +
 `_pizarra_tools.html`): debajo del resumen, cada usuario arma sus cuadros —
 **libro** (el mismo `partials/mercado_book.html` de Mercado / Órdenes,
-embebido con `piz` = sin auto-refresh propio ni chips; la métrica por nivel
-`y` es por usuario y vale para todos sus libros) o **cotización** (cuadro
-compacto estilo BYMA: último · puntas con VN · var · TIR last/bid/offer · TEM ·
-dur · máx/mín · apertura/cierre · volumen, de `curves._row_for_code(book=True)`).
+embebido con `piz` = sin auto-refresh propio ni chips, en formato COMPACTO:
+seis datos clave + escalera `Cant · Compra · Venta · Cant` con la métrica por
+nivel debajo del precio, cantidades `ar_hum`, "Mi posición" plegada; la
+métrica `y` es por usuario y vale para todos sus libros) o **cotización**
+(cuadro compacto estilo BYMA: último · puntas con VN · var · TIR
+last/bid/offer · TEM · dur · máx/mín · apertura/cierre · volumen, de
+`curves._row_for_code(book=True)`). Cuadros chicos a propósito (`.piz-grid`
+minmax 280 px → 4-5 por fila en un monitor de desk); las tablas de la
+pizarra (`.piz-ladder`, `.piz-cot-tbl`) NO llevan `.cashflows`: quedan fuera
+del ratchet de anchos de app.js (una métrica larga en un cuadro ensanchaba la
+columna de todos) y van con `table-layout: fixed` por porcentajes; métricas
+absurdas de un precio basura (|TIR| > 500 %) salen "—".
 Default: sin cuadros. Persisten en `data/pizarra.json` por username
 (`_local` sin muro), tope 24, sin duplicados, código validado contra el
 universo; `PIZARRA_PATH` override (la suite lo apunta a un tmp). El formulario

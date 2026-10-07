@@ -333,6 +333,19 @@ function fxGet(s, tipo) {
   if (t === "cierre") { return may.close == null ? "" : may.close; }
   if (t === "mep_base") { return fx.mep_base || ""; }
   if (t === "ccl_base") { return fx.ccl_base || ""; }
+  // Dólar BNA (Banco Nación): billete y divisa, compra / venta, con la fecha
+  // del dato (serial de Excel). Sección `bna` del snapshot — la refresca un
+  // poller horario del server, la celda se entera sola en el próximo tick.
+  if (t.indexOf("bna") === 0) {
+    var bna = s.bna || {};
+    var bk = t.replace(/[\s\-\.]+/g, "_");
+    if (bk === "bna" || bk === "bna_billete" || bk === "bna_billete_venta") { return bna.billete_venta == null ? "" : bna.billete_venta; }
+    if (bk === "bna_billete_compra") { return bna.billete_compra == null ? "" : bna.billete_compra; }
+    if (bk === "bna_divisa" || bk === "bna_divisa_venta") { return bna.divisa_venta == null ? "" : bna.divisa_venta; }
+    if (bk === "bna_divisa_compra") { return bna.divisa_compra == null ? "" : bna.divisa_compra; }
+    if (bk === "bna_fecha" || bk === "bna_billete_fecha") { var sb = isoToSerial(bna.billete_fecha); return sb == null ? "" : sb; }
+    if (bk === "bna_divisa_fecha") { var sd = isoToSerial(bna.divisa_fecha); return sd == null ? "" : sd; }
+  }
   return naError("Tipo desconocido: " + t);
 }
 
@@ -412,14 +425,19 @@ function tablaGet(s, panel, opcion) {
     return out;
   }
   if (p === "fx" || p === "dolares" || p === "dólares") {
-    var fx = s.fx || {}, may = s.mayorista || {}, a35t = s.a3500 || {};
+    var fx = s.fx || {}, may = s.mayorista || {}, a35t = s.a3500 || {}, bnat = s.bna || {};
     var a35d = String(a35t.date || "");
+    var dmy = function (iso) { var d = String(iso || ""); return d.length >= 10 ? d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4) : ""; };
     return [["Tipo", "Valor"],
             ["MEP", nn(fx.mep)], ["CCL", nn(fx.ccl)], ["Canje", nn(fx.canje)],
             ["MEP CI", nn(fx.mep_ci)], ["CCL CI", nn(fx.ccl_ci)],
             ["Mayorista", nn(may.last)], ["A3500 (cierre)", nn(a35t.last != null ? a35t.last : may.close)],
-            ["A3500 fecha", a35d.length >= 10 ? a35d.slice(8, 10) + "/" + a35d.slice(5, 7) + "/" + a35d.slice(0, 4) : ""],
-            ["Mayorista (cierre feed)", nn(may.close)]];
+            ["A3500 fecha", dmy(a35d)],
+            ["Mayorista (cierre feed)", nn(may.close)],
+            ["BNA billete compra", nn(bnat.billete_compra)], ["BNA billete venta", nn(bnat.billete_venta)],
+            ["BNA billete fecha", dmy(bnat.billete_fecha)],
+            ["BNA divisa compra", nn(bnat.divisa_compra)], ["BNA divisa venta", nn(bnat.divisa_venta)],
+            ["BNA divisa fecha", dmy(bnat.divisa_fecha)]];
   }
   if (p === "mae") {
     var mae = s.mae || {};
