@@ -7,12 +7,17 @@
    /mercado/book/{code}; la forma ?code= devolvía 404 silencioso y el libro
    quedaba freezado en Mercado y en Órdenes. #}
 {% set _base = "/mercado/book/" ~ (code | urlencode) ~ "?plazo=" ~ plazo ~ "&leg=" ~ leg ~ "&fuente=" ~ fuente %}
-<div class="card" data-flash-scope
+{# `piz` (pizarra de Inicio): el libro va EMBEBIDO en el render de toda la
+   pizarra — sin auto-refresh propio (lo refresca el contenedor, un request por
+   tick para todos los cuadros), sin chips de métrica (la elige la barra de la
+   pizarra para todos los libros) y con los botones mover / quitar del cuadro. #}
+<div class="card"{% if not piz %} data-flash-scope
      hx-get="{{ _base }}&y={{ y }}"
      hx-trigger="md-update from:body, every 30s"
-     hx-target="this" hx-swap="outerHTML">
+     hx-target="this" hx-swap="outerHTML"{% endif %}>
   <div class="card-title">
-    <span>Libro · {{ code }}
+    <span>Libro · {{ code }}{% if piz %} <span class="muted" style="font-weight:500">· {{ plazo }}</span>{% endif %}
+      {% if not piz %}
       {# Métrica por nivel: cada chip pide el mismo partial con otro y=; app.js
          guarda la elección (localStorage) y la agrega a los próximos libros. #}
       <span class="book-y">
@@ -24,8 +29,9 @@
           {% endif %}
         {% endfor %}
       </span>
+      {% endif %}
     </span>
-    <span class="card-title-aux">{{ nombre }} · {{ symbol }}</span>
+    <span class="card-title-aux">{{ nombre }} · {{ symbol }}{% if piz %}{% include "partials/_pizarra_tools.html" %}{% endif %}</span>
   </div>
   <div class="card-body">
     {# Toda la data de la fila, acá mismo (sin recalcular nada — viene del

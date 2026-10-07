@@ -1,0 +1,32 @@
+{# Pizarra del usuario: todos sus cuadros en UN render (lo swapea entero el
+   motor live y cada acción agregar / mover / quitar). El formulario para
+   agregar vive AFUERA (inicio.html): un input adentro perdería el foco con
+   cada refresh. `cuadros` = [{cuadro, tipo, ctx}], `error` = mensaje. #}
+{% if error %}<div class="alert" style="margin-bottom:10px">{{ error }}</div>{% endif %}
+{% if cuadros %}
+<div class="piz-grid">
+  {% for c in cuadros %}
+    {% set piz = {"idx": loop.index0, "n": cuadros | length} %}
+    {% if not c.ctx %}
+      <div class="piz-item"><div class="card"><div class="card-title"><span>{{ c.cuadro.code }}</span>
+        <span class="card-title-aux">{% include "partials/_pizarra_tools.html" %}</span></div>
+        <div class="card-body muted" style="font-size:12px">No pude armar este cuadro (ver el log del server).</div></div></div>
+    {% elif c.tipo == "libro" %}
+      {% set b = c.ctx %}
+      <div class="piz-item piz-libro">{% with piz=piz, code=b.code, nombre=b.nombre, symbol=b.symbol, snap=b.snap, row=b.row,
+                                               position=b.position, instr=b.instr, bids=b.bids, offers=b.offers, fuente=b.fuente,
+                                               plazo=b.plazo, leg=b.leg, y=b.y, y_label=b.y_label, margen_ok=b.margen_ok %}{% include "partials/mercado_book.html" %}{% endwith %}</div>
+    {% else %}
+      <div class="piz-item">{% with piz=piz, r=c.ctx.row, code=c.ctx.code, nombre=c.ctx.nombre, plazo=c.ctx.plazo %}{% include "partials/inicio_cotizacion.html" %}{% endwith %}</div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  <div class="card-body muted" style="font-size:12.5px">
+    Tu pizarra está vacía. Elegí un bono arriba y agregalo como <b>libro</b> (profundidad con TIR por
+    nivel, el mismo cuadro que en Órdenes) o como <b>cotización</b> (cuadro compacto estilo BYMA).
+    Lo que armes queda guardado en tu usuario y se actualiza en vivo con el feed.
+  </div>
+</div>
+{% endif %}

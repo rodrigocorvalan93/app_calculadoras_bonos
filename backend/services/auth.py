@@ -46,23 +46,27 @@ ROLE_LABELS: Dict[str, str] = {"superuser": "Superuser", "premium": "Premium", "
 
 # ── Registro de pestañas (orden = orden de la nav) ───────────────────────────
 # (key, label es-AR, path de la página). Debe reflejar la nav de base.html.
+# Orden del desk (07/10): Inicio (resumen + pizarra) primero, después lo que
+# se mira todo el día — Mercado, Curvas, YAS, Futuros, Dólares, Históricos,
+# Gráficos, Posiciones, Matriz Tenencias — y recién ahí el resto.
 TABS: List[Tuple[str, str, str]] = [
+    ("home",         "Inicio",       "/inicio"),
+    ("mercado",      "Mercado",      "/mercado"),
+    ("curves",       "Curvas",       "/curves"),
     ("yas",          "YAS",          "/yas"),
+    ("futuros",      "Futuros",      "/futuros"),
+    ("dolares",      "Dólares",      "/dolares"),
+    ("historicos",   "Históricos",   "/historicos"),
+    ("graficos",     "Gráficos",     "/graficos"),
+    ("posiciones",   "Posiciones",   "/posiciones"),
+    ("matriz",       "Matriz Tenencias", "/matriz"),
     ("nueva",        "Nueva especie", "/nueva"),
     ("comparador",   "Comparador",   "/comparador"),
-    ("curves",       "Curvas",       "/curves"),
-    ("mercado",      "Mercado",      "/mercado"),
     ("breakeven",    "Break-even",   "/breakeven"),
-    ("dolares",      "Dólares",      "/dolares"),
     ("tasas",        "Tasas",        "/tasas"),
-    ("posiciones",   "Posiciones",   "/posiciones"),
-    ("matriz",       "Matriz",       "/matriz"),
     ("forwards",     "Forwards",     "/forwards"),
-    ("futuros",      "Futuros",      "/futuros"),
-    ("graficos",     "Gráficos",     "/graficos"),
     ("total_return", "Total Return", "/total-return"),
     ("escenario",    "Escenario",    "/escenario"),
-    ("historicos",   "Históricos",   "/historicos"),
     ("quepaso",      "Qué pasó",     "/que-paso"),
     ("creditos",     "Créditos",     "/creditos"),
     ("cafci",        "CAFCI",        "/cafci"),
@@ -73,6 +77,9 @@ TABS: List[Tuple[str, str, str]] = [
 # middleware (main._SUPERUSER_ONLY); listarlas en la nav de premium/básico
 # sólo mostraría un link a un 403.
 _SUPERUSER_ONLY_TABS = ("alertas",)
+# Tabs que ve TODO rol, siempre: no se guardan en `role_tabs` ni se ofrecen
+# como checkbox en /admin (Inicio es la página de aterrizaje de la app).
+ALWAYS_TABS: Tuple[str, ...] = ("home",)
 
 # ── Features por rol (paneles/funciones sueltas, no pestañas) ────────────────
 # Registro de features gateables desde el panel del superuser: el superuser
@@ -399,11 +406,12 @@ def role_tabs() -> Dict[str, List[str]]:
 
 
 def allowed_tabs(role: Optional[str]) -> List[str]:
-    """Keys de tabs permitidas (en el orden de TABS). Superuser → todas."""
+    """Keys de tabs permitidas (en el orden de TABS). Superuser → todas; las
+    `ALWAYS_TABS` (Inicio) las ve cualquier rol aunque no estén en su lista."""
     if role == "superuser":
         return list(TAB_KEYS)
     allowed = set(_store()["role_tabs"].get(role or "", []))
-    return [k for k in TAB_KEYS if k in allowed]
+    return [k for k in TAB_KEYS if k in allowed or k in ALWAYS_TABS]
 
 
 _nav_cache: Dict[str, List[Dict[str, str]]] = {}
@@ -475,7 +483,7 @@ def can_access_path(role: Optional[str], path: str) -> bool:
         if path == prefix or path.startswith(prefix + "/"):
             return tab in set(_store()["role_tabs"].get(role or "", []))
     tab = page_tab(path)
-    if tab is None:
+    if tab is None or tab in ALWAYS_TABS:
         return True
     return tab in set(_store()["role_tabs"].get(role or "", []))
 

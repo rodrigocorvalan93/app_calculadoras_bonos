@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Inicio{% endblock %}
+
+{% block content %}
+<section class="curves inicio">
+  <header class="yas-header">
+    <h1>Inicio</h1>
+    <p class="muted">
+      El mercado en una pantalla: tipos de cambio, tasas, Merval y riesgo país, soberanos por
+      segmento (último · var · var % · TIR · Δ TIR · TEM · margen si aplica), panel líder y
+      futuros de dólar. En vivo con cada tick del feed (respaldo cada 30 s). Cada tarjeta de
+      bonos muestra los más operados del día; el pie linkea a la curva completa.
+    </p>
+  </header>
+
+  {# UNA request por tick para todo el resumen (seq_cached en el server: N
+     pestañas comparten el render). data-flash-scope: diff de celdas post-swap. #}
+  <div id="inicio-body" data-flash-scope
+       hx-get="/inicio/body" hx-trigger="md-update from:body, every 30s" hx-swap="innerHTML">
+    {% include "partials/inicio_body.html" %}
+  </div>
+
+  {# ── Mi pizarra: cuadros por usuario (default: ninguno) ───────────────
+     El formulario y los chips viven FUERA del contenedor live: un input
+     adentro perdería el foco con cada refresh. Cada acción devuelve la
+     pizarra entera (#inicio-pizarra). #}
+  <header class="piz-head">
+    <h2>Mi pizarra <span class="muted" style="font-weight:400;font-size:12px">· cuadros guardados en tu usuario · se actualizan en vivo</span></h2>
+    <form class="piz-form" hx-post="/inicio/pizarra/agregar" hx-target="#inicio-pizarra" hx-swap="innerHTML"
+          hx-on::after-request="if (event.detail.successful) { var i = this.querySelector('[name=code]'); if (i) i.value = ''; }">
+      <label class="field">
+        <span>Bono</span>
+        <input type="text" name="code" list="piz-codes" placeholder="GD30, TX26, S30N6…" autocomplete="off"
+               required style="width:150px;text-transform:uppercase">
+      </label>
+      <datalist id="piz-codes">{% for c in piz_codes %}<option value="{{ c }}">{% endfor %}</datalist>
+      <fieldset class="field field-mode">
+        <legend>Cuadro</legend>
+        <label><input type="radio" name="tipo" value="libro" checked> Libro</label>
+        <label><input type="radio" name="tipo" value="cotizacion"> Cotización</label>
+      </fieldset>
+      <fieldset class="field field-mode">
+        <legend>Plazo</legend>
+        <label><input type="radio" name="plazo" value="24hs" checked> 24 hs</label>
+        <label><input type="radio" name="plazo" value="CI"> CI</label>
+      </fieldset>
+      <button class="btn-primary" type="submit">Agregar</button>
+    </form>
+    {# Métrica por nivel de TODOS los libros de la pizarra (por usuario). El
+       `active` se mueve en el cliente; el server la guarda y re-renderiza. #}
+    <span class="book-y piz-y" title="Métrica por nivel en los libros de la pizarra">
+      {% for k, lbl in [("tirea", "TIREA"), ("tem", "TEM"), ("tna", "TNA"), ("margen", "Margen")] %}
+      <button type="button" class="hc-preset{% if piz_y == k %} active{% endif %}"
+              hx-post="/inicio/pizarra/metrica" hx-vals='{"y": "{{ k }}"}' hx-target="#inicio-pizarra" hx-swap="innerHTML"
+              onclick="var bs = this.parentNode.querySelectorAll('.hc-preset'); for (var i = 0; i < bs.length; i++) bs[i].classList.remove('active'); this.classList.add('active');">{{ lbl }}</button>
+      {% endfor %}
+    </span>
+  </header>
+  <div id="inicio-pizarra" data-flash-scope
+       hx-get="/inicio/pizarra" hx-trigger="md-update from:body, every 30s" hx-swap="innerHTML">
+    {% include "partials/inicio_pizarra.html" %}
+  </div>
+</section>
+{% endblock %}

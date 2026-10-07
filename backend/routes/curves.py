@@ -980,6 +980,16 @@ async def mercado_book(
     """Libro (profundidad) de un instrumento — se carga al clickear su fila.
     `y` = métrica por nivel (tirea | tem | tna | margen): salen del MISMO dict
     de métricas cacheado que ya daba la TIREA por nivel, costo cero extra."""
+    ctx = await book_context(request, code, plazo, leg, fuente, y)
+    return _render(request, "partials/mercado_book.html", **ctx)
+
+
+async def book_context(request: Request, code: str, plazo: str = "24hs", leg: str = "native",
+                       fuente: str = "byma", y: str = "tirea") -> Dict[str, Any]:
+    """Contexto del template del libro (`partials/mercado_book.html`): fila +
+    profundidad con la métrica por nivel + tenencia visible del usuario +
+    lámina. Lo usan la ruta del libro, el ticket de Órdenes y los cuadros
+    "libro" de la pizarra de Inicio (que embebe N libros en UN render)."""
     bond_universe.ensure_loaded()
     y = y if y in _BOOK_Y else "tirea"
     store = marketdata_store.get_store()
@@ -1052,9 +1062,7 @@ async def mercado_book(
         or (row or {}).get("tna_convention_label") or ""
     y_label = {"tirea": "TIREA", "tem": "TEM", "margen": "Margen",
                "tna": f"TNA {conv}".strip() if conv and conv != "—" else "TNA"}[y]
-    return _render(
-        request,
-        "partials/mercado_book.html",
+    return dict(
         code=code,
         nombre=meta.get("nombre") or code,
         symbol=symbol,

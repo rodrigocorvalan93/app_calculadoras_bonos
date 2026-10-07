@@ -504,6 +504,80 @@ inventa una desde su primera rueda). Antes "1 mes" podía medir mes y medio sin
 decirlo (CER +4,35 % con el mercado en 2-3 %, 30/09). El CSV lleva las
 mismas columnas (Precio ini/fin, Fecha ini/fin) y el aviso.
 
+## Inicio y orden de pestañas (07/10)
+
+`auth.TABS` manda el orden de la nav: **Inicio** (`home`, `/inicio`),
+Mercado, Curvas, YAS, Futuros, Dólares, Históricos, Gráficos, Posiciones,
+**Matriz Tenencias** (`matriz`, antes "Matriz") y recién ahí el resto.
+`auth.ALWAYS_TABS = ("home",)`: la ve TODO rol aunque no esté en su
+`role_tabs` (`allowed_tabs` / `can_access_path`), y /admin no la ofrece como
+checkbox. `/`, el `next` default del login y la marca de la topbar van a
+`/inicio`. Regresión: `tests/test_inicio.py` (orden, aterrizaje, básico sin
+Inicio en su lista entra igual).
+
+**Inicio** (`routes/inicio.py`, `services/inicio.py`, `templates/inicio.html`
++ `partials/inicio_body.html`): el mercado en una pantalla — Tipos de cambio
+(oficial · MEP · CCL · brecha · canje, de `dolares.summary`), Tasas (TAMAR /
+BADLAR del macro + caución ARS/USD BYMA del riel + caución ARS/USD MAE),
+Mercado (Merval ARS y en CCL, riesgo país, SPY y EWZ), una tarjeta por
+segmento soberano (Globales · Bonares · CER · Tasa fija · Dólar linked ·
+TAMAR · Duales) con último · var · var % · TIR · Δ TIR (`delta_yield_bps`)
+· TEM · margen (sólo si el segmento lo tiene), Panel líder y futuros de
+dólar (contratos en columnas). UNA request live por tick para toda la página
+(`/inicio/body`, `seq_cached`): las filas de bonos salen del MISMO cache por
+curva y seq que Mercado / Curvas (`curves._rows_en_seq`, en serie para no
+ocupar los 8 workers del pool); el resto son lookups en memoria
+(`inicio.resumen`, en el executor). Cada tarjeta de bonos muestra hasta
+`MAX_FILAS` (10): los más operados hoy (VN; sin VN, efectivo) completados con
+los de vencimiento más corto, ordenados por vencimiento, con "+N más → ver la
+curva" (el pie habla de la sección principal y linkea a su curva real:
+Duales → `mix:dualfija,dualcer,dualdlk`). Duales = patas base (`dualfija` +
+`dualcer` + `dualdlk`, un dual por fila); el margen de la pata TAMAR
+(`dualtamar`, código base + `v`) se cruza a la pata fija y DLK, NUNCA a la
+CER (no le corresponde — desk 07/10; tooltip propio de la columna). La pata
+TAMAR (v) de los duales CER va como SUBDIVISIÓN de la tarjeta TAMAR
+(`SUB_DUALES_V`, curva `dualtamar_cer`; `secciones` de la tarjeta, cada una
+con su tope de filas, su "+N más" y su curva) con su TIR / TEM / margen. Las
+tablas son `.cashflows` para que el
+diff de flashes las vea (id propio por tarjeta: el ratchet de anchos de
+app.js keyea por id + cabecera). Medido con el
+store sembrado (bench_tick, 2000 símbolos): hit 0,9 ms; tick con rebuild
+p50 ≈ 14 · p95 ≈ 20 ms.
+
+**Riesgo país** (`services/riesgo_pais.py`): ArgentinaDatos
+(`/v1/finanzas/indices/riesgo-pais[/ultimo]`, la misma API de
+`backfill_fx`), thread daemon cada 30 min (10 min si falló), NUNCA en un
+request; historia reciente en `data/riesgo_pais.json` (fuera de git) para la
+variación contra la observación anterior y para mostrar el último dato sin
+red. Primer arranque sin dos puntos locales → serie completa una vez; después
+`/ultimo`. `RIESGO_PAIS=0` apaga el poller (la suite corre así vía
+`conftest`), `RIESGO_PAIS_URL` / `RIESGO_PAIS_PATH` overrides.
+
+**Pizarra por usuario** (`services/pizarra.py`, rutas `/inicio/pizarra*`,
+`partials/inicio_pizarra.html` + `inicio_cotizacion.html` +
+`_pizarra_tools.html`): debajo del resumen, cada usuario arma sus cuadros —
+**libro** (el mismo `partials/mercado_book.html` de Mercado / Órdenes,
+embebido con `piz` = sin auto-refresh propio ni chips; la métrica por nivel
+`y` es por usuario y vale para todos sus libros) o **cotización** (cuadro
+compacto estilo BYMA: último · puntas con VN · var · TIR last/bid/offer · TEM ·
+dur · máx/mín · apertura/cierre · volumen, de `curves._row_for_code(book=True)`).
+Default: sin cuadros. Persisten en `data/pizarra.json` por username
+(`_local` sin muro), tope 24, sin duplicados, código validado contra el
+universo; `PIZARRA_PATH` override (la suite lo apunta a un tmp). El formulario
+de alta (input + `<datalist>` del universo) y los chips viven FUERA del
+contenedor live (un input adentro perdería el foco en cada refresh); cada
+acción (agregar / mover / quitar / métrica) devuelve la pizarra entera. Render
+= UN request por tick para todos los cuadros: `routes.curves.book_context`
+(extraído de `mercado_book`, también lo usa `/ordenes/quote`) por libro, las
+cotizaciones en una sola tarea del pool, y memo por usuario keyeado por (seq
+del store, firma mtime+tamaño del JSON) — un cuadro recién agregado se ve en
+el próximo refresh con la seq quieta, y la firma también detecta otra
+instancia escribiendo el mismo archivo. Medido con 6 libros + 4
+cotizaciones (store sembrado): hit 1,6 ms; tick con puntas de un cuadro
+cambiando p50 ≈ 10 · p95 ≈ 14 ms; tick de otro símbolo p95 ≈ 7 ms. Regresión:
+`tests/test_inicio_pizarra.py` (servicio, HTTP por usuario, memo, el libro de
+Mercado sigue igual).
+
 ## Visual style (FastAPI rewrite)
 
 Bloomberg palette + Notion/Apple/Linear typography. System sans

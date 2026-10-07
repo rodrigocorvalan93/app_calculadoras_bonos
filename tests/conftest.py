@@ -25,6 +25,12 @@ os.environ.setdefault("PRIMARY_REJECTED_CACHE", "0")
 # real — un tmp nuevo por corrida (los tests que lo necesitan aislado por test
 # lo apuntan a su tmp_path).
 os.environ.setdefault("HISTORICO_JOURNAL_DIR", tempfile.mkdtemp(prefix="bonos_test_journal_"))
+# Riesgo país (Inicio): la suite nunca sale a ArgentinaDatos ni toca el
+# data/riesgo_pais.json real — poller apagado y archivo en un tmp.
+os.environ.setdefault("RIESGO_PAIS", "0")
+os.environ.setdefault("RIESGO_PAIS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_riesgo_pais.json"))
+# Pizarra de Inicio (cuadros por usuario): nunca el data/pizarra.json real.
+os.environ.setdefault("PIZARRA_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_pizarra_"), "pizarra.json"))
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")
 os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_auth_store.json"))
 # Bootstrap del superuser de la suite: valores SINTÉTICOS (nunca una cuenta

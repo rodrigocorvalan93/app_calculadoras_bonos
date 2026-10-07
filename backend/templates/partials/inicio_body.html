@@ -1,0 +1,160 @@
+{% import "partials/_fx_macros.html" as fx %}
+{# ── Inicio: resumen del mercado (lo swapea entero el motor live) ────────────
+   Tres tipos de tarjeta: KPI (label · valor · var · var %), bonos por segmento
+   y tablas (panel líder, futuros). Todas son <table class="cashflows"> para que
+   el diff de flashes de app.js (tabla + 1ª celda + columna) las vea. #}
+
+{% macro kpi_table(rows) %}
+<table class="cashflows ini-kpi">
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td class="ini-l">{{ r.label }}{% if r.sub %} <span class="muted">· {{ r.sub }}</span>{% endif %}</td>
+    <td class="ini-v">
+      {%- if r.fmt == 'pct' %}{{ r.value | ar_pct(2) }}
+      {%- elif r.fmt == 'pp' %}{{ r.value | ar_pct_pp(2) }}
+      {%- elif r.fmt == 'int' %}{{ r.value | ar_num(0) }}
+      {%- else %}{{ r.value | ar_num(2) }}{% endif -%}
+    </td>
+    {% if 'var_pp' in r %}
+      {# brecha / canje / tasas: la variación es en PUNTOS porcentuales #}
+      <td class="{{ fx.vcls(r.var_pp) }}" colspan="2">
+        {%- if r.var_pp is not none %}{{ fx.arrow(r.var_pp) }} {{ r.var_pp | ar_num(2) }} pp
+        {%- elif r.aplicable is defined and r.aplicable is not none %}<span class="muted">aplicable {{ r.aplicable | ar_pct_pp(2) }}</span>
+        {%- else %}<span class="muted">—</span>{% endif -%}
+      </td>
+    {% else %}
+      <td class="{{ fx.vcls(r.var_pct) }}">{% if r.var_px is not none %}{{ r.var_px | ar_num(0 if r.fmt == 'int' else 2) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="{{ fx.vcls(r.var_pct) }}">{% if r.var_pct is not none %}{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_pct(2) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro bonos_card(c) %}
+<div class="card ini-card">
+  <div class="card-title"><span>{{ c.titulo }}</span><span class="card-title-aux">{{ c.sub }}</span></div>
+  {% if c.filas %}
+  {# id por tarjeta: el ratchet de anchos de app.js keyea por id + cabecera;
+     sin id las siete tablas compartirían anchos y una TIR larga en un
+     segmento ensancharía la columna en todos. #}
+  <div class="table-scroll">
+    <table class="cashflows ini-bonos{% if c.margen %} ini-8{% endif %}" id="ini-tbl-{{ c.key }}">
+      <thead>
+        <tr>
+          <th>Bono</th><th>Último</th><th>Var</th><th>Var %</th><th>TIR</th>
+          <th title="TIR al último vs TIR al cierre previo, en puntos básicos">Δ TIR</th><th>TEM</th>
+          {% if c.margen %}<th title="{{ c.margen_tip }}">Margen</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+      {# Secciones: la tarjeta TAMAR trae abajo la pata TAMAR (v) de los duales
+         CER bajo un subtítulo (con su propio "+N más" → su curva); las demás
+         tienen una sola sección sin título. #}
+      {% for s in c.secciones if s.filas %}
+        {% if s.titulo %}
+        <tr class="ini-sub"><td colspan="{{ 8 if c.margen else 7 }}">{{ s.titulo }}{% if s.ocultas %} <span class="muted">· +{{ s.ocultas }} más · <a href="/curves?curve={{ s.curva }}">ver todos →</a></span>{% endif %}</td></tr>
+        {% endif %}
+        {% for r in s.filas %}
+        <tr>
+          <td><a class="ini-code" href="/yas?code={{ r.code | urlencode }}" title="{{ r.nombre }}">{{ r.code }}</a></td>
+          <td class="{{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
+          <td class="{{ fx.vcls(r.var_px) }}">{{ r.var_px | ar_num(2) }}</td>
+          <td class="var-cell {{ r.var_pct | var_cls }}" style="--vw:{{ r.var_pct | var_w(2) }}%">{{ r.var_pct | ar_pct_pp(2) }}</td>
+          <td>{{ r.tirea | ar_pct(2) }}</td>
+          <td class="muted">{{ r.delta_tir_bps | ar_num(0) }}</td>
+          <td>{{ r.tem | ar_pct(2) }}</td>
+          {% if c.margen %}<td>{{ r.margen | ar_pct(2) }}</td>{% endif %}
+        </tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {# El pie habla de la sección PRINCIPAL (la subdivisión cuenta lo suyo en su
+     fila de título) y linkea a su curva real (Duales → las tres bases juntas). #}
+  {% set main = c.secciones[0] %}
+  {% if main.ocultas %}
+  <div class="ini-more muted">+{{ main.ocultas }} más · se muestran los {{ main.filas | length }} más operados hoy ·
+    <a href="/curves?curve={{ main.curva }}">ver la curva →</a></div>
+  {% endif %}
+  {% else %}
+  <div class="card-body muted" style="font-size:12px">Sin bonos con cotización en este segmento.</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+<div class="ini-grid">
+  <div class="card ini-card">
+    <div class="card-title"><span>💵 Tipos de cambio</span><span class="card-title-aux">plazo {{ plazo }} · <a href="/dolares">monitor →</a></span></div>
+    {{ kpi_table(tc) }}
+  </div>
+  <div class="card ini-card">
+    <div class="card-title"><span>📊 Tasas</span><span class="card-title-aux">TNA · <a href="/tasas">monitor →</a></span></div>
+    {{ kpi_table(tasas) }}
+  </div>
+  <div class="card ini-card">
+    <div class="card-title"><span>📈 Mercado</span><span class="card-title-aux">Merval · riesgo país · CEDEARs</span></div>
+    {{ kpi_table(mercado) }}
+  </div>
+</div>
+
+<div class="ini-grid">
+  {{ bonos_card(bonos['globales']) }}
+  {{ bonos_card(bonos['bonares']) }}
+  <div class="card ini-card ini-rows2">
+    <div class="card-title"><span>Panel líder</span><span class="card-title-aux">Merval + componentes · <a href="/mercado?panel=lideres">Mercado →</a></span></div>
+    {% if lideres %}
+    <div class="table-scroll">
+      <table class="cashflows ini-eq" id="ini-tbl-lideres">
+        <thead><tr><th>Especie</th><th>Último</th><th>Var %</th><th>Vol</th></tr></thead>
+        <tbody>
+        {% for r in lideres %}
+          <tr{% if r.indice %} class="ini-indice"{% endif %}>
+            <td>{{ r.code }}</td>
+            <td style="font-weight:600">{{ r.last | ar_num(0 if r.indice else 2) }}</td>
+            <td class="var-cell {{ r.var_pct | var_cls }}" style="--vw:{{ r.var_pct | var_w(5) }}%">{{ r.var_pct | ar_pct_pp(2) }}</td>
+            <td class="muted">{% if r.volume is not none %}{{ r.volume | ar_hum }}{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body muted" style="font-size:12px">Sin acciones en el store todavía.</div>
+    {% endif %}
+  </div>
+  {{ bonos_card(bonos['cer']) }}
+  {{ bonos_card(bonos['lecap']) }}
+</div>
+
+<div class="ini-grid">
+  {{ bonos_card(bonos['dolarlinked']) }}
+  {{ bonos_card(bonos['tamar']) }}
+  {{ bonos_card(bonos['duales']) }}
+</div>
+
+<div class="ini-grid">
+  <div class="card ini-card ini-span3">
+    <div class="card-title"><span>Futuros de dólar · A3 (ex ROFEX)</span><span class="card-title-aux">mayorista · tasa implícita vs oficial · <a href="/futuros">Futuros →</a></span></div>
+    {% if futuros %}
+    <div class="table-scroll">
+      <table class="cashflows ini-fut" id="ini-tbl-futuros">
+        <thead><tr><th></th>{% for f in futuros %}<th title="{{ f.code }}">{{ f.label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          <tr><td>Último</td>{% for f in futuros %}<td style="font-weight:600">{{ f.last | ar_num(2) }}</td>{% endfor %}</tr>
+          <tr><td>Var %</td>{% for f in futuros %}<td class="{{ fx.vcls(f.var_pct) }}">{{ f.var_pct | ar_pct(2) }}</td>{% endfor %}</tr>
+          <tr><td>Deva. impl.</td>{% for f in futuros %}<td>{{ f.td | ar_pct(2) }}</td>{% endfor %}</tr>
+          <tr><td>TNA impl.</td>{% for f in futuros %}<td>{{ f.tna | ar_pct(2) }}</td>{% endfor %}</tr>
+          <tr><td>TEM impl.</td>{% for f in futuros %}<td>{{ f.tem | ar_pct(2) }}</td>{% endfor %}</tr>
+          <tr><td class="muted">Días</td>{% for f in futuros %}<td class="muted" data-noflash>{{ f.dias if f.dias is not none else '—' }}</td>{% endfor %}</tr>
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body muted" style="font-size:12px">Sin futuros con precio en el store.</div>
+    {% endif %}
+  </div>
+</div>
