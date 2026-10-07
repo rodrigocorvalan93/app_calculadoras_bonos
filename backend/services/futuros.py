@@ -121,7 +121,12 @@ def rows(canal: str = "may", spot_v: Optional[float] = None) -> List[Dict[str, A
         alias = _alias(sym)
         if alias:
             alt = store.get(alias)
-            if alt is not None and (snap is None or (alt.updated_at or 0) >= (snap.updated_at or 0)):
+            # El alias (inglés) gana sólo si su data es ESTRICTAMENTE más nueva:
+            # en un empate manda el código canónico, que es el que el broker
+            # lista de verdad. Con `>=` un empate de `updated_at` (reloj de
+            # Windows, ~15 ms de resolución) exponía el alias como `code` y el
+            # click al libro / los tests buscaban el canónico y no lo encontraban.
+            if alt is not None and (snap is None or (alt.updated_at or 0) > (snap.updated_at or 0)):
                 snap = alt
         if snap is None:
             continue

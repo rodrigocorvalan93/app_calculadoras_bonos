@@ -48,7 +48,11 @@ TARJETAS_BONOS: Tuple[Tuple[str, str, str], ...] = (
 DUALES_BASE: Tuple[str, ...] = ("dualfija", "dualcer", "dualdlk")
 SUB_DUALES_V = "Duales CER · pata TAMAR (v)"
 CURVA_DUALES_V = "dualtamar_cer"                      # la pata TAMAR de los duales CER (curves.build_curve_codes)
-CURVA_DUALES_MIX = "mix:" + ",".join(DUALES_BASE)     # "ver la curva" de Duales: las tres bases juntas
+# Links "ver la curva": /curves sólo conoce las CurveDef de curves.CURVES y las
+# combinadas `mix:a,b`; ni "duales" ni "dualtamar_cer" son CurveDef, así que
+# van como mix (mix_codes toma cualquier key de build_curve_codes).
+CURVA_DUALES_MIX = "mix:" + ",".join(DUALES_BASE)     # Duales: las tres bases juntas
+CURVA_DUALES_V_LINK = "mix:" + CURVA_DUALES_V          # subdivisión de TAMAR
 # Las curvas que hay que armar para las tarjetas.
 CURVAS_NECESARIAS: Tuple[str, ...] = tuple(k for k, _, _ in TARJETAS_BONOS if k != "duales") \
     + DUALES_BASE + ("dualtamar", CURVA_DUALES_V)
@@ -209,7 +213,7 @@ def tarjetas_bonos(rows_by: Dict[str, List[Dict[str, Any]]],
             tip = _TIP_MARGEN_DUALES
         elif key == "tamar":
             secs = [(None, "tamar", [_fila(r) for r in rows_by.get("tamar") or []]),
-                    (SUB_DUALES_V, CURVA_DUALES_V, [_fila(r) for r in v_cer])]
+                    (SUB_DUALES_V, CURVA_DUALES_V_LINK, [_fila(r) for r in v_cer])]
         else:
             secs = [(None, key, [_fila(r) for r in rows_by.get(key) or []])]
         out[key] = _tarjeta(key, titulo, sub, secs, max_filas, tip)
@@ -327,6 +331,8 @@ def mercado(summary: Dict[str, Any]) -> List[Dict[str, Any]]:
                  "fmt": "int", "value": v_ccl, "var_px": px_ccl, "var_pct": vp_ccl})
     rp = _safe("riesgo_pais", riesgo_pais.snapshot, {}) or {}
     rows.append({"label": "Riesgo país", "sub": f"EMBI · {rp['fecha']}" if rp.get("fecha") else "EMBI",
+                 "tip": "EMBI+ Argentina (JP Morgan), dato diario, vía ArgentinaDatos (api.argentinadatos.com); "
+                        "variación contra la observación anterior",
                  "fmt": "int", "value": _f(rp.get("valor")),
                  "var_px": _f(rp.get("var")), "var_pct": _f(rp.get("var_pct"))})
     for code in ("SPY", "EWZ"):

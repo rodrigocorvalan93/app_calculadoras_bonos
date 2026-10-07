@@ -66,15 +66,47 @@ def test_rows_lee_data_bajo_alias_ingles() -> None:
 
 def test_rows_tea_y_volumen_fallback_nominal() -> None:
     """TEA = TIR efectiva anual directa del td; sin EV el volumen cae al
-    nominal (NV, contratos) para no mostrar '—' con mercado operando."""
+    nominal (NV, contratos) para no mostrar '—' con mercado operando.
+
+    A prueba de calendario: un contrato SIN alias inglés (ni ENE/ABR/AGO/DIC)
+    que venza en ≥ 5 días. Con `[2]` a secas, en octubre caía en DIC26M, cuyo
+    alias DEC26M ya sembraron otros tests (excel_api, alias inglés) y en Windows
+    el `updated_at` empataba (reloj de ~15 ms) → `code` salía el alias y el
+    `next()` no encontraba el canónico (StopIteration)."""
+    from backend.locale_ar import hoy_ba
     from backend.services import marketdata_store as mds
 
-    sym = fut.symbols("may")[2]
+    sym = next(s for s in fut.symbols("may")
+               if not fut._alias(s) and (fut._parse_vto(s) - hoy_ba()).days >= 5)
     sp = fut.spot() or 1000.0
     mds.get_store().update_from_md(sym, {"LA": {"price": sp * 1.06}, "NV": {"size": 7777.0}})
     r = next(x for x in fut.rows("may") if x["code"] == sym)
     assert r["tea"] == pytest.approx((1.0 + r["td"]) ** (365.0 / r["dias"]) - 1.0)
     assert r["volume"] == 7777.0
+
+
+def test_empate_de_updated_at_gana_el_canonico() -> None:
+    """Regresión del CI de Windows (07/10): data bajo el alias inglés y bajo el
+    canónico con el MISMO `updated_at` (reloj de ~15 ms) → `code` es el
+    canónico (el símbolo que el broker lista), no el alias; el alias sólo gana
+    si su data es estrictamente más nueva."""
+    from backend.locale_ar import hoy_ba
+    from backend.services import marketdata_store as mds
+
+    sym = next(s for s in fut.symbols("may")
+               if fut._alias(s) and (fut._parse_vto(s) - hoy_ba()).days >= 5)
+    alias = fut._alias(sym)
+    st = mds.get_store()
+    sp = fut.spot() or 1000.0
+    st.update_from_md(alias, {"LA": {"price": sp * 1.04}})
+    st.update_from_md(sym, {"LA": {"price": sp * 1.07}})
+    st.get(alias).updated_at = st.get(sym).updated_at           # empate exacto
+    r = next((x for x in fut.rows("may") if x["label"] == fut._label(sym)), None)
+    assert r is not None and r["code"] == sym and r["last"] == pytest.approx(sp * 1.07)
+    # alias estrictamente más nuevo → gana el alias (data persistida vieja / feed inglés)
+    st.get(alias).updated_at = st.get(sym).updated_at + 1.0
+    r = next((x for x in fut.rows("may") if x["label"] == fut._label(sym)), None)
+    assert r is not None and r["code"] == alias and r["last"] == pytest.approx(sp * 1.04)
 
 
 def test_deva_chart_promedio() -> None:

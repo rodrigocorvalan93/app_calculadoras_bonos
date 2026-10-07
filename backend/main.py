@@ -336,6 +336,14 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] riesgo país poller start failed")
 
+    # Dólar BNA (billete / divisa) para el add-in de Excel: thread daemon, un
+    # fetch por hora (pedido del desk); el snapshot de Excel sólo lee memoria.
+    from backend.services import bna_fx
+    try:
+        bna_fx.start()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] BNA FX poller start failed")
+
     # Autoguardado del histórico px/tasas al cierre (17:01 BA, días hábiles):
     # si la app está corriendo a esa hora, la base del día se guarda sola en
     # el Excel/Parquet de bymaapi (mismo esquema/dedup — correr bymaapi a mano
@@ -502,6 +510,7 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] CAFCI API poller stop failed")
     riesgo_pais.stop()
+    bna_fx.stop()
     if warmup is not None:
         try:
             await warmup.stop()

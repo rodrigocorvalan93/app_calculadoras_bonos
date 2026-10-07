@@ -29,6 +29,9 @@ os.environ.setdefault("HISTORICO_JOURNAL_DIR", tempfile.mkdtemp(prefix="bonos_te
 # data/riesgo_pais.json real — poller apagado y archivo en un tmp.
 os.environ.setdefault("RIESGO_PAIS", "0")
 os.environ.setdefault("RIESGO_PAIS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_riesgo_pais.json"))
+# Dólar BNA del add-in: sin red en la suite y sin tocar data/bna_fx.json.
+os.environ.setdefault("BNA_FX", "0")
+os.environ.setdefault("BNA_FX_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_bna_fx.json"))
 # Pizarra de Inicio (cuadros por usuario): nunca el data/pizarra.json real.
 os.environ.setdefault("PIZARRA_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_pizarra_"), "pizarra.json"))
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")

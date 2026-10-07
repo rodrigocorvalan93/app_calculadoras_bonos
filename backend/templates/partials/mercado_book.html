@@ -117,7 +117,10 @@
     {% endif %}
 
     {% if position %}
-    <details style="margin-top:14px" open>
+    {# En la pizarra la tenencia arranca plegada (pedido del desk, 07/10): el
+       cuadro muestra el libro y la posición se abre a demanda. En Mercado /
+       Órdenes sigue abierta como siempre. #}
+    <details style="margin-top:14px"{% if not piz %} open{% endif %}>
       <summary style="cursor:pointer;color:var(--cyan)">Mi posición · {{ position.total_cantidad | ar_int }} VN en {{ position.n_fondos }} fondo{{ "s" if position.n_fondos != 1 else "" }}</summary>
       <table class="cashflows" style="margin-top:6px">
         <thead><tr><th style="text-align:left">Fondo</th><th>VN</th><th>Valor</th><th>% PN</th></tr></thead>

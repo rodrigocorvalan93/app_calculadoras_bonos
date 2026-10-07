@@ -36,6 +36,8 @@ const snap = {
   fx: { mep: 1539.12, ccl: 1606.87, canje: 0.044 },
   mayorista: { source: "SIOPEL", last: 1512.5, close: 1510.0 },
   a3500: { source: "A3500", last: 1515.1105, close: 1512.3, var_pct: 0.0019, date: "2026-09-09" },
+  bna: { billete_compra: 1395, billete_venta: 1445, billete_fecha: "2026-10-07",
+         divisa_compra: 1387.5, divisa_venta: 1407.5, divisa_fecha: "2026-10-06" },
   macro: {
     a3500: { serie: "a3500", label: "Dólar mayorista A3500", valor: 1515.1105, fecha: "2026-09-09", n: 500 },
     badlar: { serie: "badlar", label: "BADLAR", valor: 33.5, fecha: "2026-09-09", n: 500 },
@@ -83,6 +85,21 @@ out.fx_cierre_feed = eq(sandbox.fxGet(snap, "cierre"), 1510.0);
 out.fx_mayorista_intradia = eq(sandbox.fxGet(snap, "mayorista"), 1512.5);
 out.fx_a3500_fallback_sin_seccion = eq(sandbox.fxGet({ mayorista: { close: 1510.0 } }, "a3500"), 1510.0);
 out.fx_a3500_fecha_sin_seccion_vacia = eq(sandbox.fxGet({ mayorista: { close: 1510.0 } }, "a3500_fecha"), "");
+// BNA (Banco Nación): billete / divisa, compra / venta, fecha como serial; alias cortos; sin sección → vacío
+out.fx_bna_billete_venta = eq(sandbox.fxGet(snap, "bna_billete_venta"), 1445);
+out.fx_bna_billete_compra = eq(sandbox.fxGet(snap, "BNA billete compra"), 1395);
+out.fx_bna_divisa_venta = eq(sandbox.fxGet(snap, "bna-divisa-venta"), 1407.5);
+out.fx_bna_divisa_compra = eq(sandbox.fxGet(snap, "bna_divisa_compra"), 1387.5);
+out.fx_bna_alias_corto = eq(sandbox.fxGet(snap, "bna"), 1445) === true && sandbox.fxGet(snap, "bna_divisa") === 1407.5 ? true : { got: sandbox.fxGet(snap, "bna") };
+out.fx_bna_fecha_serial = eq(sandbox.fxGet(snap, "bna_fecha"), 46302);            // 07/10/2026
+out.fx_bna_divisa_fecha_serial = eq(sandbox.fxGet(snap, "bna_divisa_fecha"), 46301);   // 06/10/2026
+out.fx_bna_sin_seccion_vacio = eq(sandbox.fxGet({ fx: {} }, "bna_billete_venta"), "");
+out.fx_bna_tipo_desconocido = isErr(sandbox.fxGet(snap, "bna_oro"));
+out.tabla_fx_bna = (() => {
+  const t = T("fx"); const m = Object.fromEntries(t.slice(1).map((r) => [r[0], r[1]]));
+  const ok = m["BNA billete venta"] === 1445 && m["BNA divisa compra"] === 1387.5 && m["BNA billete fecha"] === "07/10/2026";
+  return ok ? true : { got: m };
+})();
 out.tabla_fx_filas = (() => {
   const t = T("fx"); const m = Object.fromEntries(t.slice(1).map((r) => [r[0], r[1]]));
   const ok = m["A3500 (cierre)"] === 1515.1105 && m["A3500 fecha"] === "09/09/2026" &&

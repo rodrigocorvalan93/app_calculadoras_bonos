@@ -31,6 +31,7 @@ from fastapi.responses import PlainTextResponse, Response
 
 from backend.config import settings
 from backend.services import (
+    bna_fx as bna_fx_svc,
     cauciones as cauciones_svc,
     dolares as dolares_svc,
     futuros as futuros_svc,
@@ -147,6 +148,14 @@ def _build(codes: Optional[FrozenSet[str]]) -> Dict[str, Any]:
     except Exception:  # noqa: BLE001
         logger.exception("[excel] a3500 section failed")
         out["a3500"] = {}
+    try:
+        # Dólar BNA billete / divisa (compra · venta · fecha) para =OMS.FX("bna_…"):
+        # lo trae un poller HORARIO en thread de fondo (services.bna_fx); acá
+        # sólo se lee memoria. Pedido del desk, sólo para el add-in.
+        out["bna"] = bna_fx_svc.snapshot()
+    except Exception:  # noqa: BLE001
+        logger.exception("[excel] bna section failed")
+        out["bna"] = {}
     try:
         # Último dato de cada serie BCRA (valor + fecha) para =OMS.MACRO EN
         # VIVO: la misma `_calc_macro` del batch, así la celda, el botón

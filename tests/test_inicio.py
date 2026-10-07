@@ -118,7 +118,7 @@ def test_tarjetas_bonos_duales_sin_margen_cer_y_pata_tamar_v_en_tamar() -> None:
     # pata v de la fija / DLK NO va (su margen ya está cruzado en Duales).
     tm = t["tamar"]
     assert [s["titulo"] for s in tm["secciones"]] == [None, inicio.SUB_DUALES_V]
-    assert [s["curva"] for s in tm["secciones"]] == ["tamar", "dualtamar_cer"]
+    assert [s["curva"] for s in tm["secciones"]] == ["tamar", "mix:dualtamar_cer"]   # /curves sólo conoce CurveDef y mix:
     assert [f["code"] for f in tm["secciones"][0]["filas"]] == ["TMF27"]
     assert [f["code"] for f in tm["secciones"][1]["filas"]] == ["TXMD8v"]
     assert (tm["secciones"][1]["filas"][0]["tirea"], tm["secciones"][1]["filas"][0]["margen"]) == (0.29, 0.045)
@@ -243,10 +243,7 @@ async def test_inicio_body_muestra_los_bonos_sembrados_y_comparte_el_render() ->
         for c in sembrados:
             assert f'href="/yas?code={c}"' in html, c
         assert "var-cell" in html and "Δ TIR" in html
-        # el pie "+N más" linkea a una curva REAL (nunca a /curves?curve=duales)
-        assert 'href="/curves?curve=duales"' not in html
-        if "+12 más" in html or "más operados hoy" in html:
-            assert 'href="/curves?curve=cer"' in html or 'href="/curves?curve=lecap"' in html
+        assert 'title="EMBI+ Argentina' in html                    # la fuente del riesgo país, visible
         # el segundo pedido con la misma seq sale del cache compartido
         r2 = await ac.get("/inicio/body")
         assert r2.status_code == 200 and r2.headers.get("x-seq-cache") == "hit"
@@ -255,6 +252,33 @@ async def test_inicio_body_muestra_los_bonos_sembrados_y_comparte_el_render() ->
         assert page.status_code == 200
         assert 'hx-get="/inicio/body"' in page.text and 'hx-trigger="md-update from:body, every 30s"' in page.text
         assert "Panel líder" in page.text and sembrados[0] in page.text
+
+
+@pytest.mark.asyncio
+async def test_pies_y_subdivision_linkean_a_curvas_que_curvas_reconoce() -> None:
+    """Render del partial con tarjetas que SÍ tienen ocultas (cosa que el
+    universo real no da hoy): el pie habla de la sección principal y linkea a
+    su curva; la subdivisión linkea a la suya; y /curves reconoce esas keys
+    (ni `duales` ni `dualtamar_cer` son CurveDef: van como mix:)."""
+    from backend.main import app
+    bond_universe.ensure_loaded()
+    muchos = {"tamar": [_row(f"TM{i:02d}", date(2027, 1, 1 + i), 1e6 * (i + 1)) for i in range(12)],
+              "dualtamar_cer": [_row(f"TX{i:02d}v", date(2028, 1, 1 + i), 1e6, margen_tna=0.03) for i in range(11)],
+              "dualfija": [_row(f"TD{i:02d}", date(2027, 2, 1 + i), 1e6) for i in range(12)]}
+    bonos = inicio.tarjetas_bonos(muchos)
+    html = app.state.templates.env.get_template("partials/inicio_body.html").render(
+        tc=[], tasas=[], mercado=[], futuros=[], lideres=[], plazo="24hs", bonos=bonos)
+    tam = html[html.find('id="ini-tbl-tamar"'):html.find('id="ini-tbl-duales"')]
+    assert "+2 más · se muestran los 10 más operados hoy" in tam and 'href="/curves?curve=tamar"' in tam
+    assert "+1 más" in tam and 'href="/curves?curve=mix:dualtamar_cer"' in tam and "ver todos" in tam
+    dua = html[html.find('id="ini-tbl-duales"'):]
+    assert 'href="/curves?curve=mix:dualfija,dualcer,dualdlk"' in dua and 'href="/curves?curve=duales"' not in html
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        for curva in ("tamar", "mix:dualtamar_cer", "mix:dualfija,dualcer,dualdlk"):
+            r = await ac.get(f"/curves/table?curve={curva}")
+            assert r.status_code == 200 and "Curva no encontrada" not in r.text, curva
+        r = await ac.get("/curves/table?curve=dualtamar_cer")          # la key cruda NO sirve: por eso el mix
+        assert "Curva no encontrada" in r.text
 
 
 def test_resumen_nunca_lanza_con_fuentes_caidas(monkeypatch) -> None:

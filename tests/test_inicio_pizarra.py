@@ -167,6 +167,34 @@ async def test_pizarra_por_usuario_libro_cotizacion_y_render_compartido(piz_tmp,
         assert pizarra.usuarios_con_cuadros() == ["juan"]
 
 
+def _render_book(piz) -> str:
+    """El partial del libro con una tenencia sintética: el mismo template que
+    Mercado / Órdenes, embebido (`piz`) o no."""
+    from backend.main import app
+    tpl = app.state.templates.env.get_template("partials/mercado_book.html")
+    return tpl.render(code="GD30", plazo="24hs", leg="native", fuente="byma", y="tirea", y_label="TIREA",
+                      nombre="Global 2030", symbol="MERV - XMEV - GD30 - 24hs", row=None,
+                      bids=[{"price": 100.0, "size": 1000, "cum": 1000, "frac": 1.0, "own": None, "tirea": 0.10}],
+                      offers=[{"price": 101.0, "size": 2000, "cum": 2000, "frac": 1.0, "own": None, "tirea": 0.09}],
+                      instr=None, margen_ok=False, piz=piz,
+                      position={"total_cantidad": 1000, "n_fondos": 1,
+                                "funds": [{"nombre": "Delta Ahorro", "cantidad": 1000, "valor": 1234, "pct_pn": 0.01}]})
+
+
+def test_mi_posicion_plegada_en_la_pizarra_y_abierta_en_mercado() -> None:
+    """07/10: en la pizarra la tenencia arranca plegada (pedido del desk); en el
+    libro de Mercado / Órdenes sigue abierta. El resto del libro es el MISMO
+    (libro completo, no la versión compacta que el desk rechazó)."""
+    piz = _render_book({"idx": 0, "n": 1})
+    merc = _render_book(None)
+    assert "Mi posición · 1.000 VN en 1 fondo" in piz and "Delta Ahorro" in piz
+    assert '<details style="margin-top:14px">' in piz and '<details style="margin-top:14px" open>' not in piz
+    assert '<details style="margin-top:14px" open>' in merc
+    # el libro embebido es el completo: mismas puntas (book-grid) y stats, sin escalera compacta
+    assert "book-grid" in piz and "Bid TIREA" in piz and "Offer TIREA" in piz and "piz-ladder" not in piz
+    assert "piz-tools" in piz and "piz-tools" not in merc
+
+
 @pytest.mark.asyncio
 async def test_libro_de_mercado_sigue_igual_fuera_de_la_pizarra() -> None:
     """El refactor (book_context) no cambia el libro de Mercado: sigue con su
