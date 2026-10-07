@@ -111,26 +111,33 @@ def test_tarjetas_bonos_duales_sin_margen_cer_y_pata_tamar_v_en_tamar() -> None:
     d = t["duales"]
     assert [f["code"] for f in d["filas"]] == ["TTD26", "TMVE8", "TXMJ8", "TXMD8"]
     assert {f["code"]: f["margen"] for f in d["filas"]} == {"TTD26": 0.0312, "TMVE8": 0.05, "TXMJ8": None, "TXMD8": None}
-    assert d["margen"] is True and d["sub"] == "pata base fija · CER · DLK"
-    # TAMAR: soberanos arriba y, como subdivisión, la pata TAMAR (v) de TODOS
-    # los duales (CER incluidos) con su TIR y su margen propios.
+    assert d["margen"] is True and d["margen_tip"] == inicio._TIP_MARGEN_DUALES
+    assert d["secciones"][0]["curva"] == "mix:dualfija,dualcer,dualdlk"        # "ver la curva" real, no /curves?curve=duales
+    # TAMAR: soberanos arriba y, como subdivisión, la pata TAMAR (v) de los
+    # duales CER (los que nombró el desk) con su TIR y su margen propios; la
+    # pata v de la fija / DLK NO va (su margen ya está cruzado en Duales).
     tm = t["tamar"]
     assert [s["titulo"] for s in tm["secciones"]] == [None, inicio.SUB_DUALES_V]
+    assert [s["curva"] for s in tm["secciones"]] == ["tamar", "dualtamar_cer"]
     assert [f["code"] for f in tm["secciones"][0]["filas"]] == ["TMF27"]
-    assert [f["code"] for f in tm["secciones"][1]["filas"]] == ["TTD26v", "TMVE8v", "TXMD8v"]
-    assert {f["code"]: (f["tirea"], f["margen"]) for f in tm["secciones"][1]["filas"]} == {
-        "TTD26v": (0.31, 0.0312), "TMVE8v": (0.30, 0.05), "TXMD8v": (0.29, 0.045)}
-    assert [f["code"] for f in tm["filas"]] == ["TMF27", "TTD26v", "TMVE8v", "TXMD8v"] and tm["margen"] is True
-    assert tm["total"] == 4 and tm["ocultas"] == 0
+    assert [f["code"] for f in tm["secciones"][1]["filas"]] == ["TXMD8v"]
+    assert (tm["secciones"][1]["filas"][0]["tirea"], tm["secciones"][1]["filas"][0]["margen"]) == (0.29, 0.045)
+    assert [f["code"] for f in tm["filas"]] == ["TMF27", "TXMD8v"] and tm["margen"] is True
+    assert tm["total"] == 2 and tm["ocultas"] == 0 and tm["margen_tip"] == inicio._TIP_MARGEN
+    # con la curva dualtamar_cer en rows_by manda ésa (es lo que arma la ruta)
+    t_cur = inicio.tarjetas_bonos({**rows_by, "dualtamar_cer": [_row("TXMJ9v", date(2029, 6, 29), 1e6, margen_tna=0.04)]})
+    assert [f["code"] for f in t_cur["tamar"]["secciones"][1]["filas"]] == ["TXMJ9v"]
     assert t["cer"]["filas"] == [] and t["cer"]["total"] == 0
-    # sin dualtamar la subdivisión queda vacía (el template no la pinta) y la tarjeta sigue
+    # sin duales la subdivisión queda vacía (el template no la pinta) y la tarjeta sigue
     t2 = inicio.tarjetas_bonos({"tamar": rows_by["tamar"]})
     assert t2["tamar"]["secciones"][1]["filas"] == [] and [f["code"] for f in t2["tamar"]["filas"]] == ["TMF27"]
-    # el tope aplica por sección: 12 soberanos + 7 duales v → 10 + 7
+    # el tope aplica por sección: 12 soberanos + 11 duales CER v → 10 + 10; cada
+    # sección cuenta lo suyo (el pie de la tarjeta usa la principal)
     muchos = {"tamar": [_row(f"TM{i:02d}", date(2027, 1, 1 + i), 1e6 * (i + 1)) for i in range(12)],
-              "dualtamar": [_row(f"TX{i}v", date(2028, 1, 1 + i), 1e6) for i in range(7)]}
+              "dualtamar_cer": [_row(f"TX{i:02d}v", date(2028, 1, 1 + i), 1e6) for i in range(11)]}
     t3 = inicio.tarjetas_bonos(muchos)["tamar"]
-    assert [len(s["filas"]) for s in t3["secciones"]] == [10, 7] and t3["ocultas"] == 2 and t3["secciones"][0]["ocultas"] == 2
+    assert [len(s["filas"]) for s in t3["secciones"]] == [10, 10]
+    assert [s["ocultas"] for s in t3["secciones"]] == [2, 1] and t3["ocultas"] == 3
 
 
 def test_kpis_tipos_de_cambio_y_mercado() -> None:
@@ -236,6 +243,10 @@ async def test_inicio_body_muestra_los_bonos_sembrados_y_comparte_el_render() ->
         for c in sembrados:
             assert f'href="/yas?code={c}"' in html, c
         assert "var-cell" in html and "Δ TIR" in html
+        # el pie "+N más" linkea a una curva REAL (nunca a /curves?curve=duales)
+        assert 'href="/curves?curve=duales"' not in html
+        if "+12 más" in html or "más operados hoy" in html:
+            assert 'href="/curves?curve=cer"' in html or 'href="/curves?curve=lecap"' in html
         # el segundo pedido con la misma seq sale del cache compartido
         r2 = await ac.get("/inicio/body")
         assert r2.status_code == 200 and r2.headers.get("x-seq-cache") == "hit"

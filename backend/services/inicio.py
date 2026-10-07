@@ -31,24 +31,30 @@ logger = logging.getLogger("backend.inicio")
 MAX_FILAS = 10
 # (key de la tarjeta, título, subtítulo). La key es la curva de Mercado salvo
 # "duales", que junta las patas BASE de los tres tipos de dual (fija / CER /
-# DLK: `DUALES_BASE`). La pata TAMAR de los duales (`dualtamar`, que valúa el
-# código base con el sufijo 'v') va como SUBDIVISIÓN de la tarjeta TAMAR, con
-# su margen; en Duales el margen se cruza sólo a la pata fija / DLK — a un dual
-# CER no le corresponde (pedido del desk, 07/10).
+# DLK: `DUALES_BASE`). Pedido del desk (07/10): a un dual CER NO le
+# corresponde margen — en Duales el margen de la pata TAMAR (`dualtamar`, que
+# valúa el código base con el sufijo 'v') se cruza sólo a la pata fija y a la
+# DLK, y la pata TAMAR de los duales CER se ve aparte, como SUBDIVISIÓN de la
+# tarjeta TAMAR (curva `dualtamar_cer`: TXMD8v, TXMJ8v, …) con su margen.
 TARJETAS_BONOS: Tuple[Tuple[str, str, str], ...] = (
     ("globales", "Globales", "ley Nueva York · USD"),
     ("bonares", "Bonares", "ley argentina · USD"),
     ("cer", "CER", "soberanos ajustados por inflación"),
     ("lecap", "Tasa fija", "LECAP · BONCAP · tasa fija ARS"),
     ("dolarlinked", "Dólar linked", "soberanos A3500"),
-    ("tamar", "TAMAR", "soberanos tasa variable · duales (v) abajo"),
-    ("duales", "Duales", "pata base fija · CER · DLK"),
+    ("tamar", "TAMAR", "soberanos tasa variable · duales CER (v) abajo"),
+    ("duales", "Duales", "pata base · margen TAMAR en fija y DLK"),
 )
 DUALES_BASE: Tuple[str, ...] = ("dualfija", "dualcer", "dualdlk")
-SUB_DUALES_V = "Duales · pata TAMAR (v)"
+SUB_DUALES_V = "Duales CER · pata TAMAR (v)"
+CURVA_DUALES_V = "dualtamar_cer"                      # la pata TAMAR de los duales CER (curves.build_curve_codes)
+CURVA_DUALES_MIX = "mix:" + ",".join(DUALES_BASE)     # "ver la curva" de Duales: las tres bases juntas
 # Las curvas que hay que armar para las tarjetas.
 CURVAS_NECESARIAS: Tuple[str, ...] = tuple(k for k, _, _ in TARJETAS_BONOS if k != "duales") \
-    + DUALES_BASE + ("dualtamar",)
+    + DUALES_BASE + ("dualtamar", CURVA_DUALES_V)
+_TIP_MARGEN = "Margen TNA sobre el benchmark (TAMAR / BADLAR)"
+_TIP_MARGEN_DUALES = ("Margen TNA de la pata TAMAR del dual (código + v), cruzado a la pata fija y a la DLK; "
+                      "a la pata CER no le corresponde")
 MAX_FUTUROS = 12
 MAX_LIDERES = 24
 
@@ -139,22 +145,25 @@ def seleccionar(filas: List[Dict[str, Any]], max_filas: int = MAX_FILAS) -> List
 
 
 def _tarjeta(key: str, titulo: str, sub: str,
-             secciones: List[Tuple[Optional[str], List[Dict[str, Any]]]],
-             max_filas: int) -> Dict[str, Any]:
-    """Arma la tarjeta a partir de sus secciones [(subtítulo o None, filas
-    crudas)]: cada sección elige sus `max_filas`; `filas` = todas las elegidas
-    en orden (lo que itera el template vía `secciones`, y lo que miran los
-    tests); `margen` = alguna fila con margen → la columna se muestra."""
+             secciones: List[Tuple[Optional[str], str, List[Dict[str, Any]]]],
+             max_filas: int, margen_tip: str = _TIP_MARGEN) -> Dict[str, Any]:
+    """Arma la tarjeta a partir de sus secciones [(subtítulo o None, curva del
+    link "ver la curva", filas crudas)]: cada sección elige sus `max_filas` y
+    cuenta sus `ocultas` (el pie de la tarjeta habla de la sección principal;
+    la fila de subtítulo, de la suya); `filas` = todas las elegidas en orden
+    (lo que miran los tests); `margen` = alguna fila con margen → la columna se
+    muestra, con `margen_tip` como tooltip de la cabecera."""
     secs: List[Dict[str, Any]] = []
     total = 0
-    for st, filas in secciones:
+    for st, curva, filas in secciones:
         sel = seleccionar(filas, max_filas)
         total += len(filas)
-        secs.append({"titulo": st, "filas": sel, "total": len(filas), "ocultas": len(filas) - len(sel)})
+        secs.append({"titulo": st, "curva": curva, "filas": sel, "total": len(filas),
+                     "ocultas": len(filas) - len(sel)})
     todas = [f for s in secs for f in s["filas"]]
     return {"key": key, "titulo": titulo, "sub": sub, "secciones": secs, "filas": todas,
             "total": total, "ocultas": total - len(todas),
-            "margen": any(f["margen"] is not None for f in todas)}
+            "margen": any(f["margen"] is not None for f in todas), "margen_tip": margen_tip}
 
 
 def tarjetas_bonos(rows_by: Dict[str, List[Dict[str, Any]]],
@@ -165,9 +174,10 @@ def tarjetas_bonos(rows_by: Dict[str, List[Dict[str, Any]]],
     Duales: un dual por fila con su pata BASE (fija / CER / DLK; el mismo código
     no se repite aunque esté en dos curvas). El margen de la pata TAMAR
     (`dualtamar`, código base + 'v') se cruza a la pata fija y a la DLK; a la
-    pata CER NO (pedido del desk 07/10: no le corresponde). La pata TAMAR
-    completa de todos los duales se ve en la tarjeta TAMAR, como subdivisión
-    `SUB_DUALES_V`, con su TIR / TEM / margen propios."""
+    pata CER NO (pedido del desk 07/10: no le corresponde). La pata TAMAR de
+    los duales CER se ve en la tarjeta TAMAR, como subdivisión `SUB_DUALES_V`
+    (curva `dualtamar_cer`; sin esa curva en `rows_by`, las filas de
+    `dualtamar` cuyo base es un dual CER), con su TIR / TEM / margen propios."""
     margen_dual: Dict[str, float] = {}
     for r in rows_by.get("dualtamar") or []:
         c = str(r.get("code") or "")
@@ -175,8 +185,13 @@ def tarjetas_bonos(rows_by: Dict[str, List[Dict[str, Any]]],
         if c and m is not None:
             margen_dual[c[:-1] if c.endswith("v") else c] = m
     cer_duales = {str(r.get("code") or "") for r in rows_by.get("dualcer") or []}
+    v_cer = rows_by.get(CURVA_DUALES_V)
+    if v_cer is None:
+        v_cer = [r for r in rows_by.get("dualtamar") or []
+                 if str(r.get("code") or "").endswith("v") and str(r.get("code"))[:-1] in cer_duales]
     out: Dict[str, Dict[str, Any]] = {}
     for key, titulo, sub in TARJETAS_BONOS:
+        tip = _TIP_MARGEN
         if key == "duales":
             vistos: set = set()
             filas = []
@@ -190,13 +205,14 @@ def tarjetas_bonos(rows_by: Dict[str, List[Dict[str, Any]]],
                         filas.append(_fila(r, sin_margen=True))
                     else:
                         filas.append(_fila(r, margen_dual.get(c)))
-            secs = [(None, filas)]
+            secs = [(None, CURVA_DUALES_MIX, filas)]
+            tip = _TIP_MARGEN_DUALES
         elif key == "tamar":
-            secs = [(None, [_fila(r) for r in rows_by.get("tamar") or []]),
-                    (SUB_DUALES_V, [_fila(r) for r in rows_by.get("dualtamar") or []])]
+            secs = [(None, "tamar", [_fila(r) for r in rows_by.get("tamar") or []]),
+                    (SUB_DUALES_V, CURVA_DUALES_V, [_fila(r) for r in v_cer])]
         else:
-            secs = [(None, [_fila(r) for r in rows_by.get(key) or []])]
-        out[key] = _tarjeta(key, titulo, sub, secs, max_filas)
+            secs = [(None, key, [_fila(r) for r in rows_by.get(key) or []])]
+        out[key] = _tarjeta(key, titulo, sub, secs, max_filas, tip)
     return out
 
 

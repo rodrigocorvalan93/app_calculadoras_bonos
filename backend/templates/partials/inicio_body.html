@@ -46,15 +46,16 @@
         <tr>
           <th>Bono</th><th>Último</th><th>Var</th><th>Var %</th><th>TIR</th>
           <th title="TIR al último vs TIR al cierre previo, en puntos básicos">Δ TIR</th><th>TEM</th>
-          {% if c.margen %}<th title="Margen TNA sobre el benchmark (TAMAR / BADLAR)">Margen</th>{% endif %}
+          {% if c.margen %}<th title="{{ c.margen_tip }}">Margen</th>{% endif %}
         </tr>
       </thead>
       <tbody>
       {# Secciones: la tarjeta TAMAR trae abajo la pata TAMAR (v) de los duales
-         bajo un subtítulo; las demás tienen una sola sección sin título. #}
+         CER bajo un subtítulo (con su propio "+N más" → su curva); las demás
+         tienen una sola sección sin título. #}
       {% for s in c.secciones if s.filas %}
         {% if s.titulo %}
-        <tr class="ini-sub"><td colspan="{{ 8 if c.margen else 7 }}">{{ s.titulo }}{% if s.ocultas %} <span class="muted">· +{{ s.ocultas }} más</span>{% endif %}</td></tr>
+        <tr class="ini-sub"><td colspan="{{ 8 if c.margen else 7 }}">{{ s.titulo }}{% if s.ocultas %} <span class="muted">· +{{ s.ocultas }} más · <a href="/curves?curve={{ s.curva }}">ver todos →</a></span>{% endif %}</td></tr>
         {% endif %}
         {% for r in s.filas %}
         <tr>
@@ -72,9 +73,12 @@
       </tbody>
     </table>
   </div>
-  {% if c.ocultas %}
-  <div class="ini-more muted">+{{ c.ocultas }} más · se muestran los {{ c.filas | length }} más operados hoy ·
-    <a href="/curves?curve={{ c.key }}">ver la curva →</a></div>
+  {# El pie habla de la sección PRINCIPAL (la subdivisión cuenta lo suyo en su
+     fila de título) y linkea a su curva real (Duales → las tres bases juntas). #}
+  {% set main = c.secciones[0] %}
+  {% if main.ocultas %}
+  <div class="ini-more muted">+{{ main.ocultas }} más · se muestran los {{ main.filas | length }} más operados hoy ·
+    <a href="/curves?curve={{ main.curva }}">ver la curva →</a></div>
   {% endif %}
   {% else %}
   <div class="card-body muted" style="font-size:12px">Sin bonos con cotización en este segmento.</div>
