@@ -215,6 +215,17 @@
       </div>
     </div>
 
+    {# ── Copias en conflicto / archivos viejos (OneDrive -HOST, .corrupto, .bak, .tmp) — on-demand ── #}
+    <div class="card">
+      <div class="card-title"><span>🗂 Copias en conflicto y archivos viejos</span>
+        <span class="card-title-aux">carpeta de la app · Delta Bases · cierres · carteras · journal</span></div>
+      <div class="card-body">
+        <div id="admin-copias" hx-get="/admin/copias" hx-trigger="load" hx-swap="innerHTML">
+          <p class="muted" style="font-size:12px">Cargando…</p>
+        </div>
+      </div>
+    </div>
+
     {# ── Auditoría del OMS: visor + export CSV ── #}
     <div class="card">
       <div class="card-title"><span>🧾 Auditoría OMS</span>

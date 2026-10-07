@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -32,8 +31,6 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 os.chdir(_ROOT)
-
-_CONFLICTO = re.compile(r"conflicto|conflict|\.corrupto-|\.tmp(\.xlsx)?$|\.bak-|-[A-Za-z0-9]+-(NB|PC|DESKTOP)[A-Za-z0-9-]*\.", re.I)
 
 
 def _archivo(path: str) -> Dict[str, Any]:
@@ -108,14 +105,9 @@ def informe(ruedas: int = 15) -> Dict[str, Any]:
     out["ruedas"] = filas
     out["journal"] = {"dias": len(journal), "ultimo": max(journal).isoformat() if journal else None}
     out["ignorados"] = [d.isoformat() for d in sorted(ignorados)]
-    try:
-        nombres = sorted(os.listdir(os.path.dirname(xlsx)))
-    except OSError:
-        nombres = []
-    base = os.path.splitext(os.path.basename(xlsx))[0]
-    out["conflictos"] = [n for n in nombres if base.split(" - ")[0] in n and _CONFLICTO.search(n)
-                         and n not in (os.path.basename(xlsx), os.path.basename(pq),
-                                       os.path.basename(espejo.sidecar_path(pq)))]
+    # Mismo escaneo que la tarjeta "Copias en conflicto" de /admin (sin abrir nada).
+    from backend.services import copias
+    out["conflictos"] = copias.resumen_bases()
     return out
 
 

@@ -76,6 +76,46 @@ def _curve_rows_html(templates: Any, rows: list[dict], plazo: str) -> list[str]:
     return out
 
 
+# ── Memo del HTML por fila de Mercado ─────────────────────────────────────────
+# Mismo patrón que Curvas: la tabla completa (`/mercado/table`, 163 filas × 26
+# celdas con filtros) rehacía TODO el Jinja en cada tick aunque el delta por
+# filas ya cubría el refresco — medido 07/10: 46 ms p50 por request con un solo
+# símbolo cambiado (1,6 s de 2,5 s del perfil eran la macro de la fila), más
+# dos regex `compact` sobre los 228 KB. La fila es idéntica mientras no cambie
+# su dict (`_rk`), el plazo/leg/fuente/ym y su fracción de nominal (relativa al
+# máximo de la tabla): se cachea el <tr> ya compactado y un tick re-renderiza
+# sólo las filas que cambiaron. El delta (/mercado/rows) usa el mismo memo, así
+# el markup de una fila sale IDÉNTICO por los dos caminos (y el delta deja
+# cebada la fila para la próxima tabla completa).
+_MROW_MEMO: Dict[tuple, str] = {}
+_MROW_MAX = 8192
+_MROW_STATS: Dict[str, int] = {"render": 0, "hit": 0}
+
+
+def _mercado_rows_html(templates: Any, rows: list[dict], plazo: str, leg: str,
+                       fuente: str, ym: str) -> list[str]:
+    env = templates.env
+    fila = env.get_template("partials/mercado_row.html").module.fila
+    compact = env.filters["compact"]
+    out: list[str] = []
+    for r in rows:
+        rk = r.get("_rk")
+        k = ((rk, plazo, leg, fuente, ym, round(float(r.get("nominal_frac") or 0.0), 3))
+             if rk is not None else None)
+        h = _MROW_MEMO.get(k) if k is not None else None
+        if h is None:
+            h = str(compact(fila(r, plazo, leg, fuente, ym)))
+            _MROW_STATS["render"] += 1
+            if k is not None:
+                if len(_MROW_MEMO) >= _MROW_MAX:
+                    _MROW_MEMO.clear()
+                _MROW_MEMO[k] = h
+        else:
+            _MROW_STATS["hit"] += 1
+        out.append(h)
+    return out
+
+
 def _def_or_mix(key: str | None):
     """CurveDef de una curva normal, o un def sintético para una combinada
     `mix:a,b,c` (para que el template muestre el label sin tocar nada más)."""
@@ -799,8 +839,13 @@ async def _delta_render(key: tuple, request: Request, ctx: Dict[str, Any]) -> Di
     fut = loop.create_future()
     _DELTA_INFLIGHT[key] = fut
 
+    tpls = request.app.state.templates
+
     def _build() -> Dict[str, Any]:
-        body = bytes(_render(request, "partials/mercado_rows.html", **ctx).body)
+        # Mismo memo de HTML por fila que la tabla completa: markup idéntico por
+        # los dos caminos y el delta deja cebadas las filas para el próximo swap.
+        rows_html = _mercado_rows_html(tpls, ctx["rows"], ctx["plazo"], ctx["leg"], ctx["fuente"], ctx["ym"])
+        body = bytes(_render(request, "partials/mercado_rows.html", rows_html=rows_html, **ctx).body)
         gz = gzip.compress(body, _GZIP_LEVEL) if len(body) >= 1024 else None
         return {"body": body, "gz": gz}
 
@@ -884,19 +929,23 @@ async def mercado_table_partial(
         return _render(request, "partials/equities_table.html",
                        rows=eq_rows, panel=panel, plazo=plazo, **ctx)
     seq, rows, row_meta, ohash = await _rows_en_seq(curve, plazo, only_quoting, leg, fuente, q, mas)
-    # 7-12 ms de Jinja @120-200 filas × 25 filtros/fila: al pool, como equities.
+    ym_k = "margen" if ym == "margen" else "tir"
+    tpls = request.app.state.templates
+    # Las filas salen del memo de HTML (_mercado_rows_html): un tick re-renderiza
+    # sólo las que cambiaron. El card + lo que quede de Jinja va al pool.
     return await asyncio.get_running_loop().run_in_executor(
         None, lambda: _render(
             request,
             "partials/mercado_table.html",
             selected_def=curves.curve_def(curve),
             rows=rows,
+            rows_html=_mercado_rows_html(tpls, rows, plazo, leg, fuente, ym_k),
             row_meta=row_meta,
             plazo=plazo,
             only_quoting=only_quoting,
             leg=leg,
             fuente=fuente,
-            ym="margen" if ym == "margen" else "tir",
+            ym=ym_k,
             # tabla por filas: el cliente pide /mercado/rows?…&since=seq&order=hash
             # en cada tick y reemplaza sólo las filas cambiadas.
             delta_url=("/mercado/rows?" + request.url.query) if fuente != "mae" else "",
@@ -1065,48 +1114,75 @@ def _forwards_matrix(rows: list[dict], metric: str = "tirea") -> dict:
     codes = [p[0] for p in pts]
     ys = [p[1] for p in pts]
     ts = [p[2] for p in pts]
-    dfact = [] if margen else [(1.0 + ys[i]) ** (-ts[i]) for i in range(n)]
+    # Los N² pares en numpy (1.225 con N = 50): la doble iteración en Python con
+    # un `**` por par costaba ~11 ms por tick; vectorizada, < 1 ms. Mismo umbral
+    # que el histórico (forwards_hist._MIN_GAP): dos bonos con duration casi
+    # igual dan 1/(t2−t1) enorme → un forward finito pero absurdo que envenena
+    # vmin/vmax y lava el heatmap entero; con gap < ~11 días la celda queda "·",
+    # igual que un resultado no finito (antes el except).
+    import warnings
 
-    raw: list[list[float | None]] = [[None] * n for _ in range(n)]
-    finite: list[float] = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            # Mismo umbral que el histórico (forwards_hist._MIN_GAP): dos bonos con
-            # duration casi igual dan 1/(t2−t1) enorme → un forward finito pero
-            # absurdo que no cae en el except, envenena vmin/vmax y lava el heatmap
-            # entero. Con gap < ~11 días la celda queda "·" como en el histórico.
-            if ts[j] - ts[i] < _FWD_MIN_GAP:
-                continue
-            try:
-                if margen:
-                    f = (ys[j] * ts[j] - ys[i] * ts[i]) / (ts[j] - ts[i])
-                else:
-                    f = (dfact[i] / dfact[j]) ** (1.0 / (ts[j] - ts[i])) - 1.0
-            except (ValueError, ZeroDivisionError, OverflowError):
-                f = None
-            if f is not None and f == f:
-                raw[i][j] = f
-                finite.append(f)
-    vmin = min(finite) if finite else 0.0
-    vmax = max(finite) if finite else 1.0
+    import numpy as np
+    t = np.asarray(ts, dtype=float)
+    y = np.asarray(ys, dtype=float)
+    gap = t[None, :] - t[:, None]                               # t_j − t_i
+    ok = np.triu(np.ones((n, n), dtype=bool), k=1) & (gap >= _FWD_MIN_GAP)
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        g = np.where(gap == 0.0, np.nan, gap)
+        if margen:
+            f = (y[None, :] * t[None, :] - y[:, None] * t[:, None]) / g
+        else:
+            d = (1.0 + y) ** (-t)
+            f = (d[:, None] / d[None, :]) ** (1.0 / g) - 1.0
+        f = np.where(ok & np.isfinite(f), f, np.nan)
+        finite = f[np.isfinite(f)]
+        vmin = float(finite.min()) if finite.size else 0.0
+        vmax = float(finite.max()) if finite.size else 1.0
+        span = (vmax - vmin) or 1.0
+        alpha = 0.08 + np.clip((f - vmin) / span, 0.0, 1.0) * 0.42
 
-    span = (vmax - vmin) or 1.0
+    from markupsafe import escape
+    cod_html = [str(escape(c)) for c in codes]
     out_rows = []
     for i in range(n):
+        fi, ai, ci = f[i], alpha[i], cod_html[i]
         cells = []
+        parts = []
         for j in range(n):
-            f = raw[i][j]
-            if f is None:
+            v = fi[j]
+            if v != v:                                              # NaN = sin forward
                 cells.append({"txt": "·", "bg": ""})
+                parts.append("<td>·</td>")
             else:
-                norm = min(1.0, max(0.0, (f - vmin) / span))
-                alpha = 0.08 + norm * 0.42
-                # Texto pre-formateado en Python (evita N² dispatch del filtro
-                # Jinja `ar_pct` al renderizar la matriz — clave en curvas anchas).
-                cells.append({"txt": fmt_pct(f, 2),
-                              "bg": f"background-color: rgba(76,201,240,{alpha:.2f})"})
-        out_rows.append({"code": codes[i], "t": ts[i], "tirea": ys[i], "cells": cells})
+                # Texto y fondo pre-formateados (memo por valor): el filtro
+                # `ar_pct` y el dispatch de Jinja por celda eran el 60 % del
+                # tick de la matriz en curvas anchas.
+                txt, bg = _fwd_cell(float(v), float(ai[j]))
+                cells.append({"txt": txt, "bg": bg})
+                parts.append(f'<td style="{bg}" data-fwc="{ci}" data-fwl="{cod_html[j]}">{txt}</td>')
+        # `cells` para los tests / consumidores viejos; `cells_html` es lo que
+        # pinta _fwd_matrix.html (una fila = un string, sin loop de Jinja).
+        out_rows.append({"code": codes[i], "t": ts[i], "tirea": ys[i], "cells": cells,
+                         "cells_html": "".join(parts)})
     return {"header": [{"code": codes[j], "t": ts[j]} for j in range(n)], "rows": out_rows, "n": n}
+
+
+_FWD_CELL: Dict[tuple, tuple] = {}
+_FWD_CELL_MAX = 50_000
+
+
+def _fwd_cell(f: float, alpha: float) -> tuple:
+    """(texto, estilo de fondo) de una celda de la matriz, memoizado por valor:
+    entre dos ticks cambian ~2N pares de N², el resto sale del dict."""
+    k = (round(f, 9), round(alpha, 2))
+    c = _FWD_CELL.get(k)
+    if c is None:
+        if len(_FWD_CELL) >= _FWD_CELL_MAX:
+            _FWD_CELL.clear()
+        c = (fmt_pct(f, 2), f"background-color: rgba(76,201,240,{alpha:.2f})")
+        _FWD_CELL[k] = c
+    return c
 
 
 def _is_fwd_point(r: dict) -> bool:

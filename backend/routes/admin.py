@@ -8,6 +8,7 @@ mensaje de resultado (sin htmx: es un panel de baja frecuencia).
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Form, Request
@@ -301,6 +302,85 @@ async def admin_especies_faltantes(request: Request) -> HTMLResponse:
     rep = await loop.run_in_executor(None, _build)
     return request.app.state.templates.TemplateResponse(
         request, "partials/admin_especies_faltantes.html", {"rep": rep})
+
+
+# ── Copias en conflicto / archivos viejos (superuser, on-demand) ────────────
+def _copias_ctx(request: Request, *, revisar: bool, msg: Optional[str] = None,
+                error: Optional[str] = None) -> dict:
+    """GET: listdir + stat y lo ya revisado (cache por mtime/tamaño); Revisar:
+    lee cada copia y la compara con su principal. Siempre en el pool."""
+    from backend.services import copias
+    entradas = copias.analizar(solo_cache=not revisar)
+    grupos = copias.agrupar(entradas)
+    return {"grupos": grupos, "carpetas": copias.carpetas(), "n_copias": len(entradas),
+            "n_inutiles": sum(1 for e in entradas if e.get("aporta") is False),
+            "analizado": revisar or all(e.get("veredicto") for e in entradas),
+            "msg": msg, "error": error}
+
+
+async def _copias_render(request: Request, **kw) -> HTMLResponse:
+    ctx = await asyncio.get_running_loop().run_in_executor(None, lambda: _copias_ctx(request, **kw))
+    return request.app.state.templates.TemplateResponse(request, "partials/admin_copias.html", ctx)
+
+
+def _quien(request: Request) -> str:
+    return str((getattr(request.state, "user", None) or {}).get("username") or "superuser")
+
+
+@router.get("/copias", response_class=HTMLResponse)
+async def admin_copias(request: Request) -> HTMLResponse:
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    return await _copias_render(request, revisar=False)
+
+
+@router.post("/copias/revisar", response_class=HTMLResponse)
+async def admin_copias_revisar(request: Request) -> HTMLResponse:
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    return await _copias_render(request, revisar=True)
+
+
+@router.post("/copias/borrar", response_class=HTMLResponse)
+async def admin_copias_borrar(request: Request, path: str = Form(...)) -> HTMLResponse:
+    """Borra UNA copia (re-validada en el momento: adentro de una carpeta
+    escaneada y clasificada como copia — nunca un principal)."""
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    from backend.services import copias
+    r = await asyncio.get_running_loop().run_in_executor(None, copias.borrar, path, _quien(request))
+    if r.get("ok"):
+        return await _copias_render(request, revisar=True, msg=f"✓ Borrado {r['nombre']} ({r['tipo']}).")
+    return await _copias_render(request, revisar=True, error=f"No se borró: {r.get('error')}")
+
+
+@router.post("/copias/borrar-inutiles", response_class=HTMLResponse)
+async def admin_copias_borrar_inutiles(request: Request) -> HTMLResponse:
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    from backend.services import copias
+    r = await asyncio.get_running_loop().run_in_executor(None, copias.borrar_inutiles, _quien(request))
+    n = len(r["borradas"])
+    msg = (f"✓ Borradas {n} copia{'s' if n != 1 else ''} que no aportaban ({copias.fmt_bytes(r['bytes'])}): "
+           f"{', '.join(r['borradas'][:8])}{' …' if n > 8 else ''}" if n else "Nada para borrar.")
+    err = "; ".join(r["errores"]) if r["errores"] else None
+    return await _copias_render(request, revisar=True, msg=msg, error=err)
+
+
+@router.post("/copias/incorporar", response_class=HTMLResponse)
+async def admin_copias_incorporar(request: Request, path: str = Form(...)) -> HTMLResponse:
+    """Las ruedas que SÓLO están en la copia pasan a su base (px/tasas, FX,
+    acciones) por el camino de escritura de siempre."""
+    if not _guard(request):
+        return HTMLResponse("<h1>403</h1>", status_code=403)
+    from backend.services import copias
+    r = await asyncio.get_running_loop().run_in_executor(None, copias.incorporar, path, _quien(request))
+    if r.get("ok"):
+        det = f"{len(r['ruedas'])} rueda(s): {r['ruedas_fmt']}" if r.get("ruedas") else f"{r.get('filas')} filas nuevas"
+        return await _copias_render(request, revisar=True,
+                                    msg=f"✓ Incorporado a la base {r['tipo']} desde {os.path.basename(path)}: {det} "
+                                        f"({r.get('filas')} filas; total {r.get('total_rows')}).")
+    return await _copias_render(request, revisar=True, error=f"No se incorporó: {r.get('error')}")
 
 
 @router.get("/salud", response_class=HTMLResponse)

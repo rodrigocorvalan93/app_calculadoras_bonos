@@ -19,7 +19,12 @@
            col=largo) en el panel de histórico de abajo (app.js). Sin title
            por celda: en una matriz 50×50 pesaba ~50 KB; el cursor+hover
            alcanzan como affordance. #}
+        {#- `cells_html` viene armado en Python (routes/curves._forwards_matrix):
+            una fila = un string; el loop de Jinja por celda (2.500 por matriz)
+            queda sólo de fallback para un `fwd` sin ese campo. -#}
+        {%- if r.cells_html is defined %}{{ r.cells_html | safe }}{% else -%}
         {% for c in r.cells %}{% if c.txt != "·" %}<td style="{{ c.bg }}" data-fwc="{{ r.code }}" data-fwl="{{ fwd.header[loop.index0].code }}">{{ c.txt }}</td>{% else %}<td>·</td>{% endif %}{% endfor %}
+        {%- endif %}
       </tr>
     {% endfor %}
   </tbody>
