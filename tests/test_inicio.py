@@ -87,14 +87,16 @@ def test_seleccionar_prioriza_operados_y_ordena_por_vencimiento() -> None:
     assert [f["code"] for f in sinvol] == ["C0", "C1", "C2"]
 
 
-def test_tarjetas_bonos_cruza_margen_tamar_en_duales_y_detecta_margen() -> None:
+def test_tarjetas_bonos_duales_sin_margen_cer_y_pata_tamar_v_en_tamar() -> None:
     rows_by = {
         "globales": [_row("GD30", date(2030, 7, 9), 5e6), _row("GD35", date(2035, 7, 9), 1e6)],
-        "dualfija": [_row("TTD26", date(2026, 12, 15), 1e6)],
-        "dualcer": [_row("TXMD8", date(2028, 12, 15), 2e6), _row("TTD26", date(2026, 12, 15), 1e6)],
+        # TMVE8 también está en dualfija a propósito: el mismo código no se repite
+        "dualfija": [_row("TTD26", date(2026, 12, 15), 1e6), _row("TMVE8", date(2028, 1, 28), 3e6)],
+        "dualcer": [_row("TXMD8", date(2028, 12, 15), 2e6), _row("TXMJ8", date(2028, 6, 30), 2e6, margen_tna=0.9)],
         "dualdlk": [_row("TMVE8", date(2028, 1, 28), 3e6)],
-        "dualtamar": [_row("TTD26v", date(2026, 12, 15), 1e6, margen_tna=0.0312),
-                      _row("TXMD8v", date(2028, 12, 15), 2e6, margen_tna=0.045)],
+        "dualtamar": [_row("TTD26v", date(2026, 12, 15), 1e6, margen_tna=0.0312, tirea=0.31),
+                      _row("TXMD8v", date(2028, 12, 15), 2e6, margen_tna=0.045, tirea=0.29),
+                      _row("TMVE8v", date(2028, 1, 28), 3e6, margen_tna=0.05, tirea=0.30)],
         "tamar": [_row("TMF27", date(2027, 2, 1), 1e6, margen_tna=0.02)],
     }
     t = inicio.tarjetas_bonos(rows_by)
@@ -102,11 +104,33 @@ def test_tarjetas_bonos_cruza_margen_tamar_en_duales_y_detecta_margen() -> None:
     g = t["globales"]
     assert [f["code"] for f in g["filas"]] == ["GD30", "GD35"] and g["margen"] is False and g["ocultas"] == 0
     assert g["filas"][0]["tirea"] == 0.10 and g["filas"][0]["delta_tir_bps"] == -12.3 and g["filas"][0]["margen"] is None
+    assert len(g["secciones"]) == 1 and g["secciones"][0]["titulo"] is None
+    # Duales: un dual por fila (pata base) por vencimiento; margen TAMAR sólo en
+    # la pata fija / DLK — a la CER no le corresponde (aunque dualtamar lo tenga
+    # y aunque la propia fila CER traiga un margen_tna).
     d = t["duales"]
-    assert [f["code"] for f in d["filas"]] == ["TTD26", "TMVE8", "TXMD8"]      # un dual por fila, por vencimiento
-    assert {f["code"]: f["margen"] for f in d["filas"]} == {"TTD26": 0.0312, "TMVE8": None, "TXMD8": 0.045}
-    assert d["margen"] is True
-    assert t["tamar"]["margen"] is True and t["cer"]["filas"] == [] and t["cer"]["total"] == 0
+    assert [f["code"] for f in d["filas"]] == ["TTD26", "TMVE8", "TXMJ8", "TXMD8"]
+    assert {f["code"]: f["margen"] for f in d["filas"]} == {"TTD26": 0.0312, "TMVE8": 0.05, "TXMJ8": None, "TXMD8": None}
+    assert d["margen"] is True and d["sub"] == "pata base fija · CER · DLK"
+    # TAMAR: soberanos arriba y, como subdivisión, la pata TAMAR (v) de TODOS
+    # los duales (CER incluidos) con su TIR y su margen propios.
+    tm = t["tamar"]
+    assert [s["titulo"] for s in tm["secciones"]] == [None, inicio.SUB_DUALES_V]
+    assert [f["code"] for f in tm["secciones"][0]["filas"]] == ["TMF27"]
+    assert [f["code"] for f in tm["secciones"][1]["filas"]] == ["TTD26v", "TMVE8v", "TXMD8v"]
+    assert {f["code"]: (f["tirea"], f["margen"]) for f in tm["secciones"][1]["filas"]} == {
+        "TTD26v": (0.31, 0.0312), "TMVE8v": (0.30, 0.05), "TXMD8v": (0.29, 0.045)}
+    assert [f["code"] for f in tm["filas"]] == ["TMF27", "TTD26v", "TMVE8v", "TXMD8v"] and tm["margen"] is True
+    assert tm["total"] == 4 and tm["ocultas"] == 0
+    assert t["cer"]["filas"] == [] and t["cer"]["total"] == 0
+    # sin dualtamar la subdivisión queda vacía (el template no la pinta) y la tarjeta sigue
+    t2 = inicio.tarjetas_bonos({"tamar": rows_by["tamar"]})
+    assert t2["tamar"]["secciones"][1]["filas"] == [] and [f["code"] for f in t2["tamar"]["filas"]] == ["TMF27"]
+    # el tope aplica por sección: 12 soberanos + 7 duales v → 10 + 7
+    muchos = {"tamar": [_row(f"TM{i:02d}", date(2027, 1, 1 + i), 1e6 * (i + 1)) for i in range(12)],
+              "dualtamar": [_row(f"TX{i}v", date(2028, 1, 1 + i), 1e6) for i in range(7)]}
+    t3 = inicio.tarjetas_bonos(muchos)["tamar"]
+    assert [len(s["filas"]) for s in t3["secciones"]] == [10, 7] and t3["ocultas"] == 2 and t3["secciones"][0]["ocultas"] == 2
 
 
 def test_kpis_tipos_de_cambio_y_mercado() -> None:

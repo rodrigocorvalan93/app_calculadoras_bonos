@@ -50,7 +50,13 @@
         </tr>
       </thead>
       <tbody>
-      {% for r in c.filas %}
+      {# Secciones: la tarjeta TAMAR trae abajo la pata TAMAR (v) de los duales
+         bajo un subtítulo; las demás tienen una sola sección sin título. #}
+      {% for s in c.secciones if s.filas %}
+        {% if s.titulo %}
+        <tr class="ini-sub"><td colspan="{{ 8 if c.margen else 7 }}">{{ s.titulo }}{% if s.ocultas %} <span class="muted">· +{{ s.ocultas }} más</span>{% endif %}</td></tr>
+        {% endif %}
+        {% for r in s.filas %}
         <tr>
           <td><a class="ini-code" href="/yas?code={{ r.code | urlencode }}" title="{{ r.nombre }}">{{ r.code }}</a></td>
           <td class="{{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
@@ -61,6 +67,7 @@
           <td>{{ r.tem | ar_pct(2) }}</td>
           {% if c.margen %}<td>{{ r.margen | ar_pct(2) }}</td>{% endif %}
         </tr>
+        {% endfor %}
       {% endfor %}
       </tbody>
     </table>

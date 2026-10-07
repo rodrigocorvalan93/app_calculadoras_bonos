@@ -531,8 +531,13 @@ ocupar los 8 workers del pool); el resto son lookups en memoria
 `MAX_FILAS` (10): los más operados hoy (VN; sin VN, efectivo) completados con
 los de vencimiento más corto, ordenados por vencimiento, con "+N más → ver la
 curva". Duales = patas base (`dualfija` + `dualcer` + `dualdlk`, un dual por
-fila) con el margen de la pata TAMAR (`dualtamar`, código base + `v`). Las
-tablas son `.cashflows` para que el diff de flashes las vea. Medido con el
+fila); el margen de la pata TAMAR (`dualtamar`, código base + `v`) se cruza a
+la pata fija y DLK, NUNCA a la CER (no le corresponde — desk 07/10). La pata
+TAMAR (v) de todos los duales va como SUBDIVISIÓN de la tarjeta TAMAR
+(`SUB_DUALES_V`, `secciones` de la tarjeta; el tope de filas aplica por
+sección) con su TIR / TEM / margen. Las tablas son `.cashflows` para que el
+diff de flashes las vea (id propio por tarjeta: el ratchet de anchos de
+app.js keyea por id + cabecera). Medido con el
 store sembrado (bench_tick, 2000 símbolos): hit 0,9 ms; tick con rebuild
 p50 ≈ 14 · p95 ≈ 20 ms.
 
