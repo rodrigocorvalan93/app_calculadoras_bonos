@@ -48,9 +48,11 @@ def informe(ruedas: int = 15) -> Dict[str, Any]:
     from backend.services import espejo, historico_writer as hw
 
     xlsx = hw._xlsx_default()
+    we = hw.writer_estado()                          # flag + rol de quien usó esta instancia hoy
     out: Dict[str, Any] = {
         "host": hw._host(),
-        "writer": bool(settings.historico_base_writer),
+        "writer": bool(we["writer"]),
+        "writer_motivo": we["motivo"],
         "autosave": bool(settings.historico_autosave),
         "journal_dir": hw.journal_dir(),
         "carpeta": os.path.dirname(xlsx) if xlsx else None,
@@ -120,7 +122,8 @@ def _fmt_par(v: Any) -> str:
 
 
 def imprimir(inf: Dict[str, Any]) -> None:
-    print(f"máquina   {inf['host']} · writer={'sí' if inf['writer'] else 'no'} · autosave={'sí' if inf['autosave'] else 'no'}")
+    print(f"máquina   {inf['host']} · writer={'sí' if inf['writer'] else 'no'} ({inf.get('writer_motivo', '')}) · "
+          f"autosave={'sí' if inf['autosave'] else 'no'}")
     print(f"journal   {inf['journal_dir']}")
     if inf.get("error"):
         print(f"ERROR     {inf['error']}")

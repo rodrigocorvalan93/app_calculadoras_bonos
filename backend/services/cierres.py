@@ -451,11 +451,12 @@ def importar_base(force: bool = False) -> Dict[str, Any]:
     """Convierte la base px/tasas (espejo parquet) en particiones para las
     fechas que todavía no tienen una — la matriz arranca con toda la historia
     de bonos. Sólo la máquina writer (salvo `force`); idempotente."""
-    from backend.config import settings
     from backend.services import symbols as syms
+    from backend.services.historico_writer import writer_estado
 
-    if not settings.historico_base_writer and not force:
-        return {"skipped": "base_writer=0"}
+    we = writer_estado()
+    if not we["writer"] and not force:
+        return {"skipped": we["motivo"]}
     hist_dir = deltapaths.historico_dir()
     if not hist_dir:
         return {"skipped": "sin carpeta Delta Bases"}

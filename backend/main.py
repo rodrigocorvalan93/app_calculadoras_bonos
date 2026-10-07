@@ -713,6 +713,7 @@ def create_app() -> FastAPI:
                 return JSONResponse({"error": "Token de Excel inválido o deshabilitado."},
                                     status_code=401)
             request.state.user = {"username": uname, "role": auth_svc.role_of(uname)}
+            auth_svc.marcar_visto(uname)          # el add-in también es uso de esta instancia (writer por rol)
             return await call_next(request)
         if not settings.auth_enabled or _is_public(path):
             if not settings.auth_enabled:
@@ -758,6 +759,9 @@ def create_app() -> FastAPI:
         request.state.nav_active = auth_svc.active_tab(path)
         request.state.is_superuser = (role == "superuser")
         request.state.features = auth_svc.features_for(role)
+        # Presencia para el writer por rol de la base histórica: quién usó esta
+        # instancia hoy decide si escribe la base compartida (~100 ns).
+        auth_svc.marcar_visto(username)
 
         if any(path == p or path.startswith(p + "/") for p in _SUPERUSER_ONLY) and role != "superuser":
             return HTMLResponse("<h1>403</h1><p>Sección reservada al superuser.</p>", status_code=403)
