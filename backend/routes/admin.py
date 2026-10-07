@@ -59,8 +59,9 @@ def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = Non
     rt = auth.role_tabs()
     # Las tabs superuser-only (Alertas) no se ofrecen como checkbox: aunque se
     # tildaran, el middleware las corta con 403 — sería un link muerto.
+    # Inicio (ALWAYS_TABS) tampoco: la ve todo rol, siempre.
     tabs = [{"key": k, "label": lbl} for k, lbl, _ in auth.TABS
-            if k not in auth._SUPERUSER_ONLY_TABS]
+            if k not in auth._SUPERUSER_ONLY_TABS and k not in auth.ALWAYS_TABS]
     rf = auth.role_features()
     return request.app.state.templates.TemplateResponse(
         request, "admin.html",

@@ -53,11 +53,11 @@ def _safe_next(nxt: Optional[str]) -> str:
     if (nxt and nxt.startswith("/") and not nxt.startswith("//")
             and "\\" not in nxt and not any(c in nxt for c in "\t\r\n")):
         return nxt
-    return "/yas"
+    return "/inicio"
 
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, next: str = "/yas") -> HTMLResponse:
+async def login_page(request: Request, next: str = "/inicio") -> HTMLResponse:
     if request.session.get("user") and auth.role_of(request.session["user"]):
         return RedirectResponse(url=_safe_next(next), status_code=303)
     return _render(request, "login.html", next=_safe_next(next), error=None,
@@ -66,7 +66,7 @@ async def login_page(request: Request, next: str = "/yas") -> HTMLResponse:
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_submit(request: Request, username: str = Form(...),
-                       password: str = Form(...), next: str = Form("/yas")) -> HTMLResponse:
+                       password: str = Form(...), next: str = Form("/inicio")) -> HTMLResponse:
     ip = _client_ip(request)
     if _login_throttled(ip):
         return _render(request, "login.html", status=429, next=_safe_next(next),

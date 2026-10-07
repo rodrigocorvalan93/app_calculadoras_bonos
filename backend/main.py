@@ -46,6 +46,7 @@ from backend.routes.total_return import router as total_return_router
 from backend.routes.escenario import router as escenario_router
 from backend.routes.excel import router as excel_router
 from backend.routes.historico import router as historico_router
+from backend.routes.inicio import router as inicio_router
 from backend.routes.market import router as market_router
 from backend.routes.posiciones import router as posiciones_router
 from backend.routes.tape import router as tape_router
@@ -78,7 +79,8 @@ class _QuietPolls(logging.Filter):
               "/tasas/table", "/tasas/caucion/book", "/dolares/oficial", "/dolares/tables",
               "/futuros/table", "/futuros/book", "/breakeven/table", "/breakeven/chart",
               "/forwards/table", "/forwards/hist", "/alertas/tabla", "/alertas/estado",
-              "/yas/market", "/ordenes/quote", "/market/health", "/market/events")
+              "/yas/market", "/ordenes/quote", "/market/health", "/market/events",
+              "/inicio/body", "/inicio/pizarra")
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
@@ -326,6 +328,14 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] news poller start failed")
 
+    # Riesgo país (ArgentinaDatos, dato diario) para la tarjeta Mercado de
+    # Inicio: thread daemon, un fetch cada 30 min; el request sólo lee memoria.
+    from backend.services import riesgo_pais
+    try:
+        riesgo_pais.start()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] riesgo país poller start failed")
+
     # Autoguardado del histórico px/tasas al cierre (17:01 BA, días hábiles):
     # si la app está corriendo a esa hora, la base del día se guarda sola en
     # el Excel/Parquet de bymaapi (mismo esquema/dedup — correr bymaapi a mano
@@ -491,6 +501,7 @@ async def lifespan(app: FastAPI):
         await cafci_api_svc.get_poller().stop()
     except Exception:  # noqa: BLE001
         logger.exception("[main] CAFCI API poller stop failed")
+    riesgo_pais.stop()
     if warmup is not None:
         try:
             await warmup.stop()
@@ -607,6 +618,7 @@ def create_app() -> FastAPI:
     app.mount("/static", _StaticInmutable(directory=str(STATIC_DIR)), name="static")
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(inicio_router)
     app.include_router(yas_router)
     app.include_router(nueva_router)
     app.include_router(comparador_router)
@@ -772,7 +784,7 @@ def create_app() -> FastAPI:
         if not auth_svc.can_access_path(role, path):
             return HTMLResponse(
                 "<h1>403</h1><p>No tenés acceso a esta sección. "
-                "<a href='/yas'>Volver</a></p>", status_code=403)
+                "<a href='/inicio'>Volver</a></p>", status_code=403)
         return await call_next(request)
 
     # SessionMiddleware se agrega DESPUÉS del guard → queda MÁS AFUERA (Starlette
@@ -950,7 +962,7 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def index() -> RedirectResponse:
-        return RedirectResponse(url="/yas", status_code=302)
+        return RedirectResponse(url="/inicio", status_code=302)
 
     def _ready() -> tuple:
         """(ready, motivo): el proceso vive (liveness) ≠ puede operar

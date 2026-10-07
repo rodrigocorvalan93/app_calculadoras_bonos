@@ -1,0 +1,34 @@
+{% import "partials/_fx_macros.html" as fx %}
+{# Cuadro "cotización" de la pizarra: la ficha de pantalla estilo BYMA de un
+   bono (último · puntas con cantidad · var · máx/mín · volumen · apertura /
+   cierre) más TIR / TEM / duration de la app. `r` = fila de curva con book
+   (routes.curves._row_for_code book=True); `piz` = {"idx", "n"}. #}
+<div class="card piz-cot">
+  <div class="card-title">
+    <span><a class="ini-code" href="/yas?code={{ code | urlencode }}">{{ code }}</a> <span class="muted" style="font-weight:500">· {{ plazo }}</span></span>
+    <span class="card-title-aux">{{ nombre }}{% include "partials/_pizarra_tools.html" %}</span>
+  </div>
+  {% if r %}
+  <table class="cashflows piz-cot-tbl">
+    <tbody>
+      <tr>
+        <td>Último</td>
+        <td class="{{ r.last_cls }}" style="font-size:16px;font-weight:650">{{ r.last | ar_num(2) }}</td>
+        <td class="var-cell {{ r.var_pct | var_cls }}" style="--vw:{{ r.var_pct | var_w(2) }}%">{{ r.var_pct | ar_pct_pp(2) }}</td>
+      </tr>
+      <tr><td>Compra</td><td class="px-up" style="font-weight:600">{{ r.bid | ar_num(2) }}</td><td class="muted">{{ r.bid_size | ar_int }} VN</td></tr>
+      <tr><td>Venta</td><td class="px-down" style="font-weight:600">{{ r.offer | ar_num(2) }}</td><td class="muted">{{ r.offer_size | ar_int }} VN</td></tr>
+      <tr><td>TIR</td><td style="color:var(--accent);font-weight:600">{{ r.tirea_last | ar_pct(2) }}</td><td class="muted">{{ r.tirea_bid | ar_pct(2) }} / {{ r.tirea_offer | ar_pct(2) }}</td></tr>
+      <tr><td>TEM · Dur</td><td>{{ r.tem | ar_pct(2) }}</td><td class="muted">{{ r.duration | ar_num(2) }}</td></tr>
+      {% if r.margen_last is defined and r.margen_last is not none and r.margen_last == r.margen_last %}
+      <tr><td>Margen</td><td>{{ r.margen_last | ar_pct(2) }}</td><td class="muted">s/ benchmark</td></tr>
+      {% endif %}
+      <tr><td>Máx · Mín</td><td>{{ r.high | ar_num(2) }}</td><td class="muted">{{ r.low | ar_num(2) }}</td></tr>
+      <tr><td>Apertura · Cierre</td><td>{{ r.open | ar_num(2) }}</td><td class="muted">{{ r.close | ar_num(2) }}</td></tr>
+      <tr><td>Volumen</td><td>{{ r.nominal | ar_hum }} <small class="muted">VN</small></td><td class="muted">{{ r.volume | ar_hum }} efvo</td></tr>
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card-body muted" style="font-size:12px">Sin datos en el store para {{ code }} (¿no operó / feed caído?).</div>
+  {% endif %}
+</div>

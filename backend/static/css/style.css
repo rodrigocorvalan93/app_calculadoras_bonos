@@ -1745,3 +1745,55 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 a:focus-visible, button:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
+
+/* ── Inicio (resumen del mercado + pizarra) ───────────────────────────── */
+.ini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+  margin-bottom: 12px; align-items: start; }
+.ini-grid > .card { margin-bottom: 0; min-width: 0; }
+.ini-span2 { grid-column: span 2; }
+.ini-span3 { grid-column: 1 / -1; }
+.ini-rows2 { grid-row: span 2; }
+@media (max-width: 1180px) {
+  .ini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ini-rows2 { grid-row: auto; }
+  .ini-span2 { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) { .ini-grid { grid-template-columns: 1fr; } }
+.ini-kpi td { padding: 6px 10px; font-size: 12.5px; white-space: nowrap; }
+.ini-kpi td.ini-l { color: var(--text-soft); white-space: normal; }
+.ini-kpi td.ini-v { font-weight: 650; font-size: 14px; color: var(--text); }
+.ini-kpi tr:last-child td { border-bottom: 0; }
+.ini-bonos th, .ini-bonos td, .ini-eq th, .ini-eq td, .ini-fut th, .ini-fut td {
+  padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+/* Con la columna Margen (TAMAR / Duales) son 8 columnas: más apretadas para
+   que entren en una tarjeta de ~430 px (1600 de ancho con el riel abierto). */
+.ini-bonos.ini-8 th, .ini-bonos.ini-8 td { padding: 4px 5px; font-size: 11.5px; }
+.ini-bonos tr:last-child td, .ini-eq tr:last-child td, .ini-fut tr:last-child td { border-bottom: 0; }
+.ini-code { color: var(--accent); font-weight: 600; text-decoration: none; }
+.ini-code:hover { text-decoration: underline; }
+.ini-more { font-size: 11px; padding: 6px 10px; border-top: 1px solid var(--border-soft); }
+.ini-indice td { font-weight: 600; background: var(--panel-2); }
+.ini-fut td:first-child { color: var(--text-muted); }
+.card-title-aux a { color: inherit; }
+.card-title-aux a:hover { color: var(--accent); text-decoration: none; }
+/* Pizarra por usuario (Inicio) */
+.piz-head { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; margin: 20px 0 10px; }
+.piz-head h2 { font-size: 15px; margin: 0 6px 6px 0; }
+.piz-form { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end; }
+.piz-y { margin: 0 0 8px 4px; }
+.piz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
+.piz-item > .card { margin-bottom: 0; min-width: 0; }
+.piz-libro { grid-column: span 2; }
+@media (max-width: 760px) { .piz-libro { grid-column: auto; } }
+.piz-tools { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: middle; }
+.piz-tools .btn-mini { padding: 1px 6px; font-size: 11px; }
+.piz-tools .btn-mini[disabled] { opacity: .35; cursor: default; }
+.piz-cot-tbl td { padding: 5px 10px; font-size: 12.5px; }
+.piz-cot-tbl td:first-child { color: var(--text-muted); width: 36%; }
+.piz-cot-tbl tr:last-child td { border-bottom: 0; }
+.piz-libro .cashflows th, .piz-libro .cashflows td { padding: 5px 8px; font-size: 12px; }
+.piz-libro .book-grid { padding: 4px 0 0; gap: 8px; }
+.piz-libro .book-stats { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+/* Un número desbordado (TIR absurda de un precio basura) no ensancha el cuadro */
+.piz-cot-tbl { table-layout: fixed; }
+.piz-cot-tbl td { overflow-wrap: anywhere; }

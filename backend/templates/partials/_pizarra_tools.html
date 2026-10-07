@@ -1,0 +1,13 @@
+{# Botones de un cuadro de la pizarra (mover / quitar). Espera `piz` =
+   {"idx": i, "n": total}. Cada POST devuelve la pizarra entera re-renderizada. #}
+<span class="piz-tools">
+  <button type="button" class="btn-mini" title="Mover a la izquierda"{% if piz.idx == 0 %} disabled{% endif %}
+          hx-post="/inicio/pizarra/mover" hx-vals='{"idx": {{ piz.idx }}, "delta": -1}'
+          hx-target="#inicio-pizarra" hx-swap="innerHTML">◀</button>
+  <button type="button" class="btn-mini" title="Mover a la derecha"{% if piz.idx >= piz.n - 1 %} disabled{% endif %}
+          hx-post="/inicio/pizarra/mover" hx-vals='{"idx": {{ piz.idx }}, "delta": 1}'
+          hx-target="#inicio-pizarra" hx-swap="innerHTML">▶</button>
+  <button type="button" class="btn-mini btn-danger" title="Quitar este cuadro de mi pizarra"
+          hx-post="/inicio/pizarra/quitar" hx-vals='{"idx": {{ piz.idx }}}'
+          hx-target="#inicio-pizarra" hx-swap="innerHTML">✕</button>
+</span>

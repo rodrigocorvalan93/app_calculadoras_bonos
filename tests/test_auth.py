@@ -111,7 +111,8 @@ async def test_config_role_tabs(auth_on):
         r = await su.post("/admin/tabs", data={"tab_basico_yas": "on", "tab_basico_curves": "on",
                                                "tab_premium_yas": "on"})
         assert r.status_code == 200
-    assert set(auth.allowed_tabs("basico")) == {"yas", "curves"}
+    # Inicio (ALWAYS_TABS) la ve todo rol aunque no esté tildada
+    assert set(auth.allowed_tabs("basico")) == {"home", "yas", "curves"}
     # ahora un básico no entra a /breakeven (antes estaba permitido)
     async with _client() as su:
         await _login(su, "su_test", "clave-de-test-2026!")
