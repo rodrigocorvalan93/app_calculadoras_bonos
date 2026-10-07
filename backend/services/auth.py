@@ -32,6 +32,7 @@ import logging
 import os
 import secrets
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
@@ -81,8 +82,16 @@ _SUPERUSER_ONLY_TABS = ("alertas",)
 # (Alertas NO es una feature: es superuser-exclusiva por diseño.)
 FEATURES: List[Tuple[str, str]] = [
     ("cafci_fondos", "Panel VCP fondos propios (API CAFCI)"),
+    # Writer de la base histórica compartida: la instancia (notebook/PC) que
+    # usa un usuario con esta feature escribe px/tasas, FX, acciones y cierres
+    # en Delta Bases a las 17:01 / al reconstruir; las demás sólo journalean.
+    ("base_writer", "Escribe la base histórica compartida (autosave 17:01, reconstrucción, cierres) "
+                    "— superuser siempre; premium por default; básico nunca"),
 ]
 FEATURE_KEYS: Tuple[str, ...] = tuple(k for k, _ in FEATURES)
+# Features que arrancan TILDADAS para un rol (una sola vez: si el superuser
+# las destilda, quedan destildadas — `features_default_ok` en el store).
+_DEFAULT_FEATURES_ON: Dict[str, Tuple[str, ...]] = {"base_writer": ("premium",)}
 TAB_KEYS: Tuple[str, ...] = tuple(k for k, _, _ in TABS)
 _TAB_LABEL: Dict[str, str] = {k: lbl for k, lbl, _ in TABS}
 _TAB_PATH: Dict[str, str] = {k: p for k, _, p in TABS}
@@ -135,6 +144,18 @@ def _load() -> Dict[str, Any]:
     data.setdefault("users", {})
     data.setdefault("role_tabs", {k: list(v) for k, v in _DEFAULT_ROLE_TABS.items()})
     data.setdefault("role_features", {})     # rol → features tildadas (default: ninguna)
+    # Defaults de features nuevas, aplicados UNA vez por store (se persisten
+    # con el próximo guardado; hasta entonces se reaplican en cada carga, con
+    # el mismo resultado). Un superuser que la destilda la deja destildada.
+    hechos = data.setdefault("features_default_ok", [])
+    for feat, roles in _DEFAULT_FEATURES_ON.items():
+        if feat in hechos:
+            continue
+        for r in roles:
+            lst = data["role_features"].setdefault(r, [])
+            if feat not in lst:
+                lst.append(feat)
+        hechos.append(feat)
     data.setdefault("secret", "")
     return data
 
@@ -663,6 +684,46 @@ def features_for(role: Optional[str]) -> frozenset:
 
 def can_feature(role: Optional[str], key: str) -> bool:
     return key in features_for(role)
+
+
+# ── Presencia: quién usó ESTA instancia hoy ──────────────────────────────────
+# Cada request autenticado (cookie o token de Excel) deja el epoch del usuario
+# en memoria del proceso (una asignación a un dict: ~100 ns). Lo consume el
+# writer por rol de la base histórica: la instancia escribe la base compartida
+# sólo si hoy la usó alguien con la feature `base_writer` — así la notebook de
+# un usuario básico nunca pisa la base del desk, y una app que quedó abierta
+# sin nadie tampoco. Es por proceso a propósito: un reinicio la vacía y las
+# pestañas abiertas la vuelven a marcar en el primer poll (cookie vigente).
+_VISTOS: Dict[str, float] = {}
+
+
+def marcar_visto(username: Optional[str]) -> None:
+    if username:
+        _VISTOS[_norm(username)] = time.time()
+
+
+def vistos_hoy() -> Dict[str, datetime]:
+    """{usuario: último request} de los que usaron esta instancia HOY (fecha BA)."""
+    from backend.locale_ar import TZ_BA
+    hoy = datetime.now(TZ_BA).date()
+    out: Dict[str, datetime] = {}
+    for u, ts in list(_VISTOS.items()):
+        dt = datetime.fromtimestamp(ts, TZ_BA)
+        if dt.date() == hoy:
+            out[u] = dt
+    return out
+
+
+def writer_presente() -> Optional[str]:
+    """El usuario con la feature `base_writer` que usó esta instancia hoy (el
+    más reciente), o None. El rol se resuelve AHORA (un cambio de rol o de la
+    feature en /admin aplica al instante)."""
+    mejor: Optional[Tuple[str, datetime]] = None
+    for u, dt in vistos_hoy().items():
+        role = role_of(u)
+        if role and can_feature(role, "base_writer") and (mejor is None or dt > mejor[1]):
+            mejor = (u, dt)
+    return mejor[0] if mejor else None
 
 
 def set_role_features(role: str, keys: List[str]) -> None:

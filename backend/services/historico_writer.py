@@ -343,9 +343,8 @@ def consolidar_cierres_journal() -> Optional[Dict[str, Any]]:
     marcado `sin_rueda` se respeta). Antes esa copia local era recuperable
     sólo a mano — un fallo de la partición a las 17:01 seguido de un reinicio
     dejaba el hueco (auditoría 30/09). None = nada para hacer."""
-    from backend.config import settings
     from backend.services import deltapaths
-    if not settings.historico_base_writer:
+    if not es_writer():
         return None
     hist_dir = deltapaths.historico_dir()
     if not hist_dir:
@@ -433,6 +432,38 @@ def _xlsx_default() -> Optional[str]:
     from backend.services import deltapaths
     hist_dir = deltapaths.historico_dir()
     return os.path.join(hist_dir, HIST_FILENAME) if hist_dir else None
+
+
+# ── Writer por rol ────────────────────────────────────────────────────────────
+# `HISTORICO_BASE_WRITER` sigue siendo el máster (0 = esta máquina nunca
+# escribe lo compartido). Con el flag en 1 y el muro de login puesto, la
+# instancia escribe la base compartida sólo si HOY la usó un usuario con la
+# feature `base_writer` (superuser siempre; premium por default; básico nunca,
+# ver auth.FEATURES): la notebook de un básico, o una app que quedó abierta sin
+# nadie, sólo journalea. La captura headless (tools/cierre.py) no tiene
+# usuarios: decide el flag, como siempre (`_WRITER_HEADLESS`).
+_WRITER_HEADLESS = False
+
+
+def writer_estado() -> Dict[str, Any]:
+    """{writer, motivo, usuario}: si ESTA instancia escribe la base compartida
+    y por qué. `motivo` es texto para el chip / admin / base_check."""
+    from backend.config import settings
+    if not settings.historico_base_writer:
+        return {"writer": False, "motivo": "base_writer=0", "usuario": None}
+    if _WRITER_HEADLESS:
+        return {"writer": True, "motivo": "captura headless (decide HISTORICO_BASE_WRITER)", "usuario": None}
+    if not settings.auth_enabled:
+        return {"writer": True, "motivo": "sin muro de login: todo es superuser", "usuario": None}
+    from backend.services import auth
+    u = auth.writer_presente()
+    if u:
+        return {"writer": True, "motivo": f"{u} ({auth.role_of(u)}) usó esta instancia hoy", "usuario": u}
+    return {"writer": False, "motivo": "sin superuser ni premium conectado hoy en esta instancia", "usuario": None}
+
+
+def es_writer() -> bool:
+    return bool(writer_estado()["writer"])
 
 
 def _firma_archivo(path: str) -> Optional[Tuple[int, int]]:
@@ -1040,8 +1071,9 @@ def estado_cierre() -> Dict[str, Any]:
     ahora = _now()
     hoy = ahora.date()
     hh, mm = _hhmm(settings.historico_autosave_hhmm)
+    we = writer_estado()
     out: Dict[str, Any] = {"estado": "sin_base", "texto": "", "detalle": "",
-                           "writer": bool(settings.historico_base_writer),
+                           "writer": bool(we["writer"]), "writer_motivo": we["motivo"],
                            "autosave": bool(settings.historico_autosave),
                            "hhmm": f"{hh:02d}:{mm:02d}", "hoy": hoy.isoformat()}
     hist_dir = deltapaths.historico_dir()
@@ -1122,7 +1154,9 @@ def estado_cierre() -> Dict[str, Any]:
         else:
             out["texto"] = f"✓ cierre {dm}"
             quien = (f"hoy se guarda solo a las {hh:02d}:{mm:02d} — dejá la app abierta (o la captura programada)"
-                     if out["autosave"] and out["writer"] else f"hoy lo guarda la PC writer a las {hh:02d}:{mm:02d}")
+                     if out["autosave"] and out["writer"]
+                     else f"esta instancia no escribe la base ({out['writer_motivo']}): hoy la guarda la "
+                          f"máquina writer a las {hh:02d}:{mm:02d}")
             out["detalle"] = f"Base histórica al día (último cierre {dm}); {quien}"
         if huecos:
             out["detalle"] += f" · hueco el {huecos[-1]:%d/%m}" + (f" (+{len(huecos) - 1})" if len(huecos) > 1 else "")
@@ -1133,7 +1167,8 @@ def estado_cierre() -> Dict[str, Any]:
         out["estado"] = "capturado"
         out["texto"] = f"⏳ cierre {dm} capturado"
         out["detalle"] = ("Esta máquina guardó el journal local pero la base compartida todavía no lo "
-                          "tiene (se consolida en el próximo guardado / al arrancar la app writer)")
+                          "tiene (se consolida en el próximo guardado / al arrancar la app writer)"
+                          + ("" if out["writer"] else f" · esta instancia no escribe la base: {out['writer_motivo']}"))
         return out
     if esperado == hoy:
         mins = (ahora - disparo).total_seconds() / 60.0
@@ -1458,9 +1493,8 @@ def consolidar_journal(*, reponer: bool = False) -> Optional[Dict[str, Any]]:
     que este journal NO tiene, no escribe (`skipped`); `reponer` = el botón
     "Reponer del journal" del banner: escribe igual lo que hay, sin exigir
     ser writer."""
-    from backend.config import settings
     from backend.services import deltapaths
-    if not settings.historico_base_writer and not reponer:
+    if not es_writer() and not reponer:
         return None
     hist_dir = deltapaths.historico_dir()
     if not hist_dir:
@@ -1620,7 +1654,8 @@ def save_today(force: bool = False) -> Dict[str, Any]:
 
     # 2) Base compartida (OneDrive) — sólo si esta máquina es writer (el
     #    botón manual la escribe siempre).
-    if not settings.historico_base_writer and not force:
+    we = writer_estado()
+    if not we["writer"] and not force:
         if res.get("journal_error"):
             # En una máquina que NO es writer el journal ES el guardado: sin
             # él no hay nada capturado. Antes devolvía ok=True igual y el
@@ -1629,7 +1664,7 @@ def save_today(force: bool = False) -> Dict[str, Any]:
             res["retry"] = True
             return res
         res["ok"] = True
-        res["skipped"] = "base_writer=0: sólo journal local (la consolida otra máquina)"
+        res["skipped"] = f"{we['motivo']}: sólo journal local (la consolida otra máquina)"
         try:                                   # cierre completo: también al journal local
             _guardar_cierre(hist_dir, df, force=force, solo_journal=True)
         except Exception as exc:  # noqa: BLE001
@@ -1724,6 +1759,7 @@ def save_today(force: bool = False) -> Dict[str, Any]:
 PRICE_SOURCE_RC = "RC"
 _MAX_HUECOS = 15                      # ruedas hacia atrás que se revisan
 _ESPERA_SNAPSHOT_S = 240.0            # al arrancar: cuánto esperar los cierres del feed
+_ESPERA_WRITER_S = 300.0              # al arrancar: cuánto esperar a que entre un superuser/premium (writer por rol)
 _reconstruir_lock = threading.Lock()
 _ultima_reconstruccion: Optional[Dict[str, Any]] = None
 
@@ -2150,11 +2186,12 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
                               + ", ".join(d.strftime("%d/%m") for d in reg["bloqueantes"])
                               + "): no reconstruyo encima — primero reponer o aceptar la base (banner)")
             return res
-        if not settings.historico_base_writer and not force and dia in _journal_days():
+        we = writer_estado()
+        if not we["writer"] and not force and dia in _journal_days():
             # Máquina secundaria: ya lo journaleó; no recalcular 500 TIRs en
             # cada arranque hasta que la writer consolide.
             res["ok"] = True
-            res["skipped"] = f"base_writer=0: el {dia_fmt} ya está en el journal local"
+            res["skipped"] = f"{we['motivo']}: el {dia_fmt} ya está en el journal local"
             return res
         minimo = int(settings.historico_autosave_min_operados)
         base_df = _leer_base_lectura(xlsx)
@@ -2212,9 +2249,9 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
             res["journal"] = write_journal(df, dia)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[historico_writer] journal de la reconstrucción no guardado: %s", exc)
-        if not settings.historico_base_writer and not force:
+        if not we["writer"] and not force:
             res["ok"] = True
-            res["skipped"] = "base_writer=0: sólo journal local (la consolida la máquina writer)"
+            res["skipped"] = f"{we['motivo']}: sólo journal local (la consolida la máquina writer)"
             return res
         try:
             saved = append_and_save(df, xlsx)
@@ -2830,7 +2867,6 @@ def recapturar_cierre(force: bool = False) -> Dict[str, Any]:
     """Segunda captura del día (~30 min después del cierre): pisa la partición
     con los prints tardíos y re-escribe el parquet de acciones (dedup
     keep-last). NO toca la base px/tasas (esa se guarda una vez)."""
-    from backend.config import settings
     from backend.services import deltapaths
 
     res: Dict[str, Any] = {"ok": False, "skipped": None, "error": None}
@@ -2846,7 +2882,7 @@ def recapturar_cierre(force: bool = False) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("[historico_writer] recaptura: build_rows falló (%s) — sin métricas", exc)
         df_bonos = None
-    solo_journal = not settings.historico_base_writer and not force
+    solo_journal = not es_writer() and not force
     try:
         c = _guardar_cierre(hist_dir, df_bonos, force=force, solo_journal=solo_journal)
     except Exception as exc:  # noqa: BLE001
@@ -3077,6 +3113,22 @@ class HistoricoAutosave:
         from backend.config import settings
         if not settings.historico_reconstruir:
             return
+        # Writer por rol: al arrancar todavía no entró nadie, y la decisión de
+        # escribir la base (o sólo journalear) depende de quién usa esta
+        # instancia hoy. El que la prende abre el navegador enseguida: se le
+        # da hasta _ESPERA_WRITER_S para loguearse antes de decidir.
+        if settings.auth_enabled and settings.historico_base_writer and not _WRITER_HEADLESS:
+            t0 = time.monotonic()
+            while (not es_writer() and time.monotonic() - t0 < _ESPERA_WRITER_S
+                   and not self._stop.is_set()):
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    pass
+            if not es_writer():
+                logger.info("[historico_writer] sin superuser/premium conectado tras %.0f min: la "
+                            "reconstrucción del arranque sólo journalea en esta instancia",
+                            _ESPERA_WRITER_S / 60)
         reg = await loop.run_in_executor(None, regresion_detalle)
         if reg["bloqueantes"]:
             logger.warning("[historico_writer] la base perdió %s%s — no reconstruyo ni escribo hasta que "

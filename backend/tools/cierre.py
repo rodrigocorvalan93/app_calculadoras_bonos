@@ -81,6 +81,10 @@ async def capturar(force: bool = False, timeout: float = 150.0,
     pre = precheck(force)
     if pre is not None:
         return pre
+    # Captura headless: no hay usuarios logueados, así que el writer por rol de
+    # la app no aplica — decide HISTORICO_BASE_WRITER (la tarea programada la
+    # instala el superuser en la máquina que debe escribir).
+    hw._WRITER_HEADLESS = True
     if not (settings.primary_user and settings.primary_pass):
         return {"ok": False, "error": "sin PRIMARY_USER / PRIMARY_PASS (secrets.txt / .env)"}
     bond_universe.ensure_loaded()

@@ -242,8 +242,24 @@ reconectado por el resume); (6) el journal de la rueda que se está
 escribiendo no se "consolida" dos veces. Diagnóstico sólo lectura en
 cualquier máquina: `python -m backend.tools.base_check` (archivos, espejo
 fiel, ruedas base / memoria / manifiesto / journal, regresión, copias de
-conflicto). Una sola máquina writer: `HISTORICO_BASE_WRITER=0` en las demás.
-Regresión: `tests/test_base_regresion.py`.
+conflicto). Regresión: `tests/test_base_regresion.py`.
+**Writer por rol** (07/10): `HISTORICO_BASE_WRITER` sigue siendo el máster
+(0 = esa máquina nunca escribe lo compartido), pero con el flag en 1 y el
+muro de login puesto una instancia escribe la base compartida sólo si HOY
+(fecha BA) la usó un usuario con la feature `base_writer` — superuser
+siempre, premium por default (editable en /admin · Features por rol;
+`_DEFAULT_FEATURES_ON` se aplica UNA vez por store vía
+`features_default_ok`), básico nunca. `auth.marcar_visto` corre en el
+middleware (cookie y token de Excel, ~100 ns, memoria del proceso),
+`auth.writer_presente()` resuelve el rol al momento, y
+`historico_writer.writer_estado()` / `es_writer()` reemplazan al flag en
+`save_today`, `consolidar_journal`, `reconstruir_cierre`, la recaptura, los
+journals de cierres y `cierres.importar_base`; sin presencia la instancia
+sólo journalea y el chip (`writer_motivo`), /admin y `base_check` dicen por
+qué. `_reconstruir_al_arrancar` espera hasta `_ESPERA_WRITER_S` (5 min) a
+que entre un writer. La captura headless (`tools/cierre.py` →
+`_WRITER_HEADLESS`) y `AUTH_ENABLED=0` deciden por el flag, como siempre.
+Regresión: `tests/test_writer_por_rol.py`.
 **Copias en conflicto y archivos viejos** (07/10, tarjeta de /admin,
 `services/copias.py`): OneDrive deja al lado del archivo compartido la versión
 perdedora con el nombre de la máquina (`…-NOTEBOOK-RC.xlsx`, `(conflicted
