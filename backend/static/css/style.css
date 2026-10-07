@@ -1781,48 +1781,22 @@ a:focus-visible, button:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .piz-head h2 { font-size: 15px; margin: 0 6px 6px 0; }
 .piz-form { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end; }
 .piz-y { margin: 0 0 8px 4px; }
-/* Cuadros chicos: 4-5 por fila en una pantalla de desk (≈ 280 px cada uno). */
-.piz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; align-items: start; }
+.piz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
 .piz-item > .card { margin-bottom: 0; min-width: 0; }
-.piz-item .card-title { padding: 6px 10px; }
-.piz-item .card-title > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.piz-item .card-title-aux { flex-shrink: 0; }
-.piz-book .card-body { padding: 8px 10px; }
-.piz-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 8px; margin-bottom: 8px; padding-bottom: 6px; }
-.piz-stats span { font-size: 9px; }
-.piz-stats b { font-size: 12px; }
-/* Escalera y cuadro cotización: tablas propias (sin .cashflows → sin ratchet de
-   app.js), layout fijo por porcentajes: nunca desbordan el cuadro. */
-.piz-ladder, .piz-cot-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
-.piz-ladder th, .piz-ladder td, .piz-cot-tbl td { padding: 3px 6px; font-size: 11.5px; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--border-soft); text-align: right; color: var(--text-soft); }
-.piz-ladder th { color: var(--text-muted); font-weight: 500; font-size: 10.5px; background: var(--panel-2); border-bottom-color: var(--border); }
-.piz-ladder th small { display: block; font-size: 9px; font-weight: 400; letter-spacing: .02em; }
-.piz-ladder th:nth-child(1), .piz-ladder td:nth-child(1), .piz-ladder th:nth-child(4), .piz-ladder td:nth-child(4) { width: 21%; }
-.piz-ladder td.pl-q { color: var(--text-muted); font-size: 10.5px; }
-.piz-ladder td.pl-px b { font-weight: 650; font-size: 12px; }
-.piz-ladder td.pl-px small { display: block; font-size: 9.5px; color: var(--text-muted); line-height: 1.1; }
-.piz-ladder td.px-up { color: var(--green); }
-.piz-ladder td.px-down { color: var(--red); }
-.piz-ladder td.own-cell { font-weight: 700; }
-.piz-ladder td.own-cell b::before { content: "●"; font-size: 7px; margin-right: 3px; vertical-align: 2px; }
-.piz-ladder tr:last-child td { border-bottom: 0; }
-.piz-cot-tbl td.px-up { color: var(--green); }
-.piz-cot-tbl td.px-down { color: var(--red); }
-.piz-cot-tbl td.muted { color: var(--text-muted); }
-.piz-pos { margin-top: 8px; font-size: 12px; }
-.piz-pos summary { font-size: 11.5px; }
-.piz-tools { display: inline-flex; gap: 4px; margin-left: 0; vertical-align: middle; }
+.piz-libro { grid-column: span 2; }
+@media (max-width: 760px) { .piz-libro { grid-column: auto; } }
+.piz-tools { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: middle; }
 .piz-tools .btn-mini { padding: 1px 6px; font-size: 11px; }
 .piz-tools .btn-mini[disabled] { opacity: .35; cursor: default; }
-.piz-cot-tbl td { padding: 4px 8px; font-size: 12px; }
-.piz-cot-tbl td:first-child { color: var(--text-muted); width: 34%; text-align: left; }
+.piz-cot-tbl td { padding: 5px 10px; font-size: 12.5px; }
+.piz-cot-tbl td:first-child { color: var(--text-muted); width: 36%; }
 .piz-cot-tbl tr:last-child td { border-bottom: 0; }
 .piz-libro .cashflows th, .piz-libro .cashflows td { padding: 5px 8px; font-size: 12px; }
 .piz-libro .book-grid { padding: 4px 0 0; gap: 8px; }
 .piz-libro .book-stats { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+/* Un número desbordado (TIR absurda de un precio basura) no ensancha el cuadro */
+.piz-cot-tbl { table-layout: fixed; }
+.piz-cot-tbl td { overflow-wrap: anywhere; }
 /* Subtítulo de sección dentro de una tarjeta de bonos (TAMAR → duales pata v) */
 .ini-bonos tr.ini-sub td { text-align: left; color: var(--text-muted); font-size: 10.5px; font-weight: 600;
   text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2); padding: 5px 8px; }
-/* En los cuadros chicos el ⧉ de copiar tabla que inyecta app.js pisa la cabecera */
-.piz-book .tbl-copy, .piz-cot .tbl-copy { display: none; }

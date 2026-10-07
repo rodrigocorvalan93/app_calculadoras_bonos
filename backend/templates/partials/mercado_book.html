@@ -10,20 +10,14 @@
 {# `piz` (pizarra de Inicio): el libro va EMBEBIDO en el render de toda la
    pizarra — sin auto-refresh propio (lo refresca el contenedor, un request por
    tick para todos los cuadros), sin chips de métrica (la elige la barra de la
-   pizarra para todos los libros), con los botones mover / quitar del cuadro y
-   en formato COMPACTO (4-5 cuadros por fila): datos clave en dos filas y la
-   profundidad como escalera Cant · Compra · Venta · Cant con la métrica por
-   nivel en chico al lado del precio; la tenencia, plegada. #}
-<div class="card{% if piz %} piz-book{% endif %}"{% if not piz %} data-flash-scope
+   pizarra para todos los libros) y con los botones mover / quitar del cuadro. #}
+<div class="card"{% if not piz %} data-flash-scope
      hx-get="{{ _base }}&y={{ y }}"
      hx-trigger="md-update from:body, every 30s"
      hx-target="this" hx-swap="outerHTML"{% endif %}>
   <div class="card-title">
-    {% if piz %}
-    <span title="{{ nombre }} · {{ symbol }}"><a class="ini-code" href="/yas?code={{ code | urlencode }}">{{ code }}</a> <span class="muted" style="font-weight:500">· libro · {{ plazo }}</span></span>
-    <span class="card-title-aux">{% include "partials/_pizarra_tools.html" %}</span>
-    {% else %}
-    <span>Libro · {{ code }}
+    <span>Libro · {{ code }}{% if piz %} <span class="muted" style="font-weight:500">· {{ plazo }}</span>{% endif %}
+      {% if not piz %}
       {# Métrica por nivel: cada chip pide el mismo partial con otro y=; app.js
          guarda la elección (localStorage) y la agrega a los próximos libros. #}
       <span class="book-y">
@@ -35,69 +29,11 @@
           {% endif %}
         {% endfor %}
       </span>
+      {% endif %}
     </span>
-    <span class="card-title-aux">{{ nombre }} · {{ symbol }}</span>
-    {% endif %}
+    <span class="card-title-aux">{{ nombre }} · {{ symbol }}{% if piz %}{% include "partials/_pizarra_tools.html" %}{% endif %}</span>
   </div>
   <div class="card-body">
-    {% if piz %}
-    {# ── Modo compacto (pizarra) ──────────────────────────────────────── #}
-    {% if row %}
-    <div class="book-stats piz-stats">
-      <div><span>Last</span><b class="{{ row.last_cls }}">{{ row.last | ar_num(2) }}</b></div>
-      <div><span>Var %</span><b class="{{ 'px-up' if (row.var_pct or 0) > 0 else ('px-down' if (row.var_pct or 0) < 0 else '') }}">{% if row.var_pct is not none %}{{ row.var_pct | ar_num(2) }}%{% else %}—{% endif %}</b></div>
-      <div><span>TIR @ last</span><b style="color:var(--accent)">{% if row.tirea_last is not none and row.tirea_last == row.tirea_last and (row.tirea_last | abs) <= 5 %}{{ row.tirea_last | ar_pct(2) }}{% else %}—{% endif %}</b></div>
-      <div><span>Dur</span><b>{{ row.duration | ar_num(2) }}</b></div>
-      <div><span>Close</span><b>{{ row.close | ar_num(2) }}</b></div>
-      <div><span>Vol VN</span><b>{{ row.nominal | ar_hum }}</b></div>
-    </div>
-    {% endif %}
-    {% if not bids and not offers %}
-      <div class="alert">Sin profundidad en el store (¿no operó / broker offline?).</div>
-    {% else %}
-    {# Escalera SIN la clase .cashflows a propósito: queda fuera del ratchet de
-       anchos de app.js (una métrica larga en un cuadro ensanchaba la columna
-       de todos) y se acomoda con table-layout fixed por porcentajes. El diff
-       de flashes la ve igual (recorre toda <table>). Métricas absurdas de un
-       precio basura (|TIR| > 500 %) salen "—" para no deformar el cuadro. #}
-    {% set depth = [bids | length, offers | length, 5] | max %}
-    {% macro met(v) %}{% if v is not none and v == v and (v | abs) <= 5 %}{{ v | ar_pct(2) }}{% else %}—{% endif %}{% endmacro %}
-    <table class="piz-ladder">
-      <thead><tr><th>Cant</th><th>Compra <small>{{ y_label }}</small></th><th>Venta <small>{{ y_label }}</small></th><th>Cant</th></tr></thead>
-      <tbody>
-        {% for i in range(depth) %}
-        {% set b = bids[i] if i < (bids | length) else none %}
-        {% set o = offers[i] if i < (offers | length) else none %}
-        <tr>
-          <td class="pl-q{% if b and b.own %} own-cell own-buy{% endif %}">{% if b %}{{ b.size | ar_hum }}{% else %}·{% endif %}</td>
-          <td class="pl-px px-up{% if b and b.own %} own-cell own-buy{% endif %}"{% if b and b.own %} title="Orden propia de COMPRA: {{ b.own | ar_int }} VN"{% endif %}>{% if b %}<b>{{ b.price | ar_num(2) }}</b><small>{{ met(b[y]) }}</small>{% else %}·{% endif %}</td>
-          <td class="pl-px px-down{% if o and o.own %} own-cell own-sell{% endif %}"{% if o and o.own %} title="Orden propia de VENTA: {{ o.own | ar_int }} VN"{% endif %}>{% if o %}<b>{{ o.price | ar_num(2) }}</b><small>{{ met(o[y]) }}</small>{% else %}·{% endif %}</td>
-          <td class="pl-q{% if o and o.own %} own-cell own-sell{% endif %}">{% if o %}{{ o.size | ar_hum }}{% else %}·{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-    {% if position %}
-    <details class="piz-pos">
-      <summary style="cursor:pointer;color:var(--cyan)">Mi posición · {{ position.total_cantidad | ar_int }} VN en {{ position.n_fondos }} fondo{{ "s" if position.n_fondos != 1 else "" }}</summary>
-      <table class="cashflows" style="margin-top:6px">
-        <thead><tr><th style="text-align:left">Fondo</th><th>VN</th><th>Valor</th><th>% PN</th></tr></thead>
-        <tbody>
-          {% for f in position.funds %}
-          <tr>
-            <td style="text-align:left;font-size:11.5px">{{ f.nombre }}</td>
-            <td>{{ f.cantidad | ar_int }}</td>
-            <td>{{ f.valor | ar_int }}</td>
-            <td class="muted" style="font-size:10.5px">{{ (f.pct_pn * 100) | ar_pct_pp(2) if f.pct_pn is not none else "" }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </details>
-    {% endif %}
-    {% else %}
-    {# ── Libro completo (Mercado / Órdenes) ──────────────────────────── #}
     {# Toda la data de la fila, acá mismo (sin recalcular nada — viene del
        mismo motor que la tabla de arriba). Después, profundidad con TIR por
        nivel y la tenencia. #}
@@ -181,7 +117,10 @@
     {% endif %}
 
     {% if position %}
-    <details style="margin-top:14px" open>
+    {# En la pizarra la tenencia arranca plegada (pedido del desk, 07/10): el
+       cuadro muestra el libro y la posición se abre a demanda. En Mercado /
+       Órdenes sigue abierta como siempre. #}
+    <details style="margin-top:14px"{% if not piz %} open{% endif %}>
       <summary style="cursor:pointer;color:var(--cyan)">Mi posición · {{ position.total_cantidad | ar_int }} VN en {{ position.n_fondos }} fondo{{ "s" if position.n_fondos != 1 else "" }}</summary>
       <table class="cashflows" style="margin-top:6px">
         <thead><tr><th style="text-align:left">Fondo</th><th>VN</th><th>Valor</th><th>% PN</th></tr></thead>
@@ -197,7 +136,6 @@
         </tbody>
       </table>
     </details>
-    {% endif %}
     {% endif %}
 
   </div>

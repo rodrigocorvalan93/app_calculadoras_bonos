@@ -123,16 +123,12 @@ async def test_pizarra_por_usuario_libro_cotizacion_y_render_compartido(piz_tmp,
         assert r.status_code == 200 and "Tu pizarra está vacía" in r.text
         # agregar un libro: la respuesta ya trae el libro embebido, sin auto-refresh propio ni chips
         r = await ac.post("/inicio/pizarra/agregar", data={"code": g.lower(), "tipo": "libro", "plazo": "24hs"})
-        assert r.status_code == 200 and "piz-libro" in r.text and "piz-book" in r.text
-        assert f'href="/yas?code={g}"' in r.text and "· libro · 24hs" in r.text
-        # modo compacto: sin auto-refresh propio ni chips, escalera Cant · Compra · Venta · Cant con la métrica
-        assert 'hx-get="/mercado/book/' not in r.text and "book-y" not in r.text and "book-grid" not in r.text
-        assert "piz-ladder" in r.text and "Compra <small>TIREA</small>" in r.text and "Venta <small>TIREA</small>" in r.text
-        assert 'class="cashflows piz-ladder"' not in r.text          # fuera del ratchet de anchos de app.js
-        assert 'hx-post="/inicio/pizarra/quitar"' in r.text and "Lámina" not in r.text
+        assert r.status_code == 200 and f"Libro · {g}" in r.text and "piz-libro" in r.text
+        assert 'hx-get="/mercado/book/' not in r.text and "book-y" not in r.text
+        assert 'hx-post="/inicio/pizarra/quitar"' in r.text and "Bid TIREA" in r.text
         # el GET inmediato (misma seq) refleja el cuadro nuevo: el memo se invalida por la firma del archivo
         r2 = await ac.get("/inicio/pizarra")
-        assert "piz-ladder" in r2.text
+        assert f"Libro · {g}" in r2.text
         # agregar una cotización
         r = await ac.post("/inicio/pizarra/agregar", data={"code": "TX26", "tipo": "cotizacion", "plazo": "24hs"})
         assert r.status_code == 200 and "piz-cot" in r.text and 'href="/yas?code=TX26"' in r.text and "Compra" in r.text
@@ -144,12 +140,12 @@ async def test_pizarra_por_usuario_libro_cotizacion_y_render_compartido(piz_tmp,
         assert "no es un bono de la app" in r.text
         # métrica para todos los libros
         r = await ac.post("/inicio/pizarra/metrica", data={"y": "tem"})
-        assert r.status_code == 200 and "Compra <small>TEM</small>" in r.text
+        assert r.status_code == 200 and "Bid TEM" in r.text
         # mover y quitar
         r = await ac.post("/inicio/pizarra/mover", data={"idx": 1, "delta": -1})
         assert r.text.find("piz-cot") < r.text.find("piz-libro")
         r = await ac.post("/inicio/pizarra/quitar", data={"idx": 0})
-        assert "piz-cot" not in r.text and "piz-ladder" in r.text
+        assert "piz-cot" not in r.text and f"Libro · {g}" in r.text
         # render compartido entre refrescos con la seq quieta
         rt.piz_stats.update(hit=0, miss=0)
         a = await ac.get("/inicio/pizarra")
@@ -162,13 +158,41 @@ async def test_pizarra_por_usuario_libro_cotizacion_y_render_compartido(piz_tmp,
         assert rt.piz_stats["miss"] == 1
         # la página de Inicio del usuario trae su pizarra ya renderizada
         page = await ac.get("/inicio")
-        assert "piz-ladder" in page.text and "Tu pizarra está vacía" not in page.text
+        assert f"Libro · {g}" in page.text and "Tu pizarra está vacía" not in page.text
     # el superuser sigue sin cuadros (es por usuario)
     async with _client() as su:
         await su.post("/login", data=_SU)
         r = await su.get("/inicio/pizarra")
         assert "Tu pizarra está vacía" in r.text
         assert pizarra.usuarios_con_cuadros() == ["juan"]
+
+
+def _render_book(piz) -> str:
+    """El partial del libro con una tenencia sintética: el mismo template que
+    Mercado / Órdenes, embebido (`piz`) o no."""
+    from backend.main import app
+    tpl = app.state.templates.env.get_template("partials/mercado_book.html")
+    return tpl.render(code="GD30", plazo="24hs", leg="native", fuente="byma", y="tirea", y_label="TIREA",
+                      nombre="Global 2030", symbol="MERV - XMEV - GD30 - 24hs", row=None,
+                      bids=[{"price": 100.0, "size": 1000, "cum": 1000, "frac": 1.0, "own": None, "tirea": 0.10}],
+                      offers=[{"price": 101.0, "size": 2000, "cum": 2000, "frac": 1.0, "own": None, "tirea": 0.09}],
+                      instr=None, margen_ok=False, piz=piz,
+                      position={"total_cantidad": 1000, "n_fondos": 1,
+                                "funds": [{"nombre": "Delta Ahorro", "cantidad": 1000, "valor": 1234, "pct_pn": 0.01}]})
+
+
+def test_mi_posicion_plegada_en_la_pizarra_y_abierta_en_mercado() -> None:
+    """07/10: en la pizarra la tenencia arranca plegada (pedido del desk); en el
+    libro de Mercado / Órdenes sigue abierta. El resto del libro es el MISMO
+    (libro completo, no la versión compacta que el desk rechazó)."""
+    piz = _render_book({"idx": 0, "n": 1})
+    merc = _render_book(None)
+    assert "Mi posición · 1.000 VN en 1 fondo" in piz and "Delta Ahorro" in piz
+    assert '<details style="margin-top:14px">' in piz and '<details style="margin-top:14px" open>' not in piz
+    assert '<details style="margin-top:14px" open>' in merc
+    # el libro embebido es el completo: mismas puntas (book-grid) y stats, sin escalera compacta
+    assert "book-grid" in piz and "Bid TIREA" in piz and "Offer TIREA" in piz and "piz-ladder" not in piz
+    assert "piz-tools" in piz and "piz-tools" not in merc
 
 
 @pytest.mark.asyncio
@@ -182,4 +206,4 @@ async def test_libro_de_mercado_sigue_igual_fuera_de_la_pizarra() -> None:
         assert r.status_code == 200
         assert f'hx-get="/mercado/book/{g}?plazo=24hs' in r.text and 'y=tirea"' in r.text
         assert 'hx-trigger="md-update from:body, every 30s"' in r.text and "book-y" in r.text
-        assert "piz-tools" not in r.text and "piz-ladder" not in r.text and "Bid TIREA" in r.text and "book-grid" in r.text
+        assert "piz-tools" not in r.text

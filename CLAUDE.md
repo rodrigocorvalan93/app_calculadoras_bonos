@@ -575,19 +575,16 @@ red. Primer arranque sin dos puntos locales → serie completa una vez; después
 **Pizarra por usuario** (`services/pizarra.py`, rutas `/inicio/pizarra*`,
 `partials/inicio_pizarra.html` + `inicio_cotizacion.html` +
 `_pizarra_tools.html`): debajo del resumen, cada usuario arma sus cuadros —
-**libro** (el mismo `partials/mercado_book.html` de Mercado / Órdenes,
-embebido con `piz` = sin auto-refresh propio ni chips, en formato COMPACTO:
-seis datos clave + escalera `Cant · Compra · Venta · Cant` con la métrica por
-nivel debajo del precio, cantidades `ar_hum`, "Mi posición" plegada; la
-métrica `y` es por usuario y vale para todos sus libros) o **cotización**
-(cuadro compacto estilo BYMA: último · puntas con VN · var · TIR
+**libro** (el mismo `partials/mercado_book.html` de Mercado / Órdenes, el
+libro COMPLETO embebido con `piz` = sin auto-refresh propio ni chips de
+métrica, botones mover / quitar en el título y "Mi posición" plegada por
+default — en Mercado / Órdenes sigue abierta; la métrica `y` es por usuario y
+vale para todos sus libros; ocupa dos columnas de la grilla, `.piz-libro`) o
+**cotización** (cuadro estilo BYMA: último · puntas con VN · var · TIR
 last/bid/offer · TEM · dur · máx/mín · apertura/cierre · volumen, de
-`curves._row_for_code(book=True)`). Cuadros chicos a propósito (`.piz-grid`
-minmax 280 px → 4-5 por fila en un monitor de desk); las tablas de la
-pizarra (`.piz-ladder`, `.piz-cot-tbl`) NO llevan `.cashflows`: quedan fuera
-del ratchet de anchos de app.js (una métrica larga en un cuadro ensanchaba la
-columna de todos) y van con `table-layout: fixed` por porcentajes; métricas
-absurdas de un precio basura (|TIR| > 500 %) salen "—".
+`curves._row_for_code(book=True)`). Grilla `.piz-grid` minmax 320 px. Hubo
+una versión "compacta" (escalera de 4 columnas, 280 px, 4-5 por fila) que el
+desk rechazó el 07/10: NO volver a achicar los cuadros sin pedido explícito.
 Default: sin cuadros. Persisten en `data/pizarra.json` por username
 (`_local` sin muro), tope 24, sin duplicados, código validado contra el
 universo; `PIZARRA_PATH` override (la suite lo apunta a un tmp). El formulario
