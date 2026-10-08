@@ -205,3 +205,30 @@ def test_todo_viejo_cae_a_cierre_marcado() -> None:
         assert pick["tasa"] == 29.5 and pick["var"] is None   # el last viejo ES el cierre
     finally:
         _clear_cauciones()
+
+
+def test_rail_pick_no_muestra_plazo_largo_como_overnight() -> None:
+    """Regresión del monitor: el 1D todavía no operó (sólo cierre) pero el 14D
+    SÍ tiene tasa viva. El riel NO debe mostrar el 14D como si fuera el
+    overnight (un 14D no es o/n) — muestra el cierre previo del 1D."""
+    _clear_cauciones()
+    _seed_caucion_close_only(1, close=21.6)                       # 1D: sólo cierre
+    _seed_caucion(14, tasa=21.8, close=21.6, vol=90_000_000_000)  # 14D vivo con volumen
+    try:
+        r = cauc_svc.rail_pick("PESOS")
+        assert r is not None
+        assert r["plazo"] == "1D" and r["es_cierre"] is True     # NO 14D
+        assert r["tasa"] == pytest.approx(21.6)
+    finally:
+        _clear_cauciones()
+
+
+def test_rail_pick_sin_overnight_devuelve_none() -> None:
+    """Sólo hay plazos largos (ningún 1D–4D, vivo ni con cierre) → mejor no
+    mostrar nada que un tenor largo disfrazado de overnight."""
+    _clear_cauciones()
+    _seed_caucion(14, tasa=21.8, close=21.6, vol=90_000_000_000)  # sólo 14D
+    try:
+        assert cauc_svc.rail_pick("PESOS") is None
+    finally:
+        _clear_cauciones()

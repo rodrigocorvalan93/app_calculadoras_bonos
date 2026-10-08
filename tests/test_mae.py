@@ -46,6 +46,29 @@ def test_cauciones_and_repo_normalize() -> None:
         _clear()
 
 
+def test_caucion_mae_moneda_y_plazo_legibles() -> None:
+    """Regresión del monitor: dos cauciones de 1 día ('001' pesos y '001' dólar)
+    se diferenciaban sólo por una 'D' cruda, y la de pesos no marcaba moneda →
+    la de dólar (≈1%) se leía como si fuera la de pesos. Cada fila debe marcar
+    moneda sin ambigüedad (ARS / US$) y mostrar el plazo legible."""
+    _inject(cauciones=[
+        {"plazo": "001", "moneda": "D", "ultimatasa": 1.02},    # dólar (MEP)
+        {"plazo": "001", "moneda": "$", "ultimatasa": 20.60},   # pesos
+        {"plazo": "007", "moneda": "X", "ultimatasa": 2.10},    # dólar (cable)
+    ])
+    try:
+        by = {(r["plazo"], r["moneda"]): r for r in mae.cauciones_rows()}
+        usd = by[("001", "D")]
+        assert usd["moneda_lbl"] == "US$" and usd["plazo_lbl"] == "1 día"
+        assert usd["tasa"] == pytest.approx(1.02)
+        ars = by[("001", "$")]
+        assert ars["moneda_lbl"] == "ARS" and ars["plazo_lbl"] == "1 día"
+        assert ars["tasa"] == pytest.approx(20.60)
+        assert by[("007", "X")]["moneda_lbl"] == "US$" and by[("007", "X")]["plazo_lbl"] == "7 días"
+    finally:
+        _clear()
+
+
 def test_match_by_ticker_and_leg() -> None:
     _inject(rentafija=[
         {"ticker": "AL30", "segmento": "Bilateral PPT", "moneda": "$", "plazo": "002",

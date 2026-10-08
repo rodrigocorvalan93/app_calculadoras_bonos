@@ -114,34 +114,42 @@ def best(moneda: str = "PESOS") -> Dict[str, Any] | None:
 _RAIL_PLAZOS = (1, 2, 3, 4)
 
 
-def _pick_short(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _pick_short(rows: List[Dict[str, Any]]) -> Dict[str, Any] | None:
     """Entre los plazos overnight (1D–4D), el de mayor volumen; sin volumen
-    reportado, el más corto entre las candidatas, o el más corto global."""
+    reportado, el más corto de esas candidatas. None si NINGÚN plazo cae en
+    1D–4D: un tenor más largo (p. ej. 14D) NO es el overnight y mostrarlo como
+    tal confunde (el monitor llegó a mostrar '14D' cuando el 1D aún no operaba).
+    Antes el fallback era `(short or rows)[0]` → cuando no había 1D–4D vivo caía
+    al plazo más corto de TODOS, que podía ser el 14D. Mejor nada que un tenor
+    equivocado."""
     short = [r for r in rows if r["_n"] in _RAIL_PLAZOS]
+    if not short:
+        return None
     with_vol = [r for r in short if r["volumen"] is not None]
     if with_vol:
         return max(with_vol, key=lambda r: r["volumen"] or 0.0)
-    return (short or rows)[0]
+    return short[0]
 
 
 def rail_pick(moneda: str = "PESOS") -> Dict[str, Any] | None:
     """Caución overnight de referencia para el riel: entre 1D y 4D, la de
     mayor volumen con tasa (1D salvo feriado/finde, donde rueda al 2-4D).
-    Si ninguna de esas tiene volumen, cae a la más corta con tasa.
+    Si ninguna de esas tiene volumen, cae a la más corta con tasa. NUNCA un
+    plazo fuera de 1D–4D (un 14D no es el overnight).
 
     Sin operaciones todavía (pre-apertura, mercado cerrado, server recién
-    reiniciado) cae al CIERRE PREVIO, marcado `es_cierre=True` — así el riel
-    no pierde el KPI de la tasa del día fuera del horario de rueda."""
+    reiniciado) cae al CIERRE PREVIO de un plazo overnight, marcado
+    `es_cierre=True`. Si no hay dato overnight, None (mejor nada que un tenor
+    largo disfrazado de overnight)."""
     all_rows = byma_rows(moneda, include_close_only=True)
-    rows = [r for r in all_rows if r["tasa"] is not None]
-    if rows:
-        pick = _pick_short(rows)
+    pick = _pick_short([r for r in all_rows if r["tasa"] is not None])
+    if pick is not None:
         _memo_hoy(moneda, pick)
         return pick
-    closed = [r for r in all_rows if r["close"] is not None]
-    if not closed:
+    closed = _pick_short([r for r in all_rows if r["close"] is not None])
+    if closed is None:
         return None
-    pick = dict(_pick_short(closed))
+    pick = dict(closed)
     pick.update(tasa=pick["close"], var=None, es_cierre=True)
     return pick
 

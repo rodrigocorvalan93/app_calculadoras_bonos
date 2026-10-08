@@ -146,14 +146,23 @@ def status() -> Dict[str, Any]:
 
 
 def cauciones_rows() -> List[Dict[str, Any]]:
-    """Cauciones normalizadas (tasa/plazo/volumen), ordenadas por plazo."""
+    """Cauciones normalizadas (tasa/plazo/volumen), ordenadas por plazo.
+
+    `plazo`/`moneda` quedan CRUDOS (consumidos por el snapshot de Excel); se
+    agregan `plazo_lbl`/`moneda_lbl` legibles para la UI: la tabla mostraba dos
+    filas de 1 día ('001' y '001 D') diferenciadas sólo por una 'D' cruda y sin
+    marcar la de pesos → fácil leer la de dólar (1%) como si fuera la de pesos."""
     with _lock:
         raw = list(_snap["cauciones"])
     rows = []
     for r in raw:
+        moneda = r.get("moneda") or r.get("monedaCodigo") or "$"
+        plazo = str(r.get("plazo") or "").strip()
         rows.append({
-            "plazo": str(r.get("plazo") or "").strip(),
-            "moneda": r.get("moneda") or r.get("monedaCodigo") or "$",
+            "plazo": plazo,
+            "plazo_lbl": _caucion_plazo_lbl(plazo),
+            "moneda": moneda,
+            "moneda_lbl": _moneda_lbl(moneda),
             "tasa": _num(r.get("ultimatasa")) or _num(r.get("ultimaTasa")),
             "tasa_cierre": _num(r.get("precioCierreAnterior")) or _num(r.get("cierreAyer")),
             "var_pct": _num(r.get("variacion")),
@@ -190,6 +199,28 @@ def _plazo_key(p: str) -> tuple:
         return (0, int(p))
     except (TypeError, ValueError):
         return (1, 0)
+
+
+def _caucion_plazo_lbl(p: str) -> str:
+    """Plazo crudo de caución ('001','007','014') → '1 día' / '7 días'. El
+    plazo de una caución ES su cantidad de días. Texto no numérico → crudo."""
+    try:
+        n = int(p)
+    except (TypeError, ValueError):
+        return p or ""
+    return "1 día" if n == 1 else f"{n} días"
+
+
+def _moneda_lbl(m: object) -> str:
+    """Código de moneda MAE → etiqueta sin ambigüedad. '$'/'T' = pesos (ARS);
+    'D' (MEP) / 'X' (cable) = dólar (US$). Antes la de pesos no mostraba nada y
+    la de dólar sólo una 'D' cruda → se confundían las dos filas de 1 día."""
+    s = ("" if m is None else str(m)).strip().upper()
+    if s in ("$", "T", "ARS", "PESOS", "$T", ""):
+        return "ARS"
+    if s in ("D", "X", "USD", "USB", "DOLAR", "US$"):
+        return "US$"
+    return s
 
 
 def _plazo_norm(raw: object) -> str:

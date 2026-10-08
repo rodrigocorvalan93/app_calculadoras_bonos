@@ -58,7 +58,7 @@
         <tbody>
           {% for r in cauciones %}
             <tr>
-              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}{% if r.moneda and r.moneda not in ("$", None) %} <span class="muted">{{ r.moneda }}</span>{% endif %}</td>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo_lbl or r.plazo }} <span class="muted" style="font-weight:500">· {{ r.moneda_lbl or r.moneda }}</span></td>
               <td class="{{ fx.vcls(r.var_pct) }}" style="font-weight:600">{{ r.tasa | ar_num(2) }}</td>
               <td class="{{ fx.vcls(r.var_pct) }}" style="{{ fx.heat(r.var_pct, cap=1.0) }}">{{ fx.arrow(r.var_pct) }} {{ r.var_pct | ar_num(2) }}</td>
               <td>{{ r.min | ar_num(2) }}</td>
