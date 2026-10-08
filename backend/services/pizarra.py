@@ -49,10 +49,31 @@ class PizarraError(ValueError):
     """Error de negocio (mensaje apto para mostrar al usuario)."""
 
 
+def _canonico(code: str) -> str:
+    """Resuelve `code` al código REAL del universo respetando may/min: el
+    universo es case-sensitive y las variantes proyectadas/duales llevan el
+    sufijo en MINÚSCULA (PBA28j, …v). Uppercasear a ciegas rompía esas: PBA28j
+    → PBA28J no existía y la pizarra lo rechazaba. Exacto gana; si no, match
+    único sin distinguir may/min; si no hay o es ambiguo, el code en mayúsculas
+    (como antes, para que la validación avise con lo que el usuario tipeó)."""
+    from backend.services import bond_universe
+    raw = (code or "").strip()
+    if not raw:
+        return ""
+    if bond_universe.get(raw) is not None:
+        return raw
+    up = raw.upper()
+    try:
+        hits = [c for c in bond_universe.all_codes() if c.upper() == up]
+    except Exception:  # noqa: BLE001 — universo no cargado: comportamiento previo
+        hits = []
+    return hits[0] if len(hits) == 1 else up
+
+
 def _sane_cuadro(raw: Any) -> Optional[Dict[str, str]]:
     if not isinstance(raw, dict):
         return None
-    code = str(raw.get("code") or "").strip().upper()
+    code = _canonico(str(raw.get("code") or "").strip())
     tipo = str(raw.get("tipo") or "libro").strip().lower()
     plazo = str(raw.get("plazo") or "24hs").strip()
     plazo = "CI" if plazo.lower().startswith("ci") else "24hs"
@@ -88,8 +109,14 @@ def _load_all(strict: bool = False) -> Dict[str, Any]:
         return _vacio()
     except ValueError as exc:
         from backend.services.archivos import apartar_corrupto
-        logger.error("[pizarra] archivo corrupto (%s); lo aparto y arranco vacío", exc)
-        apartar_corrupto(p, str(exc))
+        dst = apartar_corrupto(p, str(exc))
+        if strict and dst is None:
+            # Corrupto Y no se pudo preservar: NO sobrescribir — el guardado que
+            # sigue pisaría las pizarras de los demás con sólo la del que guarda.
+            # Abortamos la mutación con error explícito (A08).
+            raise OSError(f"pizarra corrupta y no se pudo apartar: {p}") from exc
+        logger.error("[pizarra] archivo corrupto (%s); %s", exc,
+                     f"apartado como {dst.name}" if dst else "arranco vacío")
         return _vacio()
     if not isinstance(data, dict):
         return _vacio()

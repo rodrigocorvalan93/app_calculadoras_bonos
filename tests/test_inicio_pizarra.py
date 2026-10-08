@@ -207,3 +207,86 @@ async def test_libro_de_mercado_sigue_igual_fuera_de_la_pizarra() -> None:
         assert f'hx-get="/mercado/book/{g}?plazo=24hs' in r.text and 'y=tirea"' in r.text
         assert 'hx-trigger="md-update from:body, every 30s"' in r.text and "book-y" in r.text
         assert "piz-tools" not in r.text
+
+
+# ── Auditoría 08/10 (lote seguro) ─────────────────────────────────────────────
+def test_pizarra_acepta_codigo_con_sufijo_minuscula_del_universo(piz_tmp) -> None:
+    """A09: una variante del universo con sufijo en MINÚSCULA (proyectada /
+    dual, p. ej. PBA28j) no debe rechazarse por uppercasear a ciegas; se
+    canoniza al código real tanto si entra en may como en min."""
+    bond_universe.ensure_loaded()
+    cod = next((c for c in bond_universe.all_codes() if c != c.upper()), None)
+    if cod is None:
+        pytest.skip("el universo no tiene códigos con minúscula")
+    ent = pizarra.agregar("ana", cod.upper(), "cotizacion", "24hs")   # entra en MAYÚSCULAS
+    assert ent["cuadros"][-1]["code"] == cod                          # → código real del universo
+    ent = pizarra.agregar("ana", cod.lower(), "libro")                # y en minúsculas
+    assert ent["cuadros"][-1]["code"] == cod
+
+
+def test_pizarra_no_pisa_json_corrupto_si_no_puede_apartarlo(piz_tmp, monkeypatch) -> None:
+    """A08: JSON corrupto que NO se puede mover a cuarentena → la mutación
+    aborta (OSError) en vez de sobrescribirlo con sólo el usuario que guarda
+    (perdería las pizarras de los demás). El archivo corrupto queda intacto."""
+    original = '{"users": {"otro": ESTO-NO-ES-JSON'
+    piz_tmp.write_text(original, encoding="utf-8")
+    import backend.services.archivos as arch
+    monkeypatch.setattr(arch, "apartar_corrupto", lambda p, motivo="": None)   # la cuarentena falla
+    with pytest.raises(OSError):
+        pizarra.agregar("ana", _un_global(), "libro")
+    assert piz_tmp.read_text(encoding="utf-8") == original                     # NO se pisó
+
+
+@pytest.mark.asyncio
+async def test_pizarra_cache_se_invalida_al_cambiar_permisos(piz_tmp, auth_on) -> None:
+    """A04: el HTML de la pizarra (tenencia filtrada por fondos, marcas de orden
+    propia) se cachea por usuario+seq. Revocar fondos con la seq quieta NO debe
+    seguir sirviendo el HTML viejo: la clave incluye la huella de permisos."""
+    from backend.routes import inicio as rt
+    from backend.services import auth
+    g = _un_global()
+    _sembrar(g)
+    async with _client() as su:
+        await su.post("/login", data=_SU)
+        await su.post("/admin/users", data={"username": "lu", "password": "clave123", "role": "premium", "email": ""})
+    async with _client() as ac:
+        await ac.post("/login", data={"username": "lu", "password": "clave123"})
+        await ac.post("/inicio/pizarra/agregar", data={"code": g.lower(), "tipo": "libro", "plazo": "24hs"})
+        rt.piz_stats.update(hit=0, miss=0)
+        await ac.get("/inicio/pizarra")
+        await ac.get("/inicio/pizarra")
+        assert rt.piz_stats["hit"] >= 1                       # cacheado (seq quieta)
+        auth.set_visible_fondos("lu", [])                     # revoco fondos (no toca prefs ni seq)
+        rt.piz_stats.update(hit=0, miss=0)
+        await ac.get("/inicio/pizarra")
+        assert rt.piz_stats["miss"] == 1                      # la clave de permisos cambió → re-render
+
+
+@pytest.mark.asyncio
+async def test_libro_no_filtra_ordenes_propias_a_rol_sin_oms(piz_tmp, auth_on) -> None:
+    """A05: el tamaño de las órdenes propias de la mesa es confidencial (como
+    /ordenes). El libro se reusa en Inicio/Mercado (accesibles a un básico), así
+    que un rol SIN OMS no debe ver las marcas de orden propia; uno con OMS sí."""
+    from backend.services import oms
+    from backend.tools.bench_tick import _precio_para
+    g = _un_global()
+    _sembrar(g)
+    px = _precio_para(g, {}) or 100.0
+    top_bid = round(px * (1 - 0.002), 3)                      # mejor punta comprada por _sembrar
+    oms._OWN.clear()
+    oms.recordar_propia({"symbol": syms.md_symbol(g, "24hs"), "side": "buy",
+                         "price": top_bid, "qty": 77777, "client_order_id": "AUDIT-A05"})
+    try:
+        assert oms.own_levels(syms.md_symbol(g, "24hs"))["buy"]            # precondición: el seed matchea un nivel
+        async with _client() as su:
+            await su.post("/login", data=_SU)
+            await su.post("/admin/users", data={"username": "baz", "password": "clave123", "role": "basico", "email": ""})
+            r = await su.get(f"/mercado/book/{g}")
+            assert r.status_code == 200 and "own-order" in r.text and "77.777" in r.text    # superuser SÍ ve
+        async with _client() as ac:
+            await ac.post("/login", data={"username": "baz", "password": "clave123"})
+            assert (await ac.get("/ordenes")).status_code == 403                            # básico sin OMS
+            r = await ac.get(f"/mercado/book/{g}")
+            assert r.status_code == 200 and "own-order" not in r.text and "77.777" not in r.text   # NO ve las propias
+    finally:
+        oms._OWN.clear()

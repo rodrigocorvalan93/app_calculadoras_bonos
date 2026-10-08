@@ -29,6 +29,7 @@ import logging
 import os
 import re
 import threading
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -53,6 +54,9 @@ _RE_HOST = re.compile(r"-(?=[A-Z0-9.\-]*[A-Z])[A-Z0-9][A-Z0-9.\-]*")   # "-NOTEB
 _lock = threading.Lock()
 _STATS: Dict[str, Tuple[tuple, Dict[str, Any], Optional[Set[date]]]] = {}   # path → (firma, stats, fechas)
 _MAX_STATS = 600
+# Un .tmp más nuevo que esto puede ser una escritura EN CURSO (el writer cerró
+# el archivo pero todavía no hizo os.replace) → no borrarlo todavía (A07).
+_TMP_MIN_EDAD_S = 120
 
 
 # ── carpetas ───────────────────────────────────────────────────────────────
@@ -337,8 +341,13 @@ def _analizar_entrada(e: Dict[str, Any], solo_cache: bool = False) -> None:
     e["mas_filas"] = None
     e["incorporable"] = False
     if e["tipo"] == "temporal":
-        e["aporta"] = False
-        e["veredicto"] = "temporal de una escritura cortada: no sirve, se puede borrar"
+        if time.time() - float(e.get("mtime_ts") or 0) < _TMP_MIN_EDAD_S:
+            # Recién escrito: puede ser un writer a punto de hacer os.replace.
+            e["aporta"] = None
+            e["veredicto"] = "temporal reciente (posible escritura en curso): no borrar todavía"
+        else:
+            e["aporta"] = False
+            e["veredicto"] = "temporal de una escritura cortada: no sirve, se puede borrar"
         return
     st, fechas = stats_de(e["path"], solo_cache)
     if st is None:
@@ -385,10 +394,25 @@ def _analizar_entrada(e: Dict[str, Any], solo_cache: bool = False) -> None:
                           f"({e['ruedas_extra_fmt']})" + (f"; le faltan {menos} de la principal" if menos else "")
                           + (" · más reciente" if e["mas_reciente"] else ""))
     else:
-        e["aporta"] = False
-        e["veredicto"] = (f"no aporta: la principal tiene sus {st.get('ruedas', 0)} ruedas"
-                          + (f" y {menos} más" if menos else "")
-                          + (" (aunque esta copia es más reciente)" if e["mas_reciente"] else ""))
+        mas_filas = (st.get("filas") or 0) > (pst.get("filas") or 0)
+        mas_reales = (st.get("reales") or 0) > (pst.get("reales") or 0)
+        if mas_filas or mas_reales:
+            # Mismas RUEDAS que la principal pero MÁS filas/reales: puede traer
+            # instrumentos nuevos o correcciones dentro de esas fechas que la
+            # principal no tiene (A01). No alcanza con comparar fechas → NO es
+            # borrable en lote; queda para revisar/incorporar a mano.
+            e["aporta"] = None
+            det = f"{st.get('filas', '?')} vs {pst.get('filas', '?')} filas"
+            if mas_reales:
+                det += f" ({st.get('reales')} vs {pst.get('reales')} reales)"
+            e["veredicto"] = (f"mismas ruedas que la principal pero {det} — puede tener instrumentos "
+                              "o correcciones que la principal no: revisar a mano, NO borrar en lote"
+                              + (" · más reciente" if e["mas_reciente"] else ""))
+        else:
+            e["aporta"] = False
+            e["veredicto"] = (f"no aporta: la principal tiene sus {st.get('ruedas', 0)} ruedas"
+                              + (f" y {menos} más" if menos else "")
+                              + (" (aunque esta copia es más reciente)" if e["mas_reciente"] else ""))
 
 
 def _base_de(principal: str) -> Optional[Tuple[str, str]]:
@@ -461,6 +485,8 @@ def _validar_copia(path: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     e = _entrada(carp, d, nombre, clas)
     if e is None:
         return None, "no pude leer el archivo"
+    if e.get("tipo") == "temporal" and time.time() - float(e.get("mtime_ts") or 0) < _TMP_MIN_EDAD_S:
+        return None, "temporal reciente (posible escritura en curso): no se borra todavía"
     return e, None
 
 
