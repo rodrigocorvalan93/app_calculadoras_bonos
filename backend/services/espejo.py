@@ -70,6 +70,21 @@ def _stat_key(path: str) -> Any:
         return None
 
 
+def _sha256(path: str) -> Optional[str]:
+    """Digest del contenido (chunks de 1 MiB). None si no se puede leer. Se
+    usa sólo al escribir la firma y al validar con el memo frío (stat cambió),
+    NO en el path caliente."""
+    import hashlib
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
 def espejo_valido(pq_path: str, xlsx_path: Optional[str]) -> bool:
     """True si `pq_path` existe y es copia fiel del Excel: con sidecar, la
     firma del xlsx coincide exacto; sin sidecar, el parquet no es más viejo
@@ -96,6 +111,13 @@ def espejo_valido(pq_path: str, xlsx_path: Optional[str]) -> bool:
             # sólo la huella del Excel ese parquet ajeno pasaba por fiel.
             if ok and sc.get("pq_size") is not None:
                 ok = int(sc.get("pq_size")) == k_pq[1]
+            # Digest de contenido: tamaño == tamaño NO prueba mismo contenido
+            # (un parquet ajeno del mismo tamaño pasaba por fiel — A06). Con
+            # `pq_sha256` en la firma el espejo vale sólo si el hash coincide.
+            # Se calcula acá nomás (memo frío = algún stat cambió), no por
+            # request; una firma vieja sin hash cae a la regla de tamaño.
+            if ok and sc.get("pq_sha256"):
+                ok = (_sha256(pq_path) == sc.get("pq_sha256"))
         except (TypeError, ValueError):
             ok = False
     else:
@@ -129,7 +151,8 @@ def marcar_espejo(pq_path: str, xlsx_path: Optional[str]) -> bool:
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({**f, "xlsx": os.path.basename(xlsx_path or ""),
-                       **({"pq_size": k_pq[1]} if k_pq is not None else {})}, fh)
+                       **({"pq_size": k_pq[1]} if k_pq is not None else {}),
+                       **({"pq_sha256": _sha256(pq_path)} if k_pq is not None else {})}, fh)
         os.replace(tmp, sc)
         return True
     except OSError as exc:

@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse
 
 from backend.cache_seq import seq_cached
 from backend.routes.curves import _row_for_code, _row_pool, _rows_en_seq, book_context
-from backend.services import bond_universe, inicio as inicio_svc, marketdata_store, pizarra as piz_svc, pricing
+from backend.services import auth as auth_svc, bond_universe, inicio as inicio_svc, marketdata_store, pizarra as piz_svc, pricing
 
 logger = logging.getLogger("backend.inicio.routes")
 
@@ -40,6 +40,23 @@ def _user(request: Request) -> str:
     login (mismo pseudo-usuario que escenario / órdenes)."""
     u = getattr(request.state, "user", None) or {}
     return str(u.get("username") or "_local")
+
+
+def _perm_fp(request: Request) -> tuple:
+    """Huella de PERMISOS del request para la clave del cache de la pizarra: el
+    contenido depende de los fondos visibles (tenencia del libro) y de si el
+    usuario puede ver el OMS (marcas de órdenes propias). Sin esto, revocar un
+    fondo o cambiar el rol dejaba servir el HTML cacheado con data ya vedada
+    (A04/A05). Incluye uid+sv: borrar/recrear el usuario o 'cerrar sesiones'
+    también invalida."""
+    u = getattr(request.state, "user", None) or None
+    if not u:
+        return ("_local",)
+    name = u.get("username")
+    vf = auth_svc.visible_fondos(name)
+    return (auth_svc.session_uid(name), auth_svc.session_version(name),
+            None if vf is None else tuple(sorted(vf)),
+            bool(auth_svc.can_access_path(u.get("role"), "/ordenes")))
 
 
 async def _filas_curvas() -> Dict[str, List[dict]]:
@@ -92,7 +109,7 @@ _PREFS_MEMO: Dict[str, Tuple[tuple, Dict[str, Any]]] = {}
 # Render de la pizarra por usuario: (seq del store, firma de prefs) → HTML. Un
 # tick o un cambio de cuadros lo invalidan; con la seq quieta (fuera de rueda)
 # el GET de cada refresh es un lookup.
-_PIZ_MEMO: Dict[str, Tuple[int, tuple, str]] = {}
+_PIZ_MEMO: Dict[str, Tuple[int, tuple, tuple, str]] = {}
 piz_stats: Dict[str, int] = {"hit": 0, "miss": 0}
 
 
@@ -158,20 +175,21 @@ async def _pizarra_response(request: Request, error: Optional[str] = None) -> HT
     user = _user(request)
     prefs = await _prefs(request)
     sig = _PREFS_MEMO[user][0]
+    perm = _perm_fp(request)
     seq = marketdata_store.get_store().seq()
     hdr = {"Cache-Control": "no-store"}
     if error is None:
         ent = _PIZ_MEMO.get(user)
-        if ent is not None and ent[0] == seq and ent[1] == sig:
+        if ent is not None and ent[0] == seq and ent[1] == sig and ent[2] == perm:
             piz_stats["hit"] += 1
-            return HTMLResponse(ent[2], headers=hdr)
+            return HTMLResponse(ent[3], headers=hdr)
     piz_stats["miss"] += 1
     ctx = await _pizarra_ctx(request, prefs)
     resp = _render(request, "partials/inicio_pizarra.html", error=error, **ctx)
     if error is None:
         if len(_PIZ_MEMO) > 256:            # fusible (usuarios reales: decenas)
             _PIZ_MEMO.clear()
-        _PIZ_MEMO[user] = (seq, sig, resp.body.decode("utf-8"))
+        _PIZ_MEMO[user] = (seq, sig, perm, resp.body.decode("utf-8"))
     for k, v in hdr.items():
         resp.headers[k] = v
     return resp

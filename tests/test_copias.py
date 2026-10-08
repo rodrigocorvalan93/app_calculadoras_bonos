@@ -8,6 +8,7 @@ incorporación a la base px/tasas / FX de las ruedas que sólo tiene la copia.""
 from __future__ import annotations
 
 import os
+import time
 from datetime import date
 
 import pandas as pd
@@ -85,6 +86,7 @@ def _sembrar(carpetas) -> dict:
     tmp = str(bases / f"{stem}.parquet.4242-3.tmp")
     with open(tmp, "wb") as f:
         f.write(b"x" * 10)
+    os.utime(tmp, (time.time() - 3600, time.time() - 3600))   # huérfano viejo: borrable (A07 sólo frena los recientes)
     (app / "auth_store.json").write_text('{"users": {}}', encoding="utf-8")
     json_copia = str(app / "auth_store-NOTEBOOK.json")
     with open(json_copia, "w", encoding="utf-8") as f:
@@ -139,6 +141,46 @@ def test_escanear_analizar_incorporar_y_borrar(carpetas) -> None:
     assert sorted(r["borradas"]) == sorted(os.path.basename(p) for p in (s["copia_xlsx"], s["copia_pq"], s["corrupto"]))
     assert not r["errores"] and os.path.isfile(s["json_copia"]) and os.path.isfile(s["xlsx"])
     assert copias.escanear() and {e["nombre"] for e in copias.escanear()} == {"auth_store-NOTEBOOK.json"}
+
+
+def test_copia_mismas_fechas_mas_filas_no_se_borra_en_lote(carpetas) -> None:
+    """A01: una copia con las MISMAS ruedas que la principal pero MÁS filas
+    (instrumentos o correcciones dentro de esas fechas) NO debe quedar como
+    'no aporta' (borrable en lote): queda para revisar/incorporar a mano."""
+    bases = carpetas["bases"]
+    xlsx = str(bases / hw.HIST_FILENAME)
+    hw.append_and_save(_filas(D_ANT), xlsx)
+    hw.append_and_save(_filas(D), xlsx)                      # base: ruedas D_ANT + D
+    stem = os.path.splitext(hw.HIST_FILENAME)[0]
+    copia = str(bases / f"{stem} (2).xlsx")                  # copia con las mismas ruedas + 1 fila
+    pd.concat([_filas(D_ANT), _filas(D), _filas(D).head(1)]).to_excel(copia, index=False)
+    rev = {e["nombre"]: e for e in copias.analizar()}
+    c = rev[os.path.basename(copia)]
+    assert c["aporta"] is None                               # NO False → "Borrar las que no aportan" la saltea
+    assert c["mas_filas"] and not c["ruedas_extra"] and "revisar a mano" in c["veredicto"].lower()
+    assert os.path.basename(copia) not in copias.borrar_inutiles(quien="su_test")["borradas"]
+    assert os.path.isfile(copia)
+
+
+def test_tmp_reciente_no_se_borra(carpetas) -> None:
+    """A07: un .tmp recién escrito puede ser una escritura EN CURSO (el writer
+    cerró el archivo pero todavía no hizo os.replace) → ni el análisis lo da
+    por borrable ni `borrar` lo elimina; uno viejo sí."""
+    bases = carpetas["bases"]
+    stem = os.path.splitext(hw.HIST_FILENAME)[0]
+    reciente = str(bases / f"{stem}.parquet.9999-1.tmp")
+    with open(reciente, "wb") as f:
+        f.write(b"x" * 10)                                   # mtime = ahora
+    rev = {e["nombre"]: e for e in copias.analizar()}
+    r = rev[os.path.basename(reciente)]
+    assert r["tipo"] == "temporal" and r["aporta"] is None and "escritura en curso" in r["veredicto"]
+    assert "reciente" in copias.borrar(reciente, quien="su_test")["error"] and os.path.isfile(reciente)
+    assert os.path.basename(reciente) not in copias.borrar_inutiles(quien="su_test")["borradas"]
+    # el mismo .tmp, ya viejo, sí es borrable
+    os.utime(reciente, (time.time() - 3600, time.time() - 3600))
+    copias._STATS.clear()
+    assert {e["nombre"]: e for e in copias.analizar()}[os.path.basename(reciente)]["aporta"] is False
+    assert copias.borrar(reciente, quien="su_test")["ok"] and not os.path.exists(reciente)
 
 
 def test_incorporar_fx_desde_copia(carpetas) -> None:
