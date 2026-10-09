@@ -859,6 +859,17 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   constantes: `DEV_TICKS_FOCUS=S13N6 python backend/tools/dev_ticks.py 8765`
   (alterna un tick de sólo tamaños —flashea— con uno de precios).
 
+## Matriz de tenencias — vistas (09/10)
+
+`routes/posiciones._matriz_ctx(view)`: `vn` (nominales), `pct` (% sobre PN,
+1 decimal) y `vnpct` = **VN y %** en la misma celda, texto plano
+"772.000.000 5,0%" (sin PN del fondo queda sólo el VN; sin tenencia, vacía) —
+pedido del desk para leer tamaño y peso de un vistazo. El ancho de columna
+sale del texto más largo, así que esa vista ensancha las columnas; el HTML
+va al mismo `_MATRIZ_CACHE` por (generación, familia, vista, visibles). Un
+test que pisa `positions._cache` a mano tiene que vaciar ese cache (es
+orden-dependiente si no). Regresión: `test_posiciones_galileo.test_http_matriz_markup_compacto`.
+
 ## Seguridad — invariantes (no regresar sin querer)
 
 La app cursa órdenes reales y se comparte en el equipo, así que estos

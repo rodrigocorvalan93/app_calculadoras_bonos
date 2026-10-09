@@ -22,7 +22,7 @@
 <div class="card">
   <div class="card-title">
     <span>Matriz de tenencias</span>
-    <span class="card-title-aux">{{ rows | length }} especies × {{ fondos | length }} fondos · {{ "VN" if view == "vn" else "% sobre PN" }}</span>
+    <span class="card-title-aux">{{ rows | length }} especies × {{ fondos | length }} fondos · {{ {"vn": "VN", "pct": "% sobre PN", "vnpct": "VN y % sobre PN"}.get(view, "VN") }}</span>
   </div>
   <div class="card-body" style="padding:0">
     <div class="table-scroll matriz-pane" style="--w-esp:{{ w_esp }}px;--w-total:{{ w_total }}px">

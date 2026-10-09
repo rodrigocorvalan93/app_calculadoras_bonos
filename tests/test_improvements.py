@@ -159,6 +159,8 @@ async def test_matriz_has_copyable_detail() -> None:
 
     from backend.main import app
 
+    from backend.routes import posiciones as pos_routes
+
     saved = positions._cache
     positions._cache = {
         "loaded": True, "error": None, "paths": {}, "asof": None, "by_code": {},
@@ -168,6 +170,10 @@ async def test_matriz_has_copyable_detail() -> None:
             {"cod_delta": "TX26", "cod_fondo": 20, "cantidad": 100000.0, "valor": 100000.0, "especie": "TX26", "clase": None},
         ],
     }
+    # El HTML de la matriz se cachea por generación de carteras: al pisar
+    # `_cache` a mano (sin refresh) hay que vaciarlo, o el test ve la matriz
+    # que dejó otro test con la misma generación (orden-dependiente).
+    pos_routes._MATRIZ_CACHE.clear()
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             r = await ac.get("/matriz")
@@ -176,6 +182,7 @@ async def test_matriz_has_copyable_detail() -> None:
         assert "RENTA" in r.text and "200.000" in r.text and "100.000" in r.text
     finally:
         positions._cache = saved
+        pos_routes._MATRIZ_CACHE.clear()
 
 
 def test_todos_ars_aggregate_includes_duals() -> None:
