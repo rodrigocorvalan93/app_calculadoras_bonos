@@ -707,6 +707,26 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `test_conexion.test_conexion_status_se_refresca_y_espera_el_handshake`,
   `test_marketdata.test_connecting_es_gracia_de_handshake_no_feed_caido`,
   `test_live_engine.test_sse_emits_baseline_and_tick`.
+- **Motor live endurecido** (09/10, `app.js`): `renderEstado(advanced, rtt)`
+  (dot + meta; prioridad down > stale > live > conectando > idle) lo llaman
+  `handleSeq`, `checkHealth` y un timer de 5 s — antes un cambio de salud con
+  el mercado quieto (SSE sin seqs) no se veía y `live → idle` nunca pasaba;
+  `checkHealth` va con `fetchTexto` (plazo 6 s) y generación (una respuesta
+  vieja no pisa), `connecting` del server = dot 'idle' "Conectando al
+  broker…"; `linkDown` (polling con 3 fallos / SSE reconectando) deja el dot
+  en 'off' y el primer seq que vuelve dispara un health ya. **SSE**: watchdog
+  de CONNECTING — sin `onopen` ni mensaje en 8 s (pool de 6 conexiones
+  HTTP/1.1 lleno por pestañas duplicadas, proxy que no streamea) se cierra y
+  cae a polling con "Sin stream del feed — sondeando"; `arm()` no abre nada
+  con la pestaña oculta y `dispatchUpdate` / `htmx:beforeRequest` cancelan el
+  `md-update` oculto. **`htmx.config.timeout = 30 s`** (antes 0 = nunca: un
+  XHR colgado dejaba el panel con datos viejos en silencio) + toast en
+  `htmx:timeout` como el de `sendError`; las acciones largas llevan
+  `hx-request='{"timeout":600000}'` (guardar base, reconstruir / reponer /
+  aceptar, Copias en conflicto) y Históricos conserva sus 90 s. Regresión:
+  `tests/live_engine_harness.cjs` casos 6-11 (health sin seq, health colgado,
+  SSE colgado, SSE sano, pestaña oculta, plazo htmx) vía
+  `test_auditoria_eficiencia`.
 - **Pestaña vieja tras un deploy** (09/10): `/market/health` lleva `asset_v`
   (la misma versión de estáticos que `?v=` de los templates, `app.state.asset_v`)
   y la página la pone en `<body data-asset-v>`; `app.js checkVersion` (en el
