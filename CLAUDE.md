@@ -431,6 +431,23 @@ escritura por tormenta (coalescida 3 s, en el executor, atómica) y flush en
 `stop()`. `PRIMARY_REJECTED_CACHE` = ruta del archivo; `0` apaga (la suite
 corre con 0 vía `conftest`). Regresión:
 `test_marketdata.test_rechazados_persisten_por_host_con_ttl`.
+**Plazos de caución = validez por día** (09/10): `MERV - XMEV - PESOS|DOLAR -
+nD` existe sólo cuando hoy+n es hábil (4D: lunes, jueves y el viernes previo
+a feriado del lunes; 1D nunca un viernes; 7D no si cae en feriado). El broker
+los rechaza ese día y el cache de 7 días los dejaba mudos justo cuando sí
+operaban: el viernes 09/10 la tira mostraba 1D–7D "hoy no hay" con sólo
+14D/21D vivos (los únicos plazos que no fueron inválidos ningún día de la
+semana) mientras el 4D operaba 912.000 M. `_es_diario(symbol)`: esos
+símbolos NO entran a `_rejected` ni al JSON (un cache viejo con ellos se
+ignora al cargar), van en `smd` DE A UNO (su rechazo no voltea el lote de los
+demás), un rechazo los deja en `_rechazo_diario` con cooldown
+`REPROBAR_DIARIO_S` (30 min) y `reprobar_pendientes()` (task
+`_reprobar_loop`, cada `REPROBAR_CHECK_S` = 60 s, sólo conectado y dentro de
+`_REPROBAR_HORAS` = 7–18 BA) los vuelve a pedir; al cambiar el día (BA) pide
+TODOS los plazos de nuevo, y también reprueba con el proceso arriba los
+rechazados persistentes cuya entrada venció (antes sólo al reiniciar).
+`stats()["rechazados_hoy"]` los lista en `/market/diag`. Regresión:
+`test_marketdata.test_plazos_de_caucion_rechazados_se_reprueban_y_no_van_al_cache`.
 
 ## Add-in de Excel — OMS.MACRO en vivo (01/10)
 
