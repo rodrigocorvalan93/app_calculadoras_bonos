@@ -622,3 +622,90 @@ async def test_rechazados_persisten_por_host_con_ttl(tmp_path, monkeypatch) -> N
     c5._recover_from_error(pws._subscribe_payload([z1]))
     await c5.stop()
     assert json.loads(path.read_text(encoding="utf-8")) == data
+
+
+@pytest.mark.asyncio
+async def test_plazos_de_caucion_rechazados_se_reprueban_y_no_van_al_cache(tmp_path, monkeypatch) -> None:
+    """09/10/2026 (viernes, lunes feriado): la tira de Tasas mostraba 1D–7D
+    "hoy no hay" y sólo 14D/21D vivos mientras otra plataforma veía el 4D
+    operando 912.000 M. Los plazos de caución existen POR DÍA (el 4D sólo
+    cuando hoy+4 es hábil): el broker rechazó el 4D el martes, el rechazo fue
+    al cache local por 7 días y el viernes — su día — nunca se suscribió.
+    Exactamente los plazos que fueron inválidos algún día de la semana (1D–7D,
+    el 7D por caer en el feriado) quedaban mudos; 14D/21D nunca lo son.
+    Ahora: un plazo de caución rechazado no va al cache ni a `_rejected`, se
+    suscribe de a uno, tiene un cooldown y se reprueba; al cambiar el día se
+    piden todos de nuevo; un rechazo persistente vencido también se reprueba
+    con el proceso arriba."""
+    import json
+    from datetime import date, datetime, timedelta
+
+    from backend.locale_ar import TZ_BA
+
+    path = tmp_path / "rechazados.json"
+    monkeypatch.setenv("PRIMARY_REJECTED_CACHE", str(path))
+    c4d, c1d = "MERV - XMEV - PESOS - 4D", "MERV - XMEV - DOLAR - 1D"
+    bono, zzz = "MERV - XMEV - GD30 - 24hs", "MERV - XMEV - ZZZ - CI"
+    hoy = date.today().isoformat()
+    # un cache viejo con plazos de caución adentro NO los muda
+    path.write_text(json.dumps({"broker-a.invalid": {c4d: hoy, zzz: hoy}}), encoding="utf-8")
+    client = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    assert c4d not in client._rejected and zzz in client._rejected
+
+    sent: list = []
+
+    class FakeWS:
+        async def send(self, raw: str) -> None:
+            sent.append([p["symbol"] for p in json.loads(raw)["products"]])
+
+    fixed = datetime(2026, 10, 9, 11, 0, tzinfo=TZ_BA)
+    client._dia_diario = fixed.date()
+    client._subscriptions.update([c4d, c1d, bono, zzz])
+    client._connected, client._ws = True, FakeWS()
+    await client._send_in_chunks(client._ws, [c4d, c1d, bono, zzz])
+    assert sent == [[bono], [c1d], [c4d]]            # bono en lote, cauciones de a uno, zzz rechazado
+    # el broker rechaza el 4D (hoy no hay rueda de ese plazo): cooldown, nada al cache
+    client._recover_from_error(pws._subscribe_payload([c4d]))
+    assert c4d not in client._rejected and c4d in client._rechazo_diario
+    assert client.stats()["rechazados_hoy"] == [c4d] and client.stats()["rejected"] == 1
+    sent.clear()
+    await client._send_in_chunks(client._ws, [c4d, c1d])
+    assert sent == [[c1d]]                            # en cooldown no se vuelve a pedir
+    # reprobar: todavía en cooldown → nada; pasado el cooldown → se pide de nuevo
+    assert await client.reprobar_pendientes(now_fn=lambda: fixed) == []
+    client._rechazo_diario[c4d] -= pws.REPROBAR_DIARIO_S
+    sent.clear()
+    assert await client.reprobar_pendientes(now_fn=lambda: fixed) == [c4d]
+    assert sent == [[c4d]] and c4d not in client._rechazo_diario
+    # de noche no se reprueba (se vuelve a probar al conectar o a las 7)
+    client._recover_from_error(pws._subscribe_payload([c4d]))
+    client._rechazo_diario[c4d] -= pws.REPROBAR_DIARIO_S
+    sent.clear()
+    assert await client.reprobar_pendientes(now_fn=lambda: fixed.replace(hour=2)) == []
+    assert sent == []
+    # cambió el día: TODOS los plazos se piden de nuevo en la primera pasada en ventana
+    manana = fixed + timedelta(days=1)
+    assert sorted(await client.reprobar_pendientes(now_fn=lambda: manana)) == [c1d, c4d]
+    assert sorted(sent) == [[c1d], [c4d]] and not client._rechazo_diario
+    assert await client.reprobar_pendientes(now_fn=lambda: manana) == []        # una sola vez
+    # desconectado: sólo contabilidad, no manda nada
+    client._connected = False
+    client._recover_from_error(pws._subscribe_payload([c4d]))
+    client._rechazo_diario[c4d] -= pws.REPROBAR_DIARIO_S
+    assert await client.reprobar_pendientes(now_fn=lambda: manana) == []
+    client._connected = True
+    # un rechazo persistente VENCIDO se reprueba con el proceso arriba (antes: sólo al
+    # reiniciar); el 4D que quedó pendiente mientras estaba desconectado sale en la misma pasada
+    client._rejected_fecha[zzz] = (date.today() - timedelta(days=pws.REJECTED_TTL_DAYS + 1)).isoformat()
+    sent.clear()
+    assert sorted(await client.reprobar_pendientes(now_fn=lambda: manana)) == [c4d, zzz]
+    assert sorted(sent) == [[c4d], [zzz]]
+    assert zzz not in client._rejected and zzz not in client._rejected_fecha
+    # el cache en disco nunca lleva plazos de caución
+    client._recover_from_error(pws._subscribe_payload([c4d]))
+    client._recover_from_error(pws._subscribe_payload(["MERV - XMEV - QQQ - CI"]))
+    await client.stop()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data["broker-a.invalid"]) == {"MERV - XMEV - QQQ - CI"}
+    assert pws._es_diario(c4d) and pws._es_diario("MERV - XMEV - DOLAR - 120D")
+    assert not pws._es_diario(bono) and not pws._es_diario("MERV - XMEV - PESOS - 4D - CI")

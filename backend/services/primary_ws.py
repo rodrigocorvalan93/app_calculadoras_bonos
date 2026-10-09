@@ -24,6 +24,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import ssl
 import time
 from datetime import date, timedelta
@@ -51,8 +52,10 @@ BACKOFF_MAX = 30.0
 # tampoco tenían feed, y que solía terminar en un keepalive timeout). Con el
 # cache, el primer subscribe ya sale sin ellos. Un símbolo puede volver a ser
 # válido (nueva emisión que el broker lista días después): cada entrada vence
-# a los REJECTED_TTL_DAYS y se vuelve a probar. PRIMARY_REJECTED_CACHE = ruta
-# del archivo; "0" lo apaga (la suite de tests corre con 0).
+# a los REJECTED_TTL_DAYS y se vuelve a probar (al arrancar y, con el proceso
+# arriba, en reprobar_pendientes). PRIMARY_REJECTED_CACHE = ruta del archivo;
+# "0" lo apaga (la suite de tests corre con 0). Los plazos de caución NO entran
+# acá: su validez es por día (ver _es_diario).
 REJECTED_TTL_DAYS = 7
 _REJECTED_SAVE_DELAY = 3.0          # segundos: coalesce de la tormenta en UNA escritura
 
@@ -100,6 +103,30 @@ ENTRIES_FUT = ENTRIES + ["OI"]
 def _is_futuro(symbol: str) -> bool:
     """Futuro DLR nativo (excluye el spot, que no tiene interés abierto)."""
     return symbol.startswith("DLR/") and symbol != "DLR/SPOT"
+
+
+# Plazos de caución ('MERV - XMEV - PESOS - 4D'): la validez es POR DÍA — el 4D
+# existe sólo cuando hoy+4 es hábil (lunes, jueves y el viernes previo a un
+# feriado del lunes), el 1D nunca un viernes, el 7D no cuando cae en feriado.
+# Un rechazo del broker NO dice "símbolo inválido" sino "hoy no hay rueda de
+# ese plazo", así que NO se persiste ni se descarta por REJECTED_TTL_DAYS: el
+# 09/10/2026 (viernes, lunes feriado) el 4D — el overnight del día, el que
+# concentra el volumen — no llegaba porque el rechazo del martes lo había
+# dejado en el cache, y la tira de Tasas mostraba 1D–7D "hoy no hay" con sólo
+# 14D/21D vivos: exactamente los plazos que no fueron inválidos ningún día de
+# esa semana. Van en 'smd' DE A UNO (un rechazo no voltea el lote de los
+# demás), con un cooldown de REPROBAR_DIARIO_S entre reintentos, y al cambiar
+# el día se piden todos de nuevo (reprobar_pendientes, cada REPROBAR_CHECK_S,
+# dentro de _REPROBAR_HORAS BA; fuera de la ventana se prueban al conectar).
+_RE_CAUCION = re.compile(r"^MERV - XMEV - (?:PESOS|DOLAR) - \d+D$")
+REPROBAR_DIARIO_S = 1800.0        # cooldown entre reintentos de un plazo rechazado hoy
+REPROBAR_CHECK_S = 60.0           # cadencia del chequeo (µs cuando no hay nada que reprobar)
+_REPROBAR_HORAS = (7, 18)         # ventana BA [desde, hasta) en la que se reprueba
+
+
+def _es_diario(symbol: str) -> bool:
+    """Símbolo cuya validez depende del día (plazos de caución)."""
+    return bool(_RE_CAUCION.match(symbol))
 
 
 def _ws_header_kwarg() -> str:
@@ -239,6 +266,14 @@ class PrimaryWS:
         self._rejected_fecha: Dict[str, str] = {}
         self._rej_dirty = False
         self._rej_handle: Optional[asyncio.TimerHandle] = None
+        # Plazos de caución rechazados HOY: {símbolo: monotonic del rechazo}
+        # (cooldown, ver _es_diario). Nunca van al cache persistido.
+        self._rechazo_diario: Dict[str, float] = {}
+        self._diario_avisado: Set[str] = set()          # un log por plazo y por día
+        self._reprobar_todo = False                      # cambió el día: pedir todos los plazos
+        self._reprobar_task: Optional[asyncio.Task] = None
+        from backend.locale_ar import hoy_ba
+        self._dia_diario = hoy_ba()
         self._cargar_rechazados()
 
     # ── API ─────────────────────────────────────────────────────────
@@ -334,6 +369,7 @@ class PrimaryWS:
         self._subscriptions.update(symbols)
         self._stop_evt.clear()
         self._task = asyncio.create_task(self._run_loop(), name="primary_ws")
+        self._reprobar_task = asyncio.create_task(self._reprobar_loop(), name="primary_ws_reprobar")
         logger.info("[primary_ws] reader task started")
 
     async def stop(self) -> None:
@@ -348,6 +384,12 @@ class PrimaryWS:
                 await asyncio.wait_for(self._task, timeout=5.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._task.cancel()
+        if self._reprobar_task:
+            try:
+                await asyncio.wait_for(self._reprobar_task, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._reprobar_task.cancel()
+            self._reprobar_task = None
         if self._http is not None:
             await self._http.aclose()
             self._http = None
@@ -382,17 +424,26 @@ class PrimaryWS:
         con el entry OI extra (interés abierto).
         """
         syms = sorted(s for s in symbols if s not in self._rejected)
+        now = time.monotonic()
+        # Plazos de caución: de a uno y sin los rechazados hoy en cooldown
+        # (ver _es_diario / reprobar_pendientes).
+        diarios = [s for s in syms if _es_diario(s)
+                   and now - self._rechazo_diario.get(s, -1e18) >= REPROBAR_DIARIO_S]
         futs = [s for s in syms if _is_futuro(s)]
-        rest = [s for s in syms if not _is_futuro(s)]
+        rest = [s for s in syms if not _is_futuro(s) and not _es_diario(s)]
         n_lotes = 0
         for group, entries in ((rest, None), (futs, ENTRIES_FUT)):
             for i in range(0, len(group), SUBSCRIBE_CHUNK):
                 await ws.send(_subscribe_payload(group[i:i + SUBSCRIBE_CHUNK], entries=entries))
                 n_lotes += 1
                 await asyncio.sleep(0.05)
+        for s in diarios:
+            await ws.send(_subscribe_payload([s]))
+            await asyncio.sleep(0.02)
         if syms:
-            logger.info("[primary_ws] subscribe en %d lotes de <=%d (%d símbolos, %d futuros)",
-                        n_lotes, SUBSCRIBE_CHUNK, len(syms), len(futs))
+            logger.info("[primary_ws] subscribe en %d lotes de <=%d (%d símbolos, %d futuros, "
+                        "%d plazos de caución de a uno)",
+                        n_lotes, SUBSCRIBE_CHUNK, len(rest) + len(futs) + len(diarios), len(futs), len(diarios))
 
     @staticmethod
     def _payload_from_error(message: Any) -> Dict[str, Any]:
@@ -421,6 +472,15 @@ class PrimaryWS:
                 self._retried_no_oi.add(bad)
                 logger.info("[primary_ws] %s rechazado con OI; reintento sin OI", bad)
                 self._spawn_resub([bad], None)
+                return
+            if _es_diario(bad):
+                # Plazo de caución sin rueda HOY: no es un símbolo inválido.
+                # Cooldown y se reprueba (reprobar_pendientes); jamás al cache.
+                self._rechazo_diario[bad] = time.monotonic()
+                if bad not in self._diario_avisado:
+                    self._diario_avisado.add(bad)
+                    logger.info("[primary_ws] %s rechazado: plazo sin rueda hoy (se reprueba cada %d min)",
+                                bad, int(REPROBAR_DIARIO_S // 60))
                 return
             # rechazo de un único símbolo -> es inválido, lo descartamos (y
             # queda en el cache local para los próximos arranques).
@@ -466,6 +526,69 @@ class PrimaryWS:
             except (ConnectionClosed, WebSocketException):
                 return
 
+    async def reprobar_pendientes(self, now_fn=None) -> List[str]:
+        """Vuelve a pedir, de a uno, lo que el broker rechazó pero puede volver
+        a existir: los plazos de caución rechazados hoy pasado el cooldown
+        (`REPROBAR_DIARIO_S`), TODOS los plazos cuando cambió el día (BA) y los
+        rechazados persistentes cuya entrada venció (`REJECTED_TTL_DAYS`) con el
+        proceso arriba — antes sólo se reprobaban al reiniciar la app. Sólo
+        conectado y dentro de `_REPROBAR_HORAS`; fuera de la ventana se prueban
+        al conectar. Lo llama `_reprobar_loop` cada `REPROBAR_CHECK_S`
+        (µs si no hay nada); devuelve lo que mandó."""
+        from datetime import datetime
+        from backend.locale_ar import TZ_BA
+        ahora = now_fn() if now_fn else datetime.now(TZ_BA)
+        hoy = ahora.date()
+        if hoy != self._dia_diario:
+            self._dia_diario = hoy
+            self._rechazo_diario.clear()
+            self._diario_avisado.clear()
+            self._reprobar_todo = True
+        limite = (hoy - timedelta(days=REJECTED_TTL_DAYS)).isoformat()
+        vencidos = [s for s, f in self._rejected_fecha.items() if f < limite]
+        for s in vencidos:
+            self._rejected.discard(s)
+            self._rejected_fecha.pop(s, None)
+            self._retried_individually.discard(s)
+        if vencidos:
+            self._programar_guardado()
+        if self._ws is None or not self._connected:
+            return []
+        if not (_REPROBAR_HORAS[0] <= ahora.hour < _REPROBAR_HORAS[1]):
+            return []
+        t = time.monotonic()
+        due = []
+        for s in sorted(self._subscriptions):
+            if _es_diario(s):
+                if self._reprobar_todo or (s in self._rechazo_diario
+                                           and t - self._rechazo_diario[s] >= REPROBAR_DIARIO_S):
+                    due.append(s)
+            elif s in vencidos:
+                due.append(s)
+        self._reprobar_todo = False
+        if not due:
+            return []
+        for s in due:
+            self._rechazo_diario.pop(s, None)
+        logger.info("[primary_ws] repruebo %d símbolos rechazados: %s", len(due),
+                    ", ".join(due[:6]) + ("…" if len(due) > 6 else ""))
+        await self._resubscribe_individually(due, None)
+        return due
+
+    async def _reprobar_loop(self) -> None:
+        while not self._stop_evt.is_set():
+            try:
+                await asyncio.wait_for(self._stop_evt.wait(), timeout=REPROBAR_CHECK_S)
+                break
+            except asyncio.TimeoutError:
+                pass
+            try:
+                await self.reprobar_pendientes()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("[primary_ws] reprobar_pendientes falló")
+
     # ── Cache persistido de símbolos rechazados ─────────────────────
 
     def _cargar_rechazados(self) -> None:
@@ -476,8 +599,9 @@ class PrimaryWS:
         if not isinstance(por_host, dict) or not por_host:
             return
         limite = (date.today() - timedelta(days=REJECTED_TTL_DAYS)).isoformat()
+        # Los plazos de caución de un cache viejo se ignoran (validez por día).
         vigentes = {s: f for s, f in por_host.items()
-                    if isinstance(s, str) and isinstance(f, str) and f >= limite}
+                    if isinstance(s, str) and isinstance(f, str) and f >= limite and not _es_diario(s)}
         if not vigentes:
             return
         self._rejected.update(vigentes)
@@ -541,6 +665,7 @@ class PrimaryWS:
         s = dict(self._stats)
         s["subscriptions"] = len(self._subscriptions)
         s["rejected"] = len(self._rejected)
+        s["rechazados_hoy"] = sorted(self._rechazo_diario)      # plazos de caución sin rueda hoy
         last = self._stats.get("last_message_at") or 0.0
         s["stale_seconds"] = round(time.time() - last, 1) if last else None
         s["feed_alive"] = self.feed_alive
