@@ -13,6 +13,8 @@
   </div>
   {% if c.es_cierre %}
     <div class="rail-s muted">cierre previo · sin operaciones</div>
+  {% elif c.sin_dato %}
+    <div class="rail-s muted">sin operaciones aún</div>
   {% elif c.var is not none %}
     <div class="rail-s {{ fx.vcls(c.var) }}">{{ c.var | ar_num(2) }} pp <span class="muted">vs cierre</span></div>
   {% endif %}

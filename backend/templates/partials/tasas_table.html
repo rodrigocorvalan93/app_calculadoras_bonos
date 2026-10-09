@@ -15,12 +15,15 @@
 
 <div class="dolar-tables">
   {# Filas BYMA clickeables → libro completo abajo (#cauc-book, fuera de este
-     partial para que el auto-refresh de la tabla no lo pise). #}
+     partial para que el auto-refresh de la tabla no lo pise). La tira
+     (cauciones.tira_rows) trae 1D–7D SIEMPRE — "hoy no hay" cuando el plazo no
+     opera (1D/2D un viernes, 3D si el lunes es feriado) — y de 14D en adelante
+     sólo los que operaron hoy; `o/n` marca el overnight del calendario. #}
   {% for titulo, filas, mon, vacio in [
         ("🔁 Cauciones BYMA $ · por plazo", byma_cauciones, "PESOS", "Sin caución BYMA en el store (¿broker offline?)."),
         ("🔁 Cauciones BYMA US$ · por plazo", byma_cauciones_usd, "DOLAR", "Sin caución BYMA US$ en el store.")] %}
   <div class="dolar-tbl">
-    <div class="dolar-tbl-h">{{ titulo }}</div>
+    <div class="dolar-tbl-h">{{ titulo }} <span class="muted" style="font-weight:400">· 1D–7D siempre, más largos sólo si operaron</span></div>
     <div class="table-scroll">
       <table class="cashflows curve-table mercado-table">
         <thead>
@@ -28,10 +31,16 @@
         </thead>
         <tbody>
           {% for r in filas %}
+            {% if r.sin_dato %}
+            <tr class="cauc-sin-dato">
+              <td style="text-align:left;font-weight:600">{{ r.plazo }}{% if r.es_overnight %} <span class="on-tag" title="Overnight de hoy por calendario">o/n</span>{% endif %}</td>
+              <td colspan="5" class="muted" style="text-align:left">hoy no hay{% if r.close is not none %} · cierre previo {{ r.close | ar_num(2) }}{% endif %}</td>
+            </tr>
+            {% else %}
             <tr style="cursor:pointer" title="Ver libro completo"
                 hx-get="/tasas/caucion/book?moneda={{ mon }}&dias={{ r._n }}"
                 hx-target="#cauc-book" hx-swap="innerHTML">
-              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}</td>
+              <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.plazo }}{% if r.es_overnight %} <span class="on-tag" title="Overnight de hoy por calendario">o/n</span>{% endif %}</td>
               <td class="{{ fx.vcls(r.var) }}" style="font-weight:600">{{ r.tasa | ar_num(2) }}</td>
               <td>{{ r.bid | ar_num(2) }}</td>
               <td>{{ r.offer | ar_num(2) }}</td>
@@ -39,6 +48,7 @@
               <td class="{{ fx.vcls(r.var) }}" style="{{ fx.heat(r.var, cap=1.0) }}">{{ fx.arrow(r.var) }} {{ r.var | ar_num(2) }}</td>
               <td style="color:var(--text-muted)">{{ r.volumen | ar_hum }}</td>
             </tr>
+            {% endif %}
           {% else %}
             <tr><td colspan="6" class="muted" style="text-align:center">{{ vacio }}</td></tr>
           {% endfor %}

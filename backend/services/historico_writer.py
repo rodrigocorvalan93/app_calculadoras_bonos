@@ -1505,11 +1505,9 @@ def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
     # 1) Espejo parquet PRIMERO (99 ms): es lo que lee la app y lo que lee el
     #    próximo guardado. Columnas de texto con tipos mixtos rompen pyarrow
     #    (read_excel devolvía 'Price Date' como int y el df nuevo str) → string.
+    from backend.services import espejo
     pq_path = os.path.splitext(xlsx_path)[0] + ".parquet"
-    mirror = df_last.copy()
-    for col in ("symbol", "Código", "Price Source", "Price Date"):
-        if col in mirror.columns:
-            mirror[col] = mirror[col].astype("string")
+    mirror = espejo.normalizar_texto(df_last.copy())
     tmp_pq = pq_path + ".tmp"
     mirror.to_parquet(tmp_pq, index=False)
     os.replace(tmp_pq, pq_path)

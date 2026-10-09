@@ -16,7 +16,7 @@ import asyncio
 import time
 from typing import Any, AsyncIterator, Dict
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from backend.services import fx as fx_svc, marketdata_store as mds, primary_ws, symbols as syms
@@ -110,7 +110,7 @@ async def diag() -> Dict[str, Any]:
 
 
 @router.get("/health")
-async def market_health() -> Dict[str, Any]:
+async def market_health(request: Request) -> Dict[str, Any]:
     """Estado del feed para el dot de la topbar (liviano; el front lo sondea cada
     ~15 s). Dos alarmas distintas:
 
@@ -119,10 +119,16 @@ async def market_health() -> Dict[str, Any]:
       market data (broker que autentica y no streamea): el seq sigue avanzando
       por MAE/pollers y los precios que se ven son los persistidos de la última
       rueda buena. Sólo alarma en rueda y con sesión — sin falsos positivos de
-      noche ni en paper/dev. Ver services.feed_health."""
+      noche ni en paper/dev. Ver services.feed_health.
+
+    `asset_v` = versión de los estáticos con la que se sirvió la página
+    (`data-asset-v` del body): si cambió, la pestaña quedó abierta a través de
+    un deploy y app.js ofrece recargar."""
     from backend.services import feed_health
 
-    return feed_health.snapshot()
+    out = feed_health.snapshot()
+    out["asset_v"] = getattr(request.app.state, "asset_v", None)
+    return out
 
 
 @router.get("/fx")

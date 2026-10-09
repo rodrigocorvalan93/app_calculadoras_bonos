@@ -186,6 +186,28 @@ COLS_NUMERICAS = ("Last Price", "Close Price", "Variación %", "TIREA", "TNA", "
                   "Paridad", "Duration")
 
 
+# Columnas de texto de la base: en el espejo van SIEMPRE `string`. Mezcladas
+# (datetime + str en 'Price Date', int + str en 'Código') pyarrow no las escribe.
+COLS_TEXTO = ("symbol", "Código", "Price Source", "Price Date")
+
+
+def normalizar_texto(df: Any, cols: Tuple[str, ...] = COLS_TEXTO) -> Any:
+    """Columnas de texto a dtype `string` antes de escribir un espejo. El
+    Excel compartido mezcla orígenes: el writer escribe 'Price Date' como
+    texto ISO, pero bymaapi (legacy) y una celda tocada a mano la dejan como
+    FECHA de Excel → `read_excel` devuelve una columna `object` con str y
+    `datetime` → `to_parquet` muere con "Expected bytes, got a
+    'datetime.datetime' object" y la máquina queda SIN espejo, releyendo el
+    xlsx entero en cada carga (09/10/2026, PC de un compañero). El writer ya
+    hacía este cast al guardar; acá queda para todo el que escriba un espejo.
+    Una columna ya `string` no se toca. Modifica `df` en el lugar y lo
+    devuelve."""
+    for col in cols:
+        if col in df.columns and str(df[col].dtype) != "string":
+            df[col] = df[col].astype("string")
+    return df
+
+
 def normalizar_numericas(df: Any, origen: str, cols: Tuple[str, ...] = COLS_NUMERICAS) -> Any:
     """Columnas numéricas a float64 antes de escribir un espejo, venga de
     donde venga el cuadro (Excel leído por el writer, por el lector de

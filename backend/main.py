@@ -584,6 +584,10 @@ def create_app() -> FastAPI:
                        _mtime("js", "app.js"),
                        _mtime("js", "charts.js"))) or 1
     templates.env.globals["asset_v"] = _asset_v
+    # La misma versión viaja en /market/health: una pestaña que quedó abierta
+    # de antes de un deploy (JS viejo contra server nuevo → paneles que "se
+    # caen") se entera y ofrece recargar (app.js checkHealth).
+    app.state.asset_v = _asset_v
     # Filtro `compact`: saca la indentación entre tags de las tablas live
     # ({% filter compact %} alrededor del loop de filas). Un 22-24 % de los
     # bytes de Mercado/Curvas era whitespace de indentación = ~5.500 nodos de

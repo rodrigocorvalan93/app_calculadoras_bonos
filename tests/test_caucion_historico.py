@@ -43,6 +43,7 @@ def _fx(monkeypatch, ccl: float):
 
 
 def test_hist_row_cae_al_ultimo_pick_valido_de_hoy(store_propio, monkeypatch) -> None:
+    monkeypatch.setattr(cauc_svc, "_overnight_n", lambda *a, **k: 2)   # el o/n del calendario es el 2D
     store_propio.update_from_md("MERV - XMEV - PESOS - 2D",
                                 {"LA": {"price": 31.0, "size": 4e6, "date": "9"}, "HI": 32.0, "LO": 30.0,
                                  "NV": 3.65e9, "EV": 3.65e9 + 1e7 * 0.31 * 2})

@@ -113,12 +113,32 @@ window.lsSet = function (k, v) {
   // (sesión abierta pero WS del broker desconectado → precios congelados) de
   // "mercado quieto" (conectado, sin operaciones). Sin esto el dot mostraba
   // 'idle' en ambos casos y el trader no sabía que veía precios viejos.
+  // Pestaña abierta a través de un deploy: el server manda su versión de
+  // estáticos en /market/health y la página lleva la suya en
+  // <body data-asset-v>. Si difieren, el JS de esta pestaña es VIEJO contra un
+  // server nuevo (paneles que "se caen", pedidos a rutas que cambiaron): aviso
+  // fijo con click para recargar — nunca recarga sola (puede haber un ticket a
+  // medio cargar). Una vez por versión vista.
+  var avisadoV = null;
+  function checkVersion(h) {
+    var mine = (document.body && document.body.dataset) ? document.body.dataset.assetV : null;
+    var suya = (h && h.asset_v !== null && h.asset_v !== undefined) ? String(h.asset_v) : null;
+    if (!mine || !suya || mine === suya || avisadoV === suya) return;
+    avisadoV = suya;
+    var box = document.createElement('div');
+    box.className = 'toast show';
+    box.setAttribute('role', 'status');
+    box.textContent = 'Hay una versión nueva de la app · click acá para recargar la pestaña';
+    box.addEventListener('click', function () { window.location.reload(); });
+    document.body.appendChild(box);
+  }
   function checkHealth() {
     fetch('/market/health', { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (h) {
         feedDown = !!(h && h.feed_down);
         staleWarn = (h && !h.feed_down && h.warn) ? h.warn : null;
+        checkVersion(h);
       })
       .catch(function () { /* dejamos el estado previo del feed */ });
   }

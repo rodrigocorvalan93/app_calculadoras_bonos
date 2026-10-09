@@ -3,6 +3,11 @@ WS que los bonos). Símbolos `MERV - XMEV - PESOS - {n}D` / `… - DOLAR - {n}D`
 
 La caución cotiza directo por TNA (no hay TIR que calcular). Complementa las
 cauciones de MAE en la pestaña Tasas. Lee sólo de cache → sub-50 ms.
+
+El overnight del riel / Inicio es el plazo del CALENDARIO (`_overnight_n`:
+1D normal, 3D viernes, 4D viernes previo a feriado); la tira de Tasas muestra
+1D–7D siempre y los plazos largos sólo si operaron (`tira_rows`); el histórico
+diario toma el plazo que de verdad operó (`hist_row`, por volumen).
 """
 from __future__ import annotations
 
@@ -131,17 +136,74 @@ def _pick_short(rows: List[Dict[str, Any]]) -> Dict[str, Any] | None:
     return short[0]
 
 
-def rail_pick(moneda: str = "PESOS") -> Dict[str, Any] | None:
-    """Caución overnight de referencia para el riel: entre 1D y 4D, la de
-    mayor volumen con tasa (1D salvo feriado/finde, donde rueda al 2-4D).
-    Si ninguna de esas tiene volumen, cae a la más corta con tasa. NUNCA un
-    plazo fuera de 1D–4D (un 14D no es el overnight).
+def _overnight_n(hoy=None) -> int:
+    """Plazo (en días) del overnight de la RUEDA por CALENDARIO: la caución
+    overnight vence el próximo día hábil, así que n = (próximo hábil después de
+    la rueda) − rueda. 1D normal; 3D un viernes; 4D un viernes previo a feriado
+    del lunes (el 09/10/2026 con el 12/10 feriado) o un jueves con viernes
+    feriado + finde. Un sábado / domingo / feriado la "rueda" es el último
+    hábil (el store muestra esa rueda), no hoy. Ante cualquier problema con el
+    calendario, 1D: el riel nunca se cae por una fecha."""
+    from datetime import timedelta
 
-    Sin operaciones todavía (pre-apertura, mercado cerrado, server recién
-    reiniciado) cae al CIERRE PREVIO de un plazo overnight, marcado
-    `es_cierre=True`. Si no hay dato overnight, None (mejor nada que un tenor
-    largo disfrazado de overnight)."""
+    try:
+        import dias_habiles as dh
+        rueda = hoy or hoy_ba()
+        while dh.siguiente_dia_habil_ar(rueda) != rueda:      # finde / feriado → la rueda anterior
+            rueda -= timedelta(days=1)
+        return (dh.siguiente_dia_habil_ar(rueda + timedelta(days=1)) - rueda).days
+    except Exception:  # noqa: BLE001
+        return 1
+
+
+def _placeholder(moneda: str, n: int) -> Dict[str, Any]:
+    """Fila sin dato de un plazo que HOY no está en el store (ni vivo ni con
+    cierre): misma forma que las de byma_rows, con `sin_dato`."""
+    return {"plazo": f"{n}D", "_n": n,
+            "moneda": "ARS" if _moneda_tk(moneda) == "PESOS" else "USD",
+            "tasa": None, "bid": None, "offer": None, "close": None,
+            "var": None, "volumen": None, "sin_dato": True}
+
+
+def rail_pick(moneda: str = "PESOS", *, calendario: bool = True) -> Dict[str, Any] | None:
+    """Caución overnight de referencia.
+
+    `calendario=True` (riel / Inicio): el plazo del overnight sale del
+    CALENDARIO (`_overnight_n`: vence el próximo día hábil → 1D normal, 3D un
+    viernes, 4D un viernes previo a feriado del lunes) y se muestra ESE plazo:
+    operado hoy, o su cierre previo marcado `es_cierre`, o `sin_dato` si el
+    store todavía no tiene nada de él. Antes se elegía por volumen entre 1D-4D
+    y el viernes 09/10/2026 (lunes feriado) el riel mostraba "3D · cierre
+    previo" — el overnight "normal" de un viernes, pero ese día el 3D vence en
+    feriado y lo que opera es el 4D. Si el plazo del calendario no está en el
+    store pero OTRO plazo 1D-4D operó HOY, gana el que operó (el mercado sabe
+    más que nuestro calendario: un feriado que `holidays` no trae); nunca el
+    cierre viejo de un plazo que no es el del día.
+
+    `calendario=False` (hist_row): el plazo que REALMENTE operó más (mayor
+    volumen entre 1D-4D) — lo que corresponde a la serie histórica, que no
+    inventa un plazo que no operó.
+
+    En ambos: nunca un plazo fuera de 1D-4D; sin NINGÚN dato de caución, None."""
     all_rows = byma_rows(moneda, include_close_only=True)
+    if calendario:
+        n = _overnight_n()
+        r = {row["_n"]: row for row in all_rows}.get(n)
+        if r is not None:
+            if r["tasa"] is not None:
+                _memo_hoy(moneda, r)
+                return r
+            pick = dict(r)
+            if r["close"] is not None:
+                pick.update(tasa=r["close"], var=None, es_cierre=True)   # existe pero aún no operó
+            else:
+                pick.update(tasa=None, var=None, sin_dato=True)          # sólo puntas, sin cierre ni operación
+            return pick
+        live = _pick_short([r for r in all_rows if r["tasa"] is not None])
+        if live is not None:
+            _memo_hoy(moneda, live)
+            return live
+        return _placeholder(moneda, n) if all_rows else None
     pick = _pick_short([r for r in all_rows if r["tasa"] is not None])
     if pick is not None:
         _memo_hoy(moneda, pick)
@@ -152,6 +214,47 @@ def rail_pick(moneda: str = "PESOS") -> Dict[str, Any] | None:
     pick = dict(closed)
     pick.update(tasa=pick["close"], var=None, es_cierre=True)
     return pick
+
+
+# Plazos que la tira de Tasas muestra SIEMPRE (pedido del desk 09/10): 1D a
+# 7D con lo que haya — tasa viva, sólo puntas, cierre previo o "hoy no hay" —
+# porque son los plazos que uno mira para ubicar el overnight del día; de 14D
+# en adelante sólo los que operaron hoy.
+TIRA_FIJA = (1, 2, 3, 4, 5, 6, 7)
+
+
+def tira_rows(moneda: str = "PESOS") -> List[Dict[str, Any]]:
+    """Filas de la tira de cauciones de la pestaña Tasas, ordenadas por plazo.
+
+    1D–7D van siempre: con cotización viva como en byma_rows; con sólo cierre
+    previo o sin snapshot, una fila `sin_dato` ("hoy no hay": el 1D y el 2D un
+    viernes, el 3D cuando el lunes es feriado) que conserva `close` si lo hay.
+    Los plazos más largos (14D, 21D, …) entran sólo si OPERARON hoy (tasa viva
+    + volumen > 0; un volumen sticky de otra rueda no cuenta porque el last de
+    esa rueda ya se degradó a cierre). `es_overnight` marca el plazo del
+    calendario (_overnight_n). Lista vacía si el store no tiene NINGUNA caución
+    de la moneda (la pestaña muestra "¿broker offline?")."""
+    por_n = {r["_n"]: r for r in byma_rows(moneda, include_close_only=True)}
+    if not por_n:
+        return []
+    on = _overnight_n()
+    out: List[Dict[str, Any]] = []
+    for n in PLAZOS:
+        r = por_n.get(n)
+        if n in TIRA_FIJA:
+            if r is None:
+                r = _placeholder(moneda, n)
+            else:
+                r = dict(r)
+                r["sin_dato"] = r["tasa"] is None and r["bid"] is None and r["offer"] is None
+        else:
+            if r is None or r["tasa"] is None or not ((r["volumen"] or 0.0) > 0):
+                continue
+            r = dict(r)
+            r["sin_dato"] = False
+        r["es_overnight"] = n == on
+        out.append(r)
+    return out
 
 
 def rail_picks() -> List[Dict[str, Any]]:
@@ -288,7 +391,7 @@ def hist_row(moneda: str = "PESOS") -> Dict[str, Any] | None:
     codifica en EV/NV (ver vwap_evnv — todo dato de API, nada grabado).
     Si el pick en vivo ya no vale (ver _ULTIMO_HOY), cae al último válido
     visto hoy; None sólo si hoy no se vio ninguna caución o/n operada."""
-    pick = rail_pick(moneda)
+    pick = rail_pick(moneda, calendario=False)     # lo que OPERÓ (volumen), no el plazo del calendario
     if not _pick_valido(pick):
         pick = ultimo_hoy(moneda)
         if pick is None:

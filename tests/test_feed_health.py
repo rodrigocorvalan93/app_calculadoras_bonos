@@ -114,6 +114,33 @@ async def test_market_health_endpoint_expone_warn(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_market_health_lleva_la_version_de_los_estaticos(monkeypatch) -> None:
+    """Pestaña abierta a través de un deploy (JS viejo contra server nuevo →
+    "se cae todo el tiempo" en la PC de un compañero, 09/10): /market/health
+    manda la versión de los estáticos y la página la lleva en
+    <body data-asset-v>; app.js compara y ofrece recargar (nunca sola)."""
+    import re
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    _patch_ws(monkeypatch, auth=True, connected=True, alive=True)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        h = (await ac.get("/market/health")).json()
+        page = await ac.get("/inicio")
+    v = app.state.asset_v
+    assert isinstance(v, int) and v > 0 and h["asset_v"] == v
+    assert page.status_code == 200
+    m = re.search(r'<body[^>]*\sdata-asset-v="(\d+)"', page.text)
+    assert m and int(m.group(1)) == v
+    # el JS compara contra esa versión y arma el aviso (sin recargar solo)
+    js = (page.text and open("backend/static/js/app.js", encoding="utf-8").read())
+    assert "dataset.assetV" in js and "checkVersion(h)" in js and "location.reload()" in js
+    assert js.count("location.reload()") == 1
+
+
+@pytest.mark.asyncio
 async def test_excel_snapshot_lleva_health_solo_con_warn(monkeypatch) -> None:
     import json
 
