@@ -442,6 +442,18 @@ async def admin_salud(request: Request) -> HTMLResponse:
                 pass
             return {"live": oms.is_live(), "kill": oms.kill_switch(), "audit_KB": kb}
 
+        def _news():
+            # Qué medio responde y cuál no (y por qué): el desk veía sólo dos
+            # fuentes en la marquesina y no había dónde mirarlo.
+            from backend.services import news
+            s = news.status()
+            ok = [f"{f['fuente']} ({f['items']})" for f in s["fuentes"] if f["status"] in ("ok", "304")]
+            mal = [f"{f['fuente']}: {f['status']}" for f in s["fuentes"]
+                   if f["status"] not in ("ok", "304", "pendiente")]
+            kb = sum(f["bytes"] for f in s["fuentes"]) / 1024
+            return {"titulares": s["items"], "ciclo": s["ciclo"], "último ciclo KB": f"{kb:.0f}",
+                    "ok": ", ".join(ok) or "—", "caídas": ", ".join(mal) or "ninguna"}
+
         secs = [
             ("Feed broker (WS)", _sec(lambda: {"auth": ws.authenticated,
                                                "vivo": ws.feed_alive, **(ws.stats() or {})})),
@@ -454,6 +466,7 @@ async def admin_salud(request: Request) -> HTMLResponse:
             ("Universo + warmup", _sec(lambda: {"bonos": len(bond_universe.all_codes()),
                                                 **(get_daemon().stats() or {})})),
             ("OMS", _sec(_oms)),
+            ("Noticias (RSS)", _sec(_news)),
         ]
         return secs, errores.ultimos(40)
 
