@@ -79,6 +79,7 @@ def informe(ruedas: int = 15) -> Dict[str, Any]:
     out["regresion"] = {"ruedas": [d.isoformat() for d in reg["ruedas"]],
                         "recuperables": [d.isoformat() for d in reg["recuperables"]],
                         "bloqueantes": [d.isoformat() for d in reg["bloqueantes"]],
+                        "contenido_perdido": reg.get("contenido_perdido") or {},
                         "detalle": {d.isoformat(): v for d, v in reg["detalle"].items()}}
     # Últimas N ruedas hábiles anteriores a hoy (como huecos_base, sin tope por la base).
     hoy = hw._now().date()
@@ -154,6 +155,11 @@ def imprimir(inf: Dict[str, Any]) -> None:
         print(f"  frenan la escritura: {', '.join(reg['bloqueantes']) or 'ninguna'}")
     else:
         print("regresión  ninguna: la base tiene todo lo que esta máquina vio y lo que dice el manifiesto")
+    cp = reg.get("contenido_perdido") or {}
+    if cp:
+        print(f"CONTENIDO  filas reales que journaleaste y ya NO están en la base (igual conteo, posible "
+              f"reemplazo entre réplicas): {', '.join(f'{d} ({n})' for d, n in sorted(cp.items()))}")
+        print("           revisá / reponé del journal (no frena la escritura por sí solo)")
     print(f"journal    {inf['journal']['dias']} días · último {inf['journal']['ultimo'] or '—'}")
     if inf["ignorados"]:
         print(f"ignorados  {', '.join(inf['ignorados'])}")

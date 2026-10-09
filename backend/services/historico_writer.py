@@ -569,6 +569,91 @@ def _fechas_base_cached(xlsx_path: str) -> set:
     return set(_resumen_base_cached(xlsx_path))
 
 
+# ── A03 · huella de CONTENIDO por rueda (no sólo conteos) ─────────────────────
+# Un reemplazo entre réplicas que PIERDE una fila y GANA otra en la misma rueda
+# deja el conteo igual → invisible a regresion_base. Comparamos las claves
+# (symbol, Código) con precio REAL que ESTA máquina journaleó contra las que la
+# base tiene hoy: si una que escribimos ya no está, se perdió aunque el conteo
+# no baje. Preciso (una fila agregada por otro no borra una nuestra → sin falsos
+# positivos) y sobre datos que ya tenemos (el journal local).
+_claves_cache: tuple = ()                         # (firma base, {rueda: frozenset[(symbol, Código)]})
+_journal_claves_cache: Dict[str, tuple] = {}      # path journal → (firma, frozenset real)
+
+
+def _claves_de_frame(df: "Any", pd) -> Dict[date, frozenset]:
+    if not {"fecha_hoy", "symbol", "Código"}.issubset(df.columns):
+        return {}
+    f = pd.to_datetime(df["fecha_hoy"], errors="coerce")
+    ok = f.notna()
+    out: Dict[date, set] = {}
+    for d, s, c in zip(f[ok].dt.date.values, df["symbol"][ok].astype(str).values,
+                       df["Código"][ok].astype(str).values):
+        out.setdefault(d, set()).add((s, c))
+    return {d: frozenset(v) for d, v in out.items()}
+
+
+def _claves_base_cached(xlsx_path: str) -> Dict[date, frozenset]:
+    """{rueda: claves (symbol, Código)} de la fuente FIEL, cacheado por firma."""
+    global _claves_cache
+    key = _firmas_base(xlsx_path)
+    if key == (None, None):
+        return {}
+    if _claves_cache and _claves_cache[0] == key:
+        return _claves_cache[1]
+    import pandas as pd
+    from backend.services import espejo
+    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+    hay_pq, hay_xlsx = os.path.isfile(pq), os.path.isfile(xlsx_path)
+    res: Dict[date, frozenset] = {}
+    try:
+        if hay_pq and (not hay_xlsx or espejo.espejo_valido(pq, xlsx_path)):
+            res = _claves_de_frame(pd.read_parquet(pq, columns=["fecha_hoy", "symbol", "Código"]), pd)
+        elif hay_xlsx:
+            res = _claves_de_frame(pd.read_excel(xlsx_path, usecols=lambda c: c in ("fecha_hoy", "symbol", "Código")), pd)
+        elif hay_pq:
+            res = _claves_de_frame(pd.read_parquet(pq, columns=["fecha_hoy", "symbol", "Código"]), pd)
+    except Exception as exc:  # noqa: BLE001 — a medio sincronizar / esquema viejo: sin huellas
+        logger.debug("[historico_writer] no pude leer claves de la base (%s)", exc)
+        res = {}
+    _claves_cache = (key, res)
+    return res
+
+
+def _claves_reales_journal(path: str) -> frozenset:
+    """Claves (symbol, Código) con precio REAL (no RC) que journaleó esta máquina
+    para una rueda; cacheado por firma del parquet."""
+    firma = _firma_archivo(path)
+    ent = _journal_claves_cache.get(path)
+    if ent is not None and ent[0] == firma:
+        return ent[1]
+    out: frozenset = frozenset()
+    try:
+        import pandas as pd
+        t = pd.read_parquet(path, columns=["symbol", "Código", "Price Source"])
+        real = t["Price Source"].astype(str).str.strip().ne(PRICE_SOURCE_RC)
+        sub = t[real]
+        out = frozenset(zip(sub["symbol"].astype(str), sub["Código"].astype(str)))
+    except Exception:  # noqa: BLE001 — journal viejo sin columnas: sin huella
+        out = frozenset()
+    _journal_claves_cache[path] = (firma, out)
+    return out
+
+
+def contenido_perdido(xlsx_path: str) -> Dict[date, int]:
+    """{rueda: nº de claves} que ESTA máquina journaleó con precio real y que la
+    base YA NO tiene (reemplazo entre réplicas con igual conteo). {} = sana."""
+    claves_base = _claves_base_cached(xlsx_path)
+    piso = _now().date() - timedelta(days=_MEMORIA_DIAS)
+    out: Dict[date, int] = {}
+    for d, p in _journal_days().items():
+        if d < piso:
+            continue
+        faltan = _claves_reales_journal(p) - claves_base.get(d, frozenset())
+        if faltan:
+            out[d] = len(faltan)
+    return out
+
+
 # Memoria LOCAL (por máquina y por carpeta de base) de lo que se vio en la base.
 def _vista_path() -> str:
     return os.path.join(journal_dir(), VISTA_FILENAME)
@@ -761,9 +846,16 @@ def regresion_detalle(xlsx_path: Optional[str] = None,
     local las tiene con filas reales), bloqueantes, detalle, manifest}."""
     if xlsx_path is None:
         xlsx_path = _xlsx_default()
-    out: Dict[str, Any] = {"ruedas": [], "recuperables": [], "bloqueantes": [], "detalle": {}, "manifest": None}
+    out: Dict[str, Any] = {"ruedas": [], "recuperables": [], "bloqueantes": [], "detalle": {},
+                           "manifest": None, "contenido_perdido": {}}
     if not xlsx_path:
         return out
+    # A03 (informativo, NO bloquea): filas reales que journaleamos y ya no están
+    # en la base aunque el conteo no haya bajado. Separado del gate por conteos.
+    try:
+        out["contenido_perdido"] = {d.isoformat(): n for d, n in contenido_perdido(xlsx_path).items()}
+    except Exception:  # noqa: BLE001 — la detección de contenido jamás frena un guardado
+        logger.debug("[historico_writer] contenido_perdido falló", exc_info=True)
     reg = regresion_base(xlsx_path, resumen)
     out["detalle"] = reg
     out["ruedas"] = sorted(reg)
