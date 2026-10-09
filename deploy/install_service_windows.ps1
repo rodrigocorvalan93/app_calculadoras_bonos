@@ -41,7 +41,7 @@ if ($repo -match "OneDrive") {
 
 $logs = Join-Path $repo "logs"
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
-$appArgs = "-m uvicorn backend.main:app --host $BindHost --port $Port --timeout-graceful-shutdown 10"
+$appArgs = "-m uvicorn backend.main:app --host $BindHost --port $Port --timeout-graceful-shutdown 10 --timeout-keep-alive 75"
 
 & nssm install $ServiceName $PythonExe $appArgs
 & nssm set $ServiceName AppDirectory $repo

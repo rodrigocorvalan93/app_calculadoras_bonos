@@ -37,6 +37,41 @@ async def test_conexion_login_fallido_es_manejado() -> None:
 
 
 @pytest.mark.asyncio
+async def test_conexion_status_se_refresca_y_espera_el_handshake() -> None:
+    """09/10: tras un login OK la tarjeta mostraba "⚠ Feed caído" (start()
+    vuelve antes del handshake y el partial no se refrescaba) y el desk volvía
+    a apretar Reconectar. Ahora: GET /conexion/status (lo sondea la tarjeta
+    cada 10 s) y el POST espera acotado a que el WS conecte."""
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.routes import conexion
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        page = await ac.get("/conexion")
+        st = await ac.get("/conexion/status")
+    assert 'hx-get="/conexion/status"' in page.text and 'hx-trigger="every 10s"' in page.text
+    assert st.status_code == 200 and "Estado del feed" in st.text and "Reprobar símbolos rechazados" in st.text
+
+    class _WS:
+        _connected = False
+
+    ws = _WS()
+
+    async def conecta():
+        await asyncio.sleep(0.15)
+        ws._connected = True
+
+    asyncio.get_running_loop().create_task(conecta())
+    assert await conexion._esperar_conexion(ws, 2.0, paso_s=0.05) is True       # conectó dentro del plazo
+    ws2 = _WS()
+    assert await conexion._esperar_conexion(ws2, 0.2, paso_s=0.05) is False     # no conectó: no cuelga
+    assert await conexion._esperar_conexion(object(), 5.0) is False             # fake sin _connected: no espera
+
+
+@pytest.mark.asyncio
 async def test_conexion_reprobar_olvida_rechazados(monkeypatch) -> None:
     """09/10: una cuenta quedó con 2717 de 2903 símbolos en el cache de
     rechazados → cada reconexión suscribía 186 y el feed mostraba precios

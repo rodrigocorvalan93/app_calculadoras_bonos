@@ -271,10 +271,26 @@ async def test_http_matriz_markup_compacto(carteras) -> None:
     al30 = next(r for r in vn["rows"] if r["especie"] == "AL30")
     assert "1.000.000" in al30["txt"] and "" in al30["txt"]          # es-AR + celda vacía
 
+    # Vista "VN y %" (desk 09/10): nominales + espacio + % sobre PN en la misma
+    # celda, texto plano; sin % (fondo sin PN) queda sólo el VN; vacía sigue vacía.
+    ambos = _matriz_ctx(None, "todos", "vnpct")
+    al30_ab = next(r for r in ambos["rows"] if r["especie"] == "AL30")
+    con = [t for t in al30_ab["txt"] if t]
+    assert con and all(t.endswith("%") and t.count(" ") == 1 for t in con)
+    i = al30["txt"].index("1.000.000")
+    assert al30_ab["txt"][i].startswith("1.000.000 ") and al30_ab["txt"][i].endswith("%")
+    assert al30_ab["txt"][i].split(" ")[1] == ctx["rows"][[r["especie"] for r in ctx["rows"]].index("AL30")]["txt"][i]
+    assert [t == "" for t in al30_ab["txt"]] == [t == "" for t in al30["txt"]]
+    assert ambos["w_cols"][i] > vn["w_cols"][i]                          # la columna se ensancha para el texto
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.get("/matriz/table", params={"view": "vn"})
         assert r.status_code == 200
         assert 'class="matriz-chunk"' in r.text and "content-visibility" not in r.text  # CSS, no inline
+        r2 = await ac.get("/matriz/table", params={"view": "vnpct"})
+        assert r2.status_code == 200 and "VN y % sobre PN" in r2.text and "<td>1.000.000 " in r2.text
+        page2 = await ac.get("/matriz", params={"view": "vnpct"})
+        assert 'value="vnpct" selected' in page2.text
         assert "<colgroup>" in r.text and "--w-total:" in r.text
         assert "<td></td>" in r.text and "<td>\n" not in r.text and "\n<td" not in r.text
         assert 'matriz matriz-head"' in r.text and r.text.count("<colgroup>") >= 2

@@ -13,7 +13,7 @@
        las 17:01 si la app está abierta; este botón es el "ahora". #}
     <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn" type="button"
-              hx-post="/historicos/guardar-base" hx-target="#guardar-base-out" hx-swap="innerHTML"
+              hx-request='{"timeout":600000}' hx-post="/historicos/guardar-base" hx-target="#guardar-base-out" hx-swap="innerHTML"
               hx-confirm="¿Guardar la base px/tasas de HOY en el Excel/Parquet de Delta Bases?"
               hx-disabled-elt="this">💾 Guardar base de hoy</button>
       <span id="guardar-base-out" class="muted" style="font-size:12px">autoguardado 17:01 hs (días hábiles) con la app abierta</span>

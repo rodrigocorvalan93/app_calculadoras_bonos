@@ -462,6 +462,20 @@ rechazados»** de /conexion (`POST /conexion/reprobar` →
 página avisa la tormenta con el `last_error_desc` del broker. Regresión:
 `test_marketdata.test_tormenta_de_rechazos_no_se_persiste_y_se_reprueba`,
 `test_conexion.test_conexion_reprobar_olvida_rechazados`.
+**Reconexión = pase nuevo de recuperación por lote** (09/10):
+`_retried_individually` / `_retried_no_oi` se limpian al conectar
+(`_reset_reintentos` en `_connect_and_read`); antes nunca se limpiaban y en
+la reconexión un lote rechazado por un símbolo que dejó de existir volvía con
+`pending` vacío → los 20 símbolos del lote mudos hasta reiniciar, sin log.
+Regresión: `test_marketdata.test_reconexion_vuelve_a_reintentar_un_lote_rechazado`.
+**Serie diaria de caución vacía 05–09/10** (diagnóstico verificado): fue
+esto mismo + el cache por 7 días — `hist_row` exige un plazo 1D–4D con tasa
+de HOY y estaban todos mudos; el writer no cambió (CCL/MEP se guardaron). No
+hay de dónde reconstruir esos días dentro de la app (RC escribe la fila FX
+sin caución a propósito, el journal no tiene lo que no estaba suscripto): se
+cargan a mano en `Delta - historico_fx.xlsx` (columnas `caucion_plazo_d` /
+`caucion_tna` / `caucion_tna_vwap` / `caucion_monto`, números; el Excel
+editado gana al espejo y el próximo autosave mergea sólo SU fecha).
 
 ## Add-in de Excel — OMS.MACRO en vivo (01/10)
 
@@ -689,6 +703,44 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `.tick-up` / `.tick-down` (flash CSS verde/rojo estilo terminal).
 - El dot `#live-dot` de la topbar muestra el estado del feed
   (live/idle/off). Todo vanilla JS — sin librerías nuevas.
+- **"Conectando" ≠ "Feed caído"** (09/10): `PrimaryWS.connecting` = sesión
+  abierta + lector vivo + sin socket hace menos de `CONNECT_GRACE_S` (10 s;
+  `_disconnected_since`); `feed_health.snapshot()["connecting"]` y
+  `feed_down` sólo cuando NO está conectando. `/conexion/login` espera
+  acotado (`_esperar_conexion`, 3 s) el handshake antes de renderizar, la
+  tarjeta dice "⏳ Conectando…" y `#conn-status` sondea `GET /conexion/status`
+  cada 10 s — antes el partial, renderizado un instante después de
+  `start()`, mostraba "⚠ Feed caído" pegado al "✅ Conectado" y el desk volvía a
+  apretar Reconectar (`old.stop()` tira un WS sano): ese era el "se me cae
+  todo el tiempo" de la PC de un compañero. El SSE (`/market/events`) deja
+  UNA línea `[sse] <cliente> cerró el stream tras N s · M eventos` al cortarse
+  (el access log sólo ve la apertura y `_QuietPolls` la calla). Los launchers
+  corren uvicorn con `--timeout-keep-alive 75` (default 5 s: Chrome reutiliza
+  sockets ociosos minutos y pegaba `ERR_CONNECTION_RESET` esporádicos).
+  Regresión: `test_feed_health.test_conectando_no_es_feed_caido`,
+  `test_conexion.test_conexion_status_se_refresca_y_espera_el_handshake`,
+  `test_marketdata.test_connecting_es_gracia_de_handshake_no_feed_caido`,
+  `test_live_engine.test_sse_emits_baseline_and_tick`.
+- **Motor live endurecido** (09/10, `app.js`): `renderEstado(advanced, rtt)`
+  (dot + meta; prioridad down > stale > live > conectando > idle) lo llaman
+  `handleSeq`, `checkHealth` y un timer de 5 s — antes un cambio de salud con
+  el mercado quieto (SSE sin seqs) no se veía y `live → idle` nunca pasaba;
+  `checkHealth` va con `fetchTexto` (plazo 6 s) y generación (una respuesta
+  vieja no pisa), `connecting` del server = dot 'idle' "Conectando al
+  broker…"; `linkDown` (polling con 3 fallos / SSE reconectando) deja el dot
+  en 'off' y el primer seq que vuelve dispara un health ya. **SSE**: watchdog
+  de CONNECTING — sin `onopen` ni mensaje en 8 s (pool de 6 conexiones
+  HTTP/1.1 lleno por pestañas duplicadas, proxy que no streamea) se cierra y
+  cae a polling con "Sin stream del feed — sondeando"; `arm()` no abre nada
+  con la pestaña oculta y `dispatchUpdate` / `htmx:beforeRequest` cancelan el
+  `md-update` oculto. **`htmx.config.timeout = 30 s`** (antes 0 = nunca: un
+  XHR colgado dejaba el panel con datos viejos en silencio) + toast en
+  `htmx:timeout` como el de `sendError`; las acciones largas llevan
+  `hx-request='{"timeout":600000}'` (guardar base, reconstruir / reponer /
+  aceptar, Copias en conflicto) y Históricos conserva sus 90 s. Regresión:
+  `tests/live_engine_harness.cjs` casos 6-11 (health sin seq, health colgado,
+  SSE colgado, SSE sano, pestaña oculta, plazo htmx) vía
+  `test_auditoria_eficiencia`.
 - **Pestaña vieja tras un deploy** (09/10): `/market/health` lleva `asset_v`
   (la misma versión de estáticos que `?v=` de los templates, `app.state.asset_v`)
   y la página la pone en `<body data-asset-v>`; `app.js checkVersion` (en el
@@ -820,6 +872,17 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   Tests: `tests/test_book_ordenes_propias.py`. Para mirar un libro con ticks
   constantes: `DEV_TICKS_FOCUS=S13N6 python backend/tools/dev_ticks.py 8765`
   (alterna un tick de sólo tamaños —flashea— con uno de precios).
+
+## Matriz de tenencias — vistas (09/10)
+
+`routes/posiciones._matriz_ctx(view)`: `vn` (nominales), `pct` (% sobre PN,
+1 decimal) y `vnpct` = **VN y %** en la misma celda, texto plano
+"772.000.000 5,0%" (sin PN del fondo queda sólo el VN; sin tenencia, vacía) —
+pedido del desk para leer tamaño y peso de un vistazo. El ancho de columna
+sale del texto más largo, así que esa vista ensancha las columnas; el HTML
+va al mismo `_MATRIZ_CACHE` por (generación, familia, vista, visibles). Un
+test que pisa `positions._cache` a mano tiene que vaciar ese cache (es
+orden-dependiente si no). Regresión: `test_posiciones_galileo.test_http_matriz_markup_compacto`.
 
 ## Seguridad — invariantes (no regresar sin querer)
 

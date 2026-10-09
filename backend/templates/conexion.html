@@ -88,7 +88,9 @@
   </div>
   {% endif %}
 
-  <div id="conn-status">
+  {# Se refresca solo cada 10 s: el "conectando…" de un login reciente pasa a
+     "en vivo" sin que nadie recargue ni vuelva a apretar Reconectar. #}
+  <div id="conn-status" hx-get="/conexion/status" hx-trigger="every 10s" hx-swap="innerHTML">
     {% include "partials/conexion_status.html" %}
   </div>
 

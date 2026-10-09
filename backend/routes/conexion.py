@@ -177,11 +177,41 @@ async def conexion_login(
             import asyncio
             seed = await asyncio.get_running_loop().run_in_executor(None, _initial_symbols)
             await ws.start(symbols=seed)
-            msg = f"Conectado a {url} — {len(seed)} símbolos suscriptos."
+            # start() sólo crea la task del lector: esperar (acotado) el
+            # handshake antes de renderizar, así la tarjeta ya dice "en vivo"
+            # en vez del falso "⚠ Feed caído" que hacía reconectar de nuevo.
+            conectado = await _esperar_conexion(ws, _ESPERA_CONEXION_S)
+            msg = (f"Conectado a {url} — {len(seed)} símbolos suscriptos." if conectado else
+                   f"Conectado a {url} (sesión OK) — {len(seed)} símbolos a suscribir; el WS termina "
+                   "el handshake en unos segundos y esta tarjeta se actualiza sola.")
         except Exception as exc:  # noqa: BLE001
             msg = f"Login OK pero el WS no arrancó: {exc}"
             return _render(request, "partials/conexion_status.html", **_status_ctx(msg, False))
     return _render(request, "partials/conexion_status.html", **_status_ctx(msg, True))
+
+
+_ESPERA_CONEXION_S = 3.0
+
+
+async def _esperar_conexion(ws, max_s: float, paso_s: float = 0.1) -> bool:
+    """Espera hasta `max_s` a que el WS tenga socket (`_connected`), de a
+    `paso_s`. True si conectó. Un cliente sin ese atributo (fakes) no espera."""
+    if getattr(ws, "_connected", None) is None:
+        return False
+    fin = asyncio.get_running_loop().time() + max_s
+    while not ws._connected:
+        if asyncio.get_running_loop().time() >= fin:
+            return False
+        await asyncio.sleep(paso_s)
+    return True
+
+
+@router.get("/conexion/status", response_class=HTMLResponse)
+async def conexion_status(request: Request) -> HTMLResponse:
+    """Partial del estado del feed (sin mensaje de resultado): la tarjeta de
+    /conexion lo sondea cada 10 s para que el "conectando…" pase a "en vivo"
+    solo y nadie vuelva a apretar Reconectar sobre un WS sano."""
+    return _render(request, "partials/conexion_status.html", **_status_ctx())
 
 
 @router.post("/conexion/reprobar", response_class=HTMLResponse)

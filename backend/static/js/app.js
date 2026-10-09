@@ -66,21 +66,47 @@ window.lsSet = function (k, v) {
   var POLL_MS = 1000;       // cadencia del fallback
   var QUIET_AFTER_MS = 20000; // sin avances por 20s → dot "quieto"
   var HEALTH_MS = 15000;      // cada ~15s chequeo el estado del feed
+  var HEALTH_TIMEOUT_MS = 6000; // plazo del /market/health (colgado ≠ estado congelado)
+  var ESTADO_MS = 5000;       // re-render del dot sin seq nueva (live → idle, salud)
+  var SSE_OPEN_MS = 8000;     // EventSource sin onopen/mensaje en 8 s → polling
+  var HTMX_TIMEOUT_MS = 30000; // plazo global de los XHR de htmx (antes 0 = nunca)
   var lastSeq = null;
   var lastAdvance = 0;
   var failures = 0;
   var timer = null;
   var healthTimer = null;
+  var estadoTimer = null;
   var feedDown = false;       // el broker tiene sesión pero el WS está caído
   var staleWarn = null;       // WS conectado pero SIN market data (precios viejos)
+  var connecting = false;     // sesión recién abierta, WS del broker en handshake
+  var linkDown = false;       // ESTE browser no llega al server (poll/SSE caídos) → dot 'off'
   var sse = null;             // EventSource activo (null = modo polling)
   var sseEverOk = false;      // llegó a conectar al menos una vez
+  var sseWatch = null;        // watchdog de CONNECTING del EventSource
+
+  // Plazo global de htmx: con 0 (default) un XHR encolado o colgado (proxy,
+  // pool de conexiones lleno, server que no contesta) no dispara NADA y el
+  // panel queda con datos viejos en silencio. Con plazo, a los 30 s sale
+  // `htmx:timeout` → toast "quedó con datos viejos" (bloque de avisos, abajo)
+  // y el panel vuelve a pedir en su próximo trigger. Los hx-request
+  // '{"timeout":90000}' por elemento (Históricos) mandan sobre este global.
+  // htmx se carga con `defer` ANTES que app.js, así que ya está; si no, se
+  // setea al tener el DOM (los deferred corren antes de DOMContentLoaded).
+  function setHtmxTimeout() {
+    if (window.htmx && window.htmx.config) window.htmx.config.timeout = HTMX_TIMEOUT_MS;
+  }
+  setHtmxTimeout();
+  if (!(window.htmx && window.htmx.config) && document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setHtmxTimeout);
+  }
 
   function dot(state, title) {
     var el = document.getElementById('live-dot');
     if (!el) return;
+    title = title || '';
+    if (el.dataset.state === state && el.title === title) return;   // sin escritura al DOM si no cambió
     el.dataset.state = state;
-    el.title = title || '';
+    el.title = title;
   }
 
   var advances = [];   // timestamps de avances (ventana 60s) → ticks/min
@@ -132,13 +158,25 @@ window.lsSet = function (k, v) {
     box.addEventListener('click', function () { window.location.reload(); });
     document.body.appendChild(box);
   }
+  // Con plazo (fetchTexto, 6 s): un health que nunca vuelve antes dejaba el
+  // estado previo para siempre. Gana la respuesta del ÚLTIMO pedido (gen):
+  // una vieja que llega tarde (re-arm al volver a la pestaña) no pisa a la
+  // nueva. Y se re-renderiza el dot ACÁ, no recién en el próximo seq: con el
+  // mercado quieto (SSE sin mensajes) un feed caído / recuperado no se veía.
+  var healthGen = 0;
   function checkHealth() {
-    fetch('/market/health', { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
+    var gen = ++healthGen;
+    fetchTexto('/market/health', { cache: 'no-store' }, HEALTH_TIMEOUT_MS)
+      .then(function (v) { return JSON.parse(v.txt); })
       .then(function (h) {
-        feedDown = !!(h && h.feed_down);
-        staleWarn = (h && !h.feed_down && h.warn) ? h.warn : null;
+        if (gen !== healthGen) return;                 // llegó una más nueva mientras tanto
+        // `connecting`: sesión recién abierta, WS en handshake — no es caída
+        // (el server lo manda como feed_down=false igual; por las dudas manda acá).
+        connecting = !!(h && h.connecting);
+        feedDown = !!(h && h.feed_down && !h.connecting);
+        staleWarn = (h && !feedDown && h.warn) ? h.warn : null;
         checkVersion(h);
+        renderEstado(false, null);
       })
       .catch(function () { /* dejamos el estado previo del feed */ });
   }
@@ -156,6 +194,10 @@ window.lsSet = function (k, v) {
   var lastDispatch = 0, pendingDispatch = null;
   function dispatchUpdate() {
     if (!window.htmx) return;
+    // Pestaña oculta: nadie mira — un mensaje del SSE que entra en la carrera
+    // con el visibilitychange no tiene que refrescar N paneles de fondo (al
+    // volver, arm() trae un baseline fresco y el primer seq refresca todo).
+    if (document.hidden) return;
     var now = Date.now();
     var wait = lastDispatch + MIN_MS - now;
     if (wait <= 0) {
@@ -164,35 +206,59 @@ window.lsSet = function (k, v) {
     } else if (!pendingDispatch) {
       pendingDispatch = setTimeout(function () {
         pendingDispatch = null;
+        if (document.hidden) return;
         lastDispatch = Date.now();
         if (window.htmx) window.htmx.trigger(document.body, 'md-update');
       }, wait);
     }
   }
 
+  // Dot + meta de la topbar. Prioridad: caído (rojo) > datos viejos (naranja)
+  // > vivo > conectando > quieto. 'stale' va ANTES que 'live': el seq puede
+  // avanzar por MAE/pollers aunque el broker no mande un solo precio de BYMA
+  // — ese verde era mentiroso. Lo llaman handleSeq (seq nueva), checkHealth
+  // (cambio de salud con el mercado quieto) y un timer cada 5 s (la
+  // transición live → idle a los 20 s no necesita que llegue otra seq; en
+  // SSE con el mercado parado no llega ninguna). Con el link caído (polling
+  // fallando / SSE reconectando) el dot queda en el 'off' que puso ese
+  // camino: un 'idle' encima diría "sin operaciones" cuando ni llegamos al
+  // server. Antes de la primera seq no se inventa un 'idle' (queda el
+  // estado inicial del HTML).
+  var lastRtt = null;   // rtt del último sondeo (null en SSE): el render por timer no lo borra
+  function renderEstado(advanced, rtt) {
+    if (rtt !== null && rtt !== undefined) lastRtt = rtt;
+    rtt = lastRtt;
+    if (!linkDown) {
+      if (feedDown) {
+        dot('down', 'Feed caído — el WS del broker está desconectado; los precios pueden estar congelados');
+      } else if (staleWarn) {
+        dot('stale', '⚠ ' + staleWarn);
+      } else if (advanced) {
+        dot('live', 'En vivo — tick hace instantes');
+      } else if (connecting) {
+        dot('idle', 'Conectando al broker…');
+      } else if (lastSeq !== null && Date.now() - lastAdvance > QUIET_AFTER_MS) {
+        dot('idle', 'Sin operaciones recientes');
+      }
+    }
+    meta(rtt);
+  }
+
   // Núcleo compartido SSE/polling: avanzó la seq → md-update + dot + meta.
   function handleSeq(seq, rtt) {
     if (isNaN(seq)) return;
     var advanced = (lastSeq !== null && seq !== lastSeq);
+    lastSeq = seq;
+    lastRtt = (rtt !== null && rtt !== undefined) ? rtt : null;   // SSE: sin rtt que mostrar
     if (advanced) {
       lastAdvance = Date.now();
       advances.push(lastAdvance);
       dispatchUpdate();
     }
-    // Prioridad del dot: caído (rojo) > datos viejos (naranja) > vivo > quieto.
-    // 'stale' va ANTES que 'live': el seq puede avanzar por MAE/pollers aunque
-    // el broker no mande un solo precio de BYMA — ese verde era mentiroso.
-    if (feedDown) {
-      dot('down', 'Feed caído — el WS del broker está desconectado; los precios pueden estar congelados');
-    } else if (staleWarn) {
-      dot('stale', '⚠ ' + staleWarn);
-    } else if (advanced) {
-      dot('live', 'En vivo — tick hace instantes');
-    } else if (Date.now() - lastAdvance > QUIET_AFTER_MS) {
-      dot('idle', 'Sin operaciones recientes');
-    }
-    meta(rtt);
-    lastSeq = seq;
+    // Volvió el server después de un corte: la salud que tenemos es de antes
+    // del corte — un health ya (una request) en vez de esperar hasta 15 s.
+    if (linkDown) { linkDown = false; checkHealth(); }
+    renderEstado(advanced, rtt);
   }
 
   // fetch con plazo TOTAL (headers + cuerpo): carrera contra un timer y
@@ -239,15 +305,17 @@ window.lsSet = function (k, v) {
       .catch(function () {
         failures += 1;
         nextPollAt = Date.now() + Math.min(POLL_BACKOFF_MAX_MS, POLL_MS * Math.pow(2, failures - 1));
-        if (failures >= 3) dot('off', 'Sin conexión con el feed');
+        if (failures >= 3) { linkDown = true; dot('off', 'Sin conexión con el feed'); }
       })
       .then(done, done);
   }
 
   function stopAll() {
     if (timer) { clearInterval(timer); timer = null; }
+    if (sseWatch) { clearTimeout(sseWatch); sseWatch = null; }
     if (sse) { try { sse.close(); } catch (e) { } sse = null; }
     if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+    if (estadoTimer) { clearInterval(estadoTimer); estadoTimer = null; }
     // un md-update coalescido que quedó pendiente al ocultar la pestaña no
     // tiene que disparar N refreshes en una pestaña que nadie mira
     if (pendingDispatch) { clearTimeout(pendingDispatch); pendingDispatch = null; }
@@ -255,14 +323,15 @@ window.lsSet = function (k, v) {
   // Los `hx-trigger="every Ns"` (fallbacks de los paneles live, tape, riel,
   // blotter) seguían pidiendo al server con la pestaña OCULTA: 16 pestañas
   // de fondo eran ~1,7 requests/s sin nadie mirando. Se cancela SÓLO el
-  // request que dispara el poll de htmx (hx:poll:trigger); load / change /
-  // click / md-update siguen igual. Al volver, el md-update del primer seq
-  // refresca los paneles live y cada `every` sigue con su intervalo.
+  // request que dispara el poll de htmx (hx:poll:trigger) y el que dispara
+  // un md-update (un tick que entró en la carrera con el visibilitychange);
+  // load / change / click siguen igual. Al volver, el md-update del primer
+  // seq refresca los paneles live y cada `every` sigue con su intervalo.
   document.addEventListener('htmx:beforeRequest', function (e) {
     if (!document.hidden) return;
     var d = e.detail || {}, cfg = d.requestConfig || {};
     var ev = cfg.triggeringEvent;
-    if (ev && ev.type === 'hx:poll:trigger') e.preventDefault();
+    if (ev && (ev.type === 'hx:poll:trigger' || ev.type === 'md-update')) e.preventDefault();
   });
   function armPoll() {
     if (timer) clearInterval(timer);
@@ -272,28 +341,70 @@ window.lsSet = function (k, v) {
   // SSE primero; el primer evento trae la seq actual como baseline. Si nunca
   // conecta (404/proxy/401) → polling. Cortes transitorios los reconecta el
   // propio EventSource (retry del server); mientras, dot en 'off'.
+  // Watchdog de CONNECTING: un EventSource puede quedar en readyState 0 para
+  // siempre sin onerror NI onopen — pool de 6 conexiones HTTP/1.1 lleno por
+  // pestañas duplicadas, proxy que no streamea — y la pestaña quedaba muda
+  // sin ningún mensaje (el fallback sólo corría en onerror). Sin onopen ni
+  // mensaje en 8 s (también tras un onerror transitorio, cuando el retry del
+  // browser no abre más) se cierra y se cae a polling con el dot en 'off';
+  // el próximo arm() (volver a la pestaña) vuelve a probar SSE.
   function startSSE() {
     if (!window.EventSource) return false;
-    try { sse = new EventSource('/market/events'); } catch (e) { return false; }
-    sse.onmessage = function (ev) {
+    var es;
+    try { es = new EventSource('/market/events'); } catch (e) { return false; }
+    sse = es;
+    var abierto = false;
+    function vigilar() {
+      abierto = false;
+      if (sseWatch) clearTimeout(sseWatch);
+      sseWatch = setTimeout(function () {
+        sseWatch = null;
+        if (sse !== es || abierto) return;
+        caerAPolling('Sin stream del feed — sondeando');
+      }, SSE_OPEN_MS);
+    }
+    // motivo null = entorno sin SSE (nunca conectó): polling en silencio, como
+    // siempre — el server puede estar perfecto y el primer sondeo pinta el dot.
+    function caerAPolling(motivo) {
+      try { es.close(); } catch (e) { /* noop */ }
+      if (sse === es) sse = null;
+      if (motivo) { linkDown = true; dot('off', motivo); }
+      armPoll();
+    }
+    es.onopen = function () {
+      abierto = true;
+      if (sseWatch) { clearTimeout(sseWatch); sseWatch = null; }
+    };
+    es.onmessage = function (ev) {
+      if (sse !== es) return;     // cerrado por stopAll / el watchdog
+      abierto = true;
+      if (sseWatch) { clearTimeout(sseWatch); sseWatch = null; }
       sseEverOk = true;
       failures = 0;
       handleSeq(parseInt(ev.data, 10), null);
     };
-    sse.onerror = function () {
-      if (!sseEverOk) {           // nunca conectó: este entorno no soporta SSE
-        if (sse) { try { sse.close(); } catch (e) { } sse = null; }
-        armPoll();
+    es.onerror = function () {
+      if (sse !== es) return;     // ya reemplazado / cerrado
+      if (!sseEverOk || es.readyState === 2) {   // nunca conectó (entorno sin SSE) o CLOSED (401/404: no reintenta)
+        if (sseWatch) { clearTimeout(sseWatch); sseWatch = null; }
+        caerAPolling(sseEverOk ? 'Sin stream del feed — sondeando' : null);
         return;
       }
+      linkDown = true;
       dot('off', 'Reconectando al feed…'); // transitorio: EventSource reintenta solo
+      vigilar();                           // …y si el retry no abre en 8 s, polling
     };
+    vigilar();
     return true;
   }
   function arm() {
     stopAll();
+    if (document.hidden) return;   // nadie mira: el visibilitychange arma al mostrarse
     checkHealth();
     healthTimer = setInterval(function () { if (!document.hidden) checkHealth(); }, HEALTH_MS);
+    // live → idle a los 20 s y los cambios de salud se ven aunque no llegue
+    // ninguna seq (SSE con el mercado parado): un render barato cada 5 s.
+    estadoTimer = setInterval(function () { if (!document.hidden) renderEstado(false, null); }, ESTADO_MS);
     if (!startSSE()) armPoll();
   }
   document.addEventListener('visibilitychange', function () {
@@ -1963,8 +2074,18 @@ window.lsSet = function (k, v) {
     if (skip(p)) return;
     show('Sin conexión con el server: ' + nombre(evt) + ' quedó con datos viejos.');
   });
+  // htmx:timeout: el plazo global (htmx.config.timeout = 30 s, lo pone el
+  // motor live) o el del elemento (hx-request '{"timeout":90000}' en las
+  // pestañas lazy de Históricos). Antes sólo cubría las lazy: un panel común
+  // con el XHR colgado quedaba con datos viejos EN SILENCIO (el timeout
+  // global era 0 = nunca). Mismo toast que sendError, mismo skip.
   document.body.addEventListener('htmx:timeout', function (evt) {
-    lazyFail(evt, 'El server no respondió en 90 s.');
+    var cfg = (evt.detail && evt.detail.requestConfig) || {};
+    var ms = cfg.timeout || (window.htmx && window.htmx.config && window.htmx.config.timeout) || 0;
+    var plazo = ms ? Math.round(ms / 1000) + ' s' : 'el plazo';
+    if (lazyFail(evt, 'El server no respondió en ' + plazo + '.')) return;
+    if (skip(cfg.path)) return;
+    show('El server no respondió en ' + plazo + ': ' + nombre(evt) + ' quedó con datos viejos.');
   });
   window.__toast = show;
 })();

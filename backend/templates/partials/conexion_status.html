@@ -17,6 +17,8 @@
        los persistidos de la última rueda). #}
     {% if health.feed_down %}
       <p style="margin:0 0 6px;color:var(--red);font-weight:600">⚠ Feed caído: hay sesión pero el WS está desconectado — precios congelados.</p>
+    {% elif health.connecting %}
+      <p style="margin:0 0 6px;color:var(--yellow);font-weight:600">⏳ Conectando al broker (sesión abierta, WS en handshake) — esta tarjeta se actualiza sola; no hace falta volver a reconectar.</p>
     {% elif health.warn %}
       <p style="margin:0 0 6px;color:var(--yellow);font-weight:600">⚠ {{ health.warn }} — probá otro broker (el selector de arriba).</p>
     {% elif health.feed_alive %}

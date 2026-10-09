@@ -13,6 +13,7 @@ WS pipeline has been validated against a live broker.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any, AsyncIterator, Dict
 
@@ -22,6 +23,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from backend.services import fx as fx_svc, marketdata_store as mds, primary_ws, symbols as syms
 
 router = APIRouter(prefix="/market", tags=["market"])
+logger = logging.getLogger("backend.market")
 
 
 @router.get("/seq", response_class=PlainTextResponse)
@@ -40,7 +42,7 @@ _SSE_HEARTBEAT_SECONDS = 15.0
 
 
 @router.get("/events")
-async def events() -> StreamingResponse:
+async def events(request: Request) -> StreamingResponse:
     """SSE: pushea la secuencia del store cuando avanza (+ heartbeat como
     comentario cada 15 s para que proxies/keep-alives no corten la conexión).
 
@@ -48,24 +50,36 @@ async def events() -> StreamingResponse:
     de tick casi instantánea y — clave en el celular — la radio del teléfono
     no se despierta una vez por segundo. El primer evento manda la seq actual
     como baseline. El cliente cae solo al polling si EventSource falla
-    (static/js/app.js)."""
+    (static/js/app.js). Al cortarse el stream queda UNA línea en el log
+    (cliente, duración, eventos): el access log sólo ve la apertura y
+    `_QuietPolls` la calla, así que un churn de reconexiones cada 2 s —
+    proxy que no streamea, pool de conexiones del browser lleno — era
+    invisible."""
+    cliente = f"{request.client.host}:{request.client.port}" if request.client else "?"
+
     async def gen() -> AsyncIterator[str]:
         store = mds.get_store()
         last = None
-        beat = time.monotonic()
-        # retry: cuánto espera EventSource antes de reconectar solo.
-        yield "retry: 2000\n\n"
-        while True:
-            cur = store.seq()
-            now = time.monotonic()
-            if cur != last:
-                last = cur
-                beat = now
-                yield f"data: {cur}\n\n"
-            elif now - beat >= _SSE_HEARTBEAT_SECONDS:
-                beat = now
-                yield ": hb\n\n"
-            await asyncio.sleep(_SSE_TICK_SECONDS)
+        t0 = beat = time.monotonic()
+        eventos = 0
+        try:
+            # retry: cuánto espera EventSource antes de reconectar solo.
+            yield "retry: 2000\n\n"
+            while True:
+                cur = store.seq()
+                now = time.monotonic()
+                if cur != last:
+                    last = cur
+                    beat = now
+                    eventos += 1
+                    yield f"data: {cur}\n\n"
+                elif now - beat >= _SSE_HEARTBEAT_SECONDS:
+                    beat = now
+                    yield ": hb\n\n"
+                await asyncio.sleep(_SSE_TICK_SECONDS)
+        finally:
+            dur = time.monotonic() - t0
+            logger.info("[sse] %s cerró el stream tras %.0f s · %d eventos", cliente, dur, eventos)
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={
         "Cache-Control": "no-store",

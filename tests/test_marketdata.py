@@ -712,6 +712,62 @@ async def test_plazos_de_caucion_rechazados_se_reprueban_y_no_van_al_cache(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_reconexion_vuelve_a_reintentar_un_lote_rechazado(monkeypatch) -> None:
+    """`_retried_individually` nunca se limpiaba: en la RECONEXIÓN el mismo
+    lote rechazado (un símbolo que dejó de existir) volvía con `pending` vacío
+    y los 20 símbolos del lote quedaban mudos hasta reiniciar, sin log. Cada
+    conexión arranca con un pase nuevo de recuperación por lote."""
+    import json
+
+    client = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    lote = [f"MERV - XMEV - L{i} - 24hs" for i in range(5)]
+    enviados: list = []
+
+    class FakeWS:
+        async def send(self, raw: str) -> None:
+            enviados.append([p["symbol"] for p in json.loads(raw)["products"]])
+
+    client._ws, client._connected = FakeWS(), True
+    client._recover_from_error(pws._subscribe_payload(lote))          # 1ª vez: reintento de a uno
+    await client._resub_task
+    assert enviados == [[s] for s in lote] and client._retried_individually == set(lote)
+    enviados.clear()
+    client._recover_from_error(pws._subscribe_payload(lote))          # misma conexión: no se repite (anti-loop)
+    assert client._resub_task is None and enviados == []
+    client._reset_reintentos()                                        # lo que hace _connect_and_read al conectar
+    assert not client._retried_individually
+    client._recover_from_error(pws._subscribe_payload(lote))          # reconexión: se vuelve a salvar el lote
+    await client._resub_task
+    assert enviados == [[s] for s in lote]
+
+
+@pytest.mark.asyncio
+async def test_connecting_es_gracia_de_handshake_no_feed_caido(monkeypatch) -> None:
+    """`connecting`: sesión abierta + lector vivo + sin socket hace menos de
+    CONNECT_GRACE_S. Sin sesión o sin lector no es "conectando"; pasada la
+    gracia tampoco (eso es feed caído de verdad)."""
+    import asyncio
+    import time
+
+    import httpx
+
+    client = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    s = client.stats()
+    assert s["connecting"] is False and s["disconnected_s"] is not None and s["disconnected_s"] >= 0
+    client._cookies = httpx.Cookies()                                  # sesión abierta…
+    assert client.connecting is False                                  # …pero sin lector
+    client._task = asyncio.get_running_loop().create_task(asyncio.sleep(5))
+    try:
+        assert client.connecting is True and client.stats()["connecting"] is True
+        client._disconnected_since = time.monotonic() - pws.CONNECT_GRACE_S - 1   # gracia vencida
+        assert client.connecting is False
+        client._connected, client._disconnected_since = True, None
+        assert client.connecting is False and client.stats()["disconnected_s"] is None
+    finally:
+        client._task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_tormenta_de_rechazos_no_se_persiste_y_se_reprueba(tmp_path, monkeypatch) -> None:
     """09/10/2026: una cuenta en LBO quedó con 2717 de 2903 símbolos en el
     cache de rechazados (una tormenta: sesión / permisos de market data, no

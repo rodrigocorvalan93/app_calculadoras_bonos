@@ -372,6 +372,27 @@ def test_motor_live_y_graficos_en_node() -> None:
     assert out["seq_en_orden"]["ok"], out["seq_en_orden"]               # un md-update por avance
     assert out["controles"]["ok"], out["controles"]
     assert out["historico_orden"]["ok"], out["historico_orden"]         # E05: la respuesta vieja no pisa
+    # Topbar honesta sin seq nueva (09/10: "decía que se cortaba la conexión y
+    # no actualizaba" en la PC de un usuario): la salud se re-renderiza desde el
+    # health y un timer, el health tiene plazo, el SSE colgado cae a polling,
+    # la pestaña oculta no arma nada y htmx tiene plazo global.
+    h = out["health_sin_seq"]
+    assert h["ok"], h
+    assert h["caido"] == "down" and h["caido_a_los_ms"] == 2000                        # en el health mismo, stream mudo
+    assert h["vuelve"] == "idle" and h["md_updates"] == 0 and h["polls"] == 0          # sin seq nueva ni polling
+    assert h["conectando"] == {"state": "idle", "title": "Conectando al broker…"}      # connecting ≠ caído
+    hc = out["health_colgado"]
+    assert hc["ok"], hc
+    assert hc["abort_a_los_ms"] == 6000 and hc["caido"] == "down" and hc["tarde"] == "idle"
+    s = out["sse_colgado"]
+    assert s["ok"], s
+    assert s["off_a_los_ms"] == 8000 and s["cerrado"] and s["seq_antes"] == 0 and s["seq_despues"] >= 3
+    assert out["sse_sano"]["ok"], out["sse_sano"]                        # el watchdog no toca un stream sano
+    assert out["sse_sano"]["quieto_sin_seq"] == "idle" and out["sse_sano"]["polls"] == 0
+    o = out["oculta"]
+    assert o["ok"], o
+    assert o["sin_sse_ni_health"] and o["md_updates_oculta"] == 0 and o["cancelados_oculta"] == 2 and o["cancelados_visible"] == 0
+    assert out["htmx_plazo"] == {"timeout": 30000, "ok": True}
     assert out["ok"]
 
 

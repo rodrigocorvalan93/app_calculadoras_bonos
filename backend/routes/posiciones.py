@@ -891,6 +891,15 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos",
     if view == "pct":
         def fmt(c: Dict[str, Any]) -> str:
             return fmt_pct_pp(c["pct"] * 100, 1) if c["pct"] is not None else ""
+    elif view == "vnpct":
+        # "VN y %" (pedido del desk 09/10): en cada celda los nominales y, con
+        # un espacio, el % sobre PN — "772.000.000 5,0%". Texto plano (la
+        # celda se copia tal cual al detalle por fondo / Excel).
+        def fmt(c: Dict[str, Any]) -> str:
+            if not c["vn"]:
+                return ""
+            vn = fmt_int(c["vn"])
+            return f"{vn} {fmt_pct_pp(c['pct'] * 100, 1)}" if c["pct"] is not None else vn
     else:
         def fmt(c: Dict[str, Any]) -> str:
             return fmt_int(c["vn"]) if c["vn"] else ""

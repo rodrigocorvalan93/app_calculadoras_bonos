@@ -70,11 +70,19 @@ def test_snapshot_empty_store_never_overwrites(tmp_path, monkeypatch) -> None:
 # El stream es infinito, así que NO se testea vía AsyncClient (cerrar el
 # stream con ASGITransport espera a que el generador termine → cuelga).
 # Iteramos el generador del endpoint directamente y lo cerramos nosotros.
+class _Req:
+    """Request mínimo para el endpoint SSE (sólo lee `client`)."""
+    class client:  # noqa: N801 — imita starlette.requests.Address
+        host, port = "127.0.0.1", 54321
+
+
 @pytest.mark.asyncio
-async def test_sse_emits_baseline_and_tick() -> None:
+async def test_sse_emits_baseline_and_tick(caplog) -> None:
+    import logging
+
     from backend.routes.market import events
 
-    resp = await events()
+    resp = await events(_Req())
     assert resp.media_type == "text/event-stream"
     assert resp.headers.get("x-accel-buffering") == "no"
 
@@ -93,7 +101,12 @@ async def test_sse_emits_baseline_and_tick() -> None:
         nxt = await next_data()
         assert nxt > base
     finally:
-        await gen.aclose()
+        with caplog.at_level(logging.INFO, logger="backend.market"):
+            await gen.aclose()
+    # Al cortarse el stream queda UNA línea en el log (el access log sólo ve la
+    # apertura y _QuietPolls la calla): cliente, duración y eventos.
+    linea = next(r.getMessage() for r in caplog.records if "[sse]" in r.getMessage())
+    assert "127.0.0.1:54321 cerró el stream" in linea and "2 eventos" in linea
 
 
 def test_sse_gzip_bypass_registered() -> None:

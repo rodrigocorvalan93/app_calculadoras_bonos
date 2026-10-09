@@ -43,6 +43,11 @@ logger = logging.getLogger("backend.primary_ws")
 KEEPALIVE_SECS = 25
 BACKOFF_INITIAL = 2.0
 BACKOFF_MAX = 30.0
+# Gracia para el handshake / la reconexión: sin socket hace menos de esto, con
+# sesión y el lector vivo, es "conectando" (ver PrimaryWS.connecting), no un
+# feed caído. Cubre un connect + subscribe normal (1-3 s) y un reconnect con
+# backoff corto; un corte real supera esto enseguida.
+CONNECT_GRACE_S = 10.0
 
 # Símbolos que el broker rechazó como inválidos, persistidos POR HOST en un
 # JSON local (fuera de OneDrive) para no volver a pedirlos en cada arranque:
@@ -251,6 +256,12 @@ class PrimaryWS:
         self._username = ""
         self._password = ""
         self._connected = False
+        # Desde cuándo NO hay socket (monotonic; None = conectado). Con sesión y
+        # el lector recién arrancado, los primeros CONNECT_GRACE_S son
+        # "conectando", no "feed caído": /conexion mostraba el rojo "⚠ Feed
+        # caído" pegado al "✅ Conectado" porque start() vuelve antes del
+        # handshake, y el desk volvía a apretar Reconectar (tirando un WS sano).
+        self._disconnected_since: Optional[float] = time.monotonic()
         self._stats: Dict[str, Any] = {
             "connected": False,
             "messages": 0,
@@ -541,6 +552,13 @@ class PrimaryWS:
             except (ConnectionClosed, WebSocketException):
                 return
 
+    def _reset_reintentos(self) -> None:
+        """Nueva conexión = un pase nuevo de recuperación por lote: olvida qué
+        símbolos ya se reintentaron de a uno (y sin OI) en la conexión
+        anterior. Los rechazados firmes (`_rejected`) siguen afuera."""
+        self._retried_individually.clear()
+        self._retried_no_oi.clear()
+
     # ── Tormenta de rechazos (sesión / permisos, no símbolos) ───────
 
     def _es_tormenta(self, n: int) -> bool:
@@ -740,6 +758,9 @@ class PrimaryWS:
         s["rejected"] = len(self._rejected)
         s["rechazados_hoy"] = sorted(self._rechazo_diario)      # plazos de caución sin rueda hoy
         s["tormenta"] = self._tormenta
+        s["disconnected_s"] = (None if self._connected
+                               else round(time.monotonic() - (self._disconnected_since or time.monotonic()), 1))
+        s["connecting"] = self.connecting
         last = self._stats.get("last_message_at") or 0.0
         s["stale_seconds"] = round(time.time() - last, 1) if last else None
         s["feed_alive"] = self.feed_alive
@@ -750,6 +771,16 @@ class PrimaryWS:
         """Tenemos cookies de sesión para el REST del OMS. NO implica que el feed
         de market data esté vivo — para eso, `feed_alive`."""
         return self._cookies is not None
+
+    @property
+    def connecting(self) -> bool:
+        """Sesión abierta, lector corriendo y sin socket hace menos de
+        CONNECT_GRACE_S: el handshake / la reconexión está en curso. NO es
+        "feed caído" (feed_health) — eso es un corte sostenido."""
+        if self._connected or self._cookies is None or self._task is None or self._task.done():
+            return False
+        since = self._disconnected_since
+        return since is not None and (time.monotonic() - since) < CONNECT_GRACE_S
 
     @property
     def feed_alive(self) -> bool:
@@ -841,10 +872,20 @@ class PrimaryWS:
         async with websockets.connect(self.ws_url, **connect_kwargs) as ws:
             self._ws = ws
             self._connected = True
+            self._disconnected_since = None
             self._stats["connected"] = True
             logger.info("[primary_ws] connected to %s", self.ws_url)
 
             if self._subscriptions:
+                # Cada conexión vuelve a mandar TODO el universo en lotes: un
+                # lote que matrizoms rechaza (un símbolo que dejó de existir
+                # desde la última vez) tiene que poder reintentarse de a uno
+                # otra vez. `_retried_individually` no se limpiaba nunca → en
+                # la reconexión el mismo lote rechazado volvía con `pending`
+                # vacío y los 20 símbolos quedaban MUDOS hasta reiniciar, sin
+                # una línea de log (09/10: así se callaban 3D/4D/14D/21D y los
+                # bonos vecinos del lote de las cauciones).
+                self._reset_reintentos()
                 if self._cache_es_tormenta():
                     logger.warning("[primary_ws] el cache local trae %d de %d símbolos rechazados por %s — "
                                    "demasiados para ser inválidos: los olvido y pruebo todo de nuevo",
@@ -860,6 +901,8 @@ class PrimaryWS:
                     self._handle_message(raw)
             finally:
                 self._connected = False
+                if self._disconnected_since is None:
+                    self._disconnected_since = time.monotonic()
                 self._stats["connected"] = False
                 self._ws = None
 

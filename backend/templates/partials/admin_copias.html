@@ -2,7 +2,7 @@
    "- copia") en la carpeta de la app, Delta Bases, cierres/, Carteras y el journal.
    Tarjeta on-demand del superuser: GET lista (listdir + stat) y pinta lo ya
    revisado; "Revisar" lee cada copia y la compara con su principal. #}
-<div id="admin-copias-body">
+<div id="admin-copias-body" hx-request='{"timeout":600000}'>
   {% if msg %}<div class="alert alert-ok" style="margin-bottom:8px">{{ msg }}</div>{% endif %}
   {% if error %}<div class="alert alert-error" style="margin-bottom:8px">{{ error }}</div>{% endif %}
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">

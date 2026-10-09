@@ -55,6 +55,21 @@ def test_socket_vivo_pero_sin_md_alarma_en_rueda(monkeypatch) -> None:
     assert h["warn"] is not None and "viejos" in h["warn"]
 
 
+def test_conectando_no_es_feed_caido(monkeypatch) -> None:
+    """Sesión abierta y WS en handshake (`stats()["connecting"]`): NO es feed
+    caído. Antes el partial de /conexion renderizado un instante después de
+    start() mostraba "⚠ Feed caído" pegado al "✅ Conectado" y el desk volvía a
+    apretar Reconectar (tirando un WS sano)."""
+    ws = _patch_ws(monkeypatch, auth=True, connected=False, alive=False)
+    ws.stats = lambda: {"connected": False, "connecting": True, "stale_seconds": None}
+    h = feed_health.snapshot()
+    assert h["feed_down"] is False and h["connecting"] is True and h["warn"] is None
+    # pasada la gracia (connecting False) sí es feed caído
+    ws.stats = lambda: {"connected": False, "connecting": False, "stale_seconds": None}
+    h = feed_health.snapshot()
+    assert h["feed_down"] is True and h["connecting"] is False
+
+
 def test_fuera_de_rueda_no_alarma(monkeypatch) -> None:
     from backend.services import watchdog
 
