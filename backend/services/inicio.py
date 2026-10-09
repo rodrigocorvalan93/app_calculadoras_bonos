@@ -295,7 +295,8 @@ def tasas() -> List[Dict[str, Any]]:
         p = _safe(f"rail_pick {moneda}", lambda moneda=moneda: cauciones.rail_pick(moneda), None)
         sub = None
         if p:
-            sub = str(p.get("plazo") or "") + (" · cierre previo" if p.get("es_cierre") else "")
+            sub = str(p.get("plazo") or "") + (" · cierre previo" if p.get("es_cierre")
+                                               else (" · sin operaciones" if p.get("sin_dato") else ""))
         rows.append({"label": label, "sub": sub or None, "fmt": "pp",
                      "value": _f(p.get("tasa")) if p else None,
                      "var_pp": _f(p.get("var")) if p else None})      # ya en puntos de TNA

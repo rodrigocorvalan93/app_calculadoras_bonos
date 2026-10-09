@@ -302,6 +302,15 @@ celdas para limpiar el Excel; una columna ya float64 no se toca (costo cero
 por el espejo). Regresión: `test_append_tolera_celdas_basura_en_el_excel`,
 `test_regenera_el_espejo_con_celdas_basura_en_el_excel`,
 `test_guardar_directo_tolera_celdas_basura`.
+**Columnas de texto mezcladas** (09/10): `espejo.normalizar_texto`
+(`COLS_TEXTO` = symbol / Código / Price Source / Price Date → dtype `string`)
+corre junto a `normalizar_numericas` en `historico_byma._regen_parquet` y en
+el writer: el writer escribe `Price Date` como texto ISO pero bymaapi / una
+celda tocada a mano la dejan como FECHA de Excel, y con str + datetime en la
+misma columna `to_parquet` moría ("Expected bytes, got a 'datetime.datetime'
+object") → esa máquina quedaba sin espejo y releía el xlsx en cada arranque
+(PC de un compañero). Regresión:
+`test_regenera_el_espejo_con_price_date_mixto_en_el_excel`.
 
 **Series diarias FX + caución** (`Delta - historico_fx`, `_guardar_fx`): UNA
 fila por día que se mergea así: escalares (CCL, MEP, canje, A3500) POR COLUMNA
@@ -329,6 +338,28 @@ CEDEARs: `backend.tools.backfill_acciones --byma` (BYMA Open Data; las filas
 de la app ganan). `backfill_historico.bat` (raíz) corre los dos con el venv
 de `run_backend (CORRER APP).bat` (`%LOCALAPPDATA%\venvs\bonos`), con menú
 plan / escribir / acciones.
+
+## Cauciones BYMA — overnight por calendario y tira de Tasas (09/10)
+
+`services/cauciones.py`. El overnight del riel / Inicio es el plazo del
+CALENDARIO: `_overnight_n()` = (próximo hábil después de la rueda) − rueda →
+1D normal, 3D un viernes, 4D un viernes con el lunes feriado (09/10/2026) o un
+jueves con viernes feriado; sábado / domingo / feriado cuentan la última rueda.
+`rail_pick(moneda, calendario=True)` muestra ESE plazo: operado hoy, o su
+cierre previo (`es_cierre`), o `sin_dato` si el store no lo tiene; si el plazo
+del calendario no está en el store y OTRO 1D–4D operó HOY, gana el que operó
+(un feriado que `holidays` no trae); nunca el cierre viejo de otro plazo (el
+09/10 el riel mostraba "3D · cierre previo" con el 3D sticky del martes).
+`calendario=False` = la heurística por volumen entre 1D–4D de siempre: la usa
+`hist_row` (la serie diaria lleva lo que de verdad operó). La pestaña Tasas
+arma la tira con `tira_rows`: 1D–7D SIEMPRE (`TIRA_FIJA`; fila `sin_dato` =
+"hoy no hay", con el cierre previo si lo hay; sólo puntas = fila normal sin
+tasa) y de 14D en adelante sólo los que operaron hoy (tasa viva + volumen > 0;
+un volumen sticky de otra rueda no cuenta porque su last ya se degradó a
+cierre); `es_overnight` pone el tag `o/n`. Medido (store sembrado, tick por
+request): `/tasas/table` p50 2,2 · p95 2,6 ms; `/dolares/rail` p95 2,6 ms.
+Regresión: `tests/test_cauciones.py` (fixture `overnight(n)` fija el
+calendario: la suite corre cualquier día).
 
 ## Consola de arranque
 
@@ -627,6 +658,14 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `.tick-up` / `.tick-down` (flash CSS verde/rojo estilo terminal).
 - El dot `#live-dot` de la topbar muestra el estado del feed
   (live/idle/off). Todo vanilla JS — sin librerías nuevas.
+- **Pestaña vieja tras un deploy** (09/10): `/market/health` lleva `asset_v`
+  (la misma versión de estáticos que `?v=` de los templates, `app.state.asset_v`)
+  y la página la pone en `<body data-asset-v>`; `app.js checkVersion` (en el
+  sondeo de health, ~15 s) muestra un toast fijo "Hay una versión nueva ·
+  click para recargar" una vez por versión y NUNCA recarga sola (puede haber
+  un ticket a medio cargar). Era el "se me cae todo el tiempo" de una PC del
+  desk que en incógnito andaba bien: JS de ayer contra el server de hoy.
+  Regresión: `test_feed_health.test_market_health_lleva_la_version_de_los_estaticos`.
 - **Libro** (`partials/mercado_book.html`, `/mercado/book/{code}`, también
   embebido en Órdenes vía `/ordenes/quote`): se swapea entero en cada
   `md-update`. Por eso el dim de carga

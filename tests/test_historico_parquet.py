@@ -97,6 +97,52 @@ def test_regenera_el_espejo_con_celdas_basura_en_el_excel(hist_dir) -> None:
     assert out2["by_code"]["T30E6"]["vals"]["TIREA"][0] == pytest.approx(0.32)
 
 
+def test_regenera_el_espejo_con_price_date_mixto_en_el_excel(hist_dir) -> None:
+    """09/10/2026 (PC de un compañero): "no pude regenerar el parquet (Expected
+    bytes, got a 'datetime.datetime' object — Conversion failed for column
+    Price Date)". El writer escribe 'Price Date' como texto ISO pero bymaapi /
+    una celda tocada a mano la dejan como FECHA de Excel; con las dos en la
+    misma columna el lector no podía espejar y releía el xlsx entero en cada
+    arranque (y el chip leía las ruedas del Excel, 5 s). El espejo se regenera
+    con las columnas de texto en `string`, como las deja el writer."""
+    from datetime import datetime
+
+    from openpyxl import Workbook
+
+    from backend.services import espejo
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["fecha_hoy", "Código", "TIREA", "TNA", "TEM", "Paridad", "Last Price", "Duration",
+               "Price Source", "Price Date", "symbol"])
+    ws.append(["2026-07-06", "T30E6", 0.32, 0.28, 0.0235, 0.98, 101.5, 0.6,
+               "LA", "2026-07-06 16:59:00", "MERV - XMEV - T30E6 - 24hs"])         # writer: texto ISO
+    ws.append(["2026-07-07", "T30E6", 0.33, 0.28, 0.0235, 0.98, 101.9, 0.6,
+               "LA", datetime(2026, 7, 7, 16, 58), "MERV - XMEV - T30E6 - 24hs"])  # bymaapi: fecha de Excel
+    ws.append(["2026-07-07", "AL30", 0.10, 0.09, 0.0075, 0.70, 60.0, 2.1,
+               "RC", None, 12345])                                                 # símbolo numérico tipeado
+    wb.save(hist_dir / _XLSX)
+    raw = pd.read_excel(hist_dir / _XLSX, sheet_name="Sheet1")
+    assert str(raw["Price Date"].dtype) == "object" and isinstance(raw["Price Date"].iloc[1], datetime)
+    with pytest.raises(Exception):                              # el crudo reproduce el caso
+        raw.to_parquet(hist_dir / "crudo.parquet", index=False)
+
+    out = historico_byma._load()
+    assert out["loaded"] is True and str(out["path"]).endswith(".xlsx")
+    pq = hist_dir / _PARQUET
+    assert pq.is_file() and espejo.espejo_valido(str(pq), str(hist_dir / _XLSX))
+    back = pd.read_parquet(pq)
+    for col in espejo.COLS_TEXTO:
+        assert str(back[col].dtype) == "string", col
+    assert list(back["Price Date"].astype(object).fillna("")) == ["2026-07-06 16:59:00", "2026-07-07 16:58:00", ""]
+    assert list(back["symbol"]) == ["MERV - XMEV - T30E6 - 24hs"] * 2 + ["12345"]
+    # la próxima carga ya va por el espejo, con la misma data
+    out2 = historico_byma._load()
+    assert str(out2["path"]).endswith(".parquet")
+    assert out2["by_code"]["T30E6"]["vals"]["TIREA"] == [pytest.approx(0.32), pytest.approx(0.33)]
+
+
 def test_parquet_only_works_without_xlsx(hist_dir) -> None:
     _df(0.44).to_parquet(hist_dir / _PARQUET, index=False)
     out = historico_byma._load()

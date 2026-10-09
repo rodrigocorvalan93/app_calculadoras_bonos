@@ -23,8 +23,9 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 def _ctx() -> Dict[str, Any]:
     return {
         "cauciones": mae_svc.cauciones_rows(),       # MAE
-        "byma_cauciones": cauc_svc.byma_rows("PESOS"),  # BYMA $ (store)
-        "byma_cauciones_usd": cauc_svc.byma_rows("DOLAR"),  # BYMA US$ (store)
+        # BYMA (store): tira 1D–7D siempre + plazos largos sólo si operaron hoy
+        "byma_cauciones": cauc_svc.tira_rows("PESOS"),
+        "byma_cauciones_usd": cauc_svc.tira_rows("DOLAR"),
         "repo": mae_svc.repo_rows(),
         "oficial": dx.official_fx(),                 # ref. dólar oficial
         "status": mae_svc.status(),

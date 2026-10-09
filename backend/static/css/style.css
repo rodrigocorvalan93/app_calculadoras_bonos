@@ -887,6 +887,9 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .mae-strip > span { color: var(--text-soft); }
 .mae-strip b { font-variant-numeric: tabular-nums; }
 .mae-tag { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: #0a0a0a; background: var(--cyan); border-radius: 5px; padding: 2px 7px; }
+/* Tira de cauciones BYMA (Tasas): el overnight del calendario y los plazos que hoy no operan */
+.on-tag { display: inline-block; font-size: 8.5px; font-weight: 700; letter-spacing: .06em; padding: 1px 5px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; }
+.cauc-sin-dato td { color: var(--text-muted); }
 
 /* Resumen de composición (Posiciones) */
 /* Un cuadro más ancho que su columna (etiquetas largas: "Fideicomisos

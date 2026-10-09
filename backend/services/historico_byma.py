@@ -98,10 +98,14 @@ def _regen_parquet(xlsx_path: str, df) -> None:
     pq = _parquet_sibling(xlsx_path)
     tmp = pq + ".tmp"
     try:
-        # Igual que el writer: métricas float64 o NaN. Una celda con texto o un
-        # entero gigante en el Excel dejaba a la app SIN espejo (pyarrow:
-        # "PyLong is too large to fit int64") y releyendo el xlsx en cada carga.
+        # Igual que el writer: métricas float64 o NaN y columnas de texto en
+        # `string`. Una celda con texto o un entero gigante en el Excel
+        # (pyarrow: "PyLong is too large to fit int64"), o un 'Price Date'
+        # con fechas de Excel mezcladas con texto ("Expected bytes, got a
+        # 'datetime.datetime' object"), dejaban a la app SIN espejo y releyendo
+        # el xlsx entero en cada carga.
         mirror = espejo.normalizar_numericas(df.copy(), f"espejo de {os.path.basename(xlsx_path)}")
+        mirror = espejo.normalizar_texto(mirror)
         mirror.to_parquet(tmp, index=False)
         os.replace(tmp, pq)
         espejo.marcar_espejo(pq, xlsx_path)
