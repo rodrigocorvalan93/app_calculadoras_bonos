@@ -462,6 +462,20 @@ rechazados»** de /conexion (`POST /conexion/reprobar` →
 página avisa la tormenta con el `last_error_desc` del broker. Regresión:
 `test_marketdata.test_tormenta_de_rechazos_no_se_persiste_y_se_reprueba`,
 `test_conexion.test_conexion_reprobar_olvida_rechazados`.
+**Reconexión = pase nuevo de recuperación por lote** (09/10):
+`_retried_individually` / `_retried_no_oi` se limpian al conectar
+(`_reset_reintentos` en `_connect_and_read`); antes nunca se limpiaban y en
+la reconexión un lote rechazado por un símbolo que dejó de existir volvía con
+`pending` vacío → los 20 símbolos del lote mudos hasta reiniciar, sin log.
+Regresión: `test_marketdata.test_reconexion_vuelve_a_reintentar_un_lote_rechazado`.
+**Serie diaria de caución vacía 05–09/10** (diagnóstico verificado): fue
+esto mismo + el cache por 7 días — `hist_row` exige un plazo 1D–4D con tasa
+de HOY y estaban todos mudos; el writer no cambió (CCL/MEP se guardaron). No
+hay de dónde reconstruir esos días dentro de la app (RC escribe la fila FX
+sin caución a propósito, el journal no tiene lo que no estaba suscripto): se
+cargan a mano en `Delta - historico_fx.xlsx` (columnas `caucion_plazo_d` /
+`caucion_tna` / `caucion_tna_vwap` / `caucion_monto`, números; el Excel
+editado gana al espejo y el próximo autosave mergea sólo SU fecha).
 
 ## Add-in de Excel — OMS.MACRO en vivo (01/10)
 

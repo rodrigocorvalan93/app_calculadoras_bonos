@@ -552,6 +552,13 @@ class PrimaryWS:
             except (ConnectionClosed, WebSocketException):
                 return
 
+    def _reset_reintentos(self) -> None:
+        """Nueva conexión = un pase nuevo de recuperación por lote: olvida qué
+        símbolos ya se reintentaron de a uno (y sin OI) en la conexión
+        anterior. Los rechazados firmes (`_rejected`) siguen afuera."""
+        self._retried_individually.clear()
+        self._retried_no_oi.clear()
+
     # ── Tormenta de rechazos (sesión / permisos, no símbolos) ───────
 
     def _es_tormenta(self, n: int) -> bool:
@@ -870,6 +877,15 @@ class PrimaryWS:
             logger.info("[primary_ws] connected to %s", self.ws_url)
 
             if self._subscriptions:
+                # Cada conexión vuelve a mandar TODO el universo en lotes: un
+                # lote que matrizoms rechaza (un símbolo que dejó de existir
+                # desde la última vez) tiene que poder reintentarse de a uno
+                # otra vez. `_retried_individually` no se limpiaba nunca → en
+                # la reconexión el mismo lote rechazado volvía con `pending`
+                # vacío y los 20 símbolos quedaban MUDOS hasta reiniciar, sin
+                # una línea de log (09/10: así se callaban 3D/4D/14D/21D y los
+                # bonos vecinos del lote de las cauciones).
+                self._reset_reintentos()
                 if self._cache_es_tormenta():
                     logger.warning("[primary_ws] el cache local trae %d de %d símbolos rechazados por %s — "
                                    "demasiados para ser inválidos: los olvido y pruebo todo de nuevo",
