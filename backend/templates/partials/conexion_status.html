@@ -22,6 +22,18 @@
     {% elif health.feed_alive %}
       <p style="margin:0 0 6px;color:var(--green)">✓ Market data en vivo{% if health.data_age_s is not none %} — último tick hace {{ health.data_age_s | ar_num(0) }} s{% endif %}.</p>
     {% endif %}
+    {# Tormenta de rechazos: el broker rechazó media universo o más — no son
+       símbolos inválidos sino la sesión / los permisos de market data de la
+       cuenta; el feed queda con precios viejos. Reprobar olvida el cache y
+       vuelve a pedir todo. #}
+    {% set rech = stats.rejected or 0 %}{% set subs = stats.subscriptions or 0 %}
+    {% if stats.tormenta or (rech > 300 and rech * 2 > subs) %}
+      <p style="margin:0 0 6px;color:var(--red);font-weight:600">⚠ El broker rechazó {{ rech | ar_int }} de {{ subs | ar_int }} símbolos — no es un problema de símbolos sino de la cuenta (¿tiene market data habilitado?): sólo llegan precios de los {{ (subs - rech) | ar_int }} que quedaron.{% if stats.last_error_desc %} Motivo del broker: <code>{{ stats.last_error_desc }}</code>.{% endif %}</p>
+    {% endif %}
+    <p style="margin:0 0 8px">
+      <button type="button" class="btn" hx-post="/conexion/reprobar" hx-target="#conn-status" hx-swap="innerHTML"
+              title="Olvida los símbolos que el broker rechazó (memoria y cache local) y vuelve a pedir el universo entero">↻ Reprobar símbolos rechazados ({{ rech | ar_int }})</button>
+    </p>
     {% if stats %}
       <table class="cashflows" style="font-size:12px">
         <tbody>

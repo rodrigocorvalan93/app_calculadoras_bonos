@@ -184,6 +184,27 @@ async def conexion_login(
     return _render(request, "partials/conexion_status.html", **_status_ctx(msg, True))
 
 
+@router.post("/conexion/reprobar", response_class=HTMLResponse)
+async def conexion_reprobar(request: Request) -> HTMLResponse:
+    """Olvida los símbolos que el broker rechazó (memoria + cache local del
+    host) y vuelve a pedir el universo entero por el WS vivo. Para cuando una
+    cuenta quedó con media universo en el cache (tormenta: sesión / permisos
+    de market data, no símbolos inválidos) y el feed muestra precios viejos.
+    Abierta a todo usuario logueado, como el reconectar: es inocuo."""
+    ws = primary_ws.get_ws_client()
+    try:
+        n = await ws.olvidar_rechazados()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[conexion] olvidar_rechazados falló", exc_info=True)
+        return _render(request, "partials/conexion_status.html",
+                       **_status_ctx(f"No pude reprobar los rechazados: {exc}", False))
+    conectado = bool(getattr(ws, "_connected", False))
+    msg = (f"Olvidé {n} símbolos rechazados" +
+           (" y volví a pedir el universo entero: los precios llegan en segundos." if conectado
+            else "; se piden de nuevo al conectar (ahora el WS no está conectado)."))
+    return _render(request, "partials/conexion_status.html", **_status_ctx(msg, True))
+
+
 async def _descartar(cand) -> None:
     """Cierra el cliente candidato que no llegó a publicarse (su http, si abrió)."""
     try:
