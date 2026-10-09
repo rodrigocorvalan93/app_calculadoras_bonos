@@ -207,9 +207,12 @@ async def test_f03_respuesta_perdida_es_desconocida_y_se_reconcilia(oms_tmp, mon
     oms.set_live(True)
     # a) la orden SÍ entró: aparece en la lista del día con alta POSTERIOR al
     #    envío (transactTime formato Primary) → estado real
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timedelta as _td
     from backend.services.oms import _TZ_BA
-    alta = (_dt.now(_TZ_BA)).strftime("%Y%m%d-%H:%M:%S.%f")[:-3] + _dt.now(_TZ_BA).strftime("%z")
+    # alta POSTERIOR al envío (place fija enviada_ts durante la llamada; +2 s la
+    # deja claramente después, que es lo que simula esta rama).
+    _alta = _dt.now(_TZ_BA) + _td(seconds=2)
+    alta = _alta.strftime("%Y%m%d-%H:%M:%S.%f")[:-3] + _alta.strftime("%z")
     _WS.activas = [{"instrumentId": {"symbol": "MERV - XMEV - AL30 - 24hs"}, "side": "BUY",
                     "orderQty": 100, "price": 941.0, "status": "NEW", "clientId": "77",
                     "transactTime": alta}]

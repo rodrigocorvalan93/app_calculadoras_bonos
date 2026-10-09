@@ -642,3 +642,53 @@ async def test_r10_recalculos_identicos_simultaneos_comparten_el_calculo(monkeyp
                                       ac.post("/yas/recompute", data={**base, "nominales": "2000000"}))
         assert r1.status_code == 200 and r2.status_code == 200
         assert sorted(calculos) == [60.5, 60.5, 61.0]              # distinto valor / VN: cálculo propio
+
+
+# ── Auditoría 08/10 · A02 (reconciliación OMS más conservadora) ───────────────
+@pytest.mark.asyncio
+async def test_a02_respuesta_de_error_no_es_prueba_de_ausencia(oms_tmp, monkeypatch) -> None:
+    """A02(a): el broker contesta HTTP 200 con un error de negocio SIN la clave
+    `orders` → no es 'lista completa vacía'. No se puede afirmar NO ENTRÓ; queda
+    DESCONOCIDA (no verificable), que es lo seguro (reenviar a ciegas duplica)."""
+    class _WS:
+        async def get_json_checked(self, path, params=None):
+            if path.endswith("newSingleOrder"):
+                raise httpx.ReadTimeout("perdida (sintético)")
+            return {"status": "ERROR", "message": "sesión vencida"}   # SIN 'orders'
+    monkeypatch.setattr(primary_ws, "get_ws_client", lambda: _WS())
+    monkeypatch.setattr(oms, "_RECONCILE_DELAYS", (0.01, 0.02))
+    oms.set_live(True)
+    res = await oms.place(_payload())
+    assert res["status"] == "DESCONOCIDA"
+    await _esperar_followups()
+    ev = [a["event"] for a in oms.audit_tail(10)]
+    assert "live_desconocida_no_verificable" in ev and "live_desconocida_sin_rastro" not in ev
+
+
+@pytest.mark.asyncio
+async def test_a02_orden_identica_apenas_anterior_es_candidato(oms_tmp, monkeypatch) -> None:
+    """A02(b): una orden idéntica dada de alta POCOS segundos ANTES del envío
+    (reloj broker/server, u otra terminal del desk) NO es este intento → queda
+    como CANDIDATO (DESCONOCIDA posible), nunca confirmada como 'nuestra'. Antes
+    el margen de 5 s hacia atrás se la comía y atribuía su estado al intento."""
+    from datetime import datetime as _dt, timedelta as _td
+    from backend.services.oms import _TZ_BA
+
+    class _WS:
+        ordenes: list = []
+
+        async def get_json_checked(self, path, params=None):
+            if path.endswith("newSingleOrder"):
+                raise httpx.ReadTimeout("perdida (sintético)")
+            return {"orders": list(self.ordenes)}
+    monkeypatch.setattr(primary_ws, "get_ws_client", lambda: _WS())
+    monkeypatch.setattr(oms, "_RECONCILE_DELAYS", (0.01, 0.02))
+    oms.set_live(True)
+    anterior = _hora_primary(_dt.now(_TZ_BA) - _td(seconds=2))     # 2 s ANTES del envío
+    _WS.ordenes = [_orden_broker(clientId="PREVIA-2S", status="FILLED", transactTime=anterior)]
+    res = await oms.place(_payload())
+    assert res["status"] == "DESCONOCIDA"
+    await _esperar_followups()
+    ev = [(a["event"], a.get("broker_order_id")) for a in oms.audit_tail(10)]
+    assert ("live_desconocida_posible", "PREVIA-2S") in ev        # candidato, con el id para verificar
+    assert not any(e == "live_estado" for e, _ in ev)            # NUNCA atribuida como ejecutada

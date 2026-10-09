@@ -899,7 +899,10 @@ def _broker_msg(d: Any) -> str:
 
 
 _RECONCILE_DELAYS = (2.0, 6.0)
-_RECONCILE_MARGEN_S = 5.0        # tolerancia de reloj entre el server y el broker
+# Ventana de DUDA hacia atrás: una orden idéntica dada de alta en estos segundos
+# ANTES del envío no se puede afirmar que sea la nuestra (reloj broker/server, u
+# otra terminal del desk que mandó la misma) → candidato, no 'nuestra' (A02).
+_VENTANA_DUDA_S = 5.0
 
 
 def _misma_orden(o: Dict[str, Any], rec: Dict[str, Any]) -> bool:
@@ -949,17 +952,27 @@ def _ts_orden(o: Dict[str, Any]) -> Optional[float]:
 
 
 def _es_nuestra(o: Dict[str, Any], rec: Dict[str, Any]) -> Optional[bool]:
-    """¿La orden del broker es ESTE intento? True si además de los términos su
-    alta es posterior al envío (con margen); False si es de antes (una orden
-    anterior idéntica, auditoría R01/B04); None si el broker no informa la hora
-    — ambiguo, no se atribuye."""
+    """¿La orden del broker es ESTE intento? No mandamos un clOrdId propio que el
+    broker eche de vuelta, así que sólo la HORA de alta distingue:
+      · alta ≥ envío → es este intento (True);
+      · alta en los `_VENTANA_DUDA_S` ANTERIORES al envío → NO se puede afirmar
+        que sea la nuestra (podría ser una idéntica de otra terminal o de unos
+        segundos antes): CANDIDATO (None, queda DESCONOCIDA para verificar) —
+        antes el margen de reloj se la comía como 'nuestra' y atribuía a este
+        intento el estado de otra orden (auditoría A02);
+      · claramente anterior → otra orden (False);
+      · sin hora de alta → ambiguo (None)."""
     if not _misma_orden(o, rec):
         return False
     t0 = rec.get("enviada_ts")
     ts = _ts_orden(o)
     if not t0 or ts is None:
         return None
-    return ts >= float(t0) - _RECONCILE_MARGEN_S
+    if ts >= float(t0):
+        return True
+    if ts >= float(t0) - _VENTANA_DUDA_S:
+        return None
+    return False
 
 
 async def _reconciliar_desconocida(rec: Dict[str, Any]) -> None:
@@ -987,8 +1000,12 @@ async def _reconciliar_desconocida(rec: Dict[str, Any]) -> None:
                 d = await get_ws_client().get_json_checked(path, {"accountId": cuenta})
             except Exception:  # noqa: BLE001 — sin respuesta no hay evidencia
                 continue
-            ordenes = d.get("orders", []) if isinstance(d, dict) else None
-            if not isinstance(ordenes, list):
+            ordenes = d.get("orders") if isinstance(d, dict) else None
+            # "orders" AUSENTE ≠ lista vacía válida: una respuesta de error de
+            # negocio (HTTP 200 con {status:ERROR} y sin "orders") NO prueba que
+            # la orden no esté → no cuenta como verificación completa (A02).
+            es_error = isinstance(d, dict) and str(d.get("status") or "").upper() in ("ERROR", "REJECTED", "FAILED", "FAIL")
+            if not isinstance(ordenes, list) or es_error:
                 continue
             if path == "rest/order/all":
                 verificado_todo = True
