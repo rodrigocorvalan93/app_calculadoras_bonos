@@ -285,3 +285,34 @@ def test_base_check_informa_la_regresion_sin_escribir(env, monkeypatch, capsys) 
     hw.aceptar_base_actual()
     assert base_check.main([]) == 0
     assert "regresión  ninguna" in capsys.readouterr().out
+
+
+# ── Auditoría 08/10 · A03 (detección por contenido, no sólo conteos) ──────────
+def test_a03_contenido_perdido_con_igual_conteo(env, monkeypatch) -> None:
+    """A03: una réplica pisa la base perdiendo UNA fila y ganando otra en la
+    misma rueda → MISMO conteo, invisible a `regresion_base`. Se detecta porque
+    una fila REAL que esta máquina journaleó ya no está en la base. Informativo:
+    no se suma a los bloqueantes (no frena el guardado)."""
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 25, 10, 0))
+    xlsx = _xlsx(env)
+    nuestras = _df_base(D, [("C1", 100.0, 99.0), ("C2", 101.0, 100.0)])
+    hw.write_journal(nuestras, D)                 # esta máquina journaleó C1 y C2 (reales)
+    _version_ajena(env, [nuestras])               # y la base TENÍA C1 y C2
+    hw._fechas_base(xlsx)                          # memoria local: D = (2 filas, 2 reales)
+    # una réplica pisa: misma rueda, MISMO conteo (2), pero perdió C2 y ganó C3
+    _version_ajena(env, [_df_base(D, [("C1", 100.0, 99.0), ("C3", 102.0, 101.0)])])
+    assert D not in hw.regresion_base(xlsx)        # el conteo (2 == 2) NO lo ve
+    assert hw.contenido_perdido(xlsx).get(D) == 1  # pero C2 (real, journaleada) ya no está
+    det = hw.regresion_detalle(xlsx)
+    assert det["contenido_perdido"].get(D.isoformat()) == 1
+    assert det["bloqueantes"] == [] and det["ruedas"] == []     # informativo, no frena
+
+
+def test_a03_sin_falso_positivo_cuando_la_base_crece(env, monkeypatch) -> None:
+    """Agregar filas (otra máquina suma un bono) NO es pérdida: las claves que
+    journaleamos siguen estando → sin aviso de contenido."""
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 25, 10, 0))
+    xlsx = _xlsx(env)
+    hw.write_journal(_df_base(D, [("C1", 100.0, 99.0), ("C2", 101.0, 100.0)]), D)
+    _version_ajena(env, [_df_base(D, [("C1", 100.0, 99.0), ("C2", 101.0, 100.0), ("C3", 102.0, 101.0)])])
+    assert hw.contenido_perdido(xlsx) == {}        # C1 y C2 siguen; C3 agregada no es pérdida
