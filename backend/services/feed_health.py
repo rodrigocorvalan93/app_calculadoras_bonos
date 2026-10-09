@@ -62,11 +62,16 @@ def snapshot() -> Dict[str, Any]:
         st = {}
     auth = bool(getattr(ws, "authenticated", False))
     connected = bool(st.get("connected"))
+    # Handshake / reconexión en curso (sesión abierta, lector vivo, sin socket
+    # hace menos de primary_ws.CONNECT_GRACE_S): NO es feed caído. Antes, el
+    # partial de /conexion renderizado un instante después de start() mostraba
+    # "⚠ Feed caído" pegado al "✅ Conectado" y el desk reconectaba de nuevo.
+    connecting = bool(st.get("connecting"))
     alive = bool(getattr(ws, "feed_alive", False))
     rueda = bool(en_rueda())
     age = data_age_s()
 
-    feed_down = bool(auth and not connected)
+    feed_down = bool(auth and not connected and not connecting)
     # El caso silencioso: socket conectado pero sin Md reciente del broker.
     md_stale = bool(rueda and auth and connected and not alive)
     # Y el doble check por los datos mismos: nada tickeó en la canasta líquida.
@@ -81,6 +86,7 @@ def snapshot() -> Dict[str, Any]:
 
     return {
         "feed_alive": alive, "authenticated": auth, "connected": connected,
+        "connecting": connecting,
         "stale_seconds": st.get("stale_seconds"),
         "feed_down": feed_down, "en_rueda": rueda,
         "data_age_s": (round(age, 1) if age is not None else None),

@@ -137,4 +137,4 @@ echo "------------------------------------------------------------"
   done
 ) &
 
-exec "$PY" -m uvicorn backend.main:app --host "${HOST}" --port "${PORT}" ${RELOAD:+--reload} --timeout-graceful-shutdown 10
+exec "$PY" -m uvicorn backend.main:app --host "${HOST}" --port "${PORT}" ${RELOAD:+--reload} --timeout-graceful-shutdown 10 --timeout-keep-alive 75

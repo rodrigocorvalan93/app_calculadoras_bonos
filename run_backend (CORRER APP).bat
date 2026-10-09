@@ -117,7 +117,7 @@ REM Primera vez: genera certs\ y confia la CA en el usuario actual
 REM (certutil, sin admin).
 "%PY%" -m backend.tools.https_local
 
-"%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port %PORT% %RELOAD% --timeout-graceful-shutdown 10
+"%PY%" -m uvicorn backend.main:app --host 127.0.0.1 --port %PORT% %RELOAD% --timeout-graceful-shutdown 10 --timeout-keep-alive 75
 
 echo.
 echo Backend se cerro. Codigo de salida: %ERRORLEVEL%

@@ -689,6 +689,24 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   `.tick-up` / `.tick-down` (flash CSS verde/rojo estilo terminal).
 - El dot `#live-dot` de la topbar muestra el estado del feed
   (live/idle/off). Todo vanilla JS — sin librerías nuevas.
+- **"Conectando" ≠ "Feed caído"** (09/10): `PrimaryWS.connecting` = sesión
+  abierta + lector vivo + sin socket hace menos de `CONNECT_GRACE_S` (10 s;
+  `_disconnected_since`); `feed_health.snapshot()["connecting"]` y
+  `feed_down` sólo cuando NO está conectando. `/conexion/login` espera
+  acotado (`_esperar_conexion`, 3 s) el handshake antes de renderizar, la
+  tarjeta dice "⏳ Conectando…" y `#conn-status` sondea `GET /conexion/status`
+  cada 10 s — antes el partial, renderizado un instante después de
+  `start()`, mostraba "⚠ Feed caído" pegado al "✅ Conectado" y el desk volvía a
+  apretar Reconectar (`old.stop()` tira un WS sano): ese era el "se me cae
+  todo el tiempo" de la PC de un compañero. El SSE (`/market/events`) deja
+  UNA línea `[sse] <cliente> cerró el stream tras N s · M eventos` al cortarse
+  (el access log sólo ve la apertura y `_QuietPolls` la calla). Los launchers
+  corren uvicorn con `--timeout-keep-alive 75` (default 5 s: Chrome reutiliza
+  sockets ociosos minutos y pegaba `ERR_CONNECTION_RESET` esporádicos).
+  Regresión: `test_feed_health.test_conectando_no_es_feed_caido`,
+  `test_conexion.test_conexion_status_se_refresca_y_espera_el_handshake`,
+  `test_marketdata.test_connecting_es_gracia_de_handshake_no_feed_caido`,
+  `test_live_engine.test_sse_emits_baseline_and_tick`.
 - **Pestaña vieja tras un deploy** (09/10): `/market/health` lleva `asset_v`
   (la misma versión de estáticos que `?v=` de los templates, `app.state.asset_v`)
   y la página la pone en `<body data-asset-v>`; `app.js checkVersion` (en el

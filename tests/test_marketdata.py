@@ -712,6 +712,32 @@ async def test_plazos_de_caucion_rechazados_se_reprueban_y_no_van_al_cache(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_connecting_es_gracia_de_handshake_no_feed_caido(monkeypatch) -> None:
+    """`connecting`: sesión abierta + lector vivo + sin socket hace menos de
+    CONNECT_GRACE_S. Sin sesión o sin lector no es "conectando"; pasada la
+    gracia tampoco (eso es feed caído de verdad)."""
+    import asyncio
+    import time
+
+    import httpx
+
+    client = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    s = client.stats()
+    assert s["connecting"] is False and s["disconnected_s"] is not None and s["disconnected_s"] >= 0
+    client._cookies = httpx.Cookies()                                  # sesión abierta…
+    assert client.connecting is False                                  # …pero sin lector
+    client._task = asyncio.get_running_loop().create_task(asyncio.sleep(5))
+    try:
+        assert client.connecting is True and client.stats()["connecting"] is True
+        client._disconnected_since = time.monotonic() - pws.CONNECT_GRACE_S - 1   # gracia vencida
+        assert client.connecting is False
+        client._connected, client._disconnected_since = True, None
+        assert client.connecting is False and client.stats()["disconnected_s"] is None
+    finally:
+        client._task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_tormenta_de_rechazos_no_se_persiste_y_se_reprueba(tmp_path, monkeypatch) -> None:
     """09/10/2026: una cuenta en LBO quedó con 2717 de 2903 símbolos en el
     cache de rechazados (una tormenta: sesión / permisos de market data, no
