@@ -59,6 +59,18 @@ BACKOFF_MAX = 30.0
 REJECTED_TTL_DAYS = 7
 _REJECTED_SAVE_DELAY = 3.0          # segundos: coalesce de la tormenta en UNA escritura
 
+# Tormenta de rechazos: si el broker rechaza MÁS de la mitad del universo (y
+# más de _TORMENTA_MIN símbolos) el problema no son los símbolos sino la sesión
+# o los permisos de market data de ESA cuenta — y cachearlos 7 días deja la app
+# con "precios viejos" toda la semana (09/10/2026: una cuenta en LBO quedó con
+# 2717 de 2903 símbolos en el cache; cada reconexión suscribía 186). Con
+# tormenta: se corta la recuperación de a uno, NO se persiste el cache del
+# host, /conexion lo avisa y el botón "Reprobar" (olvidar_rechazados) o el
+# cambio de día vuelven a probar todo. Un cache que ya viene así se descarta al
+# conectar (_cache_es_tormenta).
+_TORMENTA_FRAC = 0.5
+_TORMENTA_MIN = 300
+
 
 def _rejected_cache_path() -> Optional[str]:
     v = os.getenv("PRIMARY_REJECTED_CACHE")
@@ -271,6 +283,8 @@ class PrimaryWS:
         self._rechazo_diario: Dict[str, float] = {}
         self._diario_avisado: Set[str] = set()          # un log por plazo y por día
         self._reprobar_todo = False                      # cambió el día: pedir todos los plazos
+        self._reprobar_universo = False                  # tormenta + cambio de día: pedir TODO de nuevo
+        self._tormenta = False                           # ver _TORMENTA_FRAC
         self._reprobar_task: Optional[asyncio.Task] = None
         from backend.locale_ar import hoy_ba
         self._dia_diario = hoy_ba()
@@ -489,6 +503,7 @@ class PrimaryWS:
                 self._rejected_fecha[bad] = date.today().isoformat()
                 self._programar_guardado()
                 logger.warning("[primary_ws] símbolo inválido descartado: %s", bad)
+                self._chequear_tormenta()
             return
         # lote rechazado: reintentar de a uno (con los MISMOS entries del lote,
         # así los futuros conservan el OI) los que aún no probamos solos.
@@ -518,13 +533,61 @@ class PrimaryWS:
         if ws is None:
             return
         for s in symbols:
-            if s in self._rejected:
+            if s in self._rejected or self._tormenta:       # tormenta: no hay nada que salvar de a uno
                 continue
             try:
                 await ws.send(_subscribe_payload([s], entries=entries))
                 await asyncio.sleep(0.02)
             except (ConnectionClosed, WebSocketException):
                 return
+
+    # ── Tormenta de rechazos (sesión / permisos, no símbolos) ───────
+
+    def _es_tormenta(self, n: int) -> bool:
+        return n > _TORMENTA_MIN and n > _TORMENTA_FRAC * max(len(self._subscriptions), 1)
+
+    def _chequear_tormenta(self) -> None:
+        if self._tormenta or not self._es_tormenta(len(self._rejected)):
+            return
+        self._tormenta = True
+        self._stats["tormenta"] = True
+        logger.warning("[primary_ws] %s rechazó %d de %d símbolos — no parece un problema de símbolos "
+                       "sino de la sesión / los permisos de market data de la cuenta (%s). No guardo el "
+                       "cache de rechazados; «Reprobar» en /conexion o el cambio de día prueban todo de nuevo",
+                       self._host, len(self._rejected), len(self._subscriptions),
+                       self._stats.get("last_error_desc") or "el broker no mandó descripción")
+
+    def _cache_es_tormenta(self) -> bool:
+        """El cache cargado ya viene con una tormenta de otra sesión (la mitad
+        del universo o más): no vale como lista de símbolos inválidos."""
+        return not self._tormenta and self._es_tormenta(len(self._rejected))
+
+    def _olvidar_en_memoria(self) -> int:
+        n = len(self._rejected) + len(self._rechazo_diario)
+        self._rejected.clear()
+        self._rejected_fecha.clear()
+        self._retried_individually.clear()
+        self._retried_no_oi.clear()
+        self._rechazo_diario.clear()
+        self._diario_avisado.clear()
+        self._tormenta = False
+        self._stats["tormenta"] = False
+        self._rej_dirty = True
+        return n
+
+    async def olvidar_rechazados(self) -> int:
+        """Olvida TODOS los rechazos (memoria + cache del host en disco) y, si
+        está conectado, vuelve a suscribir el universo entero — el botón
+        «Reprobar símbolos rechazados» de /conexion. Devuelve cuántos olvidó."""
+        n = self._olvidar_en_memoria()
+        await self._flush_rechazados()                   # deja el host vacío en el JSON
+        if self._ws is not None and self._connected:
+            try:
+                await self._send_in_chunks(self._ws, self._subscriptions)
+            except (ConnectionClosed, WebSocketException) as exc:
+                logger.warning("[primary_ws] resubscribe tras olvidar rechazados falló: %s", exc)
+        logger.info("[primary_ws] olvidé %d símbolos rechazados de %s y volví a pedir el universo", n, self._host)
+        return n
 
     async def reprobar_pendientes(self, now_fn=None) -> List[str]:
         """Vuelve a pedir, de a uno, lo que el broker rechazó pero puede volver
@@ -544,6 +607,9 @@ class PrimaryWS:
             self._rechazo_diario.clear()
             self._diario_avisado.clear()
             self._reprobar_todo = True
+            if self._tormenta:                            # un día nuevo: la cuenta pudo arreglarse
+                self._olvidar_en_memoria()
+                self._reprobar_universo = True
         limite = (hoy - timedelta(days=REJECTED_TTL_DAYS)).isoformat()
         vencidos = [s for s, f in self._rejected_fecha.items() if f < limite]
         for s in vencidos:
@@ -556,6 +622,11 @@ class PrimaryWS:
             return []
         if not (_REPROBAR_HORAS[0] <= ahora.hour < _REPROBAR_HORAS[1]):
             return []
+        if self._reprobar_universo:
+            self._reprobar_universo = self._reprobar_todo = False
+            logger.info("[primary_ws] día nuevo tras una tormenta de rechazos: pido el universo entero de nuevo")
+            await self._send_in_chunks(self._ws, self._subscriptions)
+            return sorted(self._subscriptions)
         t = time.monotonic()
         due = []
         for s in sorted(self._subscriptions):
@@ -648,7 +719,9 @@ class PrimaryWS:
             return
         try:
             data = _leer_json(path) if os.path.exists(path) else {}
-            data[self._host] = dict(sorted(snap.items()))
+            # Con tormenta el snapshot no es una lista de símbolos inválidos:
+            # el host queda vacío (y lo que hubiera de antes también se va).
+            data[self._host] = {} if self._tormenta else dict(sorted(snap.items()))
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             tmp = f"{path}.tmp-{os.getpid()}"
             with open(tmp, "w", encoding="utf-8") as fh:
@@ -666,6 +739,7 @@ class PrimaryWS:
         s["subscriptions"] = len(self._subscriptions)
         s["rejected"] = len(self._rejected)
         s["rechazados_hoy"] = sorted(self._rechazo_diario)      # plazos de caución sin rueda hoy
+        s["tormenta"] = self._tormenta
         last = self._stats.get("last_message_at") or 0.0
         s["stale_seconds"] = round(time.time() - last, 1) if last else None
         s["feed_alive"] = self.feed_alive
@@ -771,6 +845,12 @@ class PrimaryWS:
             logger.info("[primary_ws] connected to %s", self.ws_url)
 
             if self._subscriptions:
+                if self._cache_es_tormenta():
+                    logger.warning("[primary_ws] el cache local trae %d de %d símbolos rechazados por %s — "
+                                   "demasiados para ser inválidos: los olvido y pruebo todo de nuevo",
+                                   len(self._rejected), len(self._subscriptions), self._host)
+                    self._olvidar_en_memoria()
+                    self._programar_guardado()
                 await self._send_in_chunks(ws, self._subscriptions)
 
             try:
@@ -798,6 +878,9 @@ class PrimaryWS:
             # inválido. Reintentamos el lote de a uno para conservar los
             # válidos y descartar solo el/los inválido(s).
             if obj.get("status") == "ERROR":
+                desc = obj.get("description") or obj.get("error")
+                if isinstance(desc, str) and desc.strip():
+                    self._stats["last_error_desc"] = desc.strip()[:200]   # motivo del broker (/conexion)
                 self._recover_from_error(obj.get("message"))
             else:
                 logger.warning("[primary_ws] mensaje no-Md (type=%r): %s",

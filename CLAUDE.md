@@ -448,6 +448,20 @@ TODOS los plazos de nuevo, y también reprueba con el proceso arriba los
 rechazados persistentes cuya entrada venció (antes sólo al reiniciar).
 `stats()["rechazados_hoy"]` los lista en `/market/diag`. Regresión:
 `test_marketdata.test_plazos_de_caucion_rechazados_se_reprueban_y_no_van_al_cache`.
+**Tormenta de rechazos** (09/10): una cuenta en LBO quedó con 2717 de 2903
+símbolos en el cache (media universo o más NO son símbolos inválidos: es la
+sesión / los permisos de market data de esa cuenta) → cada reconexión
+suscribía 186 y el feed mostraba "precios viejos" toda la semana. Umbral
+`_TORMENTA_MIN` (300) y `_TORMENTA_FRAC` (0,5 del universo suscripto):
+`_chequear_tormenta` corta la recuperación de a uno, `_guardar_rechazados`
+deja el host VACÍO en el JSON, `_connect_and_read` descarta un cache que ya
+viene así (`_cache_es_tormenta`), `reprobar_pendientes` al cambiar el día
+olvida todo y pide el universo entero, y el botón **«Reprobar símbolos
+rechazados»** de /conexion (`POST /conexion/reprobar` →
+`olvidar_rechazados()`, cualquier usuario logueado) lo hace al toque; la
+página avisa la tormenta con el `last_error_desc` del broker. Regresión:
+`test_marketdata.test_tormenta_de_rechazos_no_se_persiste_y_se_reprueba`,
+`test_conexion.test_conexion_reprobar_olvida_rechazados`.
 
 ## Add-in de Excel — OMS.MACRO en vivo (01/10)
 

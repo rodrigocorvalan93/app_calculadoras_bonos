@@ -709,3 +709,71 @@ async def test_plazos_de_caucion_rechazados_se_reprueban_y_no_van_al_cache(tmp_p
     assert set(data["broker-a.invalid"]) == {"MERV - XMEV - QQQ - CI"}
     assert pws._es_diario(c4d) and pws._es_diario("MERV - XMEV - DOLAR - 120D")
     assert not pws._es_diario(bono) and not pws._es_diario("MERV - XMEV - PESOS - 4D - CI")
+
+
+@pytest.mark.asyncio
+async def test_tormenta_de_rechazos_no_se_persiste_y_se_reprueba(tmp_path, monkeypatch) -> None:
+    """09/10/2026: una cuenta en LBO quedó con 2717 de 2903 símbolos en el
+    cache de rechazados (una tormenta: sesión / permisos de market data, no
+    símbolos inválidos) → cada reconexión suscribía 186 y el feed mostraba
+    precios viejos durante una semana. Ahora: más de la mitad del universo
+    rechazado = tormenta → se corta la recuperación de a uno, el cache del host
+    NO se guarda (queda vacío), un cache que ya viene así se descarta al
+    conectar, el cambio de día vuelve a pedir todo y `olvidar_rechazados`
+    (botón Reprobar de /conexion) lo hace al toque."""
+    import json
+    from datetime import date, datetime, timedelta
+
+    from backend.locale_ar import TZ_BA
+
+    path = tmp_path / "rechazados.json"
+    monkeypatch.setenv("PRIMARY_REJECTED_CACHE", str(path))
+    universo = [f"MERV - XMEV - S{i} - 24hs" for i in range(1000)]
+    sent: list = []
+
+    class FakeWS:
+        async def send(self, raw: str) -> None:
+            sent.append([p["symbol"] for p in json.loads(raw)["products"]])
+
+    client = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    client._subscriptions.update(universo)
+    client._connected, client._ws = True, FakeWS()
+    # 400 rechazos de a uno (> 300 pero < 50 %): todavía símbolos inválidos normales
+    for s in universo[:400]:
+        client._recover_from_error(pws._subscribe_payload([s]))
+    assert not client._tormenta and len(client._rejected) == 400
+    # pasa la mitad del universo → tormenta: la recuperación de a uno se corta
+    for s in universo[400:600]:
+        client._recover_from_error(pws._subscribe_payload([s]))
+    assert client._tormenta and client.stats()["tormenta"] is True
+    sent.clear()
+    await client._resubscribe_individually(universo[600:610], None)
+    assert sent == []
+    # el cache del host queda VACÍO (nada de persistir media universo)
+    await client._flush_rechazados()
+    assert json.loads(path.read_text(encoding="utf-8"))["broker-a.invalid"] == {}
+    # día nuevo en ventana: se olvida todo y se pide el universo entero
+    manana = datetime.now(TZ_BA).replace(hour=11, minute=0) + timedelta(days=1)
+    client._dia_diario = date.today()
+    sent.clear()
+    assert len(await client.reprobar_pendientes(now_fn=lambda: manana)) == 1000
+    assert not client._tormenta and not client._rejected and sum(len(m) for m in sent) == 1000
+    # un cache que YA viene con tormenta de otra sesión se descarta al conectar
+    path.write_text(json.dumps({"broker-a.invalid": {s: date.today().isoformat() for s in universo[:800]}}),
+                    encoding="utf-8")
+    c2 = pws.PrimaryWS("https://broker-a.invalid/", store=mds.MarketDataStore())
+    assert len(c2._rejected) == 800
+    c2._subscriptions.update(universo)
+    assert c2._cache_es_tormenta()
+    c2._subscriptions.clear()
+    c2._subscriptions.update(universo[:1200])               # con 500 de 1000 → no (<= 50 %)
+    c2._rejected = set(universo[:500]); c2._rejected_fecha = {s: "2026-10-06" for s in c2._rejected}
+    assert not c2._cache_es_tormenta()
+    # Reprobar: olvida memoria + disco y resuscribe todo por el WS vivo
+    c2._rejected = set(universo[:800]); c2._rejected_fecha = {s: "2026-10-06" for s in c2._rejected}
+    c2._connected, c2._ws = True, FakeWS()
+    sent.clear()
+    assert await c2.olvidar_rechazados() == 800
+    assert not c2._rejected and sum(len(m) for m in sent) == 1000
+    assert json.loads(path.read_text(encoding="utf-8"))["broker-a.invalid"] == {}
+    await c2.stop()
