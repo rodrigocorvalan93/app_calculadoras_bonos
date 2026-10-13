@@ -1119,3 +1119,117 @@ async def historicos_series_diarias(
     if len(_SD_CACHE) < 64:
         _SD_CACHE[key] = bytes(resp.body).decode("utf-8")
     return resp
+
+
+# ── Base: ver y bajar los archivos de Delta Bases ────────────────────────────
+# Pestaña lazy "Base" (13/10): tarjeta de archivos (px/tasas, FX, cierres,
+# acciones) + vista filtrada de la base px/tasas + descargas. El frame de la
+# base se lee UNA vez por firma en el executor (services/base_export); el
+# HTML se cachea por (parámetros, firmas). Las descargas binarias son
+# FileResponse (streaming por chunks) y van sin gzip (main._SSESinGzip:
+# un xlsx/parquet ya está comprimido y el gzip del middleware corre en el
+# event loop).
+_BASE_CACHE: Dict[tuple, str] = {}
+
+
+def _base_sig() -> tuple:
+    from backend.services import base_export, cierres
+    from backend.services import historico_writer as hw
+    xlsx = hw._xlsx_default() or ""
+    return (hw._firmas_base(xlsx) if xlsx else None, fx_hist.signature(), cierres.signature(),
+            base_export.frame_error())
+
+
+@router.get("/historicos/base", response_class=HTMLResponse)
+@_pestana_resiliente("No se pudo cargar la base")
+async def historicos_base(request: Request, codigo: str = "", desde: Optional[str] = None,
+                          hasta: Optional[str] = None, n: str = "200") -> HTMLResponse:
+    from backend.services import base_export
+    codigo = (codigo or "").strip().upper()[:24]
+    desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
+    try:
+        n_sel = max(1, min(int(n or 200), base_export.VISTA_MAX))
+    except ValueError:
+        n_sel = base_export.VISTA_DEFAULT
+    loop = asyncio.get_running_loop()
+    sig = await loop.run_in_executor(None, _base_sig)
+    key = (codigo, desde, hasta, n_sel, sig)
+    html = _BASE_CACHE.get(key)
+    if html is not None:
+        return HTMLResponse(html)
+
+    def _build() -> Dict[str, Any]:
+        arch = base_export.archivos()
+        v = base_export.vista(codigo, desde, hasta, n_sel) if arch.get("configurado") else None
+        return {"arch": arch, "v": v, "codigo": codigo, "desde": desde or "", "hasta": hasta or "",
+                "n_sel": n_sel, "fmt_bytes": base_export.fmt_bytes,
+                "csv_qs": _qs({"codigo": codigo, "desde": desde or "", "hasta": hasta or ""})}
+
+    ctx = await loop.run_in_executor(None, _build)
+    resp = _render(request, "partials/historico_base.html", **ctx)
+    sig_ahora = await loop.run_in_executor(None, _base_sig)
+    if _BASE_CACHE and next(iter(_BASE_CACHE))[-1] != sig_ahora:
+        _BASE_CACHE.clear()
+    if sig_ahora == sig and len(_BASE_CACHE) < 64:
+        _BASE_CACHE[key] = bytes(resp.body).decode("utf-8")
+    return resp
+
+
+def _qs(params: Dict[str, str]) -> str:
+    from urllib.parse import urlencode
+    return urlencode({k: v for k, v in params.items() if v})
+
+
+def _descarga_headers(nombre: str) -> Dict[str, str]:
+    from urllib.parse import quote
+    # RFC 6266: nombre ASCII de respaldo + filename* UTF-8 (los nombres llevan
+    # espacios y guiones largos: "Delta - historico_…").
+    ascii_ = nombre.encode("ascii", "replace").decode("ascii").replace('"', "")
+    return {"Content-Disposition": f'attachment; filename="{ascii_}"; filename*=UTF-8\'\'{quote(nombre)}',
+            "Cache-Control": "no-store",
+            # ya comprimido (xlsx / parquet) o grande: que GZipMiddleware no lo toque
+            "Content-Encoding": "identity"}
+
+
+@router.get("/historicos/base/archivo")
+async def historicos_base_archivo(que: str = ""):
+    """Un archivo de Delta Bases tal cual está en disco (clave cerrada)."""
+    from fastapi.responses import FileResponse
+    from backend.services import base_export
+    ent = await asyncio.get_running_loop().run_in_executor(None, base_export.archivo_descargable, que)
+    if not ent:
+        raise HTTPException(status_code=404, detail="archivo no disponible")
+    path, nombre, media = ent
+    return FileResponse(path, media_type=media, headers=_descarga_headers(nombre))
+
+
+@router.get("/historicos/base/cierre")
+async def historicos_base_cierre(fecha: str = "", fmt: str = "parquet"):
+    """Una partición del cierre completo (parquet tal cual, o CSV es-AR)."""
+    from fastapi.responses import FileResponse, PlainTextResponse
+    from backend.services import base_export
+    loop = asyncio.get_running_loop()
+    ent = await loop.run_in_executor(None, base_export.particion_descargable, _iso_o_none(fecha) or "")
+    if not ent:
+        raise HTTPException(status_code=404, detail="no hay cierre de esa fecha")
+    path, nombre = ent
+    if (fmt or "").lower() == "csv":
+        texto, _n = await loop.run_in_executor(None, base_export.csv_cierre, path)
+        return PlainTextResponse(texto, media_type="text/csv; charset=utf-8",
+                                 headers=_descarga_headers(nombre.replace(".parquet", ".csv")))
+    return FileResponse(path, media_type="application/vnd.apache.parquet", headers=_descarga_headers(nombre))
+
+
+@router.get("/historicos/base.csv")
+async def historicos_base_csv(codigo: str = "", desde: Optional[str] = None, hasta: Optional[str] = None):
+    """La base px/tasas filtrada como CSV es-AR (`;` + coma decimal + BOM)."""
+    from fastapi.responses import PlainTextResponse
+    from backend.services import base_export
+    codigo = (codigo or "").strip().upper()[:24]
+    desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
+    loop = asyncio.get_running_loop()
+    texto, n = await loop.run_in_executor(None, base_export.csv_base, codigo, desde, hasta)
+    nombre = base_export.nombre_csv("base_px_tasas", codigo, desde, hasta)
+    h = _descarga_headers(nombre)
+    h["X-Filas"] = str(n)
+    return PlainTextResponse(texto, media_type="text/csv; charset=utf-8", headers=h)

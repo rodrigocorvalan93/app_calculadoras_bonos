@@ -3,7 +3,7 @@
 {% block tab_historicos %}active{% endblock %}
 
 {% block content %}
-<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false, fechasLoaded: false, seriesLoaded: false, accionesLoaded: false, compLoaded: false }">
+<section class="curves" x-data="{ tab: 'macro', curvaLoaded: false, fechasLoaded: false, seriesLoaded: false, accionesLoaded: false, compLoaded: false, baseLoaded: false }">
   <header class="yas-header">
     <h1>Históricos</h1>
     <p class="muted">Series macro del BCRA y evolución histórica de tasas por curva (BYMA). Rango personalizable. Lectura única + cache; <strong>Actualizar</strong> relee.</p>
@@ -40,6 +40,9 @@
     <button @click="tab='comp'; if(!compLoaded){compLoaded=true; $nextTick(()=>htmx.trigger('#hist-comp','reveal'))}"
             :style="tab==='comp' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
             style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">⚖ Comparar (COMP)</button>
+    <button @click="tab='base'; if(!baseLoaded){baseLoaded=true; $nextTick(()=>htmx.trigger('#hist-base','reveal'))}"
+            :style="tab==='base' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
+            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">🗄 Base (ver / bajar)</button>
   </div>
 
   {# ── Macro (BCRA) ── #}
@@ -134,6 +137,15 @@
   <div x-show="tab==='comp'" x-cloak>
     <div id="hist-comp" hx-get="/historicos/comp" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
       <p class="muted" style="padding:10px">Cargando comparación…</p>
+    </div>
+  </div>
+
+  {# ── Base: los archivos de Delta Bases (px/tasas, FX, cierres, acciones) para
+     ver y bajar (lazy: el frame de la base se lee una vez por firma en el
+     executor; HTML cacheado por parámetros + firmas; descargas por streaming) ── #}
+  <div x-show="tab==='base'" x-cloak>
+    <div id="hist-base" hx-get="/historicos/base" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
+      <p class="muted" style="padding:10px">Cargando la base…</p>
     </div>
   </div>
 </section>

@@ -1237,3 +1237,31 @@ requirements.txt) y de https_local; `attrib` se lee con el codec `oem` y
 `--listar` sólo informa, `--sin-pin` baja sin fijar, `--quiet` sólo problemas
 (`backfill_historico.bat` lo corre así). Regresión:
 `tests/test_onedrive.py` (parchea `_atributos` / `_leer` / `_PLATFORM`).
+
+## Históricos · Base — ver y bajar los archivos de Delta Bases (13/10)
+
+Pedido del desk ("dónde puedo ver y descargar la base"): pestaña lazy **Base
+(ver / bajar)** en Históricos (`hist-base` → `GET /historicos/base`,
+`partials/historico_base.html`, `services/base_export.py`, todo sólo
+lectura). Tarjeta de archivos: base px/tasas (xlsx + espejo parquet, ¿espejo
+fiel?, ruedas / filas / reales / desde-hasta del `_resumen_base_cached` del
+writer), serie FX (xlsx + parquet, `fx_hist.status()`), cierre completo
+(particiones: cuántas, desde-hasta, bytes; listado memoizado por
+`cierres.signature()`) y acciones; un `os.stat` por archivo. Vista: las
+últimas N filas de la base px/tasas (todas las columnas, pre-formateadas
+es-AR) filtradas por Código / rango; `base_export.frame()` lee la base UNA
+vez por `hw._firmas_base` (parquet si el espejo vale, si no el Excel; sin
+apartar ni regenerar nada) y la deja en memoria compacta (`category`, ~10 MB
+por 250 ruedas) — `historico_byma` sólo guarda seis métricas por código, no
+sirve para symbol / cierre previo / fuente / hora. Descargas: `GET
+/historicos/base/archivo?que=px_xlsx|px_parquet|fx_xlsx|fx_parquet|acciones`
+(FileResponse por chunks, clave CERRADA → ruta; nunca texto del usuario),
+`GET /historicos/base/cierre?fecha=AAAA-MM-DD&fmt=parquet|csv` (la fecha se
+busca en `cierres.particiones()`), `GET /historicos/base.csv?codigo&desde&hasta`
+(CSV es-AR `;` + coma decimal + BOM, tope `CSV_MAX_FILAS`). Las tres rutas
+mandan `Content-Encoding: identity` y `main._SSESinGzip` les saca el
+`Accept-Encoding` (`_SIN_GZIP`): un xlsx / parquet ya viene comprimido y el
+gzip del middleware corre en el event loop. HTML cacheado por (parámetros,
+firmas: base + FX + cierres + error del frame); warm = lookup (medido p95 <
+50 ms en el test). Sub-rutas de Históricos: sólo login (la base no tiene
+tenencias). Regresión: `tests/test_historico_base.py`.

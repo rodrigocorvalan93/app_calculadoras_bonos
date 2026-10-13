@@ -835,12 +835,18 @@ def create_app() -> FastAPI:
     # por agregarse después) le borra el Accept-Encoding al request del SSE →
     # gzip lo deja pasar sin tocar. Versión-proof: no depende de cómo cada
     # versión de Starlette trate content-encoding en streams.
+    # Descargas de Históricos · Base: un xlsx / parquet ya viene comprimido y el
+    # gzip del middleware corre en el event loop (una base de 15 MB = cientos
+    # de ms trabados); el CSV grande, lo mismo. Van tal cual.
+    _SIN_GZIP = ("/historicos/base/archivo", "/historicos/base/cierre", "/historicos/base.csv")
+
     class _SSESinGzip:
         def __init__(self, app):  # noqa: ANN001
             self.app = app
 
         async def __call__(self, scope, receive, send):  # noqa: ANN001
-            if scope.get("type") == "http" and scope.get("path") == "/market/events":
+            if scope.get("type") == "http" and (scope.get("path") == "/market/events"
+                                               or scope.get("path", "").startswith(_SIN_GZIP)):
                 scope = dict(scope)
                 scope["headers"] = [(k, v) for (k, v) in scope["headers"]
                                     if k != b"accept-encoding"]
