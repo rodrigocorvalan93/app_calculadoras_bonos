@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no disponible")
 def test_getters_js_en_node() -> None:
     r = subprocess.run([shutil.which("node"), str(ROOT / "tests" / "excel_getters_harness.cjs")],
-                       capture_output=True, text=True, timeout=60)
+                       capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout)
     assert len(out) >= 25

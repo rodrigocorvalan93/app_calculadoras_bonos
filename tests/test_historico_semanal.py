@@ -198,7 +198,7 @@ def test_quepaso_harness_js():
     if not node:
         pytest.skip("node no disponible")
     harness = Path(__file__).resolve().parent / "quepaso_harness.cjs"
-    out = subprocess.run([node, str(harness)], capture_output=True, text=True, timeout=60)
+    out = subprocess.run([node, str(harness)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert out.returncode == 0, out.stdout + out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert res["ok"] is True, res["fallos"]

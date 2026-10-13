@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no disponible")
 def test_poller_js_en_node() -> None:
     r = subprocess.run([shutil.which("node"), str(ROOT / "tests" / "excel_poller_harness.cjs")],
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert r.returncode in (0, 1), r.stderr
     out = json.loads(r.stdout)
     assert out["seq_quieto"]["ok"], out["seq_quieto"]        # refresca aunque el seq no avance
