@@ -1196,3 +1196,26 @@ Invariantes que mantienen la app andando en Mac — CI la corre en
   `scrollbar-width` en el CSS son sólo cosméticos si faltan.
 - Windows-only sin guard no entra: `os.fchmod`, `msvcrt`, `winreg`,
   `LOCALAPPDATA` (`historico_writer.journal_dir` cae a `~/.local/share`).
+
+## Windows — carpeta del código sincronizada por OneDrive (13/10)
+
+En las PCs del desk el clon vive en la biblioteca de SharePoint que sincroniza
+OneDrive (`git pull` desde UNA máquina, OneDrive reparte los archivos). Con
+Archivos a petición, un archivo NUEVO del repo llega a las otras PCs como
+marcador "sólo en la nube" (`FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`) y se baja
+recién al leerlo; si OneDrive no lo entrega en ese momento (cerrado, pausado,
+sin sesión, sin red) `ReadFile` falla con un ERROR_CLOUD_FILE_* que el CRT
+traduce a EINVAL y Python muere al importar con `OSError: [Errno 22] Invalid
+argument` en `importlib … get_data` (Pablo, 13/10, `bna_fx.py` nuevo de #242).
+`backend/tools/onedrive.py` (stdlib) corre en el .bat ANTES de `https_local`
+(que ya importa medio backend): `escanear` (scandir con `follow_symlinks=False`,
+atributos del listado, sin `.git` / `__pycache__` / `data` / `certs`) junta los
+marcadores sin contenido, `hidratar` los lee enteros (eso dispara la bajada),
+y si la carpeta tiene reparse tag de nube y la raíz no está fijada, `fijar` =
+`attrib +P` sobre la raíz + `attrib +P /S /D` adentro ("Siempre mantener en
+este dispositivo": lo que llegue con los próximos pull viene ya bajado).
+Fuera de OneDrive y en Mac / Linux no hace nada (silencio, exit 0). Si algo
+no se pudo bajar sale con código 4 (`EXIT_SIN_BAJAR`; 3 es "app ya
+corriendo") y el .bat explica qué hacer en vez de dejar el traceback.
+`--listar` sólo informa, `--sin-pin` baja sin fijar. Regresión:
+`tests/test_onedrive.py` (parchea `_atributos` / `_leer` / `_PLATFORM`).

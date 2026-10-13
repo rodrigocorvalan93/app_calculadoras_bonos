@@ -111,6 +111,27 @@ echo   Add-in  : https://localhost:8443  ^(Excel =OMS.*, solo si hay certs^)
 echo   Ctrl+C para detener
 echo ------------------------------------------------------------
 
+REM --- Archivos a peticion de OneDrive (carpeta del codigo sincronizada) ---
+REM Un archivo NUEVO del repo llega a las otras PCs como marcador "solo en la
+REM nube" y, si OneDrive no lo entrega al leerlo, Python muere al importar con
+REM "OSError: [Errno 22] Invalid argument" (Pablo, 13/10). Esto baja lo que
+REM falte, deja la carpeta "Siempre mantener en este dispositivo" y corta
+REM con un mensaje claro si OneDrive no responde. Fuera de OneDrive no hace nada.
+"%PY%" -m backend.tools.onedrive
+if errorlevel 1 (
+  echo.
+  echo [ERROR] Hay archivos del codigo que OneDrive todavia no bajo a esta PC
+  echo         ^(Archivos a peticion: figuran "solo en la nube"^). Asi la app no arranca.
+  echo   1^) Fijate que OneDrive este abierto y sincronizando ^(icono de la nube
+  echo      en la barra, sin pausa ni error, con sesion iniciada^).
+  echo   2^) Boton derecho sobre la carpeta del codigo ^> "Siempre mantener en este dispositivo"
+  echo      y espera a que termine de bajar.
+  echo   3^) Volver a abrir este .bat.
+  echo.
+  pause
+  exit /b 4
+)
+
 REM --- Certificado HTTPS local (funciones =OMS.* de Excel) ---
 REM Idempotente: si el cert esta vigente no hace nada y sigue al toque.
 REM Primera vez: genera certs\ y confia la CA en el usuario actual
