@@ -1210,11 +1210,22 @@ argument` en `importlib … get_data` (Pablo, 13/10, `bna_fx.py` nuevo de #242).
 `backend/tools/onedrive.py` (stdlib) corre en el .bat ANTES de `https_local`
 (que ya importa medio backend): `escanear` (scandir con `follow_symlinks=False`,
 atributos del listado, sin `.git` / `__pycache__` / `data` / `certs`) junta los
-marcadores sin contenido, `hidratar` los lee enteros (eso dispara la bajada),
-y si la carpeta tiene reparse tag de nube y la raíz no está fijada, `fijar` =
-`attrib +P` sobre la raíz + `attrib +P /S /D` adentro ("Siempre mantener en
-este dispositivo": lo que llegue con los próximos pull viene ya bajado).
-Fuera de OneDrive y en Mac / Linux no hace nada (silencio, exit 0). Si algo
+marcadores sin contenido, `hidratar` los lee enteros (eso dispara la bajada;
+`attrib +P` solo es un pedido asincrónico al motor, no garantiza nada), y si
+la carpeta es de nube y la raíz no está fijada, `fijar` = `attrib -U +P` sobre
+la raíz + `attrib -U +P <raíz>\* /S /D` ("Siempre mantener en este
+dispositivo": lo nuevo hereda el pin y Storage Sense —Win11 22H2 vacía lo no
+abierto en 30 días— no lo toca; el `-U` porque un archivo ya "sólo en la
+nube" lleva UNPINNED y ese estado propio le gana al de la carpeta). "De nube"
+= tag 0x9000x01A en alguna entrada (el proceso pide verlos con
+`RtlSetProcessPlaceholderCompatibilityMode(2)`: por default Windows se los
+disfraza a una app común), o atributos que sólo pone el motor (RECALL /
+PINNED / UNPINNED), o la raíz bajo `raices_onedrive()` (variables `OneDrive*`
++ registro `HKCU\Software\Microsoft\OneDrive\Accounts`: las bibliotecas de
+SharePoint NO cuelgan de %OneDrive%). Un EINVAL en el read es consistente
+con un marcador pero no prueba: la prueba es el bit RECALL_ON_DATA_ACCESS que
+muestra `--listar`. Fuera de OneDrive y en Mac / Linux no hace nada
+(silencio, exit 0). Si algo
 no se pudo bajar sale con código 4 (`EXIT_SIN_BAJAR`; 3 es "app ya
 corriendo") y el .bat explica qué hacer en vez de dejar el traceback.
 `--listar` sólo informa, `--sin-pin` baja sin fijar. Regresión:

@@ -75,8 +75,42 @@ def test_escanear_junta_los_pendientes_y_salta_git_y_pycache(tmp_path, monkeypat
 def test_escanear_carpeta_comun_no_es_nube(tmp_path, monkeypatch) -> None:
     root = _arbol(tmp_path)
     monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set(), nube=False))
-    esc = onedrive.escanear(root)
+    esc = onedrive.escanear(root, raices=[])
     assert not esc.nube and not esc.pendientes and esc.total == 4
+
+
+def test_nube_sin_tag_por_atributos_de_pin_o_por_raiz_de_onedrive(tmp_path, monkeypatch) -> None:
+    """Windows le puede esconder el reparse point / tag a un proceso común
+    (marcadores "disfrazados"): la carpeta sigue siendo de nube si alguna
+    entrada lleva PINNED / UNPINNED / RECALL (los pone sólo el motor) o si
+    cuelga de una raíz de sincronización (SharePoint no está en %OneDrive%)."""
+    root = _arbol(tmp_path)
+    base = _atributos_fake(set(), nube=False)
+
+    def con_pin(entry):
+        attrs, tag, size = base(entry)
+        if entry.name == "fx.py":
+            attrs |= onedrive.FILE_ATTRIBUTE_UNPINNED                    # "liberar espacio" de antes
+        return attrs, tag, size
+
+    monkeypatch.setattr(onedrive, "_atributos", con_pin)
+    assert onedrive.escanear(root, raices=[]).nube
+    monkeypatch.setattr(onedrive, "_atributos", base)
+    assert not onedrive.escanear(root, raices=[]).nube
+    assert onedrive.escanear(root, raices=[str(tmp_path)]).nube          # abajo de la raíz
+    assert onedrive.escanear(root, raices=[str(root)]).nube              # es la raíz
+    assert not onedrive.escanear(root, raices=[str(tmp_path / "otra")]).nube
+    # bajo_raiz: sin distinguir mayúsculas ni barra final; 'app2' no es 'app'
+    assert onedrive.bajo_raiz(Path("C:\\Users\\p\\DELTA SA\\Inversiones - Documentos\\Codes\\app"),
+                              ["c:\\users\\P\\delta sa\\Inversiones - Documentos\\"])
+    assert not onedrive.bajo_raiz(Path("C:\\Users\\p\\OneDrive2\\app"), ["C:\\Users\\p\\OneDrive"])
+    assert not onedrive.bajo_raiz(root, [])
+    # fuera de Windows no hay registro ni ctypes: listas vacías / False, sin tirar
+    monkeypatch.setattr(onedrive, "_PLATFORM", "linux")
+    monkeypatch.delenv("OneDrive", raising=False)
+    assert onedrive.raices_onedrive() == [] and onedrive.exponer_marcadores() is False
+    monkeypatch.setenv("OneDrive", "C:\\Users\\p\\OneDrive")
+    assert onedrive.raices_onedrive() == ["C:\\Users\\p\\OneDrive"]
 
 
 def test_escanear_sigue_si_un_listado_falla(tmp_path, monkeypatch) -> None:
@@ -125,8 +159,11 @@ def test_fijar_usa_attrib_sobre_la_raiz_y_recursivo(tmp_path) -> None:
 
     ok, det = onedrive.fijar(tmp_path, run=run)
     assert ok and det == ""
-    assert llamadas[0] == (("attrib", "+P", str(tmp_path)), None)
-    assert llamadas[1] == (("attrib", "+P", "/S", "/D"), str(tmp_path))
+    # -U: un archivo que OneDrive ya marcó "sólo en la nube" lleva UNPINNED y
+    # ese estado propio le gana al pin de la carpeta; \* porque /S sólo
+    # recorre lo que matchea el patrón
+    assert llamadas[0] == (("attrib", "-U", "+P", str(tmp_path)), None)
+    assert llamadas[1] == (("attrib", "-U", "+P", str(tmp_path / "*"), "/S", "/D"), None)
 
     def run_mal(argv, **kw):
         return subprocess.CompletedProcess(argv, 1, "", "Acceso denegado")
@@ -203,6 +240,7 @@ def test_main_carpeta_comun_y_otras_plataformas_silencio(tmp_path, monkeypatch, 
     root = _arbol(tmp_path)
     monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
     monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set(), nube=False))
+    monkeypatch.setattr(onedrive, "raices_onedrive", lambda: [])        # el runner puede tener %OneDrive%
     monkeypatch.setattr(onedrive, "fijar", lambda *a, **k: pytest.fail("fuera de OneDrive no se fija"))
     assert onedrive.main(["--carpeta", str(root)]) == 0
     assert capsys.readouterr().out == ""

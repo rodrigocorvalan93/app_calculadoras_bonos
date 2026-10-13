@@ -23,14 +23,26 @@ ya importa medio backend):
      `os.scandir` con `follow_symlinks=False`: los atributos salen del
      listado, sin un syscall por archivo) y junta los archivos que todavía no
      tienen contenido local;
-  2. los LEE enteros — eso le pide la bajada al motor de OneDrive — y, si la
-     carpeta está sincronizada por la nube (reparse tag de OneDrive en algún
-     archivo), la deja marcada "Siempre mantener en este dispositivo"
-     (`attrib +P /S /D`, lo mismo que el botón derecho) para que lo que
-     llegue con los próximos git pull venga ya bajado;
+  2. los LEE enteros — eso le pide la bajada al motor de OneDrive (un
+     `attrib +P` solo es un pedido asincrónico: no garantiza nada cuando
+     vuelve) — y, si la carpeta está sincronizada por la nube, la deja
+     marcada "Siempre mantener en este dispositivo" (`attrib -U +P`, lo
+     mismo que el botón derecho) para que lo que llegue con los próximos git
+     pull venga ya bajado y Storage Sense (Windows 11 22H2: "sólo en la
+     nube" lo que no se abrió en 30 días) no lo vuelva a vaciar;
   3. si alguno NO se pudo bajar, sale con código 4 y el .bat explica qué
      hacer (abrir OneDrive, esperar que sincronice, volver a arrancar) en vez
      de dejar un traceback de importlib.
+
+"Sincronizada por la nube" se decide por tres caminos, porque Windows puede
+mostrarle los marcadores "disfrazados" a un proceso común (sin el bit de
+reparse point ni el tag): el tag de nube (0x9000x01A) en alguna entrada del
+listado — para verlo se pide `RtlSetProcessPlaceholderCompatibilityMode(2)`
+al arrancar —, los atributos que sólo pone el motor de nube
+(RECALL_ON_DATA_ACCESS / PINNED / UNPINNED, visibles aun disfrazados) o la
+carpeta bajo una raíz de sincronización de OneDrive (variables `OneDrive*`
+y el registro `HKCU\\Software\\Microsoft\\OneDrive\\Accounts`: ahí están
+también las bibliotecas de SharePoint, que NO cuelgan de %OneDrive%).
 
 En Mac / Linux no hay nada que hacer (los clones viven fuera de OneDrive y
 no existen los marcadores): sale 0 al instante.
@@ -65,11 +77,27 @@ FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000
 # de otros proveedores y de las versiones viejas del cliente).
 SIN_CONTENIDO = FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
 
-# Reparse tag de los archivos de un proveedor de nube (IsReparseTagCloud):
+# Atributos que SÓLO pone el motor de archivos en la nube (el estado de pin
+# lo deja OneDrive en cada archivo): verlos en alguna entrada = carpeta
+# sincronizada, aunque el proceso vea los marcadores disfrazados.
+DE_NUBE = SIN_CONTENIDO | FILE_ATTRIBUTE_PINNED | FILE_ATTRIBUTE_UNPINNED
+
+# Reparse tag de los archivos de un proveedor de nube (RtlIsCloudFilesPlaceholder):
 # 0x9000x01A — OneDrive lo deja también en los archivos ya bajados, así que
 # sirve para saber si la carpeta está sincronizada aunque todo esté local.
 IO_REPARSE_TAG_CLOUD = 0x9000001A
 IO_REPARSE_TAG_CLOUD_MASK = 0x0000F000
+
+# ntdll.RtlSetProcessPlaceholderCompatibilityMode (Windows 10 1803+):
+# 2 = PHCM_EXPOSE_PLACEHOLDERS — el proceso ve el bit de reparse point y el
+# tag de los marcadores (por default a una app "común" se los esconden).
+PHCM_EXPOSE_PLACEHOLDERS = 2
+
+# Variables que Windows deja con la raíz de cada OneDrive (personal / empresa).
+# Las bibliotecas de SharePoint sincronizadas NO cuelgan de ahí: viven en
+# %USERPROFILE%\<Tenant>\<Biblioteca> y sólo figuran en el registro.
+_ENV_RAICES = ("OneDrive", "OneDriveConsumer", "OneDriveCommercial")
+_REG_ACCOUNTS = r"Software\Microsoft\OneDrive\Accounts"
 
 # Carpetas que no hacen falta para correr la app (o que no deben tocarse):
 # .git es grande y consola.version() lo lee a mano sin tirar; data/ y certs/
@@ -119,6 +147,116 @@ def es_nube(tag: int) -> bool:
     return bool(tag) and (tag & ~IO_REPARSE_TAG_CLOUD_MASK) == IO_REPARSE_TAG_CLOUD
 
 
+def de_nube(attrs: int) -> bool:
+    return bool(attrs & DE_NUBE)
+
+
+def exponer_marcadores() -> bool:
+    """Pide ver los marcadores sin disfraz (reparse point + tag) para ESTE
+    proceso. Sólo Windows ≥ 1803; si ntdll no lo tiene o falla, False y se
+    sigue con los atributos (RECALL_ON_DATA_ACCESS se ve igual)."""
+    if not es_windows():
+        return False
+    try:
+        import ctypes
+        fn = ctypes.windll.ntdll.RtlSetProcessPlaceholderCompatibilityMode   # type: ignore[attr-defined]
+        fn.restype = ctypes.c_byte
+        fn.argtypes = [ctypes.c_byte]
+        return fn(PHCM_EXPOSE_PLACEHOLDERS) >= 0
+    except Exception:  # noqa: BLE001 — AttributeError / OSError / ValueError
+        return False
+
+
+def raices_onedrive() -> List[str]:
+    """Raíces de sincronización de esta cuenta de Windows: variables
+    OneDrive* + registro (UserFolder de cada cuenta, bibliotecas de SharePoint
+    en `Tenants\\<tenant>` — los NOMBRES de los valores son las carpetas — y
+    `ScopeIdToMountPointPathCache`). Vacío fuera de Windows; nunca tira."""
+    raices: List[str] = []
+    for var in _ENV_RAICES:
+        v = (os.environ.get(var) or "").strip()
+        if v:
+            raices.append(v)
+    if not es_windows():
+        return raices
+    try:
+        import winreg  # type: ignore[import-not-found]
+    except ImportError:
+        return raices
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_ACCOUNTS) as cuentas:
+            for i in range(64):
+                try:
+                    nombre = winreg.EnumKey(cuentas, i)
+                except OSError:
+                    break
+                with winreg.OpenKey(cuentas, nombre) as cuenta:
+                    try:
+                        v, _t = winreg.QueryValueEx(cuenta, "UserFolder")
+                        if isinstance(v, str) and v.strip():
+                            raices.append(v.strip())
+                    except OSError:
+                        pass
+                    for sub, modo in (("Tenants", "nombres"), ("ScopeIdToMountPointPathCache", "datos")):
+                        try:
+                            with winreg.OpenKey(cuenta, sub) as k:
+                                raices.extend(_valores_reg(winreg, k, modo))
+                        except OSError:
+                            pass
+    except OSError:
+        pass
+    return raices
+
+
+def _valores_reg(winreg, key, modo: str) -> List[str]:
+    """`Tenants` tiene UNA subclave por tenant cuyos valores se llaman como
+    las carpetas locales (modo 'nombres'); `ScopeIdToMountPointPathCache`
+    tiene los paths como DATOS (modo 'datos')."""
+    out: List[str] = []
+    claves = [key]
+    if modo == "nombres":
+        claves = []
+        for i in range(64):
+            try:
+                sub = winreg.EnumKey(key, i)
+            except OSError:
+                break
+            try:
+                claves.append(winreg.OpenKey(key, sub))
+            except OSError:
+                pass
+    for k in claves:
+        try:
+            for i in range(256):
+                try:
+                    nombre, dato, _t = winreg.EnumValue(k, i)
+                except OSError:
+                    break
+                v = nombre if modo == "nombres" else dato
+                if isinstance(v, str) and len(v) > 3 and v[1:3] == ":\\":
+                    out.append(v.strip())
+        finally:
+            if k is not key:
+                try:
+                    k.Close()
+                except Exception:  # noqa: BLE001
+                    pass
+    return out
+
+
+def bajo_raiz(root: Path, raices: Iterable[str]) -> bool:
+    """¿`root` está adentro (o es) alguna raíz? Comparación por texto con las
+    reglas de Windows (`ntpath`: sin distinguir mayúsculas ni `/` de `\\`),
+    para que el test corra en cualquier runner."""
+    import ntpath
+    r = ntpath.normcase(ntpath.normpath(str(root))).rstrip("\\")
+    for raiz in raices:
+        z = ntpath.normcase(ntpath.normpath(raiz)).rstrip("\\")
+        if z and (r == z or r.startswith(z + "\\")):
+            return True
+    return False
+
+
 def _atributos(entry: "os.DirEntry[str]") -> Tuple[int, int, int]:
     """(st_file_attributes, st_reparse_tag, st_size) de una entrada del
     listado, sin seguir el reparse point (en Windows sale del FindFirstFile:
@@ -154,15 +292,18 @@ def _es_dir(entry: "os.DirEntry[str]") -> bool:
         return False
 
 
-def escanear(root: Path, excluir: Iterable[str] = EXCLUIR) -> Escaneo:
+def escanear(root: Path, excluir: Iterable[str] = EXCLUIR,
+             raices: Optional[Iterable[str]] = None) -> Escaneo:
     """Recorre `root` (sin las carpetas de `excluir`, por nombre, a cualquier
-    nivel) y junta los archivos sin contenido local. Un listado que falla
-    (permisos, OneDrive a medio sincronizar) queda en `errores` y se sigue."""
+    nivel) y junta los archivos sin contenido local. `nube` = tag de nube o
+    atributo de nube en alguna entrada, o `root` bajo una raíz de OneDrive
+    (`raices`; default `raices_onedrive()`). Un listado que falla (permisos,
+    OneDrive a medio sincronizar) queda en `errores` y se sigue."""
     excl = frozenset(excluir)
     esc = Escaneo(root=root)
     attrs, tag = _atributos_de(root)
     esc.root_fijado = bool(attrs & FILE_ATTRIBUTE_PINNED)
-    esc.nube = es_nube(tag)
+    esc.nube = es_nube(tag) or de_nube(attrs) or bajo_raiz(root, raices_onedrive() if raices is None else raices)
     pila = [root]
     while pila:
         d = pila.pop()
@@ -180,7 +321,7 @@ def escanear(root: Path, excluir: Iterable[str] = EXCLUIR) -> Escaneo:
             except OSError as e:
                 esc.errores.append((Path(entry.path), e))
                 continue
-            if es_nube(tag):
+            if es_nube(tag) or de_nube(attrs):
                 esc.nube = True
             if _es_dir(entry):
                 pila.append(Path(entry.path))
@@ -220,12 +361,18 @@ def hidratar(pendientes: Iterable[Archivo],
 
 def fijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> Tuple[bool, str]:
     """"Siempre mantener en este dispositivo" para la carpeta y todo lo de
-    adentro: `attrib +P` sobre la raíz (las entradas nuevas heredan el
-    estado) y `attrib +P /S /D` desde adentro (todo lo que ya existe, .git
-    incluido). attrib viene con Windows; no pide admin y no toca mtimes."""
+    adentro: `attrib -U +P` sobre la raíz (lo NUEVO que cree el motor
+    adentro hereda el pin) y `attrib -U +P <raíz>\\* /S /D` (todo lo que ya
+    existe, .git incluido; `/S` sólo recorre lo que matchea el patrón, por
+    eso el `\\*`). El `-U` importa: un archivo que OneDrive ya marcó "sólo en
+    la nube" (Liberar espacio / Storage Sense) lleva UNPINNED y ese estado
+    propio le gana al pin de la carpeta. attrib viene con Windows; no pide
+    admin y sólo cambia el ChangeTime de NTFS, que git no mira."""
     try:
-        r1 = run(["attrib", "+P", str(root)], capture_output=True, text=True, timeout=60)
-        r2 = run(["attrib", "+P", "/S", "/D"], cwd=str(root), capture_output=True, text=True, timeout=300)
+        r1 = run(["attrib", "-U", "+P", str(root)], capture_output=True, text=True,
+                 encoding="utf-8", errors="replace", timeout=60)
+        r2 = run(["attrib", "-U", "+P", str(root / "*"), "/S", "/D"], capture_output=True, text=True,
+                 encoding="utf-8", errors="replace", timeout=300)
     except (OSError, subprocess.SubprocessError) as e:
         return False, str(e)
     if r1.returncode == 0 and r2.returncode == 0:
@@ -264,6 +411,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0                                     # sin marcadores fuera de Windows
 
     root = Path(args.carpeta).resolve() if args.carpeta else default_root()
+    exponer_marcadores()                             # ver tags y reparse points sin disfraz
     esc = escanear(root)
     say = (lambda m: None) if args.quiet else _say   # noqa: E731
 
@@ -293,7 +441,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if esc.nube and not esc.root_fijado and not args.sin_pin and not args.listar:
         ok, det = fijar(root)
         if ok:
-            say("[onedrive] carpeta marcada \"Siempre mantener en este dispositivo\" (attrib +P): "
+            say("[onedrive] carpeta marcada \"Siempre mantener en este dispositivo\" (attrib -U +P): "
                 "lo que llegue con los próximos git pull viene ya bajado")
         else:
             _say(f"[onedrive] ! no pude fijar la carpeta con attrib ({det}); a mano: botón derecho "
