@@ -153,12 +153,31 @@ def test_hidratar_lee_y_reporta_lo_que_onedrive_no_entrega(tmp_path, monkeypatch
 def test_fijar_usa_attrib_sobre_la_raiz_y_recursivo(tmp_path) -> None:
     llamadas: list[tuple] = []
 
+    kws: list[dict] = []
+
     def run(argv, **kw):
         llamadas.append((tuple(argv), kw.get("cwd")))
+        kws.append(kw)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     ok, det = onedrive.fijar(tmp_path, run=run)
     assert ok and det == ""
+    # attrib habla en OEM (cp850) y una ruta con ü tiraba UnicodeDecodeError con
+    # el cp1252 estricto de Popen: 'replace' nunca tira; 'oem' sólo en Windows
+    assert all(k["errors"] == "replace" and k["encoding"] == "utf-8" for k in kws)
+    monkeypatch_plat = onedrive._PLATFORM
+    onedrive._PLATFORM = "win32"
+    try:
+        kws.clear(); onedrive.fijar(tmp_path, run=run)
+        assert all(k["encoding"] == "oem" for k in kws)
+    finally:
+        onedrive._PLATFORM = monkeypatch_plat
+
+    def run_revienta(argv, **kw):
+        raise UnicodeDecodeError("charmap", b"\x81", 0, 1, "no")        # ValueError, no OSError
+
+    ok, det = onedrive.fijar(tmp_path, run=run_revienta)
+    assert not ok and "charmap" in det
     # -U: un archivo que OneDrive ya marcó "sólo en la nube" lleva UNPINNED y
     # ese estado propio le gana al pin de la carpeta; \* porque /S sólo
     # recorre lo que matchea el patrón
@@ -258,7 +277,11 @@ def test_el_bat_corre_el_preflight_antes_de_https_y_explica_el_error() -> None:
     i_one, i_https, i_uvi = (bat.index("backend.tools.onedrive"), bat.index("backend.tools.https_local"),
                              bat.index("-m uvicorn backend.main:app"))
     assert i_one < i_https < i_uvi                   # https_local ya importa medio backend
-    assert "if errorlevel 1" in bat[i_one:i_https] and "exit /b 4" in bat[i_one:i_https]
+    assert i_one < bat.index("pip install -r")       # y pip lee requirements.txt: tambien puede ser marcador
+    # exit 4 (archivos sin bajar) tiene su mensaje; cualquier otro error, el generico
+    assert "if errorlevel 4 if not errorlevel 5 (" in bat[i_one:i_https]
+    assert "if errorlevel 1 (" in bat[i_one:i_https] and "exit /b 4" in bat[i_one:i_https]
+    assert "Errno 22" in bat[i_one:i_https]
     assert "Mantener siempre en este dispositivo" in bat[i_one:i_https]
     assert bat.isascii()
 
@@ -340,3 +363,27 @@ def test_backfill_bat_corre_el_mismo_chequeo() -> None:
     bat = (ROOT / "backfill_historico.bat").read_text(encoding="utf-8")
     assert "backend.tools.onedrive --quiet" in bat and "exit /b 4" in bat
     assert bat.index("backend.tools.onedrive") < bat.index(":menu") and bat.isascii()
+
+
+def test_main_sale_4_si_no_pudo_listar_una_carpeta_de_la_nube(tmp_path, monkeypatch, capsys) -> None:
+    """Lo que hay adentro de una carpeta que no se pudo listar no se chequeó
+    ni se bajó: en una carpeta de nube es lo mismo que un archivo sin contenido."""
+    root = _arbol(tmp_path)
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
+    monkeypatch.setattr(onedrive, "fijar", lambda *a, **k: pytest.fail("no se fija con carpetas sin listar"))
+    real = os.scandir
+
+    def scandir(d):
+        if str(d).endswith("services"):
+            raise PermissionError(13, "denegado")
+        return real(d)
+
+    monkeypatch.setattr(onedrive.os, "scandir", scandir)
+    assert onedrive.main(["--carpeta", str(root)]) == 4
+    out = capsys.readouterr().out
+    assert "no pude listar" in out and "services" in out and "no se bajó" in out
+    # en una carpeta común (fuera de OneDrive) el listado fallido sólo se informa
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set(), nube=False))
+    monkeypatch.setattr(onedrive, "raices_onedrive", lambda: [])
+    assert onedrive.main(["--carpeta", str(root)]) == 0

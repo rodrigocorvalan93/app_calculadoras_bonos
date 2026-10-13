@@ -65,7 +65,7 @@ from typing import Callable, Iterable, List, Optional, Tuple
 # cualquier runner parcheándola.
 _PLATFORM = sys.platform
 
-# winnt.h — de estos el módulo `stat` sólo expone FILE_ATTRIBUTE_OFFLINE.
+# winnt.h — de estos el módulo `stat` sólo expone DIRECTORY y OFFLINE.
 FILE_ATTRIBUTE_DIRECTORY = 0x00000010
 FILE_ATTRIBUTE_OFFLINE = 0x00001000
 FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000
@@ -370,12 +370,17 @@ def fijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = s
     la nube" (Liberar espacio / Storage Sense) lleva UNPINNED y ese estado
     propio le gana al pin de la carpeta. attrib viene con Windows; no pide
     admin y sólo cambia el ChangeTime de NTFS, que git no mira."""
+    # attrib escribe sus mensajes en el code page OEM (cp850: "No se restablece
+    # el archivo oculto - …\.git", uno por ruta) y Popen(text=True) a secas los
+    # decodifica con el ANSI (cp1252) en modo estricto: una ruta con ü / É
+    # tiraba UnicodeDecodeError (ValueError, no OSError) y el .bat leía exit 1
+    # con todo ya bajado. `oem` sólo existe en Windows; `replace` nunca tira.
+    texto = dict(capture_output=True, text=True, errors="replace",
+                 encoding="oem" if es_windows() else "utf-8")
     try:
-        r1 = run(["attrib", "-U", "+P", str(root)], capture_output=True, text=True,
-                 encoding="utf-8", errors="replace", timeout=60)
-        r2 = run(["attrib", "-U", "+P", str(root / "*"), "/S", "/D"], capture_output=True, text=True,
-                 encoding="utf-8", errors="replace", timeout=300)
-    except (OSError, subprocess.SubprocessError) as e:
+        r1 = run(["attrib", "-U", "+P", str(root)], timeout=60, **texto)
+        r2 = run(["attrib", "-U", "+P", str(root / "*"), "/S", "/D"], timeout=300, **texto)
+    except Exception as e:  # noqa: BLE001 — paso best-effort: nunca aborta el arranque
         return False, str(e)
     if r1.returncode == 0 and r2.returncode == 0:
         return True, ""
@@ -441,6 +446,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             _say(f"[onedrive] {len(fallos)} archivo(s) siguen sin contenido: OneDrive no los entregó "
                  "(cerrado, pausado, sin sesión o sin red). La app no puede arrancar así.")
             return EXIT_SIN_BAJAR
+    if esc.nube and esc.errores:
+        # una carpeta de la nube que no se pudo listar: lo de adentro no se
+        # chequeó ni se bajó — mismo trato que un archivo sin contenido
+        _say(f"[onedrive] {len(esc.errores)} carpeta(s) no se pudieron listar: lo que tienen adentro "
+             "no se bajó. La app no puede arrancar así.")
+        return EXIT_SIN_BAJAR
 
     if esc.nube and not esc.root_fijado and not args.sin_pin and not args.listar:
         ok, det = fijar(root)

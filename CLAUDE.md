@@ -1227,8 +1227,13 @@ SharePoint NO cuelgan de %OneDrive%). Un EINVAL en el read es consistente
 con un marcador pero no prueba: la prueba es el bit RECALL_ON_DATA_ACCESS que
 muestra `--listar`. Fuera de OneDrive y en Mac / Linux no hace nada
 (silencio, exit 0). Si algo
-no se pudo bajar sale con código 4 (`EXIT_SIN_BAJAR`; 3 es "app ya
-corriendo") y el .bat explica qué hacer en vez de dejar el traceback.
+no se pudo bajar, o no se pudo listar una carpeta de la nube (lo de adentro no
+se chequeó), sale con código 4 (`EXIT_SIN_BAJAR`; 3 es "app ya corriendo") y
+el .bat explica qué hacer; cualquier otro código (traceback del tool mismo
+como marcador con OneDrive cerrado) va a un mensaje genérico que señala el
+`Errno 22`. El paso corre DESPUÉS de crear el venv y ANTES de pip (lee
+requirements.txt) y de https_local; `attrib` se lee con el codec `oem` y
+`errors="replace"` (cp850 vs cp1252 estricto tiraba UnicodeDecodeError).
 `--listar` sólo informa, `--sin-pin` baja sin fijar, `--quiet` sólo problemas
 (`backfill_historico.bat` lo corre así). Regresión:
 `tests/test_onedrive.py` (parchea `_atributos` / `_leer` / `_PLATFORM`).
