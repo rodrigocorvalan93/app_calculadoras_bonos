@@ -26,7 +26,7 @@ ya importa medio backend):
   2. los LEE enteros — eso le pide la bajada al motor de OneDrive (un
      `attrib +P` solo es un pedido asincrónico: no garantiza nada cuando
      vuelve) — y, si la carpeta está sincronizada por la nube, la deja
-     marcada "Siempre mantener en este dispositivo" (`attrib -U +P`, lo
+     marcada "Mantener siempre en este dispositivo" (`attrib -U +P`, lo
      mismo que el botón derecho) para que lo que llegue con los próximos git
      pull venga ya bajado y Storage Sense (Windows 11 22H2: "sólo en la
      nube" lo que no se abrió en 30 días) no lo vuelva a vaciar;
@@ -100,10 +100,12 @@ _ENV_RAICES = ("OneDrive", "OneDriveConsumer", "OneDriveCommercial")
 _REG_ACCOUNTS = r"Software\Microsoft\OneDrive\Accounts"
 
 # Carpetas que no hacen falta para correr la app (o que no deben tocarse):
-# .git es grande y consola.version() lo lee a mano sin tirar; data/ y certs/
-# son locales de cada máquina; los venv nunca van adentro del repo.
+# .git es grande y consola.version() lo lee a mano sin tirar; los venv nunca
+# van adentro del repo. certs/ y data/ SÍ entran: viven adentro del clon (o
+# sea, sincronizados) y https_local / el store persistido los leen al
+# arrancar — un cert "sólo en la nube" haría regenerar la CA.
 EXCLUIR = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-                     ".venv", "venv", "node_modules", "certs", "data", ".claude"})
+                     ".venv", "venv", "node_modules", ".claude"})
 
 _MB = 1 << 20
 EXIT_SIN_BAJAR = 4           # distinto del 3 = "la app ya está corriendo" de main.py
@@ -360,7 +362,7 @@ def hidratar(pendientes: Iterable[Archivo],
 
 
 def fijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> Tuple[bool, str]:
-    """"Siempre mantener en este dispositivo" para la carpeta y todo lo de
+    """"Mantener siempre en este dispositivo" para la carpeta y todo lo de
     adentro: `attrib -U +P` sobre la raíz (lo NUEVO que cree el motor
     adentro hereda el pin) y `attrib -U +P <raíz>\\* /S /D` (todo lo que ya
     existe, .git incluido; `/S` sólo recorre lo que matchea el patrón, por
@@ -402,7 +404,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                                              "dejó 'sólo en la nube' (Archivos a petición)")
     ap.add_argument("--listar", action="store_true", help="sólo informar, sin bajar ni fijar")
     ap.add_argument("--sin-pin", action="store_true", help="bajar sin marcar la carpeta "
-                                                           "'Siempre mantener en este dispositivo'")
+                                                           "'Mantener siempre en este dispositivo'")
     ap.add_argument("--carpeta", default="", help="carpeta a revisar (default: la raíz del proyecto)")
     ap.add_argument("--quiet", action="store_true", help="sólo problemas")
     args = ap.parse_args(argv)
@@ -432,7 +434,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         total_kb = sum(a.size for a in esc.pendientes)
         _say(f"[onedrive] {len(esc.pendientes)} de {esc.total} archivos del código están 'sólo en la nube' "
              f"(Archivos a petición de OneDrive, {_kb(total_kb)}): bajándolos…")
-        fallos = hidratar(esc.pendientes, avisar=lambda m: _say(f"[onedrive] {m}"))
+        # progreso por archivo = `say` (--quiet lo calla); un fallo se ve siempre
+        fallos = hidratar(esc.pendientes,
+                          avisar=lambda m: (_say if m.startswith("x ") else say)(f"[onedrive] {m}"))
         if fallos:
             _say(f"[onedrive] {len(fallos)} archivo(s) siguen sin contenido: OneDrive no los entregó "
                  "(cerrado, pausado, sin sesión o sin red). La app no puede arrancar así.")
@@ -440,12 +444,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if esc.nube and not esc.root_fijado and not args.sin_pin and not args.listar:
         ok, det = fijar(root)
-        if ok:
-            say("[onedrive] carpeta marcada \"Siempre mantener en este dispositivo\" (attrib -U +P): "
+        if ok and not (_atributos_de(root)[0] & FILE_ATTRIBUTE_PINNED):
+            # attrib devolvió 0 pero la raíz no muestra el pin: se vuelve a
+            # intentar en el próximo arranque (root_fijado sigue en False).
+            _say("[onedrive] ! attrib corrió pero la carpeta todavía no figura fijada; "
+                 "se reintenta en el próximo arranque")
+        elif ok:
+            say("[onedrive] carpeta marcada \"Mantener siempre en este dispositivo\" (attrib -U +P): "
                 "lo que llegue con los próximos git pull viene ya bajado")
         else:
             _say(f"[onedrive] ! no pude fijar la carpeta con attrib ({det}); a mano: botón derecho "
-                 "sobre la carpeta del código > \"Siempre mantener en este dispositivo\"")
+                 "sobre la carpeta del código > \"Mantener siempre en este dispositivo\"")
     return 0
 
 

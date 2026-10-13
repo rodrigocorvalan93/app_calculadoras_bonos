@@ -115,7 +115,7 @@ REM --- Archivos a peticion de OneDrive (carpeta del codigo sincronizada) ---
 REM Un archivo NUEVO del repo llega a las otras PCs como marcador "solo en la
 REM nube" y, si OneDrive no lo entrega al leerlo, Python muere al importar con
 REM "OSError: [Errno 22] Invalid argument" (Pablo, 13/10). Esto baja lo que
-REM falte, deja la carpeta "Siempre mantener en este dispositivo" y corta
+REM falte, deja la carpeta "Mantener siempre en este dispositivo" y corta
 REM con un mensaje claro si OneDrive no responde. Fuera de OneDrive no hace nada.
 "%PY%" -m backend.tools.onedrive
 if errorlevel 1 (
@@ -124,9 +124,10 @@ if errorlevel 1 (
   echo         ^(Archivos a peticion: figuran "solo en la nube"^). Asi la app no arranca.
   echo   1^) Fijate que OneDrive este abierto y sincronizando ^(icono de la nube
   echo      en la barra, sin pausa ni error, con sesion iniciada^).
-  echo   2^) Boton derecho sobre la carpeta del codigo ^> "Siempre mantener en este dispositivo"
+  echo   2^) Boton derecho sobre la carpeta del codigo ^> "Mantener siempre en este dispositivo"
   echo      y espera a que termine de bajar.
   echo   3^) Volver a abrir este .bat.
+  echo   Si arriba hay un error de Python que no habla de archivos sin bajar, mandalo tal cual.
   echo.
   pause
   exit /b 4

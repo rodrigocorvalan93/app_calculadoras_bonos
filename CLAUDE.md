@@ -1209,11 +1209,12 @@ traduce a EINVAL y Python muere al importar con `OSError: [Errno 22] Invalid
 argument` en `importlib … get_data` (Pablo, 13/10, `bna_fx.py` nuevo de #242).
 `backend/tools/onedrive.py` (stdlib) corre en el .bat ANTES de `https_local`
 (que ya importa medio backend): `escanear` (scandir con `follow_symlinks=False`,
-atributos del listado, sin `.git` / `__pycache__` / `data` / `certs`) junta los
+atributos del listado, sin `.git` / `__pycache__`; `certs/` y `data/` SÍ, viven
+adentro del clon sincronizado y se leen al arrancar) junta los
 marcadores sin contenido, `hidratar` los lee enteros (eso dispara la bajada;
 `attrib +P` solo es un pedido asincrónico al motor, no garantiza nada), y si
 la carpeta es de nube y la raíz no está fijada, `fijar` = `attrib -U +P` sobre
-la raíz + `attrib -U +P <raíz>\* /S /D` ("Siempre mantener en este
+la raíz + `attrib -U +P <raíz>\* /S /D` ("Mantener siempre en este
 dispositivo": lo nuevo hereda el pin y Storage Sense —Win11 22H2 vacía lo no
 abierto en 30 días— no lo toca; el `-U` porque un archivo ya "sólo en la
 nube" lleva UNPINNED y ese estado propio le gana al de la carpeta). "De nube"
@@ -1228,5 +1229,6 @@ muestra `--listar`. Fuera de OneDrive y en Mac / Linux no hace nada
 (silencio, exit 0). Si algo
 no se pudo bajar sale con código 4 (`EXIT_SIN_BAJAR`; 3 es "app ya
 corriendo") y el .bat explica qué hacer en vez de dejar el traceback.
-`--listar` sólo informa, `--sin-pin` baja sin fijar. Regresión:
+`--listar` sólo informa, `--sin-pin` baja sin fijar, `--quiet` sólo problemas
+(`backfill_historico.bat` lo corre así). Regresión:
 `tests/test_onedrive.py` (parchea `_atributos` / `_leer` / `_PLATFORM`).

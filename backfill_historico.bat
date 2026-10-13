@@ -25,6 +25,16 @@ echo Usando Python:
 "%PY%" --version
 echo.
 
+REM Carpeta sincronizada por OneDrive: bajar lo que este "solo en la nube"
+REM antes de importar backend (mismo chequeo que "run_backend (CORRER APP).bat").
+"%PY%" -m backend.tools.onedrive --quiet
+if errorlevel 1 (
+  echo [ERROR] OneDrive no bajo archivos del codigo a esta PC. Abri OneDrive, boton derecho
+  echo         sobre la carpeta ^> "Mantener siempre en este dispositivo" y volve a intentar.
+  pause
+  exit /b 4
+)
+
 :menu
 echo Que queres hacer?
 echo   1^) FX: ver el PLAN ^(dry-run: no escribe nada^)

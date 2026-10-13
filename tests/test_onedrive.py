@@ -186,10 +186,13 @@ def test_main_baja_fija_y_sale_0(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(onedrive, "_leer", lambda p: leidos.append(p.name))
     fijadas: list[Path] = []
     monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (fijadas.append(root), (True, ""))[1])
+    # la raíz: sin pin antes de fijar, con pin después (attrib pone el atributo al toque)
+    estados = iter([(0x10, NUBE_TAG), (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG)])
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: next(estados))
     assert onedrive.main(["--carpeta", str(root)]) == 0
     out = capsys.readouterr().out
     assert leidos == ["bna_fx.py"] and fijadas == [root]
-    assert "1 de 4 archivos" in out and "bna_fx.py" in out and "Siempre mantener en este dispositivo" in out
+    assert "1 de 4 archivos" in out and "bna_fx.py" in out and "Mantener siempre en este dispositivo" in out
 
 
 def test_main_sale_4_si_onedrive_no_entrega_y_no_fija(tmp_path, monkeypatch, capsys) -> None:
@@ -256,5 +259,84 @@ def test_el_bat_corre_el_preflight_antes_de_https_y_explica_el_error() -> None:
                              bat.index("-m uvicorn backend.main:app"))
     assert i_one < i_https < i_uvi                   # https_local ya importa medio backend
     assert "if errorlevel 1" in bat[i_one:i_https] and "exit /b 4" in bat[i_one:i_https]
-    assert "Siempre mantener en este dispositivo" in bat[i_one:i_https]
+    assert "Mantener siempre en este dispositivo" in bat[i_one:i_https]
     assert bat.isascii()
+
+
+def test_certs_y_data_entran_al_chequeo(tmp_path, monkeypatch) -> None:
+    """certs/ y data/ viven adentro del clon sincronizado y se leen al arrancar
+    (https_local, store persistido): un cert "sólo en la nube" haría regenerar
+    la CA. .git y __pycache__ siguen afuera."""
+    root = _arbol(tmp_path)
+    (root / "certs").mkdir()
+    (root / "certs" / "oms-local-ca.crt").write_bytes(b"cert")
+    (root / "data").mkdir()
+    (root / "data" / "market_snapshot.json").write_bytes(b"{}")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake({"oms-local-ca.crt", "aa"}))
+    esc = onedrive.escanear(root, raices=[])
+    assert esc.total == 6 and [a.path.name for a in esc.pendientes] == ["oms-local-ca.crt"]
+    assert "certs" not in onedrive.EXCLUIR and "data" not in onedrive.EXCLUIR and ".git" in onedrive.EXCLUIR
+
+
+def test_main_quiet_calla_el_progreso_pero_no_los_fallos(tmp_path, monkeypatch, capsys) -> None:
+    root = _arbol(tmp_path)
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake({"bna_fx.py", "fx.py"}))
+    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (True, ""))
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    monkeypatch.setattr(onedrive, "_leer", lambda p: None)
+    assert onedrive.main(["--carpeta", str(root), "--quiet"]) == 0
+    out = capsys.readouterr().out
+    assert "bajándolos" in out and " ok" not in out                    # cabecera sí, progreso por archivo no
+
+    def leer(p: Path) -> None:
+        if p.name == "fx.py":
+            raise OSError(22, "Invalid argument")
+
+    monkeypatch.setattr(onedrive, "_leer", leer)
+    assert onedrive.main(["--carpeta", str(root), "--quiet"]) == 4
+    out = capsys.readouterr().out
+    assert "x " in out and "fx.py" in out and "bna_fx.py ($" not in out
+
+
+def test_main_avisa_si_attrib_falla_o_el_pin_no_se_ve(tmp_path, monkeypatch, capsys) -> None:
+    root = _arbol(tmp_path)
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
+    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (False, "Acceso denegado"))
+    assert onedrive.main(["--carpeta", str(root)]) == 0                 # fijar es best-effort
+    out = capsys.readouterr().out
+    assert "no pude fijar" in out and "Acceso denegado" in out and "Mantener siempre en este dispositivo" in out
+    # attrib devolvió 0 pero la raíz no muestra PINNED (el tmp de Linux nunca lo tiene)
+    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (True, ""))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "todavía no figura fijada" in out and "carpeta marcada" not in out
+    # y con el pin visible, el mensaje normal
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG) if "x" in str(p) else (0, 0))
+    estados = iter([(0x10, NUBE_TAG), (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG)])
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: next(estados))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    assert "carpeta marcada" in capsys.readouterr().out
+
+
+def test_say_cae_a_ascii_si_la_consola_no_puede(monkeypatch, capsys) -> None:
+    import builtins
+    real = builtins.print
+    intentos: list[str] = []
+
+    def print_cp(msg, *a, **k):
+        intentos.append(msg)
+        if any(ord(c) > 127 for c in msg):
+            raise UnicodeEncodeError("cp1252", msg, 0, 1, "no")
+        real(msg, *a, **k)
+
+    monkeypatch.setattr(builtins, "print", print_cp)
+    onedrive._say("[onedrive] bajándolos… ok")
+    assert len(intentos) == 2 and capsys.readouterr().out == "[onedrive] baj?ndolos? ok\n"
+
+
+def test_backfill_bat_corre_el_mismo_chequeo() -> None:
+    bat = (ROOT / "backfill_historico.bat").read_text(encoding="utf-8")
+    assert "backend.tools.onedrive --quiet" in bat and "exit /b 4" in bat
+    assert bat.index("backend.tools.onedrive") < bat.index(":menu") and bat.isascii()
