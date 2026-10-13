@@ -2121,19 +2121,29 @@ def _fx_desde_filas(filas_sig: List[Dict[str, Any]]) -> "Any":
     except Exception:  # noqa: BLE001
         bases = []
     orden = [b for b in ("AL30", "GD30") if b in bases] + [b for b in bases if b not in ("AL30", "GD30")]
+    # Cada pata se resuelve POR SEPARADO en la primera base que la tenga (como
+    # `fx.compute_fx_cierres`): sin AL30C en D+1 el CCL sale de GD30 / GD30C y
+    # el MEP de AL30 / AL30D. Antes volvía con la primera base que tuviera
+    # UNA pata y el otro FX quedaba None (todas las pesos de la otra familia
+    # caían en `sin_fx`).
+    ccl = usb = None
+    ccl_base = usb_base = None
     for b in orden:
         ars = por_codigo.get(b)
         if not ars:
             continue
         c, d = por_codigo.get(b + "C"), por_codigo.get(b + "D")
-        ccl = (ars / c) if c else None
-        usb = (ars / d) if d else None
-        if ccl or usb:
-            return fx_svc.FxSnapshot(ccl=ccl, usb=usb, ccl_base=b if ccl else None,
-                                     usb_base=b if usb else None,
-                                     canje=(ccl / usb - 1.0) if (ccl and usb) else None,
-                                     bases=len(bases), as_of=time.time())
-    return None
+        if ccl is None and c:
+            ccl, ccl_base = ars / c, b
+        if usb is None and d:
+            usb, usb_base = ars / d, b
+        if ccl and usb:
+            break
+    if not (ccl or usb):
+        return None
+    return fx_svc.FxSnapshot(ccl=ccl, usb=usb, ccl_base=ccl_base, usb_base=usb_base,
+                             canje=(ccl / usb - 1.0) if (ccl and usb) else None,
+                             bases=len(bases), as_of=time.time())
 
 
 def _metricas_a_fecha(code: str, px: float, settle: str) -> Optional[Dict[str, Any]]:

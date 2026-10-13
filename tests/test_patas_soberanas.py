@@ -37,9 +37,15 @@ def _seed_al30() -> None:
 
 
 # ── resolver ─────────────────────────────────────────────────────────────────
-def test_resolver_por_sufijo_cubre_las_15_bases_y_nada_mas() -> None:
+def test_resolver_por_sufijo_cubre_las_bases_fx_y_nada_mas() -> None:
     s = patas.soberanas()
-    assert len(s) == 30 and {p.pata for p in s.values()} == {"ARS", "MEP", "CABLE"}
+    bases = fx_svc.fx_bases()                       # globales + bonares vivos HOY (un vencido sale solo)
+    assert bases and len(s) == 2 * len(bases) and {p.pata for p in s.values()} == {"ARS", "MEP", "CABLE"}
+    cruz = {b: ("C" if s[b].nativa.endswith("D") else "D") for b in bases}   # bonar → C, global → D
+    assert set(s) == set(bases) | {b + c for b, c in cruz.items()}            # nada de corporativos
+    for b in bases:
+        assert s[b].nativa == b + ("D" if cruz[b] == "C" else "C") and s[b].pata == "ARS" and not s[b].directa
+        assert s[b + cruz[b]].directa and s[b + cruz[b]].nativa == s[b].nativa
     assert s["AO27C"] == patas.Pata("AO27C", "AO27D", "CABLE", True, "USB")
     assert s["AO27"] == patas.Pata("AO27", "AO27D", "ARS", False, "USB")
     assert s["GD30D"] == patas.Pata("GD30D", "GD30C", "MEP", True, "USD")
@@ -108,7 +114,8 @@ def test_reconstruccion_rearma_las_patas_y_resuelve_el_fx_desde_la_base() -> Non
     cont = {"sin_fx": 0, "sin_calc": 0}
     sym_c, sym_a = syms.md_symbol("AL30C", "24hs"), syms.md_symbol("AL30", "24hs")
     f = hw._fila_rc("AL30C", sym_c, 66.0, None, dia, settle, {}, lambda: None, cont)
-    assert f and f["Pata"] == "CABLE" and f["Price Source"] == "RC" and pd.isna(f["FX"]) if f["FX"] is not None else True
+    assert f is not None
+    assert f["Pata"] == "CABLE" and f["Price Source"] == "RC" and f["FX"] is None
     assert f["TIREA"] == pytest.approx(hw._metricas_a_fecha("AL30D", 66.0, settle)["tirea"], rel=1e-9)
     assert cont == {"sin_fx": 0, "sin_calc": 0}
     # pesos sin FX → no se inventa; con FX → ÷ MEP y el FX en la fila
@@ -125,6 +132,12 @@ def test_reconstruccion_rearma_las_patas_y_resuelve_el_fx_desde_la_base() -> Non
                  {"Código": "AL30D", "symbol": syms.md_symbol("AL30D", "24hs"), "close": 68.0}]
     fx = hw._fx_desde_filas(filas_sig)
     assert fx is not None and fx.usb == pytest.approx(95_000.0 / 68.0) and fx.ccl == pytest.approx(95_000.0 / 66.0)
+    # cada pata en la primera base que la tenga: sin AL30C, el CCL sale de GD30 / GD30C
+    fx = hw._fx_desde_filas([{"Código": "AL30", "close": 95_000.0}, {"Código": "AL30D", "close": 68.0},
+                             {"Código": "GD30", "close": 96_000.0}, {"Código": "GD30C", "close": 66.0}])
+    assert fx.usb == pytest.approx(95_000.0 / 68.0) and fx.usb_base == "AL30"
+    assert fx.ccl == pytest.approx(96_000.0 / 66.0) and fx.ccl_base == "GD30" and fx.canje is not None
+    assert hw._fx_desde_filas([{"Código": "AL30D", "close": 68.0}]) is None
     rows, info = hw._filas_desde_base(dia, filas_sig, settle, {})
     assert {r["Código"] for r in rows} == {"AL30", "AL30C", "AL30D"} and info["sin_fx"] == 0 and info["sin_calc"] == 0
     assert {r["Pata"] for r in rows} == {"ARS", "CABLE", ""}

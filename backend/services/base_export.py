@@ -72,6 +72,9 @@ _ARCHIVOS: Dict[str, Tuple[str, str, str]] = {
 }
 
 _lock = threading.Lock()
+# single-flight: UNA lectura por cambio de firma (patrón de cierres._load_lock);
+# `_lock` sólo protege los dicts, nunca se sostiene durante una lectura.
+_load_lock = threading.Lock()
 _frame: Dict[str, Any] = {"key": None, "df": None, "error": None}
 _part_memo: Dict[str, Any] = {"sig": None, "lista": [], "bytes": 0}
 
@@ -134,7 +137,14 @@ def archivos() -> Dict[str, Any]:
     """Metadata de todo lo descargable. Un stat por archivo + resúmenes ya
     cacheados por firma (writer / fx_hist / cierres)."""
     hist_dir = deltapaths.historico_dir()
-    out: Dict[str, Any] = {"hist_dir": hist_dir or "", "configurado": bool(hist_dir)}
+    # `historico_dir()` da None sin variable Y con la variable puesta pero la
+    # carpeta ausente en ESTA máquina (OneDrive sin sincronizar / sin sesión):
+    # el aviso distingue los dos casos. A la pestaña va sólo el NOMBRE de la
+    # carpeta (el HTML se cachea sin rol: nada de rutas absolutas de usuario).
+    cfg = os.getenv("DELTA_HISTORICO_DIR") or os.getenv("DELTA_BASES_DIR") or ""
+    out: Dict[str, Any] = {"hist_dir": hist_dir or "", "configurado": bool(hist_dir),
+                           "carpeta": os.path.basename(os.path.normpath(hist_dir)) if hist_dir else "",
+                           "cfg": bool(cfg)}
     if not hist_dir:
         return out
     xlsx = os.path.join(hist_dir, hw.HIST_FILENAME)
@@ -167,7 +177,9 @@ def archivos() -> Dict[str, Any]:
     lista, total = _particiones_memo()
     out["cierres"] = {"dir": cierres.dir_path() or "", "n": len(lista), "bytes": total,
                       "desde": _dmy(lista[0][0]) if lista else "—", "hasta": _dmy(lista[-1][0]) if lista else "—",
-                      "fechas": [f for f, _p in reversed(lista)][:400]}       # las más nuevas primero
+                      "mtime": _stat(lista[-1][1])["mtime"] if lista else None,    # la partición más nueva
+                      "fechas": [f for f, _p in reversed(lista)]}                  # TODAS, las más nuevas primero
+    out["hay_base"] = bool(px["xlsx"]["existe"] or px["parquet"]["existe"])
     out["acciones"] = _stat(os.path.join(hist_dir, hw.ACCIONES_FILENAME))
     return out
 
@@ -183,6 +195,16 @@ def archivo_descargable(que: str) -> Optional[Tuple[str, str, str]]:
     if not os.path.isfile(path):
         return None
     return path, ent[1], ent[2]
+
+
+def probar_lectura(path: str) -> None:
+    """Abre y lee 1 byte ANTES de prometer el 200: FileResponse manda los
+    headers y recién después abre / lee, así que un marcador de OneDrive sin
+    bajar (ReadFile → EINVAL), un archivo en uso o uno borrado en el medio
+    dejaban un 200 con el cuerpo cortado o un 500. El byte también dispara
+    la bajada del marcador (la descarga lo necesita igual). Tira OSError."""
+    with open(path, "rb") as f:
+        f.read(1)
 
 
 def particion_descargable(fecha: str) -> Optional[Tuple[str, str]]:
@@ -237,15 +259,20 @@ def frame():
     with _lock:
         if _frame["key"] == key:
             return _frame["df"]
-    try:
-        df = _leer_frame(xlsx)
-        err = None
-    except Exception as exc:  # noqa: BLE001 — se informa en la pestaña, no se cae
-        logger.warning("[base] no pude leer la base para la vista: %s", exc)
-        df, err = None, f"{type(exc).__name__}: {exc}"
-    with _lock:
-        _frame.update(key=key, df=df, error=err)
-    return df
+    with _load_lock:                            # los que esperan usan la lectura del primero
+        with _lock:
+            if _frame["key"] == key:
+                return _frame["df"]
+        try:
+            df = _leer_frame(xlsx)
+            err = None
+        except Exception as exc:  # noqa: BLE001 — se informa en la pestaña, no se cae
+            logger.warning("[base] no pude leer la base para la vista: %s", exc)
+            # sin la ruta absoluta de la carpeta compartida (la pestaña la ve cualquier usuario)
+            df, err = None, f"{type(exc).__name__}: {exc}".replace(hist_dir, "…")
+        with _lock:
+            _frame.update(key=key, df=df, error=err)
+        return df
 
 
 def frame_error() -> Optional[str]:
@@ -331,10 +358,16 @@ def _csv_es_ar(cols: List[str], filas: List[List[Any]]) -> str:
 # Punto decimal entre dígitos, salvo los segundos fraccionarios de un
 # timestamp ISO ("16:59:00.123": el ":dd" de antes lo excluye).
 _RE_DEC = __import__("re").compile(r"(?<=\d)(?<!:\d\d)\.(?=\d)")
+# Filas por llamada C (to_csv + replace + encode): ~20 ms de GIL por tramo y
+# el event loop lo recupera entre tramos (medido con la base entera: lag del
+# loop p95 14 ms); de una sola vez eran 1,2 s de GIL seguidos.
+CSV_CHUNK = 2_500
+_BOM = "\ufeff".encode("utf-8")
 
 
-def _to_csv_es_ar(df) -> str:
-    """`DataFrame.to_csv` (C): `;` + coma decimal + fechas DD/MM/AAAA + BOM.
+def _to_csv_es_ar(df, chunk: int = CSV_CHUNK) -> bytes:
+    """`DataFrame.to_csv` (C) por tramos: `;` + coma decimal + fechas
+    DD/MM/AAAA + BOM, en BYTES UTF-8 (un str con emoji / acentos sería UCS-4).
     Un loop por celda tardaba 3,8 s para la base entera (119k filas)."""
     import pandas as pd
     df = df.copy()
@@ -354,25 +387,35 @@ def _to_csv_es_ar(df) -> str:
             else:
                 con_punto = con_punto or bool(s.astype("string").str.contains(".", regex=False).fillna(False).any())
     # `decimal=","` manda a pandas por el camino lento (2,8 s la base entera):
-    # se escribe con punto por el camino C (float_format también) y se cambia
-    # el punto decimal después — plano si ningún texto lleva punto (21 ms),
-    # si no sólo entre dígitos (0,5 s).
-    texto = df.to_csv(sep=";", index=False, lineterminator="\r\n", float_format="%.10g")
-    texto = _RE_DEC.sub(",", texto) if con_punto else texto.replace(".", ",")
-    return "\ufeff" + texto
+    # se escribe con punto por el camino C y se cambia el punto decimal
+    # después — plano si ningún texto lleva punto (ms), si no sólo entre
+    # dígitos. %.15g = 15 dígitos significativos (la precisión de Excel) y
+    # nunca notación científica debajo de 1e15: con %.10g un volumen de
+    # 912.000 M salía "9,12e+11" y un nominal grande perdía los centavos.
+    partes = [_BOM]
+    n = len(df)
+    cabecera = True
+    for i in range(0, max(n, 1), max(1, int(chunk))):
+        texto = df.iloc[i:i + chunk].to_csv(sep=";", index=False, header=cabecera,
+                                            lineterminator="\r\n", float_format="%.15g")
+        cabecera = False
+        texto = _RE_DEC.sub(",", texto) if con_punto else texto.replace(".", ",")
+        partes.append(texto.encode("utf-8"))
+    return b"".join(partes)
 
 
-def csv_base(codigo: str = "", desde: Optional[str] = None, hasta: Optional[str] = None) -> Tuple[str, int]:
-    """(csv, filas) de la base filtrada, más viejas primero, hasta CSV_MAX_FILAS."""
+def csv_base(codigo: str = "", desde: Optional[str] = None, hasta: Optional[str] = None) -> Tuple[bytes, int]:
+    """(csv en bytes UTF-8 con BOM, filas) de la base filtrada, más viejas
+    primero, hasta CSV_MAX_FILAS."""
     df = frame()
     if df is None:
-        return _csv_es_ar(list(COLUMNAS), []), 0
+        return _csv_es_ar(list(COLUMNAS), []).encode("utf-8"), 0
     sub = _filtrar(df, codigo, desde, hasta).tail(CSV_MAX_FILAS)
     cols = [c for c in COLUMNAS if c in sub.columns]
     return _to_csv_es_ar(sub[cols]), int(len(sub))
 
 
-def csv_cierre(path: str) -> Tuple[str, int]:
+def csv_cierre(path: str) -> Tuple[bytes, int]:
     """Una partición del cierre completo como CSV es-AR."""
     import pandas as pd
     df = pd.read_parquet(path)

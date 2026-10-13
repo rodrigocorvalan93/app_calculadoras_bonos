@@ -92,6 +92,17 @@ def test_archivos_describe_los_cuatro_origenes(bases) -> None:
     assert base_export.fmt_bytes(15 * 1024 ** 2 + 300000) == "15,3 MB" and base_export.fmt_bytes(512) == "512 B"
 
 
+def test_el_select_de_cierres_lista_todas_las_particiones_y_probar_lectura(bases) -> None:
+    tmp, dias = bases
+    a = base_export.archivos()
+    ci = a["cierres"]
+    assert len(ci["fechas"]) == ci["n"] == 5 and ci["fechas"][-1] == "2026-10-05" and ci["mtime"]
+    assert a["hay_base"] and a["carpeta"] == tmp.name and a["cfg"]
+    base_export.probar_lectura(hw.cierre_path(str(tmp), dias[0]))
+    with pytest.raises(OSError):
+        base_export.probar_lectura(str(tmp / "no-existe.parquet"))
+
+
 def test_archivo_y_particion_descargables_solo_por_clave_cerrada(bases) -> None:
     tmp, dias = bases
     path, nombre, media = base_export.archivo_descargable("px_xlsx")
@@ -125,22 +136,30 @@ def test_vista_filtra_por_codigo_y_rango_y_formatea_es_ar(bases) -> None:
 
 
 def test_csv_base_es_ar_con_bom_y_filtro(bases) -> None:
-    texto, n = base_export.csv_base("AL30D", "2026-10-08", None)
+    datos, n = base_export.csv_base("AL30D", "2026-10-08", None)
+    assert isinstance(datos, bytes) and datos.startswith(b"\xef\xbb\xbf")
+    texto = datos.decode("utf-8")
     assert n == 2 and texto.startswith("﻿")
     lineas = texto.lstrip("﻿").split("\r\n")
     assert lineas[0].split(";")[:3] == ["fecha_hoy", "Código", "symbol"]
-    assert lineas[1].startswith("08/10/2026;AL30D;MERV - XMEV - AL30D - 24hs;68,25;68;")   # %.10g: 68.0 → 68
+    assert lineas[1].startswith("08/10/2026;AL30D;MERV - XMEV - AL30D - 24hs;68,25;68;")   # %.15g: 68.0 → 68
     assert "0,1055" in lineas[1]
     assert base_export.nombre_csv("base_px_tasas", "al30d", "2026-10-08", None) == "base_px_tasas_AL30D_2026-10-08.csv"
     assert base_export.nombre_csv("base_px_tasas") == "base_px_tasas.csv"
     todo, n2 = base_export.csv_base()
-    assert n2 == 10 and todo.count("\r\n") == 11
+    assert n2 == 10 and todo.decode("utf-8").count("\r\n") == 11
     # un texto con punto (Price Date ISO con fracción) no se toca: sólo el decimal entre dígitos
     import pandas as pd
     df = pd.DataFrame({"fecha_hoy": pd.to_datetime(["2026-10-08"]), "Código": pd.Categorical(["X.1"]),
                        "Last Price": [1.5], "Price Date": ["2026-10-08T16:59:00.123"]})
-    s = base_export._to_csv_es_ar(df)
+    s = base_export._to_csv_es_ar(df).decode("utf-8")
     assert s.split("\r\n")[1] == "08/10/2026;X.1;1,5;2026-10-08T16:59:00.123"
+    # por tramos: igual que de una vez, cabecera una sola vez, %.15g sin notación científica
+    df = pd.DataFrame({"fecha_hoy": pd.to_datetime(["2026-10-08"] * 7), "Código": pd.Categorical(["A"] * 7),
+                       "Last Price": [float(i) for i in range(7)], "volume": [912_000_000_000.0] * 7})
+    uno, tramos = base_export._to_csv_es_ar(df, chunk=10 ** 6), base_export._to_csv_es_ar(df, chunk=3)
+    assert uno == tramos and uno.count(b"fecha_hoy") == 1 and b"912000000000" in uno
+    assert base_export._to_csv_es_ar(df.iloc[:0]).decode("utf-8").count("\r\n") == 1   # sólo cabecera
 
 
 def test_frame_se_lee_una_vez_por_firma(bases, monkeypatch) -> None:
@@ -161,6 +180,7 @@ def test_frame_se_lee_una_vez_por_firma(bases, monkeypatch) -> None:
 async def test_http_pestana_base_lazy_vista_y_cache(bases) -> None:
     from backend.main import app
     from backend.routes import historico as rh
+    tmp, _dias = bases
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         page = await ac.get("/historicos")
         assert page.status_code == 200
@@ -172,13 +192,15 @@ async def test_http_pestana_base_lazy_vista_y_cache(bases) -> None:
         r = await ac.get("/historicos/base")
         assert r.status_code == 200
         assert "Archivos en Delta Bases" in r.text and "5 ruedas" in r.text and "espejo fiel ✓" in r.text
+        assert str(tmp) not in r.text and tmp.name in r.text                 # sin rutas absolutas en la pestaña
+        assert "Símbolo</th>" in r.text
         assert "/historicos/base/archivo?que=px_xlsx" in r.text and "?que=px_parquet" in r.text
         assert "?que=fx_parquet" in r.text and "?que=fx_xlsx" not in r.text and "?que=acciones" in r.text
         assert 'id="base-tbl"' in r.text and "T30E6" in r.text and "AL30D" in r.text
         assert '<option value="2026-10-09">09/10/2026</option>' in r.text
         assert len(rh._BASE_CACHE) == 1
         r2 = await ac.get("/historicos/base")
-        assert r2.text == r.text and len(rh._BASE_CACHE) == 1
+        assert r2.text == r.text and len(rh._BASE_CACHE) == 1 and isinstance(next(iter(rh._BASE_CACHE.values())), bytes)
 
         r = await ac.get("/historicos/base?codigo=t30e6&desde=2026-10-07&n=50")
         assert r.status_code == 200 and "AL30D" not in r.text.split('id="base-tbl"')[1]
@@ -216,7 +238,20 @@ async def test_http_descargas_tal_cual_sin_gzip_y_claves_cerradas(bases) -> None
         r = await ac.get("/historicos/base.csv?codigo=AL30D&desde=2026-10-08", headers={"Accept-Encoding": "gzip"})
         assert r.status_code == 200 and r.headers["x-filas"] == "2" and r.headers["content-encoding"] == "identity"
         assert 'filename="base_px_tasas_AL30D_2026-10-08.csv"' in r.headers["content-disposition"]
-        assert r.text.count("\r\n") == 3 and ";68,25;" in r.text
+        assert r.content.startswith(b"\xef\xbb\xbf") and r.text.count("\r\n") == 3 and ";68,25;" in r.text
+        # un archivo que no se puede leer (marcador de OneDrive sin bajar / en uso) → 503, no un 200 cortado
+        real = base_export.probar_lectura
+
+        def no_se_puede(p):
+            raise OSError(22, "Invalid argument")
+
+        base_export.probar_lectura = no_se_puede
+        try:
+            r = await ac.get("/historicos/base/archivo?que=px_xlsx")
+            assert r.status_code == 503 and "OneDrive" in r.text
+            assert (await ac.get("/historicos/base/cierre?fecha=2026-10-07")).status_code == 503
+        finally:
+            base_export.probar_lectura = real
 
 
 @pytest.mark.asyncio
@@ -246,7 +281,7 @@ async def test_http_csv_codigo_con_control_no_llega_al_header(bases) -> None:
 
 
 @pytest.mark.asyncio
-async def test_http_base_sin_carpeta_configurada_avisa(bases, monkeypatch) -> None:
+async def test_http_base_sin_carpeta_configurada_avisa(bases, monkeypatch, tmp_path) -> None:
     from backend.main import app
     from backend.routes import historico as rh
     monkeypatch.delenv("DELTA_HISTORICO_DIR", raising=False)
@@ -255,6 +290,18 @@ async def test_http_base_sin_carpeta_configurada_avisa(bases, monkeypatch) -> No
         r = await ac.get("/historicos/base")
         assert r.status_code == 200 and "No hay carpeta de bases configurada" in r.text
         assert (await ac.get("/historicos/base/archivo?que=px_xlsx")).status_code == 404
+        # configurada pero ausente en ESTA máquina (OneDrive sin sincronizar): otro aviso
+        monkeypatch.setenv("DELTA_HISTORICO_DIR", str(tmp_path / "no-esta"))
+        rh._BASE_CACHE.clear()
+        r = await ac.get("/historicos/base")
+        assert r.status_code == 200 and "no está en esta máquina" in r.text and "Reintentar" in r.text
+        # carpeta vacía (antes del primer autosave): sin form ni CSV, con aviso
+        (tmp_path / "vacia").mkdir()
+        monkeypatch.setenv("DELTA_HISTORICO_DIR", str(tmp_path / "vacia"))
+        rh._BASE_CACHE.clear()
+        base_export.invalidar()
+        r = await ac.get("/historicos/base")
+        assert r.status_code == 200 and "Todavía no hay base px/tasas" in r.text and 'id="base-tbl"' not in r.text
 
 
 @pytest.mark.asyncio

@@ -1258,13 +1258,25 @@ sirve para symbol / cierre previo / fuente / hora. Descargas: `GET
 (FileResponse por chunks, clave CERRADA → ruta; nunca texto del usuario),
 `GET /historicos/base/cierre?fecha=AAAA-MM-DD&fmt=parquet|csv` (la fecha se
 busca en `cierres.particiones()`), `GET /historicos/base.csv?codigo&desde&hasta`
-(CSV es-AR `;` + coma decimal + BOM, tope `CSV_MAX_FILAS`). Las tres rutas
-mandan `Content-Encoding: identity` y `main._SSESinGzip` les saca el
+(CSV es-AR `;` + coma decimal + BOM en BYTES, por tramos de `CSV_CHUNK` filas
+para soltar el GIL entre llamadas C, `float_format %.15g` — con `%.10g` un
+volumen salía `9,12e+11` —, tope `CSV_MAX_FILAS`). Las tres rutas mandan
+`Content-Encoding: identity` y `main._SSESinGzip` les saca el
 `Accept-Encoding` (`_SIN_GZIP`): un xlsx / parquet ya viene comprimido y el
-gzip del middleware corre en el event loop. HTML cacheado por (parámetros,
-firmas: base + FX + cierres + error del frame); warm = lookup (medido p95 <
-50 ms en el test). Sub-rutas de Históricos: sólo login (la base no tiene
-tenencias). Regresión: `tests/test_historico_base.py`.
+CSV grande no vale el CPU del server. Antes del 200 de una descarga se lee
+UN byte en el executor (`probar_lectura`): FileResponse abre el archivo
+después de mandar los headers y un marcador de OneDrive sin bajar / un
+archivo en uso dejaba un 200 cortado → ahora 503 con motivo. `?codigo=` pasa
+por `_codigo_qs` (sin caracteres de control: un `%0d%0a` llegaba al
+`Content-Disposition`; el espacio se conserva, "AEROAR 31" es un código).
+Jinja renderiza en el executor; HTML cacheado por (parámetros, firmas: base +
+FX + cierres + error del frame) en bytes con presupuesto `_BASE_CACHE_BYTES`;
+warm = lookup (medido: avg 3,1 · p50 2,9 · p95 4,2 ms; filtro nuevo p95 43
+ms). La pestaña nunca muestra rutas absolutas (el HTML se cachea sin rol):
+sólo el nombre de la carpeta; "configurada pero ausente en esta máquina"
+(OneDrive sin sincronizar) y "carpeta sin base todavía" tienen su aviso.
+Sub-rutas de Históricos: sólo login (la base no tiene tenencias). Regresión:
+`tests/test_historico_base.py`.
 
 ## Patas de los soberanos hard-dollar en el histórico (13/10)
 
@@ -1277,8 +1289,9 @@ FX de referencia del día, MEP para un bonar / CCL para un global, la misma
 rama que ya usaban las especies pesos de las ON) y la CRUZADA (`AO27C` de un
 bonar, `GD30D` de un global: TIR **directa** = precio crudo contra el flujo
 de la ficha nativa; es la TIR por ticker del mercado y difiere de la vista
-por pata de Curvas, que convierte con CCL/MEP, en ≈ canje / duration: 56 a
-333 bps con 3 % de canje). `build_rows` las emite DESPUÉS del loop de curvas
+por pata de Curvas, que convierte con CCL/MEP, en ≈ canje / duration —
+depende de la duration del día: con 3 % de canje ≈ 50 bps en GD46, ≈ 150 en
+AL30, 300-450 en AO27). `build_rows` las emite DESPUÉS del loop de curvas
 desde esa lista propia (NO entran a `build_curve_codes`: Curvas / Inicio /
 Escenario / Qué pasó no las heredan), `Código` = ticker de la pata (el
 lector dedupea por Código + fecha: con el código de la ficha se pisarían),
@@ -1289,9 +1302,11 @@ especies pesos de ON — reproducibilidad: la recaptura de las 17:31 pisa el
 CCL/MEP del archivo FX). `_fila_rc` / `_filas_desde_feed` usan el mismo
 resolver (antes `bond_meta('AO27C')` = {} caía en `sin_calc` en silencio) y
 con AL30 + AL30C + AL30D en la base `_fx_desde_filas` por fin resuelve el
-FX de cierre para la reconstrucción desde la base. `_metricas_por_simbolo`
+FX de cierre para la reconstrucción desde la base (cada pata por separado
+en la primera base que la tenga: sin AL30C en D+1 el CCL sale de GD30 /
+GD30C). `_metricas_por_simbolo`
 → la partición de cierres lleva `tirea` en el símbolo de la pata. Lectores:
 `price_action.serie_de` acepta una pata sin ficha (cierres → base) y
 `_grupos_especies` suma "Bonos · patas pesos / C / D (soberanos)". Costo
-medido: +30 TIR (≈ +110 ms) una vez por día en el thread del autosave; cero
-en requests. Regresión: `tests/test_patas_soberanas.py`.
+medido: +30 TIR (≈ +100 ms, medido 98 ms; `soberanas()` < 0,1 ms) una vez por
+día en el thread del autosave; cero en requests. Regresión: `tests/test_patas_soberanas.py`.

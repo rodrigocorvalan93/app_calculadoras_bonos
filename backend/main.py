@@ -835,9 +835,11 @@ def create_app() -> FastAPI:
     # por agregarse después) le borra el Accept-Encoding al request del SSE →
     # gzip lo deja pasar sin tocar. Versión-proof: no depende de cómo cada
     # versión de Starlette trate content-encoding en streams.
-    # Descargas de Históricos · Base: un xlsx / parquet ya viene comprimido y el
-    # gzip del middleware corre en el event loop (una base de 15 MB = cientos
-    # de ms trabados); el CSV grande, lo mismo. Van tal cual.
+    # Descargas de Históricos · Base: un xlsx / parquet ya viene comprimido
+    # (gzip no lo achica y sólo gasta CPU) y el CSV de la base entera (~20 MB)
+    # comprimiría ~3× a costa de ~1 s de CPU del server (en las versiones de
+    # Starlette de los venvs del desk, inline en el event loop). Van tal
+    # cual: el desk descarga por LAN.
     _SIN_GZIP = ("/historicos/base/archivo", "/historicos/base/cierre", "/historicos/base.csv")
 
     class _SSESinGzip:
