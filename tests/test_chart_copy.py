@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no disponible")
 def test_copy_svg_lleva_los_estilos_calculados_en_node() -> None:
     r = subprocess.run([shutil.which("node"), str(ROOT / "tests" / "chart_copy_harness.cjs")],
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert r.returncode in (0, 1), r.stderr
     out = json.loads(r.stdout)
     assert out["boton_inyectado"]

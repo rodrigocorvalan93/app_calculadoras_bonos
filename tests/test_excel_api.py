@@ -236,9 +236,16 @@ async def test_calc_batch_requiere_token_y_calcula(auth_on):
     bond_universe.ensure_loaded()
     auth.create_user("mesa3", "clave123", "basico")
     tok = auth.set_excel_access("mesa3", True)
+    # Referencia: precio → tirea con el MISMO compute_metrics del YAS web. La
+    # ida y vuelta (item 1) usa ESA tirea, no un 14 % fijo: GD30 amortiza y a
+    # 78,50 la TIR corre con el calendario (en oct/2026 ya era 15,3 % y el
+    # test fallaba en CI con un valor fijo).
+    esperado = pricing.compute_metrics("GD30", "precio", 78.5,
+                                       settle=pricing.settlement_date_str("24hs"),
+                                       include_cashflows=False)
     body = {"items": [
         {"code": "GD30", "modo": "precio", "valor": 78.5},
-        {"code": "GD30", "modo": "tir", "valor": 0.14},
+        {"code": "GD30", "modo": "tir", "valor": esperado["tirea"]},
         {"code": "GD30", "modo": "precio", "valor": 78.5, "nominales": 1_000_000},
         {"code": "NOEXISTE", "modo": "precio", "valor": 100.0},
     ]}
@@ -248,14 +255,11 @@ async def test_calc_batch_requiere_token_y_calcula(auth_on):
     assert r.status_code == 200
     res = r.json()["results"]
     # item 0: precio → tirea, igual que el YAS web (mismo compute_metrics)
-    esperado = pricing.compute_metrics("GD30", "precio", 78.5,
-                                       settle=pricing.settlement_date_str("24hs"),
-                                       include_cashflows=False)
     assert res[0]["tirea"] == pytest.approx(esperado["tirea"])
     assert res[0]["tna"] == pytest.approx(esperado["tna"])
     assert res[0]["tna_convention_label"] == esperado["tna_convention_label"]
     # item 1: tir → precio (ida y vuelta consistente con el item 0)
-    assert res[1]["precio_clean_pct"] == pytest.approx(78.5, rel=0.02)
+    assert res[1]["precio_clean_pct"] == pytest.approx(78.5, rel=1e-6)
     # item 2: con nominales viaja el ticket
     assert res[2]["vn_ticket"] == 1_000_000
     assert res[2]["monto_total"] == pytest.approx(1_000_000 * esperado["precio"])

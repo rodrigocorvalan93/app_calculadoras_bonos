@@ -696,7 +696,8 @@ async def test_plazos_de_caucion_rechazados_se_reprueban_y_no_van_al_cache(tmp_p
     client._connected = True
     # un rechazo persistente VENCIDO se reprueba con el proceso arriba (antes: sólo al
     # reiniciar); el 4D que quedó pendiente mientras estaba desconectado sale en la misma pasada
-    client._rejected_fecha[zzz] = (date.today() - timedelta(days=pws.REJECTED_TTL_DAYS + 1)).isoformat()
+    # vencido RESPECTO DEL RELOJ DEL TEST (`manana`), no de date.today(): la suite corre cualquier día
+    client._rejected_fecha[zzz] = (manana.date() - timedelta(days=pws.REJECTED_TTL_DAYS + 1)).isoformat()
     sent.clear()
     assert sorted(await client.reprobar_pendientes(now_fn=lambda: manana)) == [c4d, zzz]
     assert sorted(sent) == [[c4d], [zzz]]

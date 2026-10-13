@@ -1,6 +1,9 @@
 {%- if items -%}
-{# Contenido duplicado para loop continuo (la animación corre -50%). #}
-<div class="news-track">
+{# Contenido duplicado para loop continuo (la animación corre -50%). La
+   duración va con la cantidad de titulares (6 s por titular, mínimo 90 s):
+   con más fuentes la cinta es más larga y a duración fija corría más rápido
+   — el desk la quería más lenta. #}
+<div class="news-track" style="animation-duration:{{ [90, 6 * (items | length)] | max }}s">
   {% for dup in range(2) %}
     {% for n in items %}
       <a class="news-item" href="{{ n.link }}" target="_blank" rel="noopener">

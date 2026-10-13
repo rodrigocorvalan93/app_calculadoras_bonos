@@ -639,6 +639,15 @@ app.js keyea por id + cabecera). Medido con el
 store sembrado (bench_tick, 2000 símbolos): hit 0,9 ms; tick con rebuild
 p50 ≈ 14 · p95 ≈ 20 ms.
 
+**Caución MAE en Inicio** (13/10): `inicio._es_usd` decide por el código
+CRUDO de MAE con la misma tabla que Tasas (`mae._moneda_lbl`: 'D' / 'X' =
+dólar, '$' / 'T' = pesos). Antes buscaba 'USD'/'DOLAR' en el texto: la 'D' no
+matcheaba, la caución en dólares pasaba por pesos y la tarjeta "Caución ARS ·
+MAE" mostraba 1 % (la de dólar) con la de USD en "—". `mae.status()["cauciones"]`
+lista crudas las que manda la API (plazo · moneda · tasa; /admin · Salud):
+si ahí no hay una de pesos, MAE no la publicó — la UI no filtra por moneda.
+Regresión: `test_inicio.test_mae_pick_distingue_pesos_de_dolar_por_codigo_crudo`.
+
 **Riesgo país** (`services/riesgo_pais.py`): ArgentinaDatos
 (`/v1/finanzas/indices/riesgo-pais[/ultimo]`, la misma API de
 `backfill_fx`), thread daemon cada 30 min (10 min si falló), NUNCA en un
@@ -872,6 +881,30 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   Tests: `tests/test_book_ordenes_propias.py`. Para mirar un libro con ticks
   constantes: `DEV_TICKS_FOCUS=S13N6 python backend/tools/dev_ticks.py 8765`
   (alterna un tick de sólo tamaños —flashea— con uno de precios).
+
+## Noticias — marquesina (09/10)
+
+`services/news.py` (stdlib, thread daemon cada 120 s, NUNCA en un request).
+El desk veía sólo Ámbito y Bloomberg Línea: los CDN de Infobae / Cronista
+devolvían 403 al User-Agent "raro" y las rutas de RSS cambian. Ahora: UA de
+navegador real; por fuente una lista de URLs alternativas (la primera que
+responde queda fija) y backoff exponencial (2 → 16 ciclos) para la que no
+responde; **GET condicional** (`If-None-Match` / `If-Modified-Since` → 304 =
+cero bytes y se conserva el último lote de esa fuente) + `Accept-Encoding:
+gzip` + tope `_MAX_BYTES`; fuentes AR (Ámbito, Cronista, Infobae, Bloomberg
+Línea, La Nación, Clarín, iProfesional, Perfil, Página/12), **Google News**
+(una búsqueda del mercado local, `when:1d`, UN pedido que agrega Reuters /
+Bloomberg / etc.; la fuente real sale de `<source>` y el título pierde el
+" - Fuente") y Yahoo Finance / CNBC / MarketWatch al final. La lista se arma
+por **round-robin** entre fuentes (variedad en la marquesina) con dedup por
+título; `items()` da 30. `status()` = por fuente: status / URL / ítems /
+bytes / fallos (tarjeta "Noticias (RSS)" en /admin · Salud) y el log deja
+una línea cuando cambia el estado de alguna fuente. Marquesina: la duración
+de la animación es `max(90, 6 × titulares)` s (antes 90 s fijos: con más
+fuentes corría más rápido; el desk la quería más lenta). Las URLs no se
+pueden verificar desde el sandbox (el proxy corta todo salvo GitHub/PyPI):
+las que no respondan en la máquina del desk se ven en /admin y se corrigen
+en `_FEEDS`. Regresión: `tests/test_news.py`.
 
 ## Matriz de tenencias — vistas (09/10)
 

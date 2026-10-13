@@ -142,7 +142,19 @@ def status() -> Dict[str, Any]:
     # Qué segmentos manda la API (diagnóstico: si acá no aparece 'CI', el T+0
     # no viene del feed — no es un problema de la app).
     base["plazos_rf"] = sorted({_plazo_norm(r.get("plazo")) for r in rf} - {""})
+    # Qué cauciones manda la API, crudas (plazo · moneda · tasa): si acá no hay
+    # una de pesos, MAE no la publicó (sin operaciones) — no es que la UI la
+    # tire (cauciones_rows no filtra por moneda).
+    base["cauciones"] = ", ".join(
+        f"{str(r.get('plazo') or '').strip() or '?'} {_moneda_lbl(r.get('moneda') or r.get('monedaCodigo'))} "
+        f"{_num(r.get('ultimatasa')) if _num(r.get('ultimatasa')) is not None else _num(r.get('ultimaTasa'))}"
+        for r in cauciones_rows_raw()) or "—"
     return base
+
+
+def cauciones_rows_raw() -> List[Dict[str, Any]]:
+    with _lock:
+        return list(_snap["cauciones"])
 
 
 def cauciones_rows() -> List[Dict[str, Any]]:

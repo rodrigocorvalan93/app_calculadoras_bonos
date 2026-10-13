@@ -363,7 +363,7 @@ async def test_e04_historicos_data_una_conversion_por_punto_y_memo(monkeypatch) 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no disponible")
 def test_motor_live_y_graficos_en_node() -> None:
     r = subprocess.run([shutil.which("node"), str(ROOT / "tests" / "live_engine_harness.cjs")],
-                       capture_output=True, text=True, timeout=180)
+                       capture_output=True, text=True, encoding="utf-8", timeout=180)
     assert r.returncode in (0, 1), r.stderr
     out = json.loads(r.stdout)
     assert out["delta_fetch"]["ok"], out["delta_fetch"]                 # fetch colgado: plazo + swap completo

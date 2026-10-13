@@ -101,7 +101,7 @@ async def test_pagina_graficos_trae_el_cajon() -> None:
 @pytest.mark.skipif(shutil.which("node") is None, reason="node no disponible")
 def test_tabla_funciones_puras_en_node() -> None:
     r = subprocess.run([shutil.which("node"), str(ROOT / "tests" / "graficos_tabla_harness.cjs")],
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert r.returncode in (0, 1), r.stderr
     out = json.loads(r.stdout)
     assert out["ok"], out["fallos"]
