@@ -639,6 +639,15 @@ app.js keyea por id + cabecera). Medido con el
 store sembrado (bench_tick, 2000 símbolos): hit 0,9 ms; tick con rebuild
 p50 ≈ 14 · p95 ≈ 20 ms.
 
+**Caución MAE en Inicio** (13/10): `inicio._es_usd` decide por el código
+CRUDO de MAE con la misma tabla que Tasas (`mae._moneda_lbl`: 'D' / 'X' =
+dólar, '$' / 'T' = pesos). Antes buscaba 'USD'/'DOLAR' en el texto: la 'D' no
+matcheaba, la caución en dólares pasaba por pesos y la tarjeta "Caución ARS ·
+MAE" mostraba 1 % (la de dólar) con la de USD en "—". `mae.status()["cauciones"]`
+lista crudas las que manda la API (plazo · moneda · tasa; /admin · Salud):
+si ahí no hay una de pesos, MAE no la publicó — la UI no filtra por moneda.
+Regresión: `test_inicio.test_mae_pick_distingue_pesos_de_dolar_por_codigo_crudo`.
+
 **Riesgo país** (`services/riesgo_pais.py`): ArgentinaDatos
 (`/v1/finanzas/indices/riesgo-pais[/ultimo]`, la misma API de
 `backfill_fx`), thread daemon cada 30 min (10 min si falló), NUNCA en un

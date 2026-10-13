@@ -268,8 +268,15 @@ def tipos_de_cambio(summary: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _es_usd(moneda: Any) -> bool:
+    """¿La fila MAE es en dólares? El código CRUDO de MAE es 'D' (MEP) / 'X'
+    (cable) para dólar y '$' / 'T' para pesos — la misma tabla que usa la
+    pestaña Tasas (`mae._moneda_lbl`). Antes se buscaba 'USD'/'DOLAR' en el
+    texto: una 'D' no matcheaba, la caución en dólares pasaba por pesos y la
+    tarjeta "Caución ARS · MAE" de Inicio mostraba 1 % (la de dólar) mientras
+    la de USD quedaba en "—"."""
+    from backend.services.mae import _moneda_lbl
     m = str(moneda or "").upper()
-    return any(t in m for t in ("USD", "U$S", "US$", "DOLAR", "DÓLAR"))
+    return _moneda_lbl(m) == "US$" or any(t in m for t in ("USD", "U$S", "US$", "DOLAR", "DÓLAR"))
 
 
 def _mae_pick(rows: Iterable[Dict[str, Any]], usd: bool) -> Optional[Dict[str, Any]]:

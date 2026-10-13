@@ -292,3 +292,26 @@ def test_resumen_nunca_lanza_con_fuentes_caidas(monkeypatch) -> None:
     assert [r["label"] for r in res["tc"]][:3] == ["Oficial · A3500", "USD MEP", "USD CCL"] or res["tc"][0]["label"].startswith("Oficial")
     assert len(res["tasas"]) == 6 and len(res["mercado"]) == 5
     assert os.environ.get("RIESGO_PAIS") == "0"          # la suite no sale a la red
+
+
+def test_mae_pick_distingue_pesos_de_dolar_por_codigo_crudo() -> None:
+    """13/10: la tarjeta "Caución ARS · MAE" de Inicio mostraba la de dólar
+    (1 %) y la de USD quedaba en "—": `_es_usd` buscaba 'USD'/'DOLAR' en el
+    texto y el código CRUDO de MAE es 'D' (MEP) / 'X' (cable) para dólar y
+    '$' / 'T' para pesos. Misma tabla que la pestaña Tasas (mae._moneda_lbl)."""
+    from backend.services import inicio
+
+    rows = [  # como las deja mae.cauciones_rows: ordenadas por plazo, la 'D' primero
+        {"plazo": "001", "moneda": "D", "tasa": 1.02, "tasa_cierre": 1.0},
+        {"plazo": "001", "moneda": "$", "tasa": 20.6, "tasa_cierre": 20.5},
+        {"plazo": "007", "moneda": "X", "tasa": 1.5, "tasa_cierre": None},
+        {"plazo": "007", "moneda": "T", "tasa": None, "tasa_cierre": 21.0},
+    ]
+    assert inicio._mae_pick(rows, usd=False)["tasa"] == 20.6
+    assert inicio._mae_pick(rows, usd=True)["tasa"] == 1.02
+    assert inicio._es_usd("D") and inicio._es_usd("X") and inicio._es_usd("USD") and inicio._es_usd("DOLAR")
+    assert not inicio._es_usd("$") and not inicio._es_usd("T") and not inicio._es_usd("ARS") and not inicio._es_usd(None)
+    # una tasa de dólar NUNCA cae en la fila de pesos aunque venga primera
+    assert inicio._mae_pick([rows[0]], usd=False) is None
+    kpis = {r["label"]: r for r in inicio.tasas()}
+    assert "Caución ARS · MAE" in kpis and "Caución USD · MAE" in kpis
