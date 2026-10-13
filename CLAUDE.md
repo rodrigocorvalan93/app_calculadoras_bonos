@@ -1265,3 +1265,33 @@ gzip del middleware corre en el event loop. HTML cacheado por (parámetros,
 firmas: base + FX + cierres + error del frame); warm = lookup (medido p95 <
 50 ms en el test). Sub-rutas de Históricos: sólo login (la base no tiene
 tenencias). Regresión: `tests/test_historico_base.py`.
+
+## Patas de los soberanos hard-dollar en el histórico (13/10)
+
+Pedido del desk: guardar también la historia de las OTRAS patas de globales y
+bonares (no corporativos) con su TIR. `services/patas.py` es el único
+resolver: `soberanas()` = por cada nativa de `globales` / `bonares` (base =
+nativa sin el sufijo, por SUFIJO y no por ISIN: AO29 / AO29D traen ISIN
+placeholder) dos entradas — la pata en PESOS (`AO27`, `GD30`: TIR = precio ÷
+FX de referencia del día, MEP para un bonar / CCL para un global, la misma
+rama que ya usaban las especies pesos de las ON) y la CRUZADA (`AO27C` de un
+bonar, `GD30D` de un global: TIR **directa** = precio crudo contra el flujo
+de la ficha nativa; es la TIR por ticker del mercado y difiere de la vista
+por pata de Curvas, que convierte con CCL/MEP, en ≈ canje / duration: 56 a
+333 bps con 3 % de canje). `build_rows` las emite DESPUÉS del loop de curvas
+desde esa lista propia (NO entran a `build_curve_codes`: Curvas / Inicio /
+Escenario / Qué pasó no las heredan), `Código` = ticker de la pata (el
+lector dedupea por Código + fecha: con el código de la ficha se pisarían),
+`symbol` = su ticker, precio crudo de pantalla, columnas nuevas `Pata` ∈
+ARS / MEP / CABLE (`espejo.COLS_TEXTO`) y `FX` = tipo de cambio por el que
+se dividió un precio en pesos (`espejo.COLS_NUMERICAS`; también en las
+especies pesos de ON — reproducibilidad: la recaptura de las 17:31 pisa el
+CCL/MEP del archivo FX). `_fila_rc` / `_filas_desde_feed` usan el mismo
+resolver (antes `bond_meta('AO27C')` = {} caía en `sin_calc` en silencio) y
+con AL30 + AL30C + AL30D en la base `_fx_desde_filas` por fin resuelve el
+FX de cierre para la reconstrucción desde la base. `_metricas_por_simbolo`
+→ la partición de cierres lleva `tirea` en el símbolo de la pata. Lectores:
+`price_action.serie_de` acepta una pata sin ficha (cierres → base) y
+`_grupos_especies` suma "Bonos · patas pesos / C / D (soberanos)". Costo
+medido: +30 TIR (≈ +110 ms) una vez por día en el thread del autosave; cero
+en requests. Regresión: `tests/test_patas_soberanas.py`.

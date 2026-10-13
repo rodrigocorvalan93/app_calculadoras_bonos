@@ -112,7 +112,7 @@ def test_vista_filtra_por_codigo_y_rango_y_formatea_es_ar(bases) -> None:
     assert v["ok"] and v["filas_base"] == 10 and v["total"] == 10 and v["n"] == 10
     assert v["desde_base"] == "05/10/2026" and v["hasta_base"] == "09/10/2026"
     assert v["codigos"] == ["AL30D", "T30E6"]
-    assert v["columnas"] == list(base_export.COLUMNAS)
+    assert v["columnas"] == [c for c in base_export.COLUMNAS if c not in ("Pata", "FX")]   # base sin patas
     f0 = v["filas"][0]                                            # más nueva primero
     assert f0["fecha_hoy"] == "09/10/2026" and f0["Código"] in ("AL30D", "T30E6")
     v = base_export.vista("t30e6", "2026-10-06", "2026-10-08", n=2)
@@ -217,6 +217,32 @@ async def test_http_descargas_tal_cual_sin_gzip_y_claves_cerradas(bases) -> None
         assert r.status_code == 200 and r.headers["x-filas"] == "2" and r.headers["content-encoding"] == "identity"
         assert 'filename="base_px_tasas_AL30D_2026-10-08.csv"' in r.headers["content-disposition"]
         assert r.text.count("\r\n") == 3 and ";68,25;" in r.text
+
+
+@pytest.mark.asyncio
+async def test_http_csv_codigo_con_control_no_llega_al_header(bases) -> None:
+    """`?codigo=` entra al nombre del CSV → al `Content-Disposition`. Un CR/LF
+    ahí es un header ilegal: ASGITransport no valida, pero uvicorn (h11 y
+    httptools) tira "Invalid HTTP header value" y el cliente se queda sin
+    respuesta. Se limpia antes de usarlo (y `_descarga_headers` también)."""
+    from backend.main import app
+    from backend.routes import historico as rh
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        for url in ("/historicos/base.csv?codigo=AL30D%0d%0aX-Injected:%201",
+                    "/historicos/base.csv?codigo=AL30D%0d%0a%0d%0a%3Chtml%3E", "/historicos/base.csv?codigo=AL30D%00"):
+            r = await ac.get(url)
+            assert r.status_code == 200
+            cd = r.headers["content-disposition"]
+            assert "\r" not in cd and "\n" not in cd and "\x00" not in cd and "%0D" not in cd and "%0A" not in cd
+            assert "x-injected" not in r.headers
+        # el código sigue funcionando como filtro (y conserva el espacio: "AEROAR 31" existe)
+        r = await ac.get("/historicos/base.csv?codigo=AL30D%0d%0a&desde=2026-10-08")
+        assert r.headers["x-filas"] == "2" and 'filename="base_px_tasas_AL30D_2026-10-08.csv"' in r.headers["content-disposition"]
+        r = await ac.get("/historicos/base?codigo=AL30D%0d%0aX")
+        assert r.status_code == 200 and "AL30DX" in r.text
+    assert rh._codigo_qs("aeroar 31\r\n") == "AEROAR 31"
+    cd = rh._descarga_headers('x"\r\ny.csv')["Content-Disposition"]
+    assert "\r" not in cd and "\n" not in cd and cd.startswith('attachment; filename="xy.csv"; filename*=UTF-8\'\'x%22%0D%0Ay.csv')
 
 
 @pytest.mark.asyncio

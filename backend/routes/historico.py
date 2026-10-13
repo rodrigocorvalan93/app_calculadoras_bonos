@@ -932,6 +932,12 @@ def _grupos_especies() -> tuple:
             codes = [k for k in cc.get(c.key, []) if k in con_hist or syms.calc_to_md_code(k) in con_hist]
             if codes:
                 grupos.append((f"Bonos · {c.label}", [{"ticker": k} for k in codes]))
+        # Patas de los soberanos hard-dollar (AO27 pesos / AO27C / GD30D):
+        # sin ficha propia pero con historia (services/patas, 13/10).
+        from backend.services import patas
+        pat = [k for k in patas.soberanas() if k in con_hist]
+        if pat:
+            grupos.append(("Bonos · patas pesos / C / D (soberanos)", [{"ticker": k} for k in pat]))
     nombres = [t["ticker"] for _, items in grupos for t in items]
     _GRUPOS_CACHE = (sig, grupos, nombres)
     return grupos, nombres
@@ -1145,7 +1151,7 @@ def _base_sig() -> tuple:
 async def historicos_base(request: Request, codigo: str = "", desde: Optional[str] = None,
                           hasta: Optional[str] = None, n: str = "200") -> HTMLResponse:
     from backend.services import base_export
-    codigo = (codigo or "").strip().upper()[:24]
+    codigo = _codigo_qs(codigo)
     desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
     try:
         n_sel = max(1, min(int(n or 200), base_export.VISTA_MAX))
@@ -1180,11 +1186,24 @@ def _qs(params: Dict[str, str]) -> str:
     return urlencode({k: v for k, v in params.items() if v})
 
 
+_RE_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _codigo_qs(codigo: Optional[str]) -> str:
+    """`?codigo=` del usuario: sin caracteres de control (un `%0d%0a` llegaba al
+    `Content-Disposition` del CSV y uvicorn cortaba la conexión con un
+    traceback). El espacio se conserva: "AEROAR 31" es un código real."""
+    return _RE_CONTROL.sub("", (codigo or "")).strip().upper()[:24]
+
+
 def _descarga_headers(nombre: str) -> Dict[str, str]:
     from urllib.parse import quote
     # RFC 6266: nombre ASCII de respaldo + filename* UTF-8 (los nombres llevan
-    # espacios y guiones largos: "Delta - historico_…").
-    ascii_ = nombre.encode("ascii", "replace").decode("ascii").replace('"', "")
+    # espacios y guiones largos: "Delta - historico_…"). Sin comillas ni
+    # caracteres de control: un header con CR/LF es ilegal (h11 / httptools lo
+    # rechazan y el cliente se queda sin respuesta); `quote` ya los codifica
+    # en filename*.
+    ascii_ = _RE_CONTROL.sub("", nombre.encode("ascii", "replace").decode("ascii")).replace('"', "")
     return {"Content-Disposition": f'attachment; filename="{ascii_}"; filename*=UTF-8\'\'{quote(nombre)}',
             "Cache-Control": "no-store",
             # ya comprimido (xlsx / parquet) o grande: que GZipMiddleware no lo toque
@@ -1225,7 +1244,7 @@ async def historicos_base_csv(codigo: str = "", desde: Optional[str] = None, has
     """La base px/tasas filtrada como CSV es-AR (`;` + coma decimal + BOM)."""
     from fastapi.responses import PlainTextResponse
     from backend.services import base_export
-    codigo = (codigo or "").strip().upper()[:24]
+    codigo = _codigo_qs(codigo)
     desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
     loop = asyncio.get_running_loop()
     texto, n = await loop.run_in_executor(None, base_export.csv_base, codigo, desde, hasta)

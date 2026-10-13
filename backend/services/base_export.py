@@ -53,10 +53,10 @@ VISTA_DEFAULT = 200
 
 # Columnas de la base en el orden que se muestran y se exportan.
 COLUMNAS = ("fecha_hoy", "Código", "symbol", "Last Price", "Close Price", "Variación %",
-            "TIREA", "TNA", "TEM", "Paridad", "Duration", "Price Source", "Price Date")
+            "TIREA", "TNA", "TEM", "Paridad", "Duration", "Price Source", "Price Date", "Pata", "FX")
 _PCT = ("Variación %", "TIREA", "TNA", "TEM", "Paridad")
-_NUM = ("Last Price", "Close Price", "Duration")
-_CAT = ("Código", "symbol", "Price Source")
+_NUM = ("Last Price", "Close Price", "Duration", "FX")
+_CAT = ("Código", "symbol", "Price Source", "Pata")
 
 # Archivos descargables por clave: (etiqueta, nombre de archivo relativo a Delta Bases, media type)
 _ARCHIVOS: Dict[str, Tuple[str, str, str]] = {
