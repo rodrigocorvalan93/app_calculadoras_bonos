@@ -146,3 +146,48 @@ async def test_http_panel_general() -> None:
         assert "Panel general" in r.text and "MOLI" in r.text
         mp = await ac.get("/mercado")
         assert 'value="general"' in mp.text                      # opción en el selector
+
+
+def test_merval_snapshot_elige_la_variante_que_el_feed_actualiza() -> None:
+    """Desk 14/10: el índice quedaba clavado mientras las acciones se movían.
+    Con '… I.MERVAL - 24hs' en el store con un cierre viejo (persistido o una CL
+    suelta) y el broker publicando el IV bajo otro string, `merval_snapshot`
+    memoizaba la PRIMERA variante con dato y la usaba para siempre. Ahora gana la
+    que el feed actualizó más recientemente, prefiriendo las que traen `last`."""
+    import time
+    store = mds.get_store()
+    equities._merval_cands.update(n=-1, at=0.0, syms=[])
+    store.update_from_md("MERV - XMEV - I.MERVAL - 24hs", {"CL": {"price": 2_400_000.0}})
+    time.sleep(0.002)
+    store.update_from_md("MERV - XMEV - I.MERVAL", {"IV": {"price": 2_510_000.0, "date": "2026-10-14T11:00:00"}})
+    s = equities.merval_snapshot()
+    assert s.symbol == "MERV - XMEV - I.MERVAL" and s.last == 2_510_000.0
+    # un tick en OTRA variante (string nuevo del broker): la candidata se descubre y gana
+    time.sleep(0.002)
+    store.update_from_md("I.MERVAL", {"IV": {"price": 2_515_000.0}})
+    equities._merval_cands["n"] = -1                      # (el store cambió de tamaño: re-escaneo)
+    assert equities.merval_snapshot().last == 2_515_000.0
+    # vuelve a moverse la anterior → vuelve a ganar; una variante sólo-cierre nunca le gana a una con last
+    time.sleep(0.002)
+    store.update_from_md("MERV - XMEV - I.MERVAL", {"IV": {"price": 2_520_000.0}})
+    assert equities.merval_snapshot().last == 2_520_000.0
+    time.sleep(0.002)
+    store.update_from_md("MERV - XMEV - I.MERVAL - 24hs", {"CL": {"price": 2_401_000.0}})
+    assert equities.merval_snapshot().last == 2_520_000.0
+    d = equities.merval_diag()
+    assert d["elegido"] == "MERV - XMEV - I.MERVAL" and len(d["variantes"]) >= 3
+    assert {v["symbol"] for v in d["variantes"]} >= {"MERV - XMEV - I.MERVAL - 24hs", "MERV - XMEV - I.MERVAL", "I.MERVAL"}
+    fila = equities.merval_row()
+    assert fila["last"] == 2_520_000.0 and fila["indice"] is True
+
+
+@pytest.mark.asyncio
+async def test_market_diag_lista_las_variantes_del_indice() -> None:
+    from httpx import ASGITransport, AsyncClient
+    from backend.main import app
+    mds.get_store().update_from_md("MERV - XMEV - I.MERVAL", {"IV": {"price": 2_530_000.0}})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/market/diag")
+        assert r.status_code == 200
+        ind = r.json()["indices"]
+        assert ind["elegido"] and any(v["symbol"] == "MERV - XMEV - I.MERVAL" for v in ind["variantes"])

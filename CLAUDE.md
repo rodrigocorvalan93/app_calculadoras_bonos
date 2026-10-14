@@ -1310,3 +1310,22 @@ GD30C). `_metricas_por_simbolo`
 `_grupos_especies` suma "Bonos · patas pesos / C / D (soberanos)". Costo
 medido: +30 TIR (≈ +100 ms, medido 98 ms; `soberanas()` < 0,1 ms) una vez por
 día en el thread del autosave; cero en requests. Regresión: `tests/test_patas_soberanas.py`.
+
+## Índice Merval clavado (14/10)
+
+El desk veía el I.MERVAL quieto mientras las acciones se movían. El índice
+puede estar en el store bajo VARIAS variantes de string (`equities.
+MERVAL_SYMBOLS`: `… I.MERVAL - 24hs` / `- CI` / sin plazo / `I.MERVAL`, más lo
+que `main` suma del universo del broker) y `merval_snapshot()` memoizaba la
+PRIMERA con dato y la usaba para siempre: una `… - 24hs` con un cierre viejo
+(snapshot persistido o una CL suelta) tapaba a la variante que recibía el IV
+en vivo (reproducido en test). Ahora `merval_candidatos()` (variantes
+conocidas + cualquier símbolo con 'MERVAL', re-escaneo sólo cuando cambia el
+tamaño del store o cada `_MERVAL_RESCAN_S`) y `merval_snapshot()` elige la de
+`updated_at` más reciente, prefiriendo las que traen `last` (IV) sobre las
+sólo-cierre; un snapshot restaurado del disco conserva su `updated_at`
+original y pierde contra uno vivo. Lo usan el panel Líderes (fila `data-pin`),
+el tape e Inicio. `GET /market/diag` → `indices` = variantes en el store
+(last / close / last_ts / updated_at / seq) y `elegido`: ahí se ve bajo qué
+string manda el broker el IV en cada máquina. Regresión:
+`test_tape_equities.test_merval_snapshot_elige_la_variante_que_el_feed_actualiza`.
