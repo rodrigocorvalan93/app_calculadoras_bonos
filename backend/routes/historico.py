@@ -932,6 +932,12 @@ def _grupos_especies() -> tuple:
             codes = [k for k in cc.get(c.key, []) if k in con_hist or syms.calc_to_md_code(k) in con_hist]
             if codes:
                 grupos.append((f"Bonos · {c.label}", [{"ticker": k} for k in codes]))
+        # Patas de los soberanos hard-dollar (AO27 pesos / AO27C / GD30D):
+        # sin ficha propia pero con historia (services/patas, 13/10).
+        from backend.services import patas
+        pat = [k for k in patas.soberanas() if k in con_hist]
+        if pat:
+            grupos.append(("Bonos · patas pesos / C / D (soberanos)", [{"ticker": k} for k in pat]))
     nombres = [t["ticker"] for _, items in grupos for t in items]
     _GRUPOS_CACHE = (sig, grupos, nombres)
     return grupos, nombres
@@ -1119,3 +1125,150 @@ async def historicos_series_diarias(
     if len(_SD_CACHE) < 64:
         _SD_CACHE[key] = bytes(resp.body).decode("utf-8")
     return resp
+
+
+# ── Base: ver y bajar los archivos de Delta Bases ────────────────────────────
+# Pestaña lazy "Base" (13/10): tarjeta de archivos (px/tasas, FX, cierres,
+# acciones) + vista filtrada de la base px/tasas + descargas. El frame de la
+# base se lee UNA vez por firma en el executor (services/base_export); el
+# HTML se cachea por (parámetros, firmas). Las descargas binarias son
+# FileResponse (streaming por chunks) y van sin gzip (main._SSESinGzip:
+# un xlsx/parquet ya está comprimido y el gzip del middleware corre en el
+# event loop).
+_BASE_CACHE: Dict[tuple, bytes] = {}       # bytes: el partial lleva emoji y un str sería UCS-4
+_BASE_CACHE_BYTES = 8 * 2 ** 20            # presupuesto: n=2000 ≈ 700 KB por entrada
+
+
+def _base_sig() -> tuple:
+    from backend.services import base_export, cierres
+    from backend.services import historico_writer as hw
+    xlsx = hw._xlsx_default() or ""
+    return (hw._firmas_base(xlsx) if xlsx else None, fx_hist.signature(), cierres.signature(),
+            base_export.frame_error())
+
+
+@router.get("/historicos/base", response_class=HTMLResponse)
+@_pestana_resiliente("No se pudo cargar la base")
+async def historicos_base(request: Request, codigo: str = "", desde: Optional[str] = None,
+                          hasta: Optional[str] = None, n: str = "200") -> HTMLResponse:
+    from backend.services import base_export
+    codigo = _codigo_qs(codigo)
+    desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
+    try:
+        n_sel = max(1, min(int(n or 200), base_export.VISTA_MAX))
+    except ValueError:
+        n_sel = base_export.VISTA_DEFAULT
+    loop = asyncio.get_running_loop()
+    sig = await loop.run_in_executor(None, _base_sig)
+    key = (codigo, desde, hasta, n_sel, sig)
+    body = _BASE_CACHE.get(key)
+    if body is not None:
+        return HTMLResponse(body)
+    tpl = request.app.state.templates.get_template("partials/historico_base.html")
+
+    def _build() -> str:
+        arch = base_export.archivos()
+        # Sin base todavía (carpeta nueva, OneDrive bajando, antes del primer
+        # autosave) no hay nada que filtrar: la pestaña lo dice, sin form ni CSV.
+        v = base_export.vista(codigo, desde, hasta, n_sel) if arch.get("hay_base") else None
+        # Jinja FUERA del loop: 2.000 filas × 15 columnas son ~36 ms de render.
+        return tpl.render(request=request, arch=arch, v=v, codigo=codigo, desde=desde or "",
+                          hasta=hasta or "", n_sel=n_sel, fmt_bytes=base_export.fmt_bytes,
+                          csv_qs=_qs({"codigo": codigo, "desde": desde or "", "hasta": hasta or ""}))
+
+    html = await loop.run_in_executor(None, _build)
+    body = html.encode("utf-8")
+    sig_ahora = await loop.run_in_executor(None, _base_sig)
+    if _BASE_CACHE and next(iter(_BASE_CACHE))[-1] != sig_ahora:
+        _BASE_CACHE.clear()
+    if sig_ahora == sig:
+        while _BASE_CACHE and sum(len(b) for b in _BASE_CACHE.values()) + len(body) > _BASE_CACHE_BYTES:
+            _BASE_CACHE.pop(next(iter(_BASE_CACHE)))          # la más vieja afuera
+        if len(body) <= _BASE_CACHE_BYTES:
+            _BASE_CACHE[key] = body
+    return HTMLResponse(body)
+
+
+def _qs(params: Dict[str, str]) -> str:
+    from urllib.parse import urlencode
+    return urlencode({k: v for k, v in params.items() if v})
+
+
+_RE_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _codigo_qs(codigo: Optional[str]) -> str:
+    """`?codigo=` del usuario: sin caracteres de control (un `%0d%0a` llegaba al
+    `Content-Disposition` del CSV y uvicorn cortaba la conexión con un
+    traceback). El espacio se conserva: "AEROAR 31" es un código real."""
+    return _RE_CONTROL.sub("", (codigo or "")).strip().upper()[:24]
+
+
+def _descarga_headers(nombre: str) -> Dict[str, str]:
+    from urllib.parse import quote
+    # RFC 6266: nombre ASCII de respaldo + filename* UTF-8 (los nombres llevan
+    # espacios y guiones largos: "Delta - historico_…"). Sin comillas ni
+    # caracteres de control: un header con CR/LF es ilegal (h11 / httptools lo
+    # rechazan y el cliente se queda sin respuesta); `quote` ya los codifica
+    # en filename*.
+    ascii_ = _RE_CONTROL.sub("", nombre.encode("ascii", "replace").decode("ascii")).replace('"', "")
+    return {"Content-Disposition": f'attachment; filename="{ascii_}"; filename*=UTF-8\'\'{quote(nombre)}',
+            "Cache-Control": "no-store",
+            # ya comprimido (xlsx / parquet) o grande: que GZipMiddleware no lo toque
+            "Content-Encoding": "identity"}
+
+
+async def _archivo_legible(path: str) -> None:
+    """Lee 1 byte en el executor antes del 200 (ver base_export.probar_lectura):
+    503 con un motivo claro si OneDrive no lo entrega / está en uso."""
+    from backend.services import base_export
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, base_export.probar_lectura, path)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="archivo no disponible en esta máquina ahora "
+                                                    f"(OneDrive sin bajar o archivo en uso): {exc.strerror or exc}")
+
+
+@router.get("/historicos/base/archivo")
+async def historicos_base_archivo(que: str = ""):
+    """Un archivo de Delta Bases tal cual está en disco (clave cerrada)."""
+    from fastapi.responses import FileResponse
+    from backend.services import base_export
+    ent = await asyncio.get_running_loop().run_in_executor(None, base_export.archivo_descargable, que)
+    if not ent:
+        raise HTTPException(status_code=404, detail="archivo no disponible")
+    path, nombre, media = ent
+    await _archivo_legible(path)
+    return FileResponse(path, media_type=media, headers=_descarga_headers(nombre))
+
+
+@router.get("/historicos/base/cierre")
+async def historicos_base_cierre(fecha: str = "", fmt: str = "parquet"):
+    """Una partición del cierre completo (parquet tal cual, o CSV es-AR)."""
+    from fastapi.responses import FileResponse
+    from backend.services import base_export
+    loop = asyncio.get_running_loop()
+    ent = await loop.run_in_executor(None, base_export.particion_descargable, _iso_o_none(fecha) or "")
+    if not ent:
+        raise HTTPException(status_code=404, detail="no hay cierre de esa fecha")
+    path, nombre = ent
+    await _archivo_legible(path)
+    if (fmt or "").lower() == "csv":
+        datos, _n = await loop.run_in_executor(None, base_export.csv_cierre, path)
+        return Response(datos, media_type="text/csv; charset=utf-8",
+                        headers=_descarga_headers(nombre.replace(".parquet", ".csv")))
+    return FileResponse(path, media_type="application/vnd.apache.parquet", headers=_descarga_headers(nombre))
+
+
+@router.get("/historicos/base.csv")
+async def historicos_base_csv(codigo: str = "", desde: Optional[str] = None, hasta: Optional[str] = None):
+    """La base px/tasas filtrada como CSV es-AR (`;` + coma decimal + BOM)."""
+    from backend.services import base_export
+    codigo = _codigo_qs(codigo)
+    desde, hasta = _iso_o_none(desde), _iso_o_none(hasta)
+    loop = asyncio.get_running_loop()
+    datos, n = await loop.run_in_executor(None, base_export.csv_base, codigo, desde, hasta)
+    nombre = base_export.nombre_csv("base_px_tasas", codigo, desde, hasta)
+    h = _descarga_headers(nombre)
+    h["X-Filas"] = str(n)
+    return Response(datos, media_type="text/csv; charset=utf-8", headers=h)

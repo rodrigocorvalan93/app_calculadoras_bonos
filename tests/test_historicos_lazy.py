@@ -52,7 +52,7 @@ async def test_contenedores_lazy_con_timeout_y_js_de_reintento() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         page = await ac.get("/historicos")
         assert page.status_code == 200
-        for tab in ("hist-curva", "hist-fechas", "hist-series", "hist-acciones"):
+        for tab in ("hist-curva", "hist-fechas", "hist-series", "hist-acciones", "hist-comp", "hist-base"):
             i = page.text.index(f'id="{tab}"')
             frag = page.text[i:i + 400]
             assert 'hx-trigger="reveal"' in frag and 'hx-request=\'{"timeout":90000}\'' in frag, tab

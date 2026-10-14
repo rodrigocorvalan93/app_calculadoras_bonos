@@ -100,6 +100,11 @@ def serie_de(ticker: str, campo: str = "precio") -> Optional[Dict[str, Any]]:
     # respeta tal cual y recién después se prueba en mayúsculas.
     t = next((c for c in (raw, raw.upper()) if pricing.bond_meta(c)), None)
     if t is None:
+        # Pata de un soberano hard-dollar sin ficha propia (AO27C / GD30D):
+        # tiene historia propia en el cierre completo y en la base (13/10).
+        from backend.services import patas
+        t = next((c for c in (raw, raw.upper()) if patas.pata_de(c)), None)
+    if t is None:
         return None
     k = 100.0 if es_tir else 1.0
     proy = t.endswith("j")
@@ -452,7 +457,7 @@ def analizar(ticker: str, base: str = "ars", modo: str = "precio", dias: int = 9
     modo = "retornos" if modo == "retornos" else "precio"
     s = serie_de(ticker, campo)
     if not s:
-        que = "TIR guardada (sólo bonos con ficha)" if es_tir else "cierres guardados"
+        que = "TIR guardada (bonos con ficha o pata de soberano)" if es_tir else "cierres guardados"
         return {"ok": False, "ticker": ticker, "motivo": f"no hay {que} de {ticker or '—'}"}
     ticker = s.get("ticker") or ticker.upper()          # código resuelto (TX26j conserva la j)
     fechas: List[str] = list(s["fechas"])

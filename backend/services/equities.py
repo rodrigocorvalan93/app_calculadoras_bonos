@@ -252,32 +252,68 @@ def merval_row() -> Optional[Dict[str, Any]]:
     return r
 
 
-_merval_sym = None                      # símbolo MERVAL resuelto (memo)
+_merval_sym = None                      # símbolo MERVAL elegido la última vez (diagnóstico)
+# Candidatos descubiertos en el store (cualquier símbolo con 'MERVAL'): el
+# escaneo de ~2k símbolos bajo el lock del store se hace una vez por cambio
+# de tamaño del store o cada _MERVAL_RESCAN_S, nunca en cada render.
+_merval_cands: Dict[str, Any] = {"n": -1, "at": 0.0, "syms": []}
+_MERVAL_RESCAN_S = 30.0
+
+
+def merval_candidatos() -> List[str]:
+    """Símbolos del store que son el índice Merval: las variantes conocidas
+    más cualquier otro string con 'MERVAL' que mande el broker."""
+    import time as _t
+    store = mds.get_store()
+    n = store.stats().get("symbols") if hasattr(store, "stats") else None
+    now = _t.time()
+    c = _merval_cands
+    if c["n"] != n or now - c["at"] > _MERVAL_RESCAN_S:
+        vistos = list(MERVAL_SYMBOLS)
+        for s in store.symbols():
+            if "MERVAL" in s.upper() and s not in vistos:
+                vistos.append(s)
+        c.update(n=n, at=now, syms=vistos)
+    return c["syms"]
 
 
 def merval_snapshot():
-    """Snapshot del índice Merval. Prueba las variantes conocidas y, si ninguna
-    pega, ESCANEA el store por cualquier símbolo que contenga 'MERVAL' — robusto al
-    formato exacto que mande el broker (los índices no siempre llegan con el string
-    esperado, que era por qué el 'MERVAL US$' del tape no aparecía)."""
+    """Snapshot del índice Merval: de TODAS las variantes que haya en el store
+    (`merval_candidatos`), la que el feed actualizó más recientemente
+    (`updated_at`), prefiriendo las que tienen `last` (el IV) sobre las que
+    sólo traen un cierre. Antes se memoizaba la PRIMERA variante con dato y se
+    la usaba para siempre: con '… I.MERVAL - 24hs' en el store con un cierre
+    viejo (persistido, o una CL suelta) y el broker publicando el IV en vivo
+    bajo otro string, el panel, el tape e Inicio mostraban el índice clavado
+    mientras las acciones se movían (desk, 14/10). Un snapshot restaurado
+    del disco conserva su `updated_at` original, así que pierde contra uno
+    vivo. Costo: ≤ 5 lookups por render."""
     global _merval_sym
     store = mds.get_store()
-    # símbolo ya descubierto: lookup directo — el escaneo de ~2k símbolos
-    # (bajo el lock del store, disputado con el thread del feed) corría en
-    # CADA render del tape porque el fallback ES el caso común.
-    if _merval_sym:
-        snap = store.get(_merval_sym)
-        if snap is not None and (snap.last is not None or snap.close is not None):
-            return snap
-    for s in MERVAL_SYMBOLS:
+    mejor = None
+    mejor_k = None
+    for s in merval_candidatos():
         snap = store.get(s)
-        if snap is not None and (snap.last is not None or snap.close is not None):
-            _merval_sym = s
-            return snap
-    for s in store.symbols():                       # fallback: cualquier I.MERVAL del feed
-        if "MERVAL" in s.upper():
-            snap = store.get(s)
-            if snap is not None and (snap.last is not None or snap.close is not None):
-                _merval_sym = s
-                return snap
-    return None
+        if snap is None or (snap.last is None and snap.close is None):
+            continue
+        k = (1 if snap.last is not None else 0, float(snap.updated_at or 0.0))
+        if mejor is None or k > mejor_k:
+            mejor, mejor_k = snap, k
+    _merval_sym = mejor.symbol if mejor is not None else None
+    return mejor
+
+
+def merval_diag() -> Dict[str, Any]:
+    """Qué variantes del índice hay en el store y cuál se está usando
+    (/market/diag): para ver en la máquina del desk bajo qué string manda
+    el broker el IV y si alguna quedó con un cierre viejo."""
+    store = mds.get_store()
+    out = []
+    for s in merval_candidatos():
+        snap = store.get(s)
+        if snap is None:
+            continue
+        out.append({"symbol": s, "last": snap.last, "close": snap.close, "last_ts": snap.last_ts,
+                    "updated_at": snap.updated_at, "seq": snap.seq})
+    el = merval_snapshot()
+    return {"elegido": el.symbol if el is not None else None, "variantes": out}

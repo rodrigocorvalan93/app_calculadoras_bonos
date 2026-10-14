@@ -114,12 +114,18 @@ async def codes() -> Dict[str, Any]:
 
 @router.get("/diag")
 async def diag() -> Dict[str, Any]:
+    from backend.services import equities
     ws = primary_ws.get_ws_client()
     store = mds.get_store()
+    try:
+        indices = equities.merval_diag()
+    except Exception as exc:  # noqa: BLE001 — el diag nunca se cae por el índice
+        indices = {"error": str(exc)}
     return {
         "ws": ws.stats(),
         "store": store.stats(),
         "authenticated": ws.authenticated,
+        "indices": indices,
     }
 
 

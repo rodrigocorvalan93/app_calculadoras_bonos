@@ -183,12 +183,12 @@ def reset_memo() -> None:
 
 # Columnas numéricas de la base px/tasas: en el espejo van SIEMPRE float64.
 COLS_NUMERICAS = ("Last Price", "Close Price", "Variación %", "TIREA", "TNA", "TEM",
-                  "Paridad", "Duration")
+                  "Paridad", "Duration", "FX")
 
 
 # Columnas de texto de la base: en el espejo van SIEMPRE `string`. Mezcladas
 # (datetime + str en 'Price Date', int + str en 'Código') pyarrow no las escribe.
-COLS_TEXTO = ("symbol", "Código", "Price Source", "Price Date")
+COLS_TEXTO = ("symbol", "Código", "Price Source", "Price Date", "Pata")
 
 
 def normalizar_texto(df: Any, cols: Tuple[str, ...] = COLS_TEXTO) -> Any:

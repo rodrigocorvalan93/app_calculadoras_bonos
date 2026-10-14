@@ -1196,3 +1196,136 @@ Invariantes que mantienen la app andando en Mac — CI la corre en
   `scrollbar-width` en el CSS son sólo cosméticos si faltan.
 - Windows-only sin guard no entra: `os.fchmod`, `msvcrt`, `winreg`,
   `LOCALAPPDATA` (`historico_writer.journal_dir` cae a `~/.local/share`).
+
+## Windows — carpeta del código sincronizada por OneDrive (13/10)
+
+En las PCs del desk el clon vive en la biblioteca de SharePoint que sincroniza
+OneDrive (`git pull` desde UNA máquina, OneDrive reparte los archivos). Con
+Archivos a petición, un archivo NUEVO del repo llega a las otras PCs como
+marcador "sólo en la nube" (`FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`) y se baja
+recién al leerlo; si OneDrive no lo entrega en ese momento (cerrado, pausado,
+sin sesión, sin red) `ReadFile` falla con un ERROR_CLOUD_FILE_* que el CRT
+traduce a EINVAL y Python muere al importar con `OSError: [Errno 22] Invalid
+argument` en `importlib … get_data` (Pablo, 13/10, `bna_fx.py` nuevo de #242).
+`backend/tools/onedrive.py` (stdlib) corre en el .bat ANTES de `https_local`
+(que ya importa medio backend): `escanear` (scandir con `follow_symlinks=False`,
+atributos del listado, sin `.git` / `__pycache__`; `certs/` y `data/` SÍ, viven
+adentro del clon sincronizado y se leen al arrancar) junta los
+marcadores sin contenido, `hidratar` los lee enteros (eso dispara la bajada;
+`attrib +P` solo es un pedido asincrónico al motor, no garantiza nada), y si
+la carpeta es de nube y la raíz no está fijada, `fijar` = `attrib -U +P` sobre
+la raíz + `attrib -U +P <raíz>\* /S /D` ("Mantener siempre en este
+dispositivo": lo nuevo hereda el pin y Storage Sense —Win11 22H2 vacía lo no
+abierto en 30 días— no lo toca; el `-U` porque un archivo ya "sólo en la
+nube" lleva UNPINNED y ese estado propio le gana al de la carpeta). "De nube"
+= tag 0x9000x01A en alguna entrada (el proceso pide verlos con
+`RtlSetProcessPlaceholderCompatibilityMode(2)`: por default Windows se los
+disfraza a una app común), o atributos que sólo pone el motor (RECALL /
+PINNED / UNPINNED), o la raíz bajo `raices_onedrive()` (variables `OneDrive*`
++ registro `HKCU\Software\Microsoft\OneDrive\Accounts`: las bibliotecas de
+SharePoint NO cuelgan de %OneDrive%). Un EINVAL en el read es consistente
+con un marcador pero no prueba: la prueba es el bit RECALL_ON_DATA_ACCESS que
+muestra `--listar`. Fuera de OneDrive y en Mac / Linux no hace nada
+(silencio, exit 0). Si algo
+no se pudo bajar, o no se pudo listar una carpeta de la nube (lo de adentro no
+se chequeó), sale con código 4 (`EXIT_SIN_BAJAR`; 3 es "app ya corriendo") y
+el .bat explica qué hacer; cualquier otro código (traceback del tool mismo
+como marcador con OneDrive cerrado) va a un mensaje genérico que señala el
+`Errno 22`. El paso corre DESPUÉS de crear el venv y ANTES de pip (lee
+requirements.txt) y de https_local; `attrib` se lee con el codec `oem` y
+`errors="replace"` (cp850 vs cp1252 estricto tiraba UnicodeDecodeError).
+`--listar` sólo informa, `--sin-pin` baja sin fijar, `--quiet` sólo problemas
+(`backfill_historico.bat` lo corre así). Regresión:
+`tests/test_onedrive.py` (parchea `_atributos` / `_leer` / `_PLATFORM`).
+
+## Históricos · Base — ver y bajar los archivos de Delta Bases (13/10)
+
+Pedido del desk ("dónde puedo ver y descargar la base"): pestaña lazy **Base
+(ver / bajar)** en Históricos (`hist-base` → `GET /historicos/base`,
+`partials/historico_base.html`, `services/base_export.py`, todo sólo
+lectura). Tarjeta de archivos: base px/tasas (xlsx + espejo parquet, ¿espejo
+fiel?, ruedas / filas / reales / desde-hasta del `_resumen_base_cached` del
+writer), serie FX (xlsx + parquet, `fx_hist.status()`), cierre completo
+(particiones: cuántas, desde-hasta, bytes; listado memoizado por
+`cierres.signature()`) y acciones; un `os.stat` por archivo. Vista: las
+últimas N filas de la base px/tasas (todas las columnas, pre-formateadas
+es-AR) filtradas por Código / rango; `base_export.frame()` lee la base UNA
+vez por `hw._firmas_base` (parquet si el espejo vale, si no el Excel; sin
+apartar ni regenerar nada) y la deja en memoria compacta (`category`, ~10 MB
+por 250 ruedas) — `historico_byma` sólo guarda seis métricas por código, no
+sirve para symbol / cierre previo / fuente / hora. Descargas: `GET
+/historicos/base/archivo?que=px_xlsx|px_parquet|fx_xlsx|fx_parquet|acciones`
+(FileResponse por chunks, clave CERRADA → ruta; nunca texto del usuario),
+`GET /historicos/base/cierre?fecha=AAAA-MM-DD&fmt=parquet|csv` (la fecha se
+busca en `cierres.particiones()`), `GET /historicos/base.csv?codigo&desde&hasta`
+(CSV es-AR `;` + coma decimal + BOM en BYTES, por tramos de `CSV_CHUNK` filas
+para soltar el GIL entre llamadas C, `float_format %.15g` — con `%.10g` un
+volumen salía `9,12e+11` —, tope `CSV_MAX_FILAS`). Las tres rutas mandan
+`Content-Encoding: identity` y `main._SSESinGzip` les saca el
+`Accept-Encoding` (`_SIN_GZIP`): un xlsx / parquet ya viene comprimido y el
+CSV grande no vale el CPU del server. Antes del 200 de una descarga se lee
+UN byte en el executor (`probar_lectura`): FileResponse abre el archivo
+después de mandar los headers y un marcador de OneDrive sin bajar / un
+archivo en uso dejaba un 200 cortado → ahora 503 con motivo. `?codigo=` pasa
+por `_codigo_qs` (sin caracteres de control: un `%0d%0a` llegaba al
+`Content-Disposition`; el espacio se conserva, "AEROAR 31" es un código).
+Jinja renderiza en el executor; HTML cacheado por (parámetros, firmas: base +
+FX + cierres + error del frame) en bytes con presupuesto `_BASE_CACHE_BYTES`;
+warm = lookup (medido: avg 3,1 · p50 2,9 · p95 4,2 ms; filtro nuevo p95 43
+ms). La pestaña nunca muestra rutas absolutas (el HTML se cachea sin rol):
+sólo el nombre de la carpeta; "configurada pero ausente en esta máquina"
+(OneDrive sin sincronizar) y "carpeta sin base todavía" tienen su aviso.
+Sub-rutas de Históricos: sólo login (la base no tiene tenencias). Regresión:
+`tests/test_historico_base.py`.
+
+## Patas de los soberanos hard-dollar en el histórico (13/10)
+
+Pedido del desk: guardar también la historia de las OTRAS patas de globales y
+bonares (no corporativos) con su TIR. `services/patas.py` es el único
+resolver: `soberanas()` = por cada nativa de `globales` / `bonares` (base =
+nativa sin el sufijo, por SUFIJO y no por ISIN: AO29 / AO29D traen ISIN
+placeholder) dos entradas — la pata en PESOS (`AO27`, `GD30`: TIR = precio ÷
+FX de referencia del día, MEP para un bonar / CCL para un global, la misma
+rama que ya usaban las especies pesos de las ON) y la CRUZADA (`AO27C` de un
+bonar, `GD30D` de un global: TIR **directa** = precio crudo contra el flujo
+de la ficha nativa; es la TIR por ticker del mercado y difiere de la vista
+por pata de Curvas, que convierte con CCL/MEP, en ≈ canje / duration —
+depende de la duration del día: con 3 % de canje ≈ 50 bps en GD46, ≈ 150 en
+AL30, 300-450 en AO27). `build_rows` las emite DESPUÉS del loop de curvas
+desde esa lista propia (NO entran a `build_curve_codes`: Curvas / Inicio /
+Escenario / Qué pasó no las heredan), `Código` = ticker de la pata (el
+lector dedupea por Código + fecha: con el código de la ficha se pisarían),
+`symbol` = su ticker, precio crudo de pantalla, columnas nuevas `Pata` ∈
+ARS / MEP / CABLE (`espejo.COLS_TEXTO`) y `FX` = tipo de cambio por el que
+se dividió un precio en pesos (`espejo.COLS_NUMERICAS`; también en las
+especies pesos de ON — reproducibilidad: la recaptura de las 17:31 pisa el
+CCL/MEP del archivo FX). `_fila_rc` / `_filas_desde_feed` usan el mismo
+resolver (antes `bond_meta('AO27C')` = {} caía en `sin_calc` en silencio) y
+con AL30 + AL30C + AL30D en la base `_fx_desde_filas` por fin resuelve el
+FX de cierre para la reconstrucción desde la base (cada pata por separado
+en la primera base que la tenga: sin AL30C en D+1 el CCL sale de GD30 /
+GD30C). `_metricas_por_simbolo`
+→ la partición de cierres lleva `tirea` en el símbolo de la pata. Lectores:
+`price_action.serie_de` acepta una pata sin ficha (cierres → base) y
+`_grupos_especies` suma "Bonos · patas pesos / C / D (soberanos)". Costo
+medido: +30 TIR (≈ +100 ms, medido 98 ms; `soberanas()` < 0,1 ms) una vez por
+día en el thread del autosave; cero en requests. Regresión: `tests/test_patas_soberanas.py`.
+
+## Índice Merval clavado (14/10)
+
+El desk veía el I.MERVAL quieto mientras las acciones se movían. El índice
+puede estar en el store bajo VARIAS variantes de string (`equities.
+MERVAL_SYMBOLS`: `… I.MERVAL - 24hs` / `- CI` / sin plazo / `I.MERVAL`, más lo
+que `main` suma del universo del broker) y `merval_snapshot()` memoizaba la
+PRIMERA con dato y la usaba para siempre: una `… - 24hs` con un cierre viejo
+(snapshot persistido o una CL suelta) tapaba a la variante que recibía el IV
+en vivo (reproducido en test). Ahora `merval_candidatos()` (variantes
+conocidas + cualquier símbolo con 'MERVAL', re-escaneo sólo cuando cambia el
+tamaño del store o cada `_MERVAL_RESCAN_S`) y `merval_snapshot()` elige la de
+`updated_at` más reciente, prefiriendo las que traen `last` (IV) sobre las
+sólo-cierre; un snapshot restaurado del disco conserva su `updated_at`
+original y pierde contra uno vivo. Lo usan el panel Líderes (fila `data-pin`),
+el tape e Inicio. `GET /market/diag` → `indices` = variantes en el store
+(last / close / last_ts / updated_at / seq) y `elegido`: ahí se ve bajo qué
+string manda el broker el IV en cada máquina. Regresión:
+`test_tape_equities.test_merval_snapshot_elige_la_variante_que_el_feed_actualiza`.

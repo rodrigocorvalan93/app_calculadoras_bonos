@@ -71,6 +71,39 @@ if not exist "%PY%" (
   )
 )
 
+REM --- Archivos a peticion de OneDrive (carpeta del codigo sincronizada) ---
+REM Un archivo NUEVO del repo llega a las otras PCs como marcador "solo en la
+REM nube" y, si OneDrive no lo entrega al leerlo, Python muere al importar con
+REM "OSError: [Errno 22] Invalid argument" (Pablo, 13/10). Esto baja lo que
+REM falte (requirements.txt incluido: pip lo lee en el paso siguiente), deja la
+REM carpeta "Mantener siempre en este dispositivo" y corta con un mensaje claro
+REM si OneDrive no responde. Fuera de OneDrive no hace nada. Solo usa la
+REM biblioteca estandar: corre aunque las dependencias no esten instaladas.
+"%PY%" -m backend.tools.onedrive
+if errorlevel 4 if not errorlevel 5 (
+  echo.
+  echo [ERROR] Hay archivos del codigo que OneDrive todavia no bajo a esta PC
+  echo         ^(Archivos a peticion: figuran "solo en la nube"^). Asi la app no arranca.
+  echo   1^) Fijate que OneDrive este abierto y sincronizando ^(icono de la nube
+  echo      en la barra, sin pausa ni error, con sesion iniciada^).
+  echo   2^) Boton derecho sobre la carpeta del codigo ^> "Mantener siempre en este dispositivo"
+  echo      y espera a que termine de bajar.
+  echo   3^) Volver a abrir este .bat.
+  echo.
+  pause
+  exit /b 4
+)
+if errorlevel 1 (
+  echo.
+  echo [ERROR] El chequeo previo de archivos fallo ^(ver arriba^).
+  echo   Si dice "OSError: [Errno 22] Invalid argument", es OneDrive: abrilo, boton derecho
+  echo   sobre la carpeta del codigo ^> "Mantener siempre en este dispositivo", esperar y reabrir.
+  echo   Si es otro error de Python, mandalo tal cual.
+  echo.
+  pause
+  exit /b 1
+)
+
 REM --- 3) dependencias: instalar solo si backend\requirements.txt cambio ---
 fc /b "backend\requirements.txt" "%VENVDIR%\requirements.instalado" >nul 2>&1
 if errorlevel 1 (
@@ -110,6 +143,7 @@ echo   App     : http://127.0.0.1:8000
 echo   Add-in  : https://localhost:8443  ^(Excel =OMS.*, solo si hay certs^)
 echo   Ctrl+C para detener
 echo ------------------------------------------------------------
+
 
 REM --- Certificado HTTPS local (funciones =OMS.* de Excel) ---
 REM Idempotente: si el cert esta vigente no hace nada y sigue al toque.

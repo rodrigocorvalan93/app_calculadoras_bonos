@@ -1,0 +1,128 @@
+{# Históricos · Base — qué archivos hay en Delta Bases, bajarlos y mirar la
+   base px/tasas filtrada. Estática (la data cambia 1×/día): sin md-update ni
+   data-flash-scope. Las celdas vienen PRE-FORMATEADAS de base_export.vista. #}
+{% if not arch.configurado %}
+  {% if arch.cfg %}
+  <div class="alert">La carpeta de bases está configurada pero no está en esta máquina ahora: OneDrive sin sincronizar o sin sesión. Cuando aparezca, Reintentar.
+    <button type="button" class="btn" style="margin-left:8px" onclick="htmx.trigger('#hist-base', 'reveal')">↻ Reintentar</button></div>
+  {% else %}
+  <div class="alert">No hay carpeta de bases configurada: falta <code>DELTA_HISTORICO_DIR</code> (o <code>DELTA_BASES_DIR</code>) en <code>secrets.txt</code>.</div>
+  {% endif %}
+{% else %}
+  <div class="card">
+    <div class="card-title"><span>🗄 Archivos en Delta Bases</span>
+      <span class="card-title-aux" title="Carpeta compartida de bases (OneDrive) de la máquina que corre la app">{{ arch.carpeta }}</span></div>
+    <div class="card-body table-scroll">
+      <table class="cashflows mercado-table" id="base-archivos">
+        <thead><tr>
+          <th>Archivo</th><th>Contenido</th><th>Tamaño</th><th>Modificado</th><th style="text-align:left">Bajar</th>
+        </tr></thead>
+        <tbody>
+          {% set px = arch.px %}
+          <tr>
+            <td><b>Base px/tasas</b><br><span class="muted" style="font-size:11px">precio · TIR · TNA · TEM · paridad · duration por bono de curva y rueda</span></td>
+            <td>{% if px.ruedas %}{{ px.ruedas }} ruedas · {{ '{:,}'.format(px.filas).replace(',', '.') }} filas ({{ '{:,}'.format(px.reales).replace(',', '.') }} reales)<br><span class="muted">{{ px.desde }} → {{ px.hasta }}</span>{% else %}<span class="muted">sin filas todavía</span>{% endif %}</td>
+            <td>{% if px.xlsx.existe %}Excel {{ fmt_bytes(px.xlsx.bytes) }}{% endif %}{% if px.parquet.existe %}{% if px.xlsx.existe %}<br>{% endif %}parquet {{ fmt_bytes(px.parquet.bytes) }}{% endif %}</td>
+            <td>{% if px.xlsx.existe %}{{ px.xlsx.mtime }}{% elif px.parquet.existe %}{{ px.parquet.mtime }}{% else %}—{% endif %}
+              {% if px.xlsx.existe and px.parquet.existe %}<br><span class="muted" title="{{ 'El parquet es copia fiel del Excel (firma mtime + tamaño)' if px.espejo_fiel else 'Parquet y Excel no coinciden (firma mtime + tamaño): la app lee el Excel hasta regenerar el espejo' }}">espejo {{ 'fiel ✓' if px.espejo_fiel else 'NO fiel ✗ · manda el Excel' }}</span>{% endif %}</td>
+            <td style="text-align:left;white-space:nowrap">
+              {% if px.xlsx.existe %}<a class="btn-ghost" href="/historicos/base/archivo?que=px_xlsx" download>⤓ Excel</a>{% endif %}
+              {% if px.parquet.existe %}<a class="btn-ghost" href="/historicos/base/archivo?que=px_parquet" download>⤓ parquet</a>{% endif %}
+            </td>
+          </tr>
+          {% set fx = arch.fx %}
+          <tr>
+            <td><b>Series diarias FX + caución</b><br><span class="muted" style="font-size:11px">CCL · MEP · canje · A3500 · caución $ y US$, una fila por día</span></td>
+            <td>{% if fx.n %}{{ fx.n }} días<br><span class="muted">{{ fx.desde }} → {{ fx.hasta }}</span>{% else %}<span class="muted">sin filas todavía</span>{% endif %}</td>
+            <td>{% if fx.xlsx.existe %}Excel {{ fmt_bytes(fx.xlsx.bytes) }}{% endif %}{% if fx.parquet.existe %}{% if fx.xlsx.existe %}<br>{% endif %}parquet {{ fmt_bytes(fx.parquet.bytes) }}{% endif %}</td>
+            <td>{% if fx.xlsx.existe %}{{ fx.xlsx.mtime }}{% elif fx.parquet.existe %}{{ fx.parquet.mtime }}{% else %}—{% endif %}</td>
+            <td style="text-align:left;white-space:nowrap">
+              {% if fx.xlsx.existe %}<a class="btn-ghost" href="/historicos/base/archivo?que=fx_xlsx" download>⤓ Excel</a>{% endif %}
+              {% if fx.parquet.existe %}<a class="btn-ghost" href="/historicos/base/archivo?que=fx_parquet" download>⤓ parquet</a>{% endif %}
+            </td>
+          </tr>
+          {% set ci = arch.cierres %}
+          <tr>
+            <td><b>Cierre completo</b><br><span class="muted" style="font-size:11px">una partición por rueda con TODOS los símbolos: último, cierre, OHLC, puntas, volumen, TIR</span></td>
+            <td>{% if ci.n %}{{ ci.n }} ruedas<br><span class="muted">{{ ci.desde }} → {{ ci.hasta }}</span>{% else %}<span class="muted">sin particiones todavía</span>{% endif %}</td>
+            <td>{% if ci.n %}{{ fmt_bytes(ci.bytes) }} en {{ ci.n }} archivos{% endif %}</td>
+            <td>{% if ci.mtime %}{{ ci.mtime }}<br>{% endif %}<span class="muted" style="font-size:11px" title="Una partición por rueda en cierres/AAAA/">cierres/AAAA/AAAA-MM-DD.parquet</span></td>
+            <td style="text-align:left;white-space:nowrap">
+              {% if ci.n %}
+              <form method="get" action="/historicos/base/cierre" style="display:inline-flex;gap:6px;align-items:center">
+                <select name="fecha" aria-label="Rueda del cierre completo" title="Rueda" style="max-width:130px">{% for f in ci.fechas %}<option value="{{ f }}">{{ f[8:10] }}/{{ f[5:7] }}/{{ f[0:4] }}</option>{% endfor %}</select>
+                <select name="fmt" aria-label="Formato de descarga" title="Formato"><option value="parquet">parquet</option><option value="csv">CSV</option></select>
+                <button type="submit" class="btn-ghost">⤓ Bajar rueda</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% set ac = arch.acciones %}
+          <tr>
+            <td><b>Acciones / CEDEARs</b><br><span class="muted" style="font-size:11px">cierre diario propio del panel</span></td>
+            <td>{% if ac.existe %}parquet{% else %}<span class="muted">no hay</span>{% endif %}</td>
+            <td>{% if ac.existe %}{{ fmt_bytes(ac.bytes) }}{% endif %}</td>
+            <td>{% if ac.existe %}{{ ac.mtime }}{% else %}—{% endif %}</td>
+            <td style="text-align:left">{% if ac.existe %}<a class="btn-ghost" href="/historicos/base/archivo?que=acciones" download>⤓ parquet</a>{% endif %}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:11px;margin-top:6px">
+        Los archivos se bajan tal cual están en OneDrive (lo que escribió el último autosave / recaptura).
+        {% if px.espejo_fiel or not (px.xlsx.existe and px.parquet.existe) %}El parquet es la copia que lee la app; el Excel es el mismo cuadro para abrir a mano.{% else %}Parquet y Excel no coinciden ahora: el Excel es el que vale (la app lo relee y regenera el parquet en el próximo guardado).{% endif %}
+      </p>
+    </div>
+  </div>
+
+  {% if not arch.hay_base %}
+  <p class="muted" style="padding:10px">Todavía no hay base px/tasas en la carpeta (se crea con el primer autosave del cierre o con "Guardar base de hoy").</p>
+  {% endif %}
+
+  {% if v %}
+  <div class="curve-picker card" style="margin-top:12px">
+    <div class="card-body">
+      <form hx-get="/historicos/base" hx-target="#hist-base" hx-swap="innerHTML">
+        <div class="row-fields">
+          <label class="field"><span>Código</span>
+            <input name="codigo" list="base-codigos" value="{{ codigo }}" placeholder="todos" style="max-width:120px" autocomplete="off">
+            <datalist id="base-codigos">{% for c in v.codigos %}<option value="{{ c }}">{% endfor %}</datalist></label>
+          <label class="field"><span>Desde</span><input type="date" name="desde" value="{{ desde }}"></label>
+          <label class="field"><span>Hasta</span><input type="date" name="hasta" value="{{ hasta }}"></label>
+          <label class="field"><span>Filas en pantalla</span>
+            <select name="n">{% for k in (50, 200, 500, 2000) %}<option value="{{ k }}" {% if k == n_sel %}selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
+          <button type="submit" class="btn-primary" style="align-self:end">Ver</button>
+          <a class="btn-ghost" style="align-self:end" href="/historicos/base.csv{% if csv_qs %}?{{ csv_qs }}{% endif %}" download
+             onclick="var f=this.closest('form'),p=new URLSearchParams();['codigo','desde','hasta'].forEach(function(k){var e=f&&f.elements[k];if(e&&e.value)p.set(k,e.value)});this.href='/historicos/base.csv'+(p.toString()?'?'+p:'')"
+             title="Todas las filas del filtro tal como está en el formulario (no sólo las de pantalla), CSV es-AR: Excel lo abre directo">⤓ CSV del filtro</a>
+        </div>
+      </form>
+      <p class="muted" style="font-size:11px;margin-top:6px">
+        {% if v.ok %}Base cargada: {{ '{:,}'.format(v.filas_base).replace(',', '.') }} filas · {{ v.desde_base }} → {{ v.hasta_base }}.
+        {% if codigo or desde or hasta %}El filtro deja {{ '{:,}'.format(v.total).replace(',', '.') }} filas; {% else %}{% endif %}se muestran las últimas {{ v.n }} (más recientes primero).
+        {% else %}<b>No pude leer la base:</b> <code>{{ v.error }}</code>{% endif %}
+      </p>
+    </div>
+  </div>
+
+  {% if v.ok and v.filas %}
+  <div class="card" style="margin-top:12px">
+    <div class="card-title"><span>🗒 Base px/tasas{% if codigo %} · {{ codigo }}{% endif %}</span>
+      <span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#base-tbl" title="Descargar la tabla como se ve (CSV es-AR)">⤓ CSV de la tabla</button> · {{ v.n }} de {{ '{:,}'.format(v.total).replace(',', '.') }}</span></div>
+    <div class="card-body table-scroll">
+      <table class="cashflows curve-table mercado-table" data-sortable id="base-tbl">
+        <thead><tr>
+          {% for c in v.columnas %}<th data-sort{% if loop.index <= 3 %} style="text-align:left"{% endif %}>{{ {'fecha_hoy': 'Rueda', 'symbol': 'Símbolo', 'Last Price': 'Último', 'Close Price': 'Cierre previo', 'Variación %': 'Var %', 'Price Source': 'Fuente', 'Price Date': 'Hora del dato'}.get(c, c) }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+          {% for r in v.filas %}
+          <tr>{% for c in v.columnas %}<td{% if loop.index <= 3 %} style="text-align:left{% if loop.index == 2 %};color:var(--accent);font-weight:600{% endif %}"{% endif %}>{{ r[c] }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% elif v.ok %}
+  <p class="muted" style="padding:10px">No hay filas para ese filtro.</p>
+  {% endif %}
+  {% endif %}
+{% endif %}

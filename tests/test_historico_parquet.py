@@ -134,7 +134,8 @@ def test_regenera_el_espejo_con_price_date_mixto_en_el_excel(hist_dir) -> None:
     assert pq.is_file() and espejo.espejo_valido(str(pq), str(hist_dir / _XLSX))
     back = pd.read_parquet(pq)
     for col in espejo.COLS_TEXTO:
-        assert str(back[col].dtype) == "string", col
+        if col in back.columns:                                 # 'Pata' sólo existe en bases con patas (13/10)
+            assert str(back[col].dtype) == "string", col
     assert list(back["Price Date"].astype(object).fillna("")) == ["2026-07-06 16:59:00", "2026-07-07 16:58:00", ""]
     assert list(back["symbol"]) == ["MERV - XMEV - T30E6 - 24hs"] * 2 + ["12345"]
     # la próxima carga ya va por el espejo, con la misma data

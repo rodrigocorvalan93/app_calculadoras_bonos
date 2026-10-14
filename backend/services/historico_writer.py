@@ -126,11 +126,15 @@ def _fecha_dato(ts: Any) -> Optional[date]:
 def build_rows(plazo: str = "24hs") -> "Any":
     """Filas del día para TODOS los códigos de las curvas (soberanos +
     corporativos), con el mismo precio de referencia que la tabla de Curvas:
-    last si operó, si no cierre previo. Devuelve un DataFrame con el esquema
-    de la base de bymaapi (fracciones numéricas, no % strings)."""
+    last si operó, si no cierre previo; y las PATAS de los soberanos
+    hard-dollar (`services/patas`: pesos ÷ FX del día + cruzada con TIR
+    directa, `Código` = ticker de la pata, columna `Pata`). Devuelve un
+    DataFrame con el esquema de la base de bymaapi (fracciones numéricas, no
+    % strings). `FX` = el tipo de cambio por el que se dividió un precio en
+    pesos (reproducibilidad: la recaptura de las 17:31 pisa el del archivo FX)."""
     import pandas as pd
 
-    from backend.services import curves, marketdata_store, pricing
+    from backend.services import curves, marketdata_store, patas, pricing
     from backend.services import fx as fx_svc
     from backend.services import symbols as syms
 
@@ -141,22 +145,53 @@ def build_rows(plazo: str = "24hs") -> "Any":
     # Mismo settle que la tabla de Curvas (CI = hoy, 24hs = t+1): comparte el
     # cache de métricas y la TIR guardada coincide con la de pantalla.
     settle = pricing.settlement_date_str(plazo)
-    fx = None   # lazy: sólo si aparece una especie pesos de un hard-dollar
+    memo: Dict[str, Any] = {}
+
+    def _fx():
+        if "fx" not in memo:                      # lazy: sólo si hace falta dividir por FX
+            memo["fx"] = fx_svc.get_fx(plazo)
+        return memo["fx"]
+
+    def _fila(code: str, calc: str, px: float, snap: Any, symbol: str, ref_px: float,
+              source: str, ts: Any, pata: str = "", fx_val: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        m = pricing.metrics_for_market_price(calc, px, settle)
+        if not m:
+            return None
+        var = None
+        try:
+            if snap.last is not None and snap.close not in (None, 0):
+                var = snap.last / snap.close - 1.0
+        except (TypeError, ZeroDivisionError):
+            var = None
+        return {
+            "symbol": symbol, "Código": code,
+            "Last Price": ref_px, "Close Price": snap.close, "Variación %": var,
+            "TIREA": m.get("tirea"), "TNA": m.get("tna"), "TEM": m.get("tem"),
+            "Paridad": m.get("paridad"), "Duration": m.get("duration"),
+            "Price Source": source, "Price Date": ts,
+            "fecha_hoy": hoy, "Pata": pata, "FX": fx_val,
+        }
+
+    def _snap(code: str):
+        symbol = syms.md_symbol(code, plazo)
+        snap = store.get(symbol)
+        if snap is None:
+            return None
+        if snap.last is not None:
+            return symbol, snap, snap.last, "LA", snap.last_ts
+        if snap.close is not None:
+            return symbol, snap, snap.close, "CL", snap.close_ts
+        return None
+
     for codes in curves.build_curve_codes().values():
         for code in codes or []:
             if code in seen:
                 continue
             seen.add(code)
-            symbol = syms.md_symbol(code, plazo)
-            snap = store.get(symbol)
-            if snap is None:
+            s = _snap(code)
+            if s is None:
                 continue
-            if snap.last is not None:
-                ref_px, source, ts = snap.last, "LA", snap.last_ts
-            elif snap.close is not None:
-                ref_px, source, ts = snap.close, "CL", snap.close_ts
-            else:
-                continue
+            symbol, snap, ref_px, source, ts = s
             # Especie en PESOS (o referencia clean) de un bono hard-dollar
             # (BPCVO/GYC5O/…): la base guardaba TIREA/paridad calculadas sobre
             # el precio en ARS crudo (GYC5O a 150.000 → TIR -100%, paridad
@@ -164,31 +199,40 @@ def build_rows(plazo: str = "24hs") -> "Any":
             # que Curvas: ficha NATIVA (…D/…C) + precio ÷ FX de la moneda de
             # pago. El precio guardado sigue siendo el de pantalla (ARS).
             meta = pricing.bond_meta(code) or {}
-            calc, px = code, ref_px
+            calc, px, fx_val = code, ref_px, None
             if meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
-                if fx is None:
-                    fx = fx_svc.get_fx(plazo)
+                fx = _fx()
                 calc = pricing.native_dollar_code(code) or code
                 px = fx_svc.normalize_price(ref_px, "ARS", meta.get("moneda"), fx)
                 if px is None:
                     continue   # sin FX no hay TIR honesta — mejor sin fila hoy
-            m = pricing.metrics_for_market_price(calc, px, settle)
-            if not m:
+                fx_val = patas.fx_usado(fx, meta.get("moneda"))
+            fila = _fila(code, calc, px, snap, symbol, ref_px, source, ts, fx_val=fx_val)
+            if fila:
+                rows.append(fila)
+
+    # Patas de los soberanos hard-dollar (globales + bonares): pesos ÷ FX del
+    # día y la cruzada con TIR directa sobre la ficha nativa. Lista PROPIA (no
+    # entran a las curvas: Curvas / Inicio / Escenario no las heredan).
+    for code, p in patas.soberanas().items():
+        if code in seen:
+            continue
+        seen.add(code)
+        s = _snap(code)
+        if s is None:
+            continue
+        symbol, snap, ref_px, source, ts = s
+        if p.directa:
+            px, fx_val = ref_px, None
+        else:
+            fx = _fx()
+            px = fx_svc.normalize_price(ref_px, "ARS", p.moneda, fx)
+            if px is None:
                 continue
-            var = None
-            try:
-                if snap.last is not None and snap.close not in (None, 0):
-                    var = snap.last / snap.close - 1.0
-            except (TypeError, ZeroDivisionError):
-                var = None
-            rows.append({
-                "symbol": symbol, "Código": code,
-                "Last Price": ref_px, "Close Price": snap.close, "Variación %": var,
-                "TIREA": m.get("tirea"), "TNA": m.get("tna"), "TEM": m.get("tem"),
-                "Paridad": m.get("paridad"), "Duration": m.get("duration"),
-                "Price Source": source, "Price Date": ts,
-                "fecha_hoy": hoy,
-            })
+            fx_val = patas.fx_usado(fx, p.moneda)
+        fila = _fila(code, p.nativa, px, snap, symbol, ref_px, source, ts, pata=p.pata, fx_val=fx_val)
+        if fila:
+            rows.append(fila)
     return pd.DataFrame(rows)
 
 
@@ -2077,19 +2121,29 @@ def _fx_desde_filas(filas_sig: List[Dict[str, Any]]) -> "Any":
     except Exception:  # noqa: BLE001
         bases = []
     orden = [b for b in ("AL30", "GD30") if b in bases] + [b for b in bases if b not in ("AL30", "GD30")]
+    # Cada pata se resuelve POR SEPARADO en la primera base que la tenga (como
+    # `fx.compute_fx_cierres`): sin AL30C en D+1 el CCL sale de GD30 / GD30C y
+    # el MEP de AL30 / AL30D. Antes volvía con la primera base que tuviera
+    # UNA pata y el otro FX quedaba None (todas las pesos de la otra familia
+    # caían en `sin_fx`).
+    ccl = usb = None
+    ccl_base = usb_base = None
     for b in orden:
         ars = por_codigo.get(b)
         if not ars:
             continue
         c, d = por_codigo.get(b + "C"), por_codigo.get(b + "D")
-        ccl = (ars / c) if c else None
-        usb = (ars / d) if d else None
-        if ccl or usb:
-            return fx_svc.FxSnapshot(ccl=ccl, usb=usb, ccl_base=b if ccl else None,
-                                     usb_base=b if usb else None,
-                                     canje=(ccl / usb - 1.0) if (ccl and usb) else None,
-                                     bases=len(bases), as_of=time.time())
-    return None
+        if ccl is None and c:
+            ccl, ccl_base = ars / c, b
+        if usb is None and d:
+            usb, usb_base = ars / d, b
+        if ccl and usb:
+            break
+    if not (ccl or usb):
+        return None
+    return fx_svc.FxSnapshot(ccl=ccl, usb=usb, ccl_base=ccl_base, usb_base=usb_base,
+                             canje=(ccl / usb - 1.0) if (ccl and usb) else None,
+                             bases=len(bases), as_of=time.time())
 
 
 def _metricas_a_fecha(code: str, px: float, settle: str) -> Optional[Dict[str, Any]]:
@@ -2112,19 +2166,33 @@ def _metricas_a_fecha(code: str, px: float, settle: str) -> Optional[Dict[str, A
 
 def _fila_rc(code: str, symbol: str, close: float, close_ts: Any, dia: date, settle: str,
              previos: Dict[tuple, float], fx_getter, contadores: Dict[str, int]) -> Optional[Dict[str, Any]]:
-    """Una fila reconstruida (mismo esquema que build_rows) o None."""
-    from backend.services import pricing
+    """Una fila reconstruida (mismo esquema que build_rows) o None. Una pata
+    de soberano (AO27 / AO27C / GD30D) se calcula con su ficha nativa
+    (`services/patas`): sin el resolver, `bond_meta('AO27C')` es {} y caía en
+    `sin_calc` en silencio."""
+    from backend.services import patas, pricing
     from backend.services import fx as fx_svc
 
+    p = patas.pata_de(code)
     meta = pricing.bond_meta(code) or {}
-    calc, px = code, float(close)
-    if meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
+    calc, px, pata, fx_val = code, float(close), "", None
+    if p is not None:
+        calc, pata = p.nativa, p.pata
+        if not p.directa:
+            fx = fx_getter()
+            px = fx_svc.normalize_price(close, "ARS", p.moneda, fx) if fx is not None else None
+            if px is None:
+                contadores["sin_fx"] += 1
+                return None
+            fx_val = patas.fx_usado(fx, p.moneda)
+    elif meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
         fx = fx_getter()
         calc = pricing.native_dollar_code(code) or code
         px = fx_svc.normalize_price(close, "ARS", meta.get("moneda"), fx) if fx is not None else None
         if px is None:
             contadores["sin_fx"] += 1
             return None
+        fx_val = patas.fx_usado(fx, meta.get("moneda"))
     m = _metricas_a_fecha(calc, px, settle)
     if not m:
         contadores["sin_calc"] += 1
@@ -2142,7 +2210,7 @@ def _fila_rc(code: str, symbol: str, close: float, close_ts: Any, dia: date, set
         "TIREA": m.get("tirea"), "TNA": m.get("tna"), "TEM": m.get("tem"),
         "Paridad": m.get("paridad"), "Duration": m.get("duration"),
         "Price Source": PRICE_SOURCE_RC, "Price Date": (str(close_ts) if close_ts else None),
-        "fecha_hoy": dia,
+        "fecha_hoy": dia, "Pata": pata, "FX": fx_val,
     }
 
 
@@ -2171,21 +2239,28 @@ def _filas_desde_feed(dia: date, settle: str, previos: Dict[tuple, float],
     contadores = {"sin_fx": 0, "sin_calc": 0}
     rows: List[Dict[str, Any]] = []
     vistos: set = set()
+
+    def _uno(code: str) -> None:
+        if code in vistos:
+            return
+        vistos.add(code)
+        symbol = syms.md_symbol(code, plazo)
+        snap = store.get(symbol)
+        if snap is None or snap.close is None:
+            return
+        f = _fecha_dato(snap.close_ts)
+        if f is None or f > dia:
+            return
+        fila = _fila_rc(code, symbol, snap.close, snap.close_ts, dia, settle, previos, _fx, contadores)
+        if fila:
+            rows.append(fila)
+
+    from backend.services import patas
     for codes in curves.build_curve_codes().values():
         for code in codes or []:
-            if code in vistos:
-                continue
-            vistos.add(code)
-            symbol = syms.md_symbol(code, plazo)
-            snap = store.get(symbol)
-            if snap is None or snap.close is None:
-                continue
-            f = _fecha_dato(snap.close_ts)
-            if f is None or f > dia:
-                continue
-            fila = _fila_rc(code, symbol, snap.close, snap.close_ts, dia, settle, previos, _fx, contadores)
-            if fila:
-                rows.append(fila)
+            _uno(code)
+    for code in patas.soberanas():          # las patas también se rearman
+        _uno(code)
     return rows, {"fx": _fx(), **contadores}
 
 
