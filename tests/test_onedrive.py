@@ -163,15 +163,20 @@ def test_fijar_usa_attrib_sobre_la_raiz_y_recursivo(tmp_path) -> None:
     ok, det = onedrive.fijar(tmp_path, run=run)
     assert ok and det == ""
     # attrib habla en OEM (cp850) y una ruta con ü tiraba UnicodeDecodeError con
-    # el cp1252 estricto de Popen: 'replace' nunca tira; 'oem' sólo en Windows
-    assert all(k["errors"] == "replace" and k["encoding"] == "utf-8" for k in kws)
-    monkeypatch_plat = onedrive._PLATFORM
-    onedrive._PLATFORM = "win32"
+    # el cp1252 estricto de Popen: 'replace' nunca tira; 'oem' sólo en Windows.
+    # La suite corre en los tres runners: se fija la plataforma en cada rama
+    # (en el runner de Windows la primera llamada ya salía con 'oem').
+    assert all(k["errors"] == "replace" for k in kws)
+    plat_real = onedrive._PLATFORM
     try:
+        onedrive._PLATFORM = "linux"
+        kws.clear(); onedrive.fijar(tmp_path, run=run)
+        assert all(k["encoding"] == "utf-8" for k in kws)
+        onedrive._PLATFORM = "win32"
         kws.clear(); onedrive.fijar(tmp_path, run=run)
         assert all(k["encoding"] == "oem" for k in kws)
     finally:
-        onedrive._PLATFORM = monkeypatch_plat
+        onedrive._PLATFORM = plat_real
 
     def run_revienta(argv, **kw):
         raise UnicodeDecodeError("charmap", b"\x81", 0, 1, "no")        # ValueError, no OSError
