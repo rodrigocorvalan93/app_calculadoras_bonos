@@ -109,7 +109,9 @@ def test_escanear_analizar_incorporar_y_borrar(carpetas) -> None:
     # GET de la tarjeta: nada revisado todavía → sin veredicto (y sin leer archivos)
     sin = {e["nombre"]: e for e in copias.analizar(solo_cache=True)}
     assert sin[os.path.basename(s["copia_xlsx"])]["veredicto"] is None
-    assert sin[os.path.basename(s["tmp"])]["aporta"] is False          # un .tmp no hace falta leerlo
+    # un .tmp tampoco se da por borrable sin leerlo (15/10: uno legible puede
+    # ser la única copia de una escritura que no llegó al replace)
+    assert sin[os.path.basename(s["tmp"])]["aporta"] is None
     # Revisar: lee y compara con la principal
     rev = {e["nombre"]: e for e in copias.analizar()}
     cx = rev[os.path.basename(s["copia_xlsx"])]
@@ -118,7 +120,11 @@ def test_escanear_analizar_incorporar_y_borrar(carpetas) -> None:
     assert "aporta 1 rueda" in cx["veredicto"] and D_SIG.strftime("%d/%m") in cx["veredicto"]
     cp = rev[os.path.basename(s["copia_pq"])]
     assert cp["aporta"] is False and "no aporta" in cp["veredicto"] and "y 1 más" in cp["veredicto"]
-    assert rev[os.path.basename(s["corrupto"])]["aporta"] is False
+    # apartado ilegible: puede tener datos recuperables a mano → NO en lote
+    assert rev[os.path.basename(s["corrupto"])]["aporta"] is None
+    assert "NO se borra en lote" in rev[os.path.basename(s["corrupto"])]["veredicto"]
+    # el .tmp (10 bytes basura: escritura cortada) sí: no tiene nada recuperable
+    assert rev[os.path.basename(s["tmp"])]["aporta"] is False
     assert rev["auth_store-NOTEBOOK.json"]["aporta"] is None and rev["auth_store-NOTEBOOK.json"]["stats"]["entradas"] == 1
     # ya revisado → el GET siguiente lo muestra sin releer
     otra = {e["nombre"]: e for e in copias.analizar(solo_cache=True)}
@@ -136,30 +142,75 @@ def test_escanear_analizar_incorporar_y_borrar(carpetas) -> None:
     assert set(hw._resumen_base(s["xlsx"])) == {D_ANT, D, D_SIG} and os.path.isfile(s["copia_xlsx"])
     assert hw.regresion_detalle(s["xlsx"])["ruedas"] == []
     assert "no tiene ruedas que le falten" in copias.incorporar(s["copia_xlsx"])["error"]
-    # ahora la copia xlsx tampoco aporta → "Borrar las que no aportan" se la lleva con las otras
+    # ahora la copia xlsx tampoco aporta (cada fila está en la base) → "Borrar
+    # las que no aportan" se la lleva con la otra; el apartado ilegible queda
     r = copias.borrar_inutiles(quien="su_test")
-    assert sorted(r["borradas"]) == sorted(os.path.basename(p) for p in (s["copia_xlsx"], s["copia_pq"], s["corrupto"]))
+    assert sorted(r["borradas"]) == sorted(os.path.basename(p) for p in (s["copia_xlsx"], s["copia_pq"]))
     assert not r["errores"] and os.path.isfile(s["json_copia"]) and os.path.isfile(s["xlsx"])
-    assert copias.escanear() and {e["nombre"] for e in copias.escanear()} == {"auth_store-NOTEBOOK.json"}
+    assert os.path.isfile(s["corrupto"])
+    assert {e["nombre"] for e in copias.escanear()} == {"auth_store-NOTEBOOK.json", os.path.basename(s["corrupto"])}
 
 
 def test_copia_mismas_fechas_mas_filas_no_se_borra_en_lote(carpetas) -> None:
-    """A01: una copia con las MISMAS ruedas que la principal pero MÁS filas
-    (instrumentos o correcciones dentro de esas fechas) NO debe quedar como
-    'no aporta' (borrable en lote): queda para revisar/incorporar a mano."""
+    """A01: una copia con las MISMAS ruedas que la principal pero con una fila
+    que la principal no tiene (instrumento nuevo o corrección dentro de esas
+    fechas) NO debe quedar como 'no aporta' (borrable en lote): queda para
+    revisar/incorporar a mano. Una fila repetida idéntica, en cambio, no trae
+    nada (15/10: contención fila por fila, no por totales)."""
     bases = carpetas["bases"]
     xlsx = str(bases / hw.HIST_FILENAME)
     hw.append_and_save(_filas(D_ANT), xlsx)
     hw.append_and_save(_filas(D), xlsx)                      # base: ruedas D_ANT + D
     stem = os.path.splitext(hw.HIST_FILENAME)[0]
-    copia = str(bases / f"{stem} (2).xlsx")                  # copia con las mismas ruedas + 1 fila
-    pd.concat([_filas(D_ANT), _filas(D), _filas(D).head(1)]).to_excel(copia, index=False)
+    copia = str(bases / f"{stem} (2).xlsx")                  # mismas ruedas + 1 fila corregida
+    corregida = _filas(D).head(1).copy()
+    corregida["Last Price"] = corregida["Last Price"] + 0.5
+    pd.concat([_filas(D_ANT), _filas(D), corregida]).to_excel(copia, index=False)
     rev = {e["nombre"]: e for e in copias.analizar()}
     c = rev[os.path.basename(copia)]
     assert c["aporta"] is None                               # NO False → "Borrar las que no aportan" la saltea
     assert c["mas_filas"] and not c["ruedas_extra"] and "revisar a mano" in c["veredicto"].lower()
+    assert "1 fila" in c["veredicto"]
     assert os.path.basename(copia) not in copias.borrar_inutiles(quien="su_test")["borradas"]
     assert os.path.isfile(copia)
+    # la misma copia con la fila repetida IDÉNTICA: todo está en la principal
+    dup = str(bases / f"{stem} (3).xlsx")
+    pd.concat([_filas(D_ANT), _filas(D), _filas(D).head(1)]).to_excel(dup, index=False)
+    d = {e["nombre"]: e for e in copias.analizar()}[os.path.basename(dup)]
+    assert d["aporta"] is False and "todas sus filas ya están" in d["veredicto"]
+
+
+def test_contencion_estricta_rc_y_celdas_fx(carpetas) -> None:
+    """15/10, "sin perder historiales": casos que el veredicto por fechas daba
+    por borrables y tenían historia única."""
+    bases = carpetas["bases"]
+    xlsx = str(bases / hw.HIST_FILENAME)
+    stem = os.path.splitext(hw.HIST_FILENAME)[0]
+    # (1) la base tiene D sólo como RC; la copia lo tiene con precios reales
+    hw.append_and_save(_filas(D_ANT), xlsx)
+    rc = _filas(D).copy()
+    rc["Price Source"] = hw.PRICE_SOURCE_RC
+    hw.append_and_save(rc, xlsx)
+    copia = str(bases / f"{stem}-NOTEBOOK.parquet")
+    _filas(D).to_parquet(copia, index=False)                 # reales, misma rueda
+    e = {x["nombre"]: x for x in copias.analizar()}[os.path.basename(copia)]
+    assert e["aporta"] is None and not e["ruedas_extra"]
+    # (2) FX: misma fecha, la copia trae una celda de caución que la principal no
+    fx = str(bases / hw.FX_FILENAME)
+    d1 = date(2026, 9, 22)
+    hw.escribir_fx(pd.DataFrame({"fecha_hoy": [d1], "ccl": [1400.0], "mep": [1380.0]}), fx)
+    cfx = str(bases / f"{os.path.splitext(hw.FX_FILENAME)[0]}-NOTEBOOK.xlsx")
+    pd.DataFrame({"fecha_hoy": [d1], "ccl": [1400.0], "mep": [1380.0], "caucion_tna": [0.31]}).to_excel(cfx, index=False)
+    f = {x["nombre"]: x for x in copias.analizar()}[os.path.basename(cfx)]
+    assert f["aporta"] is None and "1 fila/celda" in f["veredicto"]
+    # (3) un temporal LEGIBLE con datos que la principal no tiene no se borra en lote
+    tmp = str(bases / f"{stem}.parquet.777-1.tmp")
+    _filas(D_SIG).to_parquet(tmp, index=False)
+    os.utime(tmp, (time.time() - 3600, time.time() - 3600))
+    t = {x["nombre"]: x for x in copias.analizar()}[os.path.basename(tmp)]
+    assert t["aporta"] is True and t["ruedas_extra"] == [D_SIG.isoformat()]
+    borradas = copias.borrar_inutiles(quien="su_test")["borradas"]
+    assert not {os.path.basename(copia), os.path.basename(cfx), os.path.basename(tmp)} & set(borradas)
 
 
 def test_tmp_reciente_no_se_borra(carpetas) -> None:
@@ -212,7 +263,7 @@ async def test_http_tarjeta_copias_solo_superuser(carpetas, auth_on, monkeypatch
         assert "Borrar las que no aportan" not in r.text
         r = await su.post("/admin/copias/revisar")
         assert r.status_code == 200 and "aporta 1 rueda" in r.text and "⤵ Incorporar" in r.text
-        assert "Borrar las que no aportan (3)" in r.text
+        assert "Borrar las que no aportan (2)" in r.text          # el apartado ilegible no entra
         r = await su.post("/admin/copias/borrar", data={"path": s["xlsx"]})
         assert r.status_code == 200 and "No se borró" in r.text and os.path.isfile(s["xlsx"])
         r = await su.post("/admin/copias/incorporar", data={"path": s["copia_xlsx"]})
@@ -221,7 +272,7 @@ async def test_http_tarjeta_copias_solo_superuser(carpetas, auth_on, monkeypatch
         r = await su.post("/admin/copias/borrar", data={"path": s["tmp"]})
         assert r.status_code == 200 and "✓ Borrado" in r.text and not os.path.exists(s["tmp"])
         r = await su.post("/admin/copias/borrar-inutiles")
-        assert r.status_code == 200 and "Borradas 3 copias" in r.text
+        assert r.status_code == 200 and "Borradas 2 copias" in r.text
         r = await su.post("/admin/users", data={"username": "juan", "password": "clave123", "role": "basico", "email": ""})
         assert r.status_code < 400
     async with _client() as ac:

@@ -266,7 +266,17 @@ journal o desde la base) y nunca la rearma con RC ni pisa ese journal. Antes
 la reconstrucción del día siguiente reemplazaba el cierre real por RC (lo
 encontró la revisión de #254). El journal es POR MÁQUINA: la rueda entra
 cuando un superuser usa ESA instancia; sólo una rueda que ninguna máquina
-capturó se rearma con RC. Regresión: `tests/test_journal_real_no_se_pisa.py`.
+capturó se rearma con RC. Además (mismo día, limpieza "sin perder
+historiales"): `consolidar_journal` y el merge del journal en
+`_append_and_save_locked` suben a reales los días que la base tiene SÓLO como
+RC si el journal los capturó reales (`_reales_por_dia`); `consolidar_cierres_journal`
+reemplaza una partición armada desde la base (`importar_base`: sin volumen /
+OHLC / puntas, `_con_datos_vivos`) por la captura en vivo del journal
+(`_particion_mejorable`; una partición real nunca se pisa); y `_prune_journal`
+ya no poda por edad a secas: a los 90 días borra un `px_tasas_` sólo si la
+base tiene esa rueda con al menos tantas filas reales
+(`_journal_contenido_en_base`) y un `cierre_` sólo si la partición lo
+contiene (`_cierre_contenido`). Regresión: `tests/test_journal_real_no_se_pisa.py`.
 `auth.marcar_visto` corre en el
 middleware (cookie y token de Excel, ~100 ns, memoria del proceso),
 `auth.writer_presente()` resuelve el rol al momento, y
@@ -294,9 +304,20 @@ True = tiene ruedas que la principal no (botón "Incorporar": `incorporar()`
 mete SÓLO esas ruedas por el camino de siempre — `append_and_save(…,
 ignorar_regresion=True)` para px/tasas, también las ruedas que la base tiene
 sólo como RC; `escribir_fx` para FX; `append_acciones(gana_previo=True)` para
-acciones), False = sus datos ya están en la principal / temporal / apartado
-ilegible ("Borrar las que no aportan"), None = sin fechas para comparar
-(sólo borrado a mano). `borrar()` re-valida en el momento (adentro de una
+acciones), False = se PROBÓ que todo lo suyo está en la principal ("Borrar las
+que no aportan"), None = revisar a mano. **Contención estricta** (15/10, "sin
+perder historiales"; antes comparaba fechas y totales y daba por borrables una
+copia con precios reales de un día que la principal tiene sólo como RC, una
+copia FX con una celda de caución de más, un apartado ilegible o un temporal
+legible): `_contencion(copia, principal)` (memo por las firmas) compara FILA
+POR FILA con sus valores — px/tasas por `_CLAVE_PX` (rueda + código + símbolo
++ fuente + último + cierre), acciones / particiones / otras tablas la fila
+entera en las columnas comunes — y el historial FX CELDA POR CELDA (una
+columna que la principal no tiene = celdas vacías). Un temporal de tabla
+ilegible (escritura cortada) sí es False; uno legible se compara como una
+copia; un apartado `.corrupto` ilegible queda None (puede tener datos
+recuperables a mano); JSON / jsonl (auth_store, pizarra, oms_audit…) siempre
+None. `borrar()` re-valida en el momento (adentro de una
 carpeta escaneada y clasificado como copia: nunca un principal) y loguea
 quién/qué. GET `/admin/copias` pinta lo ya revisado (`solo_cache`) sin leer
 nada; `base_check` usa el mismo escaneo (`resumen_bases`). Regresión:
@@ -1298,7 +1319,16 @@ un marcador "sólo en la nube" no lo descarga; el borrado viaja a SharePoint
 carpeta NO se fija (con el pin OneDrive las bajaría en segundo plano) y se
 reintenta en el próximo arranque. Con más de `DETALLE_MAX` (40) pendientes el
 progreso sale resumido por carpeta y cada ~10 %, no una línea por archivo.
-`--listar` muestra la basura sin borrarla. Un Ctrl+C a mitad de la bajada o
+`--listar` muestra la basura sin borrarla. **`.pyc` fuera del clon** (15/10):
+los launchers (los dos .bat y `correr_app.command`) ponen
+`PYTHONPYCACHEPREFIX` (`%LOCALAPPDATA%\bonos\pycache`, Mac
+`~/.cache/bonos/pycache`) antes del primer python: cada PC escribía sus `.pyc`
+en `__pycache__` adentro de la carpeta sincronizada y OneDrive los repartía
+(un set por versión de Python, huérfanos, copias `-<PC>.pyc`, una bajada por
+`.pyc` al importar). `escanear` junta en `caches_py` los `__pycache__` /
+`.pytest_cache` / `.ruff_cache` (siguen en `EXCLUIR`: nunca se bajan) y `main`
+los borra con `borrar_caches_py` SÓLO si este proceso corre con el prefijo
+(`prefijo_pycache()`; sin él volverían en el próximo import). Un Ctrl+C a mitad de la bajada o
 del borrado sale sin traceback y con 0 (cmd pregunta igual si terminar el
 .bat; si se sigue, la app arranca y OneDrive baja lo que falte al leerlo) y
 no fija la carpeta. Sigue compartido a propósito (no es

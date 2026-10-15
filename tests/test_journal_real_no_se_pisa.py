@@ -115,3 +115,73 @@ def test_fx_desde_journal_toma_mep_de_bonares_y_ccl_de_globales(monkeypatch) -> 
     assert fx.usb == 1450.0 and fx.ccl == 1500.0 and fx.ccl_base == "journal"
     assert hw._fx_desde_journal(jf.drop(columns=["Pata"])) is None        # journal de antes del 13/10
     assert hw._fx_desde_journal(pd.DataFrame()) is None
+
+
+# ── poda y catch-up sin perder historiales (15/10) ───────────────────────────
+def _particion(dia, last: float, *, vivos: bool):
+    df = pd.DataFrame([{"fecha_hoy": dia, "symbol": "MERV - XMEV - TX26 - 24hs", "code": "TX26", "plazo": "24hs",
+                        "last": last, "close": last - 1, "volume": (1_000_000.0 if vivos else None),
+                        "bid": (last - 0.5 if vivos else None), "opero": True}])
+    for col in ("symbol", "code", "plazo"):
+        df[col] = df[col].astype("string")
+    return df
+
+
+def test_la_poda_no_borra_un_journal_que_es_la_unica_copia(env, monkeypatch) -> None:
+    """Antes `_prune_journal` borraba por edad (90 días) aunque la base no
+    tuviera la rueda o la tuviera sólo como RC."""
+    from datetime import date as _date
+    codes = _codigos_calculables(3)
+    xlsx = str(env / hw.HIST_FILENAME)
+    a, b, c = _date(2026, 5, 4), _date(2026, 5, 5), _date(2026, 5, 6)
+    hw.append_and_save(_df_base(a, [(x, 100.0, 99.0) for x in codes]), xlsx, incluir_journal=False)
+    hw.append_and_save(_df_base(b, [(x, 100.0, 99.0) for x in codes], source="RC"), xlsx, incluir_journal=False)
+    for d in (a, b, c):                                       # journal real de las tres
+        hw.write_journal(_df_base(d, [(x, 101.0, 100.0) for x in codes]), d)
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 24, 17, 5))
+    hw._prune_journal(hist_dir=str(env))
+    dias = hw._journal_days()
+    assert a not in dias                                      # la base la tiene real: se poda
+    assert b in dias and c in dias                            # RC en la base / falta en la base: quedan
+    # cierre completo: sin partición, o con una armada desde la base y el journal con datos vivos → queda
+    hw.write_cierre_journal(_particion(a, 101.0, vivos=True), a)
+    hw.write_cierre_journal(_particion(b, 101.0, vivos=True), b)
+    hw.write_cierre_journal(_particion(c, 101.0, vivos=False), c)
+    hw.escribir_particion(_particion(a, 101.0, vivos=True), str(env), a)     # la real
+    hw.escribir_particion(_particion(b, 101.0, vivos=False), str(env), b)    # armada desde la base
+    hw.escribir_particion(_particion(c, 101.0, vivos=False), str(env), c)    # el journal tampoco tiene vivos
+    hw._prune_journal(hist_dir=str(env))
+    cj = hw._cierre_journal_days()
+    assert a not in cj and c not in cj and b in cj
+
+
+def test_consolidar_sube_a_real_un_dia_que_la_base_tiene_solo_como_rc(env, monkeypatch) -> None:
+    codes = _codigos_calculables(3)
+    xlsx = str(env / hw.HIST_FILENAME)
+    hw.append_and_save(_df_base(D_ANT, [(x, 100.0, 99.0) for x in codes]), xlsx, incluir_journal=False)
+    hw.append_and_save(_df_base(D, [(x, 90.0, 89.0) for x in codes], source="RC"), xlsx, incluir_journal=False)
+    hw.write_journal(_df_base(D, [(x, 111.0 + i, 100.0) for i, x in enumerate(codes)]), D)
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 24, 10, 0))
+    assert hw.es_writer()
+    r = hw.consolidar_journal()
+    assert r and r.get("consolidados") == 1
+    d = _dia_en_base(env, D)
+    assert set(d["Price Source"]) == {"LA"} and sorted(d["Last Price"]) == [111.0, 112.0, 113.0]
+    assert hw.consolidar_journal() is None                    # ya está: no-op
+
+
+def test_catch_up_reemplaza_una_particion_armada_desde_la_base(env, monkeypatch) -> None:
+    from backend.services import cierres
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 24, 10, 0))
+    hw.escribir_particion(_particion(D, 101.0, vivos=False), str(env), D)    # importar_base: sin volumen
+    hw.write_cierre_journal(_particion(D, 101.0, vivos=True), D)            # la captura real
+    r = hw.consolidar_cierres_journal()
+    assert r == {"consolidados": 1, "dias": [D.isoformat()], "errores": {}}
+    part = pd.read_parquet(hw.cierre_path(str(env), D))
+    assert float(part["volume"].iloc[0]) == 1_000_000.0
+    assert hw.consolidar_cierres_journal() is None            # ya tiene la real: no-op
+    # una partición REAL nunca se pisa con el journal
+    hw.write_cierre_journal(_particion(D, 999.0, vivos=True), D)
+    assert hw.consolidar_cierres_journal() is None
+    assert float(pd.read_parquet(hw.cierre_path(str(env), D))["last"].iloc[0]) == 101.0
+    cierres.refresh()
