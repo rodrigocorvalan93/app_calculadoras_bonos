@@ -481,11 +481,12 @@ def _xlsx_default() -> Optional[str]:
 # ── Writer por rol ────────────────────────────────────────────────────────────
 # `HISTORICO_BASE_WRITER` sigue siendo el máster (0 = esta máquina nunca
 # escribe lo compartido). Con el flag en 1 y el muro de login puesto, la
-# instancia escribe la base compartida sólo si HOY la usó un usuario con la
-# feature `base_writer` (superuser siempre; premium por default; básico nunca,
-# ver auth.FEATURES): la notebook de un básico, o una app que quedó abierta sin
-# nadie, sólo journalea. La captura headless (tools/cierre.py) no tiene
-# usuarios: decide el flag, como siempre (`_WRITER_HEADLESS`).
+# instancia escribe la base compartida sólo si HOY la usó un SUPERUSER
+# (`auth.writer_presente`; desde el 15/10 premium ya no — el desk quiere la
+# menor cantidad de máquinas escribiendo el historial): la notebook de un
+# premium o un básico, o una app que quedó abierta sin nadie, sólo journalea.
+# La captura headless (tools/cierre.py) no tiene usuarios: decide el flag,
+# como siempre (`_WRITER_HEADLESS`).
 _WRITER_HEADLESS = False
 
 
@@ -503,7 +504,7 @@ def writer_estado() -> Dict[str, Any]:
     u = auth.writer_presente()
     if u:
         return {"writer": True, "motivo": f"{u} ({auth.role_of(u)}) usó esta instancia hoy", "usuario": u}
-    return {"writer": False, "motivo": "sin superuser ni premium conectado hoy en esta instancia", "usuario": None}
+    return {"writer": False, "motivo": "sin superuser conectado hoy en esta instancia", "usuario": None}
 
 
 def es_writer() -> bool:
@@ -1893,7 +1894,7 @@ def save_today(force: bool = False) -> Dict[str, Any]:
 PRICE_SOURCE_RC = "RC"
 _MAX_HUECOS = 15                      # ruedas hacia atrás que se revisan
 _ESPERA_SNAPSHOT_S = 240.0            # al arrancar: cuánto esperar los cierres del feed
-_ESPERA_WRITER_S = 300.0              # al arrancar: cuánto esperar a que entre un superuser/premium (writer por rol)
+_ESPERA_WRITER_S = 300.0              # al arrancar: cuánto esperar a que entre un superuser (writer por rol)
 _reconstruir_lock = threading.Lock()
 _ultima_reconstruccion: Optional[Dict[str, Any]] = None
 
@@ -3291,7 +3292,7 @@ class HistoricoAutosave:
                 except asyncio.TimeoutError:
                     pass
             if not es_writer():
-                logger.info("[historico_writer] sin superuser/premium conectado tras %.0f min: la "
+                logger.info("[historico_writer] sin superuser conectado tras %.0f min: la "
                             "reconstrucción del arranque sólo journalea en esta instancia",
                             _ESPERA_WRITER_S / 60)
         reg = await loop.run_in_executor(None, regresion_detalle)
