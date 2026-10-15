@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -292,9 +293,10 @@ def test_el_bat_corre_el_preflight_antes_de_https_y_explica_el_error() -> None:
 
 
 def test_certs_y_data_entran_al_chequeo(tmp_path, monkeypatch) -> None:
-    """certs/ y data/ viven adentro del clon sincronizado y se leen al arrancar
-    (https_local, store persistido): un cert "sólo en la nube" haría regenerar
-    la CA. .git y __pycache__ siguen afuera."""
+    """certs/ y data/ viven adentro del clon sincronizado y se leen (https_local,
+    pizarra / preferencias compartidas): un cert "sólo en la nube" haría
+    regenerar la CA. .git y __pycache__ siguen afuera. Un market_snapshot.json
+    reciente en data/ (PC con la versión anterior) no es basura todavía."""
     root = _arbol(tmp_path)
     (root / "certs").mkdir()
     (root / "certs" / "oms-local-ca.crt").write_bytes(b"cert")
@@ -392,3 +394,175 @@ def test_main_sale_4_si_no_pudo_listar_una_carpeta_de_la_nube(tmp_path, monkeypa
     monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set(), nube=False))
     monkeypatch.setattr(onedrive, "raices_onedrive", lambda: [])
     assert onedrive.main(["--carpeta", str(root)]) == 0
+
+
+# ── restos de cachés por máquina (15/10) ─────────────────────────────────────
+# El desk vio `data/` con ~6 GB de `market_snapshot-DAM-NB-CIO-<n>.json` y este
+# chequeo bajándolos enteros (6.522 de 8.449 archivos "sólo en la nube"): cada
+# PC reescribía el snapshot del store adentro del clon y OneDrive dejaba la
+# versión perdedora como copia en conflicto. Se borran sin bajarlos.
+DIA = 86400.0
+
+
+def test_basura_de_clasifica_solo_restos_de_caches_por_maquina() -> None:
+    b = onedrive.basura_de
+    # copias en conflicto de OneDrive (nombre de la PC, con o sin contador) y copias a mano
+    assert b("data", "market_snapshot-DAM-NB-CIO-191.json", 0) == ("market_snapshot.json", "copia en conflicto")
+    assert b("data", "market_snapshot-DAM-NB-CIO.json", None) == ("market_snapshot.json", "copia en conflicto")
+    assert b("data", "MARKET_SNAPSHOT-PC.JSON", 0) == ("market_snapshot.json", "copia en conflicto")
+    assert b("data", "bna_fx (1).json", 0)[1] == "copia en conflicto"
+    assert b("data", "riesgo_pais-NOTEBOOK-RC.json", 0)[1] == "copia en conflicto"
+    assert b("", "cer_completo.generated-DAM-NB-CIO.csv", 0)[1] == "copia en conflicto"
+    assert b("", "bcra_data_backup-DAM-NB-CIO-3.json", 0) == ("bcra_data_backup.json", "copia en conflicto")
+    # temporales de los escritores (y sus copias): sólo con edad (puede ser una escritura en curso)
+    assert b("data", "market_snapshot.json.tmp", 3600)[1] == "temporal"
+    assert b("data", "bna_fx.json.4242.tmp", 3600)[1] == "temporal"
+    assert b("data", "market_snapshot.json-DAM-NB-CIO.tmp", 3600)[1] == "temporal"
+    assert b("data", "market_snapshot.json.tmp", 30) is None
+    assert b("data", "market_snapshot.json.tmp", None) is None
+    # el original: sólo si nadie lo escribió en una semana; el de bcra (versionado) nunca
+    assert b("data", "market_snapshot.json", 8 * DIA) == ("market_snapshot.json", "original viejo")
+    assert b("data", "market_snapshot.json", 1 * DIA) is None
+    assert b("", "cer_completo.generated.csv", 30 * DIA)[1] == "original viejo"
+    assert b("", "bcra_data_backup.json", 365 * DIA) is None
+    # lo compartido a propósito y cualquier otro archivo: nunca
+    for nombre in ("pizarra.json", "pizarra-DAM-NB-CIO.json", "escenario_prefs.json", "alertas.json",
+                   "market_snapshots.json", "market_snapshot.json.bak", "bna_fx.jsonl", "notas.txt"):
+        assert b("data", nombre, 365 * DIA) is None, nombre
+    # sólo en su carpeta: un market_snapshot de la raíz o de backend/ no es nuestro
+    assert b("", "market_snapshot-PC.json", 0) is None
+    assert b("backend", "market_snapshot-PC.json", 0) is None
+    assert b("data", "bcra_data_backup-PC.json", 0) is None
+
+
+def _con_basura(tmp_path: Path) -> Path:
+    root = _arbol(tmp_path)
+    data = root / "data"
+    data.mkdir()
+    for n in range(1, 4):
+        (data / f"market_snapshot-DAM-NB-CIO-{n}.json").write_bytes(b"s" * 2000)
+    (data / "market_snapshot.json").write_bytes(b"{}")            # original viejo (se envejece abajo)
+    (data / "bna_fx.json.77.tmp").write_bytes(b"t")               # temporal huérfano viejo
+    (data / "riesgo_pais.json.88.tmp").write_bytes(b"t")          # temporal reciente: se respeta
+    (data / "pizarra.json").write_bytes(b"{}")                    # compartido a propósito
+    (data / "pizarra-DAM-NB-CIO.json").write_bytes(b"{}")         # copia de algo que NO es caché
+    (root / "bcra_data_backup.json").write_bytes(b"{}")           # versionado
+    (root / "bcra_data_backup-DAM-NB-CIO.json").write_bytes(b"b" * 500)
+    viejo = time.time() - 30 * DIA
+    for p in (data / "market_snapshot.json", data / "bna_fx.json.77.tmp", root / "bcra_data_backup.json"):
+        os.utime(p, (viejo, viejo))
+    return root
+
+
+def test_escanear_separa_la_basura_sin_contarla_ni_bajarla(tmp_path, monkeypatch) -> None:
+    root = _con_basura(tmp_path)
+    # todo lo de data/ "sólo en la nube", como en la PC del desk
+    sin = {p.name for p in (root / "data").iterdir()} | {"bcra_data_backup-DAM-NB-CIO.json", "bna_fx.py"}
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(sin))
+    esc = onedrive.escanear(root, raices=[])
+    basura = sorted((a.path.name, a.motivo) for a in esc.basura)
+    assert basura == [("bcra_data_backup-DAM-NB-CIO.json", "copia en conflicto"),
+                      ("bna_fx.json.77.tmp", "temporal"),
+                      ("market_snapshot-DAM-NB-CIO-1.json", "copia en conflicto"),
+                      ("market_snapshot-DAM-NB-CIO-2.json", "copia en conflicto"),
+                      ("market_snapshot-DAM-NB-CIO-3.json", "copia en conflicto"),
+                      ("market_snapshot.json", "original viejo")]
+    pend = sorted(a.path.name for a in esc.pendientes)
+    assert pend == ["bna_fx.py", "pizarra-DAM-NB-CIO.json", "pizarra.json", "riesgo_pais.json.88.tmp"]
+    assert esc.total == 4 + 3 + 1                                 # código + data/ legítimo + bcra versionado
+    assert [o for o, _n, _b in onedrive.por_origen(esc.basura)][0] == "market_snapshot.json"
+
+
+def test_main_borra_la_basura_sin_bajarla_y_despues_fija(tmp_path, monkeypatch, capsys) -> None:
+    root = _con_basura(tmp_path)
+    sin = {p.name for p in (root / "data").iterdir()}
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(sin))
+    leidos: list[str] = []
+    monkeypatch.setattr(onedrive, "_leer", lambda p: leidos.append(p.name))
+    fijadas: list[Path] = []
+    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (fijadas.append(root), (True, ""))[1])
+    estados = iter([(0x10, NUBE_TAG), (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG)])
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: next(estados))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    # la basura NO se lee (no se baja): sólo lo legítimo
+    assert sorted(leidos) == ["pizarra-DAM-NB-CIO.json", "pizarra.json", "riesgo_pais.json.88.tmp"]
+    quedan = sorted(p.name for p in (root / "data").iterdir())
+    assert quedan == ["pizarra-DAM-NB-CIO.json", "pizarra.json", "riesgo_pais.json.88.tmp"]
+    assert (root / "bcra_data_backup.json").exists() and not (root / "bcra_data_backup-DAM-NB-CIO.json").exists()
+    assert "borré 6 restos" in out and "market_snapshot.json 4" in out and "sin bajarlos" in out
+    assert "%LOCALAPPDATA%\\bonos" in out and fijadas == [root]
+    # segundo arranque: nada que borrar, nada que decir de eso
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    assert "borré" not in capsys.readouterr().out
+
+
+def test_main_no_fija_si_quedo_basura_sin_borrar(tmp_path, monkeypatch, capsys) -> None:
+    """OneDrive cerrado: borrar un marcador puede fallar. No se baja, y la
+    carpeta no se fija (con el pin OneDrive bajaría esos GB en segundo plano)."""
+    root = _con_basura(tmp_path)
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
+    monkeypatch.setattr(onedrive, "_leer", lambda p: pytest.fail("nada que bajar"))
+    monkeypatch.setattr(onedrive, "fijar", lambda *a, **k: pytest.fail("no se fija con basura sin borrar"))
+    real = os.remove
+
+    def remove(p):
+        if "market_snapshot" in str(p):
+            raise OSError(22, "Invalid argument")
+        real(p)
+
+    monkeypatch.setattr(onedrive.os, "remove", remove)
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "borré 2 restos" in out and "4 no se pudieron borrar" in out and "no se fija todavía" in out
+    assert (root / "data" / "market_snapshot-DAM-NB-CIO-1.json").exists()
+
+
+def test_main_listar_muestra_la_basura_sin_borrarla(tmp_path, monkeypatch, capsys) -> None:
+    root = _con_basura(tmp_path)
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
+    monkeypatch.setattr(onedrive, "borrar_basura", lambda *a, **k: pytest.fail("--listar no borra"))
+    monkeypatch.setattr(onedrive, "fijar", lambda *a, **k: pytest.fail("--listar no fija"))
+    assert onedrive.main(["--carpeta", str(root), "--listar"]) == 0
+    out = capsys.readouterr().out
+    assert "6 restos de cachés por PC para borrar" in out and "market_snapshot-DAM-NB-CIO-2.json" in out
+    assert "copia en conflicto" in out and "original viejo" in out
+    assert (root / "data" / "market_snapshot-DAM-NB-CIO-1.json").exists()
+
+
+def test_main_con_muchos_pendientes_resume_por_carpeta(tmp_path, monkeypatch, capsys) -> None:
+    root = _arbol(tmp_path)
+    (root / "static").mkdir()
+    nombres = set()
+    for i in range(55):
+        (root / "static" / f"f{i:03}.js").write_bytes(b"j" * 100)
+        nombres.add(f"f{i:03}.js")
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(nombres | {"bna_fx.py"}))
+    monkeypatch.setattr(onedrive, "_leer", lambda p: None)
+    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (True, ""))
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "56 de 59 archivos" in out
+    assert "static: 55 archivos" in out and "backend: 1 archivos" in out
+    assert "… 56/56" in out and " ok" not in out                       # sin una línea por archivo
+    assert out.count("[onedrive]   …") <= 11
+
+
+def test_hidratar_informa_el_progreso() -> None:
+    a = [onedrive.Archivo(Path("x"), 0, 0, 10), onedrive.Archivo(Path("y"), 0, 0, 5)]
+    vistos: list[tuple] = []
+    import backend.tools.onedrive as od
+    real = od._leer
+    try:
+        od._leer = lambda p: None
+        assert od.hidratar(a, progreso=lambda i, b: vistos.append((i, b))) == []
+    finally:
+        od._leer = real
+    assert vistos == [(1, 10), (2, 15)]
