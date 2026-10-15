@@ -9,16 +9,18 @@ Fuente: ArgentinaDatos (api.argentinadatos.com — la misma API pública que usa
 El dato es DIARIO (JP Morgan lo publica al cierre de Nueva York; la API lo
 refleja con horas de demora), así que se baja en un THREAD DE FONDO cada 30
 minutos — NUNCA en un request — y la historia reciente queda en
-`data/riesgo_pais.json` (fuera de git, como `escenario_prefs.json`): la
-variación contra la observación anterior sobrevive al reinicio y sin red se
-muestra el último valor guardado con su fecha. En el primer arranque (menos
+`riesgo_pais.json` en la carpeta LOCAL de la máquina (`estado_local`,
+%LOCALAPPDATA%\\bonos; hasta el 15/10 en `data/` del clon sincronizado: cada
+PC lo reescribía y OneDrive dejaba copias en conflicto): la variación contra
+la observación anterior sobrevive al reinicio y sin red se muestra el último
+valor guardado con su fecha. En el primer arranque (menos
 de dos puntos locales) se baja la serie completa UNA vez para tener el previo;
 después sólo `/ultimo`.
 
     RIESGO_PAIS=0          apaga el poller (la suite corre así; snapshot() sigue
                            leyendo el archivo local)
     RIESGO_PAIS_URL=…      base de la API (default ArgentinaDatos)
-    RIESGO_PAIS_PATH=…     archivo local (default data/riesgo_pais.json)
+    RIESGO_PAIS_PATH=…     archivo local (default <carpeta local>/riesgo_pais.json)
 
 `snapshot()` es lectura de memoria (µs) y nunca lanza.
 """
@@ -34,10 +36,12 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.services import estado_local
+
 logger = logging.getLogger("backend.riesgo_pais")
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_PATH = REPO_ROOT / "data" / "riesgo_pais.json"
+NOMBRE = "riesgo_pais.json"
+ENV_PATH = "RIESGO_PAIS_PATH"
 _DEFAULT_URL = "https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais"
 _KEEP = 60                   # observaciones que se guardan (≈ 3 meses de ruedas)
 _REFRESH_OK_S = 30 * 60      # dato diario: cada 30 min sobra
@@ -54,7 +58,8 @@ _thread: Optional[threading.Thread] = None
 
 
 def _path() -> Path:
-    return Path(os.getenv("RIESGO_PAIS_PATH") or _DEFAULT_PATH)
+    """Dónde se escribe (carpeta local de la máquina o RIESGO_PAIS_PATH)."""
+    return estado_local.ruta(NOMBRE, ENV_PATH)
 
 
 def _url() -> str:
@@ -98,7 +103,7 @@ def parsear(payload: Any) -> List[Punto]:
 
 # ── archivo local ────────────────────────────────────────────────────────────
 def _leer_archivo() -> List[Punto]:
-    p = _path()
+    p = estado_local.ruta_lectura(NOMBRE, ENV_PATH)    # 1er arranque: el viejo de data/
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except FileNotFoundError:

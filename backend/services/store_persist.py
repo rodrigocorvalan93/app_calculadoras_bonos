@@ -10,8 +10,12 @@ el estado real (los restores no bumpean la secuencia ni updated_at).
 Se guarda cada `SAVE_EVERY_SECONDS` (crash-safe) y al shutdown; se repone al
 boot si el archivo tiene menos de `MAX_AGE_DAYS` (un fin de semana largo
 entra; un snapshot de hace un mes ya es ruido). Path por env
-`MARKET_SNAPSHOT_PATH` o `data/market_snapshot.json` en el repo (fuera de
-git: el .gitignore whitelist ignora `data/`).
+`MARKET_SNAPSHOT_PATH` o `market_snapshot.json` en la carpeta LOCAL de la
+máquina (`estado_local.dir_local()`: %LOCALAPPDATA%\\bonos). Hasta el 15/10
+iba a `data/` adentro del clon sincronizado por OneDrive: cada PC lo
+reescribía cada 5 min y OneDrive dejaba miles de copias en conflicto
+(`market_snapshot-<PC>-<n>.json`, ~6 GB). El primer arranque con esta
+versión lee una vez el viejo de `data/` (`estado_local.ruta_lectura`).
 """
 from __future__ import annotations
 
@@ -21,19 +25,20 @@ import os
 import time
 from pathlib import Path
 
-from backend.services import marketdata_store
+from backend.services import estado_local, marketdata_store
 
 logger = logging.getLogger("backend.store_persist")
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_DEFAULT_PATH = REPO_ROOT / "data" / "market_snapshot.json"
+NOMBRE = "market_snapshot.json"
+ENV_PATH = "MARKET_SNAPSHOT_PATH"
 
 SAVE_EVERY_SECONDS = 300.0
 MAX_AGE_DAYS = 5.0
 
 
 def path() -> Path:
-    return Path(os.getenv("MARKET_SNAPSHOT_PATH") or _DEFAULT_PATH)
+    """Dónde se escribe (carpeta local de la máquina o el override)."""
+    return estado_local.ruta(NOMBRE, ENV_PATH)
 
 
 def save() -> bool:
@@ -58,7 +63,7 @@ def save() -> bool:
 def load() -> int:
     """Repone el snapshot persistido en el store. Devuelve # símbolos
     repuestos (0 si no hay archivo, está viejo o no parsea)."""
-    p = path()
+    p = estado_local.ruta_lectura(NOMBRE, ENV_PATH)
     if not p.is_file():
         return 0
     try:
