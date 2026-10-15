@@ -86,19 +86,18 @@ ALWAYS_TABS: Tuple[str, ...] = ("home",)
 # las tiene TODAS siempre; premium/básico arrancan sin ninguna (default
 # restrictivo) hasta que el superuser las tilda en /admin. Agregar una feature
 # nueva = una línea acá + su gate en main._FEATURE_PATHS / el template.
-# (Alertas NO es una feature: es superuser-exclusiva por diseño.)
+# (Alertas NO es una feature: es superuser-exclusiva por diseño. Escribir la
+# base histórica compartida tampoco: desde el 15/10 es SÓLO del superuser —
+# ver `writer_presente`; antes era la feature `base_writer`, premium por
+# default. Un `base_writer` viejo en role_features se ignora solo: no está en
+# FEATURE_KEYS.)
 FEATURES: List[Tuple[str, str]] = [
     ("cafci_fondos", "Panel VCP fondos propios (API CAFCI)"),
-    # Writer de la base histórica compartida: la instancia (notebook/PC) que
-    # usa un usuario con esta feature escribe px/tasas, FX, acciones y cierres
-    # en Delta Bases a las 17:01 / al reconstruir; las demás sólo journalean.
-    ("base_writer", "Escribe la base histórica compartida (autosave 17:01, reconstrucción, cierres) "
-                    "— superuser siempre; premium por default; básico nunca"),
 ]
 FEATURE_KEYS: Tuple[str, ...] = tuple(k for k, _ in FEATURES)
 # Features que arrancan TILDADAS para un rol (una sola vez: si el superuser
 # las destilda, quedan destildadas — `features_default_ok` en el store).
-_DEFAULT_FEATURES_ON: Dict[str, Tuple[str, ...]] = {"base_writer": ("premium",)}
+_DEFAULT_FEATURES_ON: Dict[str, Tuple[str, ...]] = {}
 TAB_KEYS: Tuple[str, ...] = tuple(k for k, _, _ in TABS)
 _TAB_LABEL: Dict[str, str] = {k: lbl for k, lbl, _ in TABS}
 _TAB_PATH: Dict[str, str] = {k: p for k, _, p in TABS}
@@ -698,9 +697,10 @@ def can_feature(role: Optional[str], key: str) -> bool:
 # Cada request autenticado (cookie o token de Excel) deja el epoch del usuario
 # en memoria del proceso (una asignación a un dict: ~100 ns). Lo consume el
 # writer por rol de la base histórica: la instancia escribe la base compartida
-# sólo si hoy la usó alguien con la feature `base_writer` — así la notebook de
-# un usuario básico nunca pisa la base del desk, y una app que quedó abierta
-# sin nadie tampoco. Es por proceso a propósito: un reinicio la vacía y las
+# sólo si hoy la usó un SUPERUSER (15/10: el desk quiere un historial lo más
+# limpio posible, con la menor cantidad de máquinas escribiendo; antes también
+# premium) — así la notebook de un premium o un básico nunca pisa la base del
+# desk, y una app que quedó abierta sin nadie tampoco. Es por proceso a propósito: un reinicio la vacía y las
 # pestañas abiertas la vuelven a marcar en el primer poll (cookie vigente).
 _VISTOS: Dict[str, float] = {}
 
@@ -723,13 +723,13 @@ def vistos_hoy() -> Dict[str, datetime]:
 
 
 def writer_presente() -> Optional[str]:
-    """El usuario con la feature `base_writer` que usó esta instancia hoy (el
-    más reciente), o None. El rol se resuelve AHORA (un cambio de rol o de la
-    feature en /admin aplica al instante)."""
+    """El SUPERUSER que usó esta instancia hoy (el más reciente), o None. Sólo
+    el superuser escribe la base compartida (15/10; premium ya no, básico
+    nunca). El rol se resuelve AHORA: un cambio de rol en /admin aplica al
+    instante."""
     mejor: Optional[Tuple[str, datetime]] = None
     for u, dt in vistos_hoy().items():
-        role = role_of(u)
-        if role and can_feature(role, "base_writer") and (mejor is None or dt > mejor[1]):
+        if role_of(u) == "superuser" and (mejor is None or dt > mejor[1]):
             mejor = (u, dt)
     return mejor[0] if mejor else None
 

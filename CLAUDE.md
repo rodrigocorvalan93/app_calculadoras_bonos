@@ -243,13 +243,18 @@ escribiendo no se "consolida" dos veces. Diagnóstico sólo lectura en
 cualquier máquina: `python -m backend.tools.base_check` (archivos, espejo
 fiel, ruedas base / memoria / manifiesto / journal, regresión, copias de
 conflicto). Regresión: `tests/test_base_regresion.py`.
-**Writer por rol** (07/10): `HISTORICO_BASE_WRITER` sigue siendo el máster
-(0 = esa máquina nunca escribe lo compartido), pero con el flag en 1 y el
-muro de login puesto una instancia escribe la base compartida sólo si HOY
-(fecha BA) la usó un usuario con la feature `base_writer` — superuser
-siempre, premium por default (editable en /admin · Features por rol;
-`_DEFAULT_FEATURES_ON` se aplica UNA vez por store vía
-`features_default_ok`), básico nunca. `auth.marcar_visto` corre en el
+**Writer por rol** (07/10; sólo superuser desde el 15/10):
+`HISTORICO_BASE_WRITER` sigue siendo el máster (0 = esa máquina nunca escribe
+lo compartido), pero con el flag en 1 y el muro de login puesto una instancia
+escribe la base compartida sólo si HOY (fecha BA) la usó un **superuser**
+(`auth.writer_presente`: rol, no feature). Pedido del desk: el historial lo
+más limpio posible, con la menor cantidad de máquinas escribiendo; premium y
+básico sólo journalean. Hasta el 15/10 era la feature `base_writer`, premium
+por default: ya no existe (salió de `auth.FEATURES` y de /admin, que ahora lo
+aclara con una nota) y una entrada vieja en `role_features` se ignora sola (no
+está en `FEATURE_KEYS`). Un día sin superuser en ninguna instancia no escribe
+la rueda: la rearma después la reconstrucción (RC) como cualquier hueco.
+`auth.marcar_visto` corre en el
 middleware (cookie y token de Excel, ~100 ns, memoria del proceso),
 `auth.writer_presente()` resuelve el rol al momento, y
 `historico_writer.writer_estado()` / `es_writer()` reemplazan al flag en
@@ -257,7 +262,7 @@ middleware (cookie y token de Excel, ~100 ns, memoria del proceso),
 journals de cierres y `cierres.importar_base`; sin presencia la instancia
 sólo journalea y el chip (`writer_motivo`), /admin y `base_check` dicen por
 qué. `_reconstruir_al_arrancar` espera hasta `_ESPERA_WRITER_S` (5 min) a
-que entre un writer. La captura headless (`tools/cierre.py` →
+que entre un superuser. La captura headless (`tools/cierre.py` →
 `_WRITER_HEADLESS`) y `AUTH_ENABLED=0` deciden por el flag, como siempre.
 Regresión: `tests/test_writer_por_rol.py`.
 **Copias en conflicto y archivos viejos** (07/10, tarjeta de /admin,
