@@ -1025,9 +1025,19 @@ def main():
     # ignora por no estar en la whitelist). Vacío ⇒ no se escribe. Si el archivo
     # está tomado (OneDrive/Excel → Permission denied) NO aborta la población de
     # rentafija.inputs (más abajo), que es lo que necesita especies/el universo.
-    _cer_dump = os.environ.get("CER_PROY_DUMP_PATH", "cer_completo.generated.csv")
+    # 15/10: el default va a la carpeta LOCAL de la máquina (la misma de
+    # backend.services.estado_local: BONOS_LOCAL_DIR o %LOCALAPPDATA%\bonos /
+    # ~/.local/share/bonos), no a la raíz del clon: ahí lo reescribía cada PC en
+    # cada arranque y OneDrive dejaba copias en conflicto con el nombre de la PC.
+    _cer_dump = os.environ.get("CER_PROY_DUMP_PATH")
+    if _cer_dump is None:
+        _dir_local = os.environ.get("BONOS_LOCAL_DIR") or os.path.join(
+            os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share"),
+            "bonos")
+        _cer_dump = os.path.join(os.path.expanduser(_dir_local), "cer_completo.generated.csv")
     if _cer_dump:
         try:
+            os.makedirs(os.path.dirname(_cer_dump) or ".", exist_ok=True)
             cer_completo_escenario_base.to_csv(_cer_dump, header=["Proyeccion CER"])
         except OSError as exc:
             _log_fx.warning("[indices] no pude escribir el dump CER %s (%s) — sigo con los datos en memoria", _cer_dump, exc)

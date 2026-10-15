@@ -25,11 +25,17 @@ os.environ.setdefault("PRIMARY_REJECTED_CACHE", "0")
 # real — un tmp nuevo por corrida (los tests que lo necesitan aislado por test
 # lo apuntan a su tmp_path).
 os.environ.setdefault("HISTORICO_JOURNAL_DIR", tempfile.mkdtemp(prefix="bonos_test_journal_"))
+# Estado LOCAL por máquina (estado_local.dir_local: snapshot del store, dump
+# CER de indices, riesgo país, BNA): nunca el %LOCALAPPDATA%\bonos real de
+# quien corre la suite; y el snapshot con override explícito para que la
+# migración no lea el data/market_snapshot.json viejo del clon.
+os.environ.setdefault("BONOS_LOCAL_DIR", tempfile.mkdtemp(prefix="bonos_test_local_"))
+os.environ.setdefault("MARKET_SNAPSHOT_PATH", os.path.join(os.environ["BONOS_LOCAL_DIR"], "market_snapshot.json"))
 # Riesgo país (Inicio): la suite nunca sale a ArgentinaDatos ni toca el
-# data/riesgo_pais.json real — poller apagado y archivo en un tmp.
+# riesgo_pais.json real — poller apagado y archivo en un tmp.
 os.environ.setdefault("RIESGO_PAIS", "0")
 os.environ.setdefault("RIESGO_PAIS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_riesgo_pais.json"))
-# Dólar BNA del add-in: sin red en la suite y sin tocar data/bna_fx.json.
+# Dólar BNA del add-in: sin red en la suite y sin tocar el bna_fx.json real.
 os.environ.setdefault("BNA_FX", "0")
 os.environ.setdefault("BNA_FX_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_bna_fx.json"))
 # Pizarra de Inicio (cuadros por usuario): nunca el data/pizarra.json real.

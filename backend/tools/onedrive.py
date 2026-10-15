@@ -34,6 +34,16 @@ ya importa medio backend):
      hacer (abrir OneDrive, esperar que sincronice, volver a arrancar) en vez
      de dejar un traceback de importlib.
 
+Antes de bajar nada BORRA los restos de los cachés por máquina que hasta el
+15/10 cada PC reescribía adentro de la carpeta (`CACHES_POR_MAQUINA`: el
+snapshot del store cada 5 min, BNA, riesgo país, el dump CER): OneDrive dejaba
+la versión perdedora como copia en conflicto con el nombre de la PC
+(`data/market_snapshot-DAM-NB-CIO-191.json`, miles, ~6 GB) y este chequeo las
+bajaba enteras en cada PC. Borrar un marcador "sólo en la nube" no lo
+descarga; ese estado ahora vive en %LOCALAPPDATA%\\bonos
+(`backend.services.estado_local`). Con muchos pendientes el progreso sale
+resumido por carpeta (no una línea por archivo).
+
 "Sincronizada por la nube" se decide por tres caminos, porque Windows puede
 mostrarle los marcadores "disfrazados" a un proceso común (sin el bit de
 reparse point ni el tag): el tag de nube (0x9000x01A) en alguna entrada del
@@ -57,6 +67,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Tuple
@@ -102,13 +113,34 @@ _REG_ACCOUNTS = r"Software\Microsoft\OneDrive\Accounts"
 # Carpetas que no hacen falta para correr la app (o que no deben tocarse):
 # .git es grande y consola.version() lo lee a mano sin tirar; los venv nunca
 # van adentro del repo. certs/ y data/ SÍ entran: viven adentro del clon (o
-# sea, sincronizados) y https_local / el store persistido los leen al
-# arrancar — un cert "sólo en la nube" haría regenerar la CA.
+# sea, sincronizados) y https_local / las preferencias compartidas (pizarra,
+# escenario, alertas) los leen — un cert "sólo en la nube" haría regenerar la
+# CA. Los cachés por máquina ya no viven en data/ (CACHES_POR_MAQUINA).
 EXCLUIR = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
                      ".venv", "venv", "node_modules", ".claude"})
 
 _MB = 1 << 20
 EXIT_SIN_BAJAR = 4           # distinto del 3 = "la app ya está corriendo" de main.py
+
+# Cachés POR MÁQUINA que hasta el 15/10 cada PC reescribía adentro de esta
+# carpeta: OneDrive veía el mismo archivo cambiado en dos máquinas y dejaba la
+# perdedora al lado con el nombre de la PC ("market_snapshot-DAM-NB-CIO-191.json").
+# Desde el 15/10 viven en la carpeta local (backend.services.estado_local); acá
+# se borran, sin bajarlas, las copias en conflicto y los temporales huérfanos,
+# y el original cuando nadie lo escribió en `ORIGINAL_VIEJO_DIAS` (una PC con
+# la versión anterior todavía corriendo lo sigue tocando hasta que reinicia).
+# (carpeta relativa a la raíz — "" = la raíz —, archivo original, ¿se borra el
+# original viejo?). bcra_data_backup.json está versionado en git: sólo sus copias.
+CACHES_POR_MAQUINA = (
+    ("data", "market_snapshot.json", True),
+    ("data", "riesgo_pais.json", True),
+    ("data", "bna_fx.json", True),
+    ("", "cer_completo.generated.csv", True),
+    ("", "bcra_data_backup.json", False),
+)
+ORIGINAL_VIEJO_DIAS = 7
+TMP_MIN_EDAD_S = 600         # un .tmp más nuevo puede ser una escritura en curso de una PC vieja
+DETALLE_MAX = 40             # más pendientes que esto: progreso resumido, no una línea por archivo
 
 
 @dataclass
@@ -117,6 +149,8 @@ class Archivo:
     attrs: int
     tag: int
     size: int
+    origen: str = ""         # basura: el caché al que pertenece ("market_snapshot.json")
+    motivo: str = ""         # basura: "copia en conflicto" / "temporal" / "original viejo"
 
     @property
     def sin_contenido(self) -> bool:
@@ -135,6 +169,7 @@ class Escaneo:
     nube: bool = False                               # algún archivo / carpeta con tag de nube
     root_fijado: bool = False                        # la carpeta raíz ya está "siempre en este dispositivo"
     errores: List[Tuple[Path, OSError]] = field(default_factory=list)   # listados que fallaron
+    basura: List[Archivo] = field(default_factory=list)  # restos de cachés por máquina (no se bajan)
 
 
 def es_windows() -> bool:
@@ -151,6 +186,47 @@ def es_nube(tag: int) -> bool:
 
 def de_nube(attrs: int) -> bool:
     return bool(attrs & DE_NUBE)
+
+
+def basura_de(carpeta_rel: str, nombre: str, edad_s: Optional[float]) -> Optional[Tuple[str, str]]:
+    """(original, motivo) si `nombre` —en `carpeta_rel`, relativa a la raíz:
+    "data" o "" — es un resto de un caché por máquina; None si no (o si no
+    se puede decidir sin la edad). Sin distinguir mayúsculas, como Windows.
+
+    - copia en conflicto: `<stem>` + "-", " " o "(" + lo que sea + `<ext>`
+      ("market_snapshot-DAM-NB-CIO-191.json", "bna_fx (1).json");
+    - temporal: `<original>…tmp` con más de `TMP_MIN_EDAD_S` (los `.tmp` /
+      `.<pid>.tmp` de los escritores y sus propias copias en conflicto);
+    - original viejo: el original mismo, si se puede borrar y nadie lo tocó
+      en `ORIGINAL_VIEJO_DIAS`."""
+    low = nombre.lower()
+    for carpeta, original, borrar_original in CACHES_POR_MAQUINA:
+        if carpeta != carpeta_rel:
+            continue
+        orig = original.lower()
+        stem, ext = os.path.splitext(orig)
+        if low == orig:
+            if borrar_original and edad_s is not None and edad_s > ORIGINAL_VIEJO_DIAS * 86400:
+                return original, "original viejo"
+            return None
+        if low.startswith(orig) and low.endswith(".tmp"):
+            if edad_s is not None and edad_s > TMP_MIN_EDAD_S:
+                return original, "temporal"
+            return None
+        if (low.startswith(stem) and low.endswith(ext) and len(low) > len(orig)
+                and low[len(stem)] in "- ("):
+            return original, "copia en conflicto"
+    return None
+
+
+def _candidato(carpeta_rel: str, nombre: str) -> bool:
+    """¿Vale la pena mirar la edad? Prefijo de algún caché de esa carpeta."""
+    low = nombre.lower()
+    return any(c == carpeta_rel and low.startswith(os.path.splitext(o.lower())[0])
+               for c, o, _b in CACHES_POR_MAQUINA)
+
+
+_CARPETAS_CACHE = frozenset(c for c, _o, _b in CACHES_POR_MAQUINA)
 
 
 def exponer_marcadores() -> bool:
@@ -271,6 +347,15 @@ def _atributos(entry: "os.DirEntry[str]") -> Tuple[int, int, int]:
             int(getattr(st, "st_size", 0) or 0))
 
 
+def _mtime(entry: "os.DirEntry[str]") -> Optional[float]:
+    """mtime de la entrada (en Windows sale del mismo listado: `DirEntry.stat`
+    queda cacheado). None si no se puede."""
+    try:
+        return float(entry.stat(follow_symlinks=False).st_mtime)
+    except OSError:
+        return None
+
+
 def _atributos_de(path: Path) -> Tuple[int, int]:
     """(attrs, tag) de una ruta (la raíz). Nunca tira."""
     try:
@@ -295,13 +380,16 @@ def _es_dir(entry: "os.DirEntry[str]") -> bool:
 
 
 def escanear(root: Path, excluir: Iterable[str] = EXCLUIR,
-             raices: Optional[Iterable[str]] = None) -> Escaneo:
+             raices: Optional[Iterable[str]] = None, ahora: Optional[float] = None) -> Escaneo:
     """Recorre `root` (sin las carpetas de `excluir`, por nombre, a cualquier
     nivel) y junta los archivos sin contenido local. `nube` = tag de nube o
     atributo de nube en alguna entrada, o `root` bajo una raíz de OneDrive
     (`raices`; default `raices_onedrive()`). Un listado que falla (permisos,
-    OneDrive a medio sincronizar) queda en `errores` y se sigue."""
+    OneDrive a medio sincronizar) queda en `errores` y se sigue. Los restos
+    de cachés por máquina (`basura_de`, sólo en la raíz y en `data/`) van a
+    `basura` — ni a `pendientes` ni a `total` — tengan contenido o no."""
     excl = frozenset(excluir)
+    ahora = time.time() if ahora is None else ahora
     esc = Escaneo(root=root)
     attrs, tag = _atributos_de(root)
     esc.root_fijado = bool(attrs & FILE_ATTRIBUTE_PINNED)
@@ -315,6 +403,9 @@ def escanear(root: Path, excluir: Iterable[str] = EXCLUIR,
         except OSError as e:
             esc.errores.append((d, e))
             continue
+        # carpeta relativa a la raíz, sólo para la raíz y sus hijas directas
+        rel = "" if d == root else (d.name if d.parent == root else None)
+        rel = rel if rel in _CARPETAS_CACHE else None
         for entry in entradas:
             if entry.name in excl:
                 continue
@@ -328,6 +419,12 @@ def escanear(root: Path, excluir: Iterable[str] = EXCLUIR,
             if _es_dir(entry):
                 pila.append(Path(entry.path))
                 continue
+            if rel is not None and _candidato(rel, entry.name):
+                mt = _mtime(entry)
+                b = basura_de(rel, entry.name, None if mt is None else ahora - mt)
+                if b is not None:
+                    esc.basura.append(Archivo(Path(entry.path), attrs, tag, size, origen=b[0], motivo=b[1]))
+                    continue
             esc.total += 1
             if sin_contenido(attrs):
                 esc.pendientes.append(Archivo(Path(entry.path), attrs, tag, size))
@@ -344,11 +441,14 @@ def _leer(path: Path) -> None:
 
 
 def hidratar(pendientes: Iterable[Archivo],
-             avisar: Optional[Callable[[str], None]] = None) -> List[Tuple[Archivo, OSError]]:
+             avisar: Optional[Callable[[str], None]] = None,
+             progreso: Optional[Callable[[int, int], None]] = None) -> List[Tuple[Archivo, OSError]]:
     """Baja cada pendiente leyéndolo. Devuelve los que no se pudieron leer
-    (OneDrive cerrado / pausado / sin red → [Errno 22] en Windows)."""
+    (OneDrive cerrado / pausado / sin red → [Errno 22] en Windows).
+    `progreso(i, bytes)` después de cada archivo (i desde 1)."""
     fallos: List[Tuple[Archivo, OSError]] = []
-    for a in pendientes:
+    hechos = 0
+    for i, a in enumerate(pendientes, 1):
         try:
             _leer(a.path)
         except OSError as e:
@@ -356,9 +456,56 @@ def hidratar(pendientes: Iterable[Archivo],
             if avisar:
                 avisar(f"x {a.path}: {e}")
         else:
+            hechos += a.size
             if avisar:
                 avisar(f"  {a.path} ({_kb(a.size)}) ok")
+        if progreso:
+            progreso(i, hechos)
     return fallos
+
+
+def borrar_basura(basura: Iterable[Archivo]) -> Tuple[int, int, List[Tuple[Archivo, OSError]]]:
+    """Borra los restos de cachés por máquina. Un marcador "sólo en la nube"
+    se borra sin bajarlo (y el borrado viaja a SharePoint y a las otras PCs).
+    Devuelve (borrados, bytes, fallos); uno que ya no está (lo borró otra PC
+    y llegó la sincronización) no cuenta como fallo."""
+    n = b = 0
+    fallos: List[Tuple[Archivo, OSError]] = []
+    for a in basura:
+        try:
+            os.remove(a.path)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            fallos.append((a, e))
+            continue
+        n += 1
+        b += a.size
+    return n, b, fallos
+
+
+def por_carpeta(archivos: Iterable[Archivo], root: Path) -> List[Tuple[str, int, int]]:
+    """[(carpeta de primer nivel, archivos, bytes)] de mayor a menor peso;
+    "(raíz)" para los archivos sueltos de la raíz."""
+    acc: dict = {}
+    for a in archivos:
+        try:
+            partes = a.path.relative_to(root).parts
+        except ValueError:
+            partes = a.path.parts
+        clave = partes[0] if len(partes) > 1 else "(raíz)"
+        n, b = acc.get(clave, (0, 0))
+        acc[clave] = (n + 1, b + a.size)
+    return sorted(((k, n, b) for k, (n, b) in acc.items()), key=lambda t: (-t[2], t[0]))
+
+
+def por_origen(basura: Iterable[Archivo]) -> List[Tuple[str, int, int]]:
+    """[(caché, archivos, bytes)] de mayor a menor peso."""
+    acc: dict = {}
+    for a in basura:
+        n, b = acc.get(a.origen, (0, 0))
+        acc[a.origen] = (n + 1, b + a.size)
+    return sorted(((k, n, b) for k, (n, b) in acc.items()), key=lambda t: (-t[2], t[0]))
 
 
 def fijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> Tuple[bool, str]:
@@ -392,6 +539,19 @@ def _kb(n: int) -> str:
     return f"{n / 1024:,.0f} KB".replace(",", ".") if n >= 1024 else f"{n} B"
 
 
+def _tam(n: int) -> str:
+    """Tamaño legible es-AR: B / KB / MB / GB."""
+    if n >= 1 << 30:
+        return f"{n / (1 << 30):.1f} GB".replace(".", ",")
+    if n >= _MB:
+        return f"{n / _MB:.1f} MB".replace(".", ",")
+    return _kb(n)
+
+
+def _n(n: int) -> str:
+    return f"{n:,}".replace(",", ".")
+
+
 def _say(msg: str) -> None:
     """print que no muere si stdout está redirigido a un cp1252 pobre."""
     try:
@@ -405,6 +565,20 @@ def default_root() -> Path:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """Lo que corre el .bat. Un Ctrl+C a mitad de la bajada o del borrado
+    (15/10: el desk lo cortó con miles de copias bajando) sale sin
+    traceback y con 0: cmd igual pregunta "¿Desea terminar el trabajo por
+    lotes?" y, si se sigue, la app arranca; lo que faltó lo baja OneDrive
+    cuando la app lo lea, la carpeta no se fija y el próximo arranque retoma."""
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        _say("[onedrive] cortado con Ctrl+C: sigo sin bajar el resto (OneDrive lo baja cuando la app "
+             "lo lea; el próximo arranque retoma)")
+        return 0
+
+
+def _main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Bajar a esta PC los archivos del código que OneDrive "
                                              "dejó 'sólo en la nube' (Archivos a petición)")
     ap.add_argument("--listar", action="store_true", help="sólo informar, sin bajar ni fijar")
@@ -427,6 +601,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     for d, e in esc.errores:
         _say(f"[onedrive] ! no pude listar {d}: {e}")
 
+    basura_pendiente = False                         # quedaron restos sin borrar: no se fija (bajaría todo)
+    if esc.basura:
+        detalle = " · ".join(f"{o} {_n(n)} ({_tam(b)})" for o, n, b in por_origen(esc.basura))
+        if args.listar:
+            _say(f"[onedrive] {_n(len(esc.basura))} restos de cachés por PC para borrar "
+                 f"({_tam(sum(a.size for a in esc.basura))}): {detalle}")
+            for a in esc.basura:
+                _say(f"[onedrive]   {a.path} ({_kb(a.size)}, {a.motivo})")
+        else:
+            if len(esc.basura) > DETALLE_MAX:
+                # cada borrado de un marcador pasa por OneDrive: con miles, un rato
+                _say(f"[onedrive] borrando {_n(len(esc.basura))} restos de cachés por PC "
+                     f"({_tam(sum(a.size for a in esc.basura))}) sin bajarlos…")
+            n, b, fallos_b = borrar_basura(esc.basura)
+            if n:
+                _say(f"[onedrive] borré {_n(n)} restos de cachés por PC ({_tam(b)}, sin bajarlos): {detalle}. "
+                     "Eran copias en conflicto que OneDrive dejaba porque cada PC guardaba su estado "
+                     "adentro de esta carpeta; ahora ese estado vive en %LOCALAPPDATA%\\bonos. "
+                     "Quedan en la papelera de la biblioteca de SharePoint; si OneDrive pregunta por "
+                     "los archivos borrados, no hace falta restaurarlos.")
+            if fallos_b:
+                basura_pendiente = True
+                a0, e0 = fallos_b[0]
+                _say(f"[onedrive] ! {_n(len(fallos_b))} no se pudieron borrar (p. ej. {a0.path.name}: {e0}); "
+                     "no se bajan, la carpeta no se fija todavía (OneDrive los bajaría) y se reintenta "
+                     "en el próximo arranque")
+
     if not esc.pendientes:
         say(f"[onedrive] código completo en esta PC ({esc.total} archivos"
             f"{', carpeta fijada' if esc.root_fijado else ''})")
@@ -436,12 +637,31 @@ def main(argv: Optional[List[str]] = None) -> int:
             for a in esc.pendientes:
                 _say(f"[onedrive]   {a.path} ({_kb(a.size)})")
             return EXIT_SIN_BAJAR
-        total_kb = sum(a.size for a in esc.pendientes)
-        _say(f"[onedrive] {len(esc.pendientes)} de {esc.total} archivos del código están 'sólo en la nube' "
-             f"(Archivos a petición de OneDrive, {_kb(total_kb)}): bajándolos…")
-        # progreso por archivo = `say` (--quiet lo calla); un fallo se ve siempre
-        fallos = hidratar(esc.pendientes,
-                          avisar=lambda m: (_say if m.startswith("x ") else say)(f"[onedrive] {m}"))
+        total_b = sum(a.size for a in esc.pendientes)
+        n_pend = len(esc.pendientes)
+        _say(f"[onedrive] {_n(n_pend)} de {_n(esc.total)} archivos del código están 'sólo en la nube' "
+             f"(Archivos a petición de OneDrive, {_tam(total_b)}): bajándolos…")
+        # progreso = `say` (--quiet lo calla); un fallo se ve siempre. Con
+        # muchos pendientes: resumen por carpeta y avance cada ~10 %, no una
+        # línea por archivo (una carpeta con miles se volvía ilegible).
+        detalle = n_pend <= DETALLE_MAX
+        progreso = None
+        if not detalle:
+            for carpeta, n, b in por_carpeta(esc.pendientes, root)[:8]:
+                say(f"[onedrive]   {carpeta}: {_n(n)} archivos, {_tam(b)}")
+            paso = max(1, -(-n_pend // 10))              # ~10 líneas de avance
+
+            def progreso(i: int, hechos: int) -> None:
+                if i % paso == 0 or i == n_pend:
+                    say(f"[onedrive]   … {_n(i)}/{_n(n_pend)} ({_tam(hechos)} de {_tam(total_b)})")
+
+        def avisar(m: str) -> None:
+            if m.startswith("x "):
+                _say(f"[onedrive] {m}")                  # un fallo, siempre
+            elif detalle:
+                say(f"[onedrive] {m}")                   # "… ok" por archivo, sólo con pocos
+
+        fallos = hidratar(esc.pendientes, avisar=avisar, progreso=progreso)
         if fallos:
             _say(f"[onedrive] {len(fallos)} archivo(s) siguen sin contenido: OneDrive no los entregó "
                  "(cerrado, pausado, sin sesión o sin red). La app no puede arrancar así.")
@@ -453,7 +673,7 @@ def main(argv: Optional[List[str]] = None) -> int:
              "no se bajó. La app no puede arrancar así.")
         return EXIT_SIN_BAJAR
 
-    if esc.nube and not esc.root_fijado and not args.sin_pin and not args.listar:
+    if esc.nube and not esc.root_fijado and not args.sin_pin and not args.listar and not basura_pendiente:
         ok, det = fijar(root)
         if ok and not (_atributos_de(root)[0] & FILE_ATTRIBUTE_PINNED):
             # attrib devolvió 0 pero la raíz no muestra el pin: se vuelve a

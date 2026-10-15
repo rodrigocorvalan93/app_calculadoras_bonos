@@ -12,14 +12,16 @@ y la fecha del dato "DD/MM/AAAA" al lado. Se parsea con expresiones TOLERANTES
 dólar y la primera fecha del bloque (si no hay, la primera de la página).
 
 Se baja en un THREAD DE FONDO cada hora (10 min si falló) — NUNCA en un
-request — y el último dato queda en `data/bna_fx.json` (fuera de git): al
-arrancar se sirve el de la última corrida hasta que el poller traiga uno nuevo,
-y sin red se sigue mostrando con su fecha. El snapshot de Excel toma
+request — y el último dato queda en `bna_fx.json` en la carpeta LOCAL de la
+máquina (`estado_local`, %LOCALAPPDATA%\\bonos; hasta el 15/10 en `data/`
+del clon sincronizado: cada PC lo reescribía y OneDrive dejaba copias en
+conflicto): al arrancar se sirve el de la última corrida hasta que el poller
+traiga uno nuevo, y sin red se sigue mostrando con su fecha. El snapshot de Excel toma
 `snapshot()` de memoria (µs).
 
     BNA_FX=0           apaga el poller (la suite corre así; snapshot() sigue leyendo el archivo)
     BNA_FX_URLS=a,b    páginas a parsear (default Personas + Empresas)
-    BNA_FX_PATH=…      archivo local (default data/bna_fx.json)
+    BNA_FX_PATH=…      archivo local (default <carpeta local>/bna_fx.json)
 """
 from __future__ import annotations
 
@@ -34,10 +36,12 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from backend.services import estado_local
+
 logger = logging.getLogger("backend.bna_fx")
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_PATH = REPO_ROOT / "data" / "bna_fx.json"
+NOMBRE = "bna_fx.json"
+ENV_PATH = "BNA_FX_PATH"
 _DEFAULT_URLS = ("https://www.bna.com.ar/Personas", "https://www.bna.com.ar/Empresas")
 _REFRESH_OK_S = 60 * 60      # el desk pidió 1×/hora (BNA cambia un par de veces por día)
 _REFRESH_FAIL_S = 10 * 60
@@ -61,7 +65,8 @@ _FECHA = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
 
 
 def _path() -> Path:
-    return Path(os.getenv("BNA_FX_PATH") or _DEFAULT_PATH)
+    """Dónde se escribe (carpeta local de la máquina o BNA_FX_PATH)."""
+    return estado_local.ruta(NOMBRE, ENV_PATH)
 
 
 def _urls() -> List[str]:
@@ -139,12 +144,13 @@ def _sane(raw: Any) -> Optional[Dict[str, Any]]:
 
 
 def _leer_archivo() -> Dict[str, Any]:
+    p = estado_local.ruta_lectura(NOMBRE, ENV_PATH)    # 1er arranque: el viejo de data/
     try:
-        raw = json.loads(_path().read_text(encoding="utf-8"))
+        raw = json.loads(p.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[bna_fx] %s ilegible (%s); arranco sin dato", _path().name, exc)
+        logger.warning("[bna_fx] %s ilegible (%s); arranco sin dato", p.name, exc)
         return {}
     if not isinstance(raw, dict):
         return {}

@@ -502,7 +502,8 @@ parsea las páginas públicas del BNA (`/Personas` → tabla `id="billetes"`,
 `/Empresas` → `id="divisas"`; fila "Dolar U.S.A", compra / venta es-AR y la
 fecha `DD/MM/AAAA` del bloque) con expresiones tolerantes, en un THREAD DE FONDO
 1×/hora (10 min si falló), NUNCA en un request; el último dato queda en
-`data/bna_fx.json` (fuera de git) y el snapshot (`routes/excel` sección
+`bna_fx.json` de la carpeta LOCAL de la máquina (`estado_local`, ver "Estado
+por máquina fuera de OneDrive") y el snapshot (`routes/excel` sección
 `bna`, `functions.js` `fxGet`) sólo lee memoria. `BNA_FX=0` apaga el poller
 (la suite corre así vía `conftest`), `BNA_FX_URLS` / `BNA_FX_PATH` overrides.
 El sandbox de desarrollo no llega a bna.com.ar: el parser está probado contra
@@ -651,7 +652,8 @@ Regresión: `test_inicio.test_mae_pick_distingue_pesos_de_dolar_por_codigo_crudo
 **Riesgo país** (`services/riesgo_pais.py`): ArgentinaDatos
 (`/v1/finanzas/indices/riesgo-pais[/ultimo]`, la misma API de
 `backfill_fx`), thread daemon cada 30 min (10 min si falló), NUNCA en un
-request; historia reciente en `data/riesgo_pais.json` (fuera de git) para la
+request; historia reciente en `riesgo_pais.json` de la carpeta LOCAL de la
+máquina (`estado_local`) para la
 variación contra la observación anterior y para mostrar el último dato sin
 red. Primer arranque sin dos puntos locales → serie completa una vez; después
 `/ultimo`. `RIESGO_PAIS=0` apaga el poller (la suite corre así vía
@@ -1237,6 +1239,54 @@ requirements.txt) y de https_local; `attrib` se lee con el codec `oem` y
 `--listar` sólo informa, `--sin-pin` baja sin fijar, `--quiet` sólo problemas
 (`backfill_historico.bat` lo corre así). Regresión:
 `tests/test_onedrive.py` (parchea `_atributos` / `_leer` / `_PLATFORM`).
+
+## Estado por máquina fuera de OneDrive (15/10)
+
+El desk vio `data/` con ~6 GB y el chequeo de arranque bajando 6.522 de 8.449
+archivos: miles de `data/market_snapshot-DAM-NB-CIO-<n>.json` (~1,7 MB c/u).
+Cada instancia reescribía el snapshot del store (`store_persist`, cada 5 min)
+adentro del clon sincronizado; con dos o más PCs corriendo, OneDrive veía el
+mismo archivo cambiado en varias máquinas y dejaba la versión perdedora como
+copia en conflicto con el nombre de la PC. Lo mismo, en chico, con
+`riesgo_pais.json` (30 min), `bna_fx.json` (1 h) y el dump
+`cer_completo.generated.csv` de `indices.main()` (cada arranque, en la raíz).
+**Regla**: lo que una instancia escribe sola y es de ESA máquina (lo que vio su
+feed, lo que bajó su poller) va a `services/estado_local.dir_local()` =
+`BONOS_LOCAL_DIR` o `%LOCALAPPDATA%\bonos` (Mac/Linux `~/.local/share/bonos`;
+la misma carpeta del journal y de `primary_rechazados.json`), NUNCA a `data/`
+ni a la raíz del clon. En `data/` queda sólo lo compartido a propósito:
+pizarra y preferencias de escenario (escritas por acción del usuario) y
+alertas (además cada instancia las marca disparadas al cruzar: escritura rara;
+sus copias en conflicto pueden traer un cambio del usuario y NO se limpian).
+`bcra_data_backup.json` sigue reescribiéndose en la raíz con cada
+`indices.main()` a propósito (decisión del desk, 15/10): es la semilla
+versionada que lee Históricos.
+`estado_local.ruta(nombre, env)` = dónde se escribe (respeta
+`MARKET_SNAPSHOT_PATH` / `RIESGO_PAIS_PATH` / `BNA_FX_PATH`);
+`ruta_lectura` = la local o, si todavía no existe y no hay override, el viejo
+de `data/` una vez (el primer arranque abre poblado). `indices.py` calcula la
+misma carpeta a mano (es legacy, no importa el backend). La suite apunta
+`BONOS_LOCAL_DIR` y `MARKET_SNAPSHOT_PATH` a un tmp (`conftest`).
+**Limpieza** (`tools/onedrive.py`, en el .bat antes de bajar nada):
+`CACHES_POR_MAQUINA` + `basura_de(carpeta, nombre, edad)` → copias en
+conflicto (`<stem>` + `-`/espacio/`(` + … + `<ext>`), temporales `<original>…tmp`
+con más de 10 min y el original cuando nadie lo escribió en 7 días (una PC con
+la versión anterior todavía corriendo lo sigue tocando hasta reiniciar);
+`bcra_data_backup.json` está versionado: sólo sus copias. Sólo en la raíz y
+en `data/`, sólo en una carpeta de nube. `escanear` las separa en `basura`
+(ni `pendientes` ni `total`) y `borrar_basura` las borra SIN bajarlas (borrar
+un marcador "sólo en la nube" no lo descarga; el borrado viaja a SharePoint
+—queda en su papelera— y a las otras PCs). Si alguna no se pudo borrar, la
+carpeta NO se fija (con el pin OneDrive las bajaría en segundo plano) y se
+reintenta en el próximo arranque. Con más de `DETALLE_MAX` (40) pendientes el
+progreso sale resumido por carpeta y cada ~10 %, no una línea por archivo.
+`--listar` muestra la basura sin borrarla. Un Ctrl+C a mitad de la bajada o
+del borrado sale sin traceback y con 0 (cmd pregunta igual si terminar el
+.bat; si se sigue, la app arranca y OneDrive baja lo que falte al leerlo) y
+no fija la carpeta. Sigue compartido a propósito (no es
+esto): `certs/` (SAN convergente entre máquinas, `https_local`),
+`auth_store.json`, `oms_audit.jsonl`. Regresión: `tests/test_estado_local.py`
++ `tests/test_onedrive.py` (casos de basura).
 
 ## Históricos · Base — ver y bajar los archivos de Delta Bases (13/10)
 
