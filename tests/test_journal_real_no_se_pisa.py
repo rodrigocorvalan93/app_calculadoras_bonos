@@ -185,3 +185,60 @@ def test_catch_up_reemplaza_una_particion_armada_desde_la_base(env, monkeypatch)
     assert hw.consolidar_cierres_journal() is None
     assert float(pd.read_parquet(hw.cierre_path(str(env), D))["last"].iloc[0]) == 101.0
     cierres.refresh()
+
+
+def test_la_poda_compara_claves_no_conteos(env, monkeypatch) -> None:
+    """Revisión 15/10: con IGUALES conteos la base y el journal pueden tener
+    símbolos distintos (permisos de market data por cuenta). La poda compara
+    claves (symbol, Código): un journal con un símbolo que la base no tiene
+    queda; un cierre_ con un símbolo que la partición no tiene, también."""
+    from datetime import date as _date
+    codes = _codigos_calculables(4)
+    xlsx = str(env / hw.HIST_FILENAME)
+    d = _date(2026, 5, 4)
+    hw.append_and_save(_df_base(d, [(x, 100.0, 99.0) for x in codes[:3]]), xlsx, incluir_journal=False)
+    hw.write_journal(_df_base(d, [(x, 100.0, 99.0) for x in codes[1:4]]), d)   # 3 y 3, distinto set
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 24, 17, 5))
+    hw._prune_journal(hist_dir=str(env))
+    assert d in hw._journal_days()
+    # cierre_: la partición existe con datos vivos pero sin uno de los símbolos del journal
+    j = pd.concat([_particion(d, 101.0, vivos=True),
+                   _particion(d, 50.0, vivos=True).assign(symbol=pd.array(["MERV - XMEV - GD30 - 24hs"], dtype="string"))])
+    hw.write_cierre_journal(j, d)
+    hw.escribir_particion(_particion(d, 101.0, vivos=True), str(env), d)
+    hw._prune_journal(hist_dir=str(env))
+    assert d in hw._cierre_journal_days()
+    hw.escribir_particion(j, str(env), d)                     # ahora sí la contiene
+    hw._prune_journal(hist_dir=str(env))
+    assert d not in hw._cierre_journal_days()
+
+
+def test_el_catch_up_escribe_la_fila_fx_del_dia_que_entra(env, monkeypatch) -> None:
+    """Revisión 15/10: un día que entra a la base desde el journal por el
+    catch-up (no por el botón) también recibe su fila FX (CCL/MEP de la
+    columna FX de las patas en pesos)."""
+    from backend.services import patas
+    codes = _codigos_calculables(3)
+    xlsx = str(env / hw.HIST_FILENAME)
+    hw.append_and_save(_df_base(D_ANT, [(x, 100.0, 99.0) for x in codes]), xlsx, incluir_journal=False)
+    sob = {"AL30": patas.Pata("AL30", "AL30D", patas.ARS, False, "USB"),
+           "GD30": patas.Pata("GD30", "GD30C", patas.ARS, False, "USD")}
+    monkeypatch.setattr(patas, "soberanas", lambda: sob)
+    jf = _df_base(D, [(x, 111.0, 100.0) for x in codes] + [("AL30", 90000.0, 89000.0), ("GD30", 95000.0, 94000.0)])
+    jf["Pata"] = [None] * len(codes) + ["ARS", "ARS"]
+    jf["FX"] = [None] * len(codes) + [1450.0, 1500.0]
+    hw.write_journal(jf, D)
+    monkeypatch.setattr(hw, "_now", lambda: _ba(2026, 9, 24, 10, 0))
+    assert hw.consolidar_journal()["consolidados"] == 1
+    fx = pd.read_excel(str(env / hw.FX_FILENAME))
+    fila = fx[pd.to_datetime(fx["fecha_hoy"]).dt.date == D].iloc[0]
+    assert float(fila["mep"]) == 1450.0 and float(fila["ccl"]) == 1500.0
+
+
+def test_el_banner_dice_filas_reales_cuando_viene_del_journal() -> None:
+    from backend.routes.historico import _msg_reconstruccion
+    m = _msg_reconstruccion({"ok": True, "fuente": "journal", "dia_fmt": "23/09/2026", "rows": 480,
+                             "total_rows": 9000})
+    assert "consolidado desde el journal local" in m and "480 filas reales (no RC)" in m and "RC desde" not in m
+    m2 = _msg_reconstruccion({"ok": True, "fuente": "feed", "dia_fmt": "23/09/2026", "rows": 480, "total_rows": 9000})
+    assert "reconstruido desde los cierres del feed" in m2 and "filas RC" in m2

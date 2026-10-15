@@ -379,10 +379,13 @@ def _prune_journal(max_dias: int = 90, hist_dir: Optional[str] = None) -> None:
         from backend.services import deltapaths
         hist_dir = deltapaths.historico_dir()
     if hist_dir:
-        resumen = _resumen_base_cached(os.path.join(hist_dir, HIST_FILENAME))
-        for d, p in _journal_days().items():
-            if d < limite and _journal_contenido_en_base(p, resumen.get(d)):
-                viejos.append(p)
+        xlsx = os.path.join(hist_dir, HIST_FILENAME)
+        vencidos = {d: p for d, p in _journal_days().items() if d < limite}
+        if vencidos:
+            todas, reales = _claves_base_cached(xlsx), _claves_reales_base_cached(xlsx)
+            for d, p in vencidos.items():
+                if _journal_contenido_en_base(p, todas.get(d), reales.get(d)):
+                    viejos.append(p)
         for d, p in _cierre_journal_days().items():
             if d < limite and _cierre_contenido(p, cierre_path(hist_dir, d)):
                 viejos.append(p)
@@ -393,20 +396,42 @@ def _prune_journal(max_dias: int = 90, hist_dir: Optional[str] = None) -> None:
             pass
 
 
-def _journal_contenido_en_base(path: str, en_base: Optional[Tuple[int, int]]) -> bool:
-    """¿La base ya tiene todo lo de este journal? (filas, reales) de la rueda
-    en la base vs las del journal: la base la tiene y con al menos tantas
-    filas reales (y, si el journal es sólo RC, al menos tantas filas)."""
-    if not en_base:
+def _journal_contenido_en_base(path: str, claves_base: Optional[frozenset],
+                               claves_reales_base: Optional[frozenset]) -> bool:
+    """¿La base ya tiene todo lo de este journal? Por CLAVE (symbol, Código),
+    no por conteos (revisión 15/10: con iguales conteos dos máquinas pueden
+    tener símbolos distintos — permisos de market data por cuenta): cada fila
+    del journal que podría entrar a la base (con las métricas que exige el
+    writer) está en la base, y cada una REAL está en la base como real (una
+    fila que la base tiene sólo como RC no contiene el precio real). Journal
+    ilegible = no contenido (no se toca)."""
+    claves = _claves_journal_para_poda(path)
+    if claves is None:
         return False
-    filas_b, reales_b = en_base
+    todas_j, reales_j = claves
+    return todas_j <= (claves_base or frozenset()) and reales_j <= (claves_reales_base or frozenset())
+
+
+def _claves_journal_para_poda(path: str) -> Optional[Tuple[frozenset, frozenset]]:
+    """(todas, reales): claves (symbol, Código) de las filas del journal que
+    pasan el `dropna(_REQUIRED)` del writer (las que no, nunca pueden estar en
+    la base y no frenan la poda). None si no se puede leer."""
     try:
         import pandas as pd
-        n = int(len(pd.read_parquet(path, columns=["fecha_hoy"])))
-    except Exception:  # noqa: BLE001 — journal ilegible: no se toca
-        return False
-    reales_j = _journal_reales(path)
-    return reales_b >= reales_j and (reales_j > 0 or filas_b >= n)
+        t = pd.read_parquet(path)
+    except Exception:  # noqa: BLE001
+        return None
+    if not {"symbol", "Código"}.issubset(t.columns):
+        return None
+    req = [c for c in _REQUIRED if c in t.columns]
+    if req:
+        t = t.dropna(subset=req)
+    claves = list(zip(t["symbol"].astype(str), t["Código"].astype(str)))
+    if "Price Source" in t.columns:
+        real = t["Price Source"].astype(str).str.strip().ne(PRICE_SOURCE_RC).tolist()
+    else:
+        real = [True] * len(claves)
+    return frozenset(claves), frozenset(k for k, r in zip(claves, real) if r)
 
 
 _COLS_VIVAS = ("volume", "open", "high", "low", "bid", "offer")
@@ -445,13 +470,26 @@ def _particion_mejorable(journal: str, particion: str) -> bool:
     return _con_datos_vivos(journal) is True and _con_datos_vivos(particion) is False
 
 
+def _simbolos_parquet(path: str) -> Optional[frozenset]:
+    try:
+        import pandas as pd
+        return frozenset(pd.read_parquet(path, columns=["symbol"])["symbol"].astype(str))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _cierre_contenido(journal: str, particion: str) -> bool:
     """¿La partición compartida ya contiene lo de este `cierre_` del journal?
-    Existe y, si el journal tiene datos vivos, la partición también."""
+    Existe, tiene TODOS los símbolos del journal (revisión 15/10: el journal
+    de otra máquina puede traer símbolos que la writer no tenía suscriptos) y,
+    si el journal tiene datos vivos, la partición también."""
     if not os.path.isfile(particion):
         return False
     j = _con_datos_vivos(journal)
     if j is None:
+        return False
+    sj, sp = _simbolos_parquet(journal), _simbolos_parquet(particion)
+    if sj is None or sp is None or not sj <= sp:
         return False
     if not j:
         return True
@@ -742,6 +780,42 @@ def _claves_base_cached(xlsx_path: str) -> Dict[date, frozenset]:
         logger.debug("[historico_writer] no pude leer claves de la base (%s)", exc)
         res = {}
     _claves_cache = (key, res)
+    return res
+
+
+_claves_reales_cache: tuple = ()
+
+
+def _claves_reales_base_cached(xlsx_path: str) -> Dict[date, frozenset]:
+    """{rueda: claves (symbol, Código) con precio REAL} de la fuente FIEL,
+    cacheado por firma (para la poda del journal: una clave que la base tiene
+    sólo como RC no contiene el precio real del journal)."""
+    global _claves_reales_cache
+    key = _firmas_base(xlsx_path)
+    if key == (None, None):
+        return {}
+    if _claves_reales_cache and _claves_reales_cache[0] == key:
+        return _claves_reales_cache[1]
+    import pandas as pd
+    from backend.services import espejo
+    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+    hay_pq, hay_xlsx = os.path.isfile(pq), os.path.isfile(xlsx_path)
+    cols = ("fecha_hoy", "symbol", "Código", "Price Source")
+    res: Dict[date, frozenset] = {}
+    try:
+        if hay_pq and (not hay_xlsx or espejo.espejo_valido(pq, xlsx_path)):
+            df = pd.read_parquet(pq, columns=list(cols))
+        elif hay_xlsx:
+            df = pd.read_excel(xlsx_path, usecols=lambda c: c in cols)
+        else:
+            df = None
+        if df is not None and "Price Source" in df.columns:
+            df = df[df["Price Source"].astype(str).str.strip().ne(PRICE_SOURCE_RC)]
+        res = _claves_de_frame(df, pd) if df is not None else {}
+    except Exception as exc:  # noqa: BLE001 — sin huellas: la poda no borra nada
+        logger.debug("[historico_writer] no pude leer claves reales de la base (%s)", exc)
+        res = {}
+    _claves_reales_cache = (key, res)
     return res
 
 
@@ -1762,6 +1836,22 @@ def consolidar_journal(*, reponer: bool = False) -> Optional[Dict[str, Any]]:
     except BaseEnRegresion as exc:           # el disco cambió entre el chequeo y la escritura
         logger.warning("[historico_writer] catch-up frenado: %s", exc)
         return {"skipped": str(exc), "consolidados": 0}
+    # Una rueda que la base NO tenía (capturada por una instancia que ese día
+    # no era writer) entra sin fila FX: el save_today no-writer no la journalea.
+    # CCL/MEP desde la columna FX de las patas en pesos + A3500 (best-effort;
+    # el merge FX nunca pisa celdas con valor).
+    for d in pendientes:
+        if d in fechas:
+            continue
+        try:
+            import pandas as pd
+            jf = pd.read_parquet(dias[d])
+            jf = jf[pd.to_datetime(jf["fecha_hoy"]).dt.date == d]
+            fila = _fx_row_reconstruida(d, _fx_desde_journal(jf))
+            if fila:
+                _guardar_fx(hist_dir, fila=fila)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] FX del %s desde el journal falló: %s", d, exc)
     try:
         from backend.services import historico_byma
         historico_byma.refresh()

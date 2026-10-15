@@ -272,11 +272,18 @@ historiales"): `consolidar_journal` y el merge del journal en
 RC si el journal los capturó reales (`_reales_por_dia`); `consolidar_cierres_journal`
 reemplaza una partición armada desde la base (`importar_base`: sin volumen /
 OHLC / puntas, `_con_datos_vivos`) por la captura en vivo del journal
-(`_particion_mejorable`; una partición real nunca se pisa); y `_prune_journal`
-ya no poda por edad a secas: a los 90 días borra un `px_tasas_` sólo si la
-base tiene esa rueda con al menos tantas filas reales
-(`_journal_contenido_en_base`) y un `cierre_` sólo si la partición lo
-contiene (`_cierre_contenido`). Regresión: `tests/test_journal_real_no_se_pisa.py`.
+(`_particion_mejorable`; una partición real nunca se pisa); el catch-up de un
+día que la base no tenía escribe también su fila FX (CCL/MEP de la columna
+`FX` de las patas en pesos); el banner dice "consolidado desde el journal
+local … filas reales (no RC)"; y `_prune_journal` ya no poda por edad a
+secas: a los 90 días borra un `px_tasas_` sólo si cada clave (symbol, Código)
+del journal que pasa el `dropna(_REQUIRED)` está en la base y cada una REAL
+está en la base como real (`_journal_contenido_en_base` +
+`_claves_reales_base_cached`; por CLAVES, no por conteos: dos cuentas con
+permisos de market data distintos tienen símbolos distintos con iguales
+conteos), y un `cierre_` sólo si la partición tiene todos sus símbolos y, si
+el journal tiene datos vivos, también ella (`_cierre_contenido`). Regresión:
+`tests/test_journal_real_no_se_pisa.py`.
 `auth.marcar_visto` corre en el
 middleware (cookie y token de Excel, ~100 ns, memoria del proceso),
 `auth.writer_presente()` resuelve el rol al momento, y
@@ -309,15 +316,21 @@ que no aportan"), None = revisar a mano. **Contención estricta** (15/10, "sin
 perder historiales"; antes comparaba fechas y totales y daba por borrables una
 copia con precios reales de un día que la principal tiene sólo como RC, una
 copia FX con una celda de caución de más, un apartado ilegible o un temporal
-legible): `_contencion(copia, principal)` (memo por las firmas) compara FILA
-POR FILA con sus valores — px/tasas por `_CLAVE_PX` (rueda + código + símbolo
-+ fuente + último + cierre), acciones / particiones / otras tablas la fila
-entera en las columnas comunes — y el historial FX CELDA POR CELDA (una
-columna que la principal no tiene = celdas vacías). Un temporal de tabla
-ilegible (escritura cortada) sí es False; uno legible se compara como una
-copia; un apartado `.corrupto` ilegible queda None (puede tener datos
-recuperables a mano); JSON / jsonl (auth_store, pizarra, oms_audit…) siempre
-None. `borrar()` re-valida en el momento (adentro de una
+legible): `_contencion(copia, principal)` (memo por las firmas) compara la
+FILA ENTERA en todas las columnas de la copia (px/tasas incluidas las
+métricas: una TIR corregida a mano es historia; una columna que la principal
+no tiene → None) y el historial FX CELDA POR CELDA (una columna que la
+principal no tiene = celdas vacías). `_norm`: números redondeados a 8
+decimales, un número guardado como texto ("1790105400000") = el número,
+fechas / instantes a ISO completo. Sólo si se lee TODA la copia
+(`_una_tabla`: parquet o xlsx de UNA hoja; nunca .xlsm — "Delta -
+Especies-PC.xlsx" con la edición en la segunda hoja salía "no aporta"). La
+principal se lee UNA vez por firma para todas sus copias (`_memo_principal`)
+y, si es un xlsx con espejo fiel, desde el parquet (`_fuente_principal`). Un
+temporal de tabla ilegible (escritura cortada) sí es False; uno legible se
+compara como una copia; un apartado `.corrupto` ilegible queda None (puede
+tener datos recuperables a mano); JSON / jsonl (auth_store, pizarra,
+oms_audit…) siempre None. `borrar()` re-valida en el momento (adentro de una
 carpeta escaneada y clasificado como copia: nunca un principal) y loguea
 quién/qué. GET `/admin/copias` pinta lo ya revisado (`solo_cache`) sin leer
 nada; `base_check` usa el mismo escaneo (`resumen_bases`). Regresión:

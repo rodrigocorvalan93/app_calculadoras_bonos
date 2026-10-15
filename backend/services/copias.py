@@ -335,12 +335,14 @@ def _fmt_ruedas(fechas: List[date], n: int = 6) -> str:
 # con una celda de caución que la principal no, un apartado ilegible o un
 # temporal legible (la única copia de una escritura que no llegó al replace)
 # caían en "Borrar las que no aportan". Ahora una copia es borrable en lote
-# sólo si se PRUEBA que todo lo suyo está en la principal: cada fila con sus
-# valores (px/tasas: rueda + código + símbolo + real/RC + último + cierre;
-# acciones / particiones / otras tablas: la fila entera en las columnas
-# comunes) o, en el historial FX, cada celda con valor.
-_CLAVE_PX = ("fecha_hoy", "Código", "symbol", "Price Source", "Last Price", "Close Price")
+# sólo si se PRUEBA que todo lo suyo está en la principal: cada fila ENTERA
+# con todos sus valores (px/tasas incluidas las métricas: una TIR corregida a
+# mano es historia) o, en el historial FX, cada celda con valor. Y sólo si se
+# pudo leer TODA la copia (`_una_tabla`: un parquet o un xlsx de UNA hoja;
+# nunca un .xlsm — un libro con más hojas o macros queda para revisar a mano).
+_RE_NUM = re.compile(r"^-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$")
 _CONT_MEMO: Dict[tuple, Optional[Tuple[bool, int]]] = {}
+_PRINC_MEMO: Dict[tuple, Any] = {}          # (principal, fuente, firma, qué) → frame / set normalizado
 
 
 def _norm(v: Any) -> Any:
@@ -357,72 +359,128 @@ def _norm(v: Any) -> Any:
         except (TypeError, ValueError):
             return str(v).strip()
         return None if math.isnan(f) else round(f, 8)
-    if isinstance(v, (datetime, date)):
-        return v.date().isoformat() if isinstance(v, datetime) else v.isoformat()
-    if hasattr(v, "isoformat"):                                   # pandas Timestamp
+    if isinstance(v, (datetime, date)) or hasattr(v, "isoformat"):     # date / datetime / Timestamp
         try:
-            return v.date().isoformat()
+            return v.isoformat()          # ISO COMPLETO: una hora distinta es otro valor
         except Exception:  # noqa: BLE001
             return str(v)
     t = str(v).strip()
-    return None if t in ("", "nan", "NaT", "None", "<NA>") else t
+    if t in ("", "nan", "NaT", "None", "<NA>"):
+        return None
+    if _RE_NUM.match(t):
+        # el mismo número guardado como texto en un archivo y como número en
+        # el otro ("1790105400000" vs 1790105400000) es el mismo valor
+        try:
+            return round(float(t), 8)
+        except ValueError:
+            pass
+    return t
 
 
 def _filas_norm(df: Any, cols: List[str]) -> Set[tuple]:
     return {tuple(_norm(v) for v in fila) for fila in df[cols].itertuples(index=False, name=None)}
 
 
+def _una_tabla(path: str) -> bool:
+    """¿`_leer_copia` ve TODO el contenido del archivo? Un parquet sí; un
+    xlsx sólo si tiene UNA hoja; un .xlsm nunca (las macros no se comparan).
+    Revisión 15/10: "Delta - Especies-NOTEBOOK.xlsx" con la edición en la
+    segunda hoja salía 'no aporta' mirando sólo la primera."""
+    ext = _ext_efectiva(path)
+    if ext == ".parquet":
+        return True
+    if ext != ".xlsx":
+        return False
+    try:
+        import pandas as pd
+        with pd.ExcelFile(path) as xl:
+            return len(xl.sheet_names) == 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _fuente_principal(principal: str) -> str:
+    """El archivo que se lee por la principal: su espejo parquet si es un xlsx
+    con espejo FIEL (~0,1 s contra ~20 s de openpyxl con el GIL tomado)."""
+    if _ext_efectiva(principal) in (".xlsx", ".xlsm"):
+        try:
+            from backend.services import espejo
+            pq = os.path.splitext(principal)[0] + ".parquet"
+            if espejo.espejo_valido(pq, principal):
+                return pq
+        except Exception:  # noqa: BLE001
+            pass
+    return principal
+
+
+def _memo_principal(principal: str, que: tuple, fn: Any) -> Any:
+    """Frame / conjunto normalizado de la principal UNA vez por firma de su
+    fuente: las K copias de una misma base comparten la lectura."""
+    src = _fuente_principal(principal)
+    key = (principal, src, _firma(src), que)
+    with _lock:
+        if key in _PRINC_MEMO:
+            return _PRINC_MEMO[key]
+    val = fn(src)
+    with _lock:
+        for k in [k for k in _PRINC_MEMO if k[0] == principal and k[1:3] != key[1:3]]:
+            _PRINC_MEMO.pop(k, None)                  # sólo la versión vigente de cada principal
+        _PRINC_MEMO[key] = val
+    return val
+
+
 def _contencion(copia: str, principal: str) -> Optional[Tuple[bool, int]]:
     """(contenida, faltantes): ¿todo lo de `copia` está en `principal`? None
-    si no se puede comparar (ilegible, sin columnas en común, columnas que la
-    principal no tiene). Memo por las firmas de los dos archivos."""
+    si no se puede comparar (ilegible, la copia no se puede leer entera,
+    columnas que la principal no tiene). Memo por las firmas de los dos."""
     fc, fp = _firma(copia), _firma(principal)
     if fc is None or fp is None:
         return None
     key = (copia, fc, principal, fp)
     if key in _CONT_MEMO:
         return _CONT_MEMO[key]
+    res: Optional[Tuple[bool, int]] = None
     try:
-        c = _leer_copia(copia)
-        pr = _leer_copia(principal)
+        if _una_tabla(copia):
+            c = _leer_copia(copia)
+            res = _comparar(c, principal)
     except Exception:  # noqa: BLE001
-        res: Optional[Tuple[bool, int]] = None
-    else:
-        res = _comparar(c, pr, _base_de(principal))
+        res = None
     if len(_CONT_MEMO) > 200:
         _CONT_MEMO.clear()
     _CONT_MEMO[key] = res
     return res
 
 
-def _comparar(c: Any, pr: Any, base: Optional[Tuple[str, str]]) -> Optional[Tuple[bool, int]]:
-    tipo = base[0] if base else None
-    if tipo == "fx":
+def _celdas_fx(df: Any) -> Set[tuple]:
+    """(fecha, columna, valor) de cada celda con valor del historial FX."""
+    cols = [k for k in df.columns if k != "fecha_hoy"]
+    out: Set[tuple] = set()
+    for fila in df[["fecha_hoy"] + cols].itertuples(index=False, name=None):
+        f = _norm(fila[0])
+        for k, v in zip(cols, fila[1:]):
+            nv = _norm(v)
+            if nv is not None:
+                out.add((f, k, nv))
+    return out
+
+
+def _comparar(c: Any, principal: str) -> Optional[Tuple[bool, int]]:
+    base = _base_de(principal)
+    pr = _memo_principal(principal, ("frame",), _leer_copia)
+    if base and base[0] == "fx":
+        # celda por celda: una columna que la principal no tiene = celdas vacías
         if "fecha_hoy" not in c.columns or "fecha_hoy" not in pr.columns:
             return None
-        def celdas(df: Any) -> Set[tuple]:
-            # una columna que la principal no tiene = todas sus celdas vacías
-            cols = [k for k in df.columns if k != "fecha_hoy"]
-            out: Set[tuple] = set()
-            for fila in df[["fecha_hoy"] + cols].itertuples(index=False, name=None):
-                f = _norm(fila[0])
-                for k, v in zip(cols, fila[1:]):
-                    nv = _norm(v)
-                    if nv is not None:
-                        out.add((f, k, nv))
-            return out
-        faltan = celdas(c) - celdas(pr)
+        faltan = _celdas_fx(c) - _memo_principal(principal, ("fx",), lambda _s: _celdas_fx(pr))
         return (not faltan, len(faltan))
-    if tipo == "px_tasas" and all(k in c.columns for k in ("fecha_hoy", "Código")):
-        cols = [k for k in _CLAVE_PX if k in c.columns]
-        if any(k not in pr.columns for k in cols):
-            return None
-        faltan = _filas_norm(c, cols) - _filas_norm(pr, cols)
-        return (not faltan, len(faltan))
+    # px/tasas, acciones, particiones y cualquier otra tabla: la fila ENTERA en
+    # todas las columnas de la copia (una que la principal no tiene → None)
     cols = list(c.columns)
     if not cols or any(k not in pr.columns for k in cols):
         return None
-    faltan = _filas_norm(c, cols) - _filas_norm(pr, cols)
+    filas_p = _memo_principal(principal, ("filas",) + tuple(cols), lambda _s: _filas_norm(pr, cols))
+    faltan = _filas_norm(c, cols) - filas_p
     return (not faltan, len(faltan))
 
 

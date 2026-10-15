@@ -283,3 +283,45 @@ async def test_http_tarjeta_copias_solo_superuser(carpetas, auth_on, monkeypatch
             r = await (ac.get(ruta) if metodo == "get" else ac.post(ruta, data={"path": s["json_copia"]}))
             assert r.status_code == 403, ruta
     assert os.path.isfile(s["json_copia"])
+
+
+def test_revision_1510_multihoja_metricas_y_una_lectura_de_la_principal(carpetas, monkeypatch) -> None:
+    """Revisión del 15/10 sobre la contención estricta:
+    (1) un libro de VARIAS hojas (Delta - Especies) con la edición en la
+        segunda hoja no puede salir 'no aporta' mirando sólo la primera;
+    (2) una copia px/tasas con una MÉTRICA corregida (TIREA) no está contenida;
+    (3) la principal se lee UNA vez para todas sus copias, y desde el espejo
+        parquet fiel cuando es un xlsx."""
+    bases = carpetas["bases"]
+    # (1) multi-hoja
+    especies = bases / "Delta - Especies.xlsx"
+    with pd.ExcelWriter(especies) as w:
+        pd.DataFrame({"a": [1, 2]}).to_excel(w, sheet_name="Hoja1", index=False)
+        pd.DataFrame({"Ticker": ["AL30"]}).to_excel(w, sheet_name="Base RF", index=False)
+    copia_esp = bases / "Delta - Especies-NOTEBOOK.xlsx"
+    with pd.ExcelWriter(copia_esp) as w:
+        pd.DataFrame({"a": [1, 2]}).to_excel(w, sheet_name="Hoja1", index=False)
+        pd.DataFrame({"Ticker": ["AL30", "GD30"]}).to_excel(w, sheet_name="Base RF", index=False)
+    # (2) métrica corregida
+    xlsx = str(bases / hw.HIST_FILENAME)
+    hw.append_and_save(_filas(D_ANT), xlsx)
+    stem = os.path.splitext(hw.HIST_FILENAME)[0]
+    corr = _filas(D_ANT).copy()
+    corr.loc[corr.index[0], "TIREA"] = 0.0359
+    copia_tir = bases / f"{stem}-NB-TIR.parquet"
+    corr.to_parquet(copia_tir, index=False)
+    igual = bases / f"{stem}-NB-IGUAL.parquet"
+    _filas(D_ANT).to_parquet(igual, index=False)
+    lecturas: list[str] = []
+    real = copias._leer_copia
+    monkeypatch.setattr(copias, "_leer_copia", lambda p: (lecturas.append(os.path.basename(p)), real(p))[1])
+    copias._PRINC_MEMO.clear()
+    copias._CONT_MEMO.clear()
+    rev = {e["nombre"]: e for e in copias.analizar()}
+    assert rev[copia_esp.name]["aporta"] is None                         # (1) no se borra en lote
+    assert rev[copia_tir.name]["aporta"] is None and "1 fila" in rev[copia_tir.name]["veredicto"]   # (2)
+    assert rev[igual.name]["aporta"] is False                            # idéntica: sí
+    # (3) la base se leyó UNA vez (y por su espejo parquet), no una por copia
+    assert lecturas.count(f"{stem}.parquet") == 1 and f"{stem}.xlsx" not in lecturas
+    borradas = copias.borrar_inutiles(quien="su_test")["borradas"]
+    assert igual.name in borradas and copia_esp.name not in borradas and copia_tir.name not in borradas

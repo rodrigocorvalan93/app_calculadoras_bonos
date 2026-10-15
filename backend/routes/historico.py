@@ -90,6 +90,12 @@ async def historicos_guardar_base(request: Request) -> HTMLResponse:
 
 def _msg_reconstruccion(res: Dict[str, Any]) -> str:
     if res.get("ok") and not res.get("skipped"):
+        if res.get("fuente") == "journal":
+            # 15/10: la rueda estaba capturada con precios reales en el journal
+            # local de esta máquina → entra tal cual, no se reconstruye con RC.
+            return (f"✅ Cierre del {res.get('dia_fmt')} consolidado desde el journal local de esta máquina: "
+                    f"{res.get('rows')} filas reales (no RC) · total {res.get('total_rows')} filas "
+                    "(el chip se actualiza en un minuto)")
         fuente = "los cierres del feed" if res.get("fuente") == "feed" else "la rueda siguiente de la base"
         extra = (f" · {res['sin_fx']} especies en pesos sin FX" if res.get("sin_fx") else "")
         return (f"✅ Cierre del {res.get('dia_fmt')} reconstruido desde {fuente}: {res.get('rows')} filas RC"
