@@ -2309,6 +2309,86 @@ def _fx_row_reconstruida(dia: date, fx: "Any") -> Optional[Dict[str, Any]]:
     return fila
 
 
+def _fx_desde_journal(jf: "Any") -> "Any":
+    """CCL / MEP de la rueda desde las filas del journal: la columna `FX` de
+    las patas en pesos de los soberanos (`Pata` = ARS) es el tipo de cambio
+    por el que se dividió su precio — MEP para un bonar (ficha USB), CCL para
+    un global (USD). None si el journal no las trae (journals de antes del
+    13/10)."""
+    if jf is None or not len(jf) or "Pata" not in jf.columns or "FX" not in jf.columns:
+        return None
+    from types import SimpleNamespace
+
+    from backend.services import patas
+    ccl = usb = None
+    try:
+        soberanas = patas.soberanas()
+    except Exception:  # noqa: BLE001 — universo sin cargar: sin FX
+        return None
+    for cod, pata, fx in zip(jf["Código"], jf["Pata"], jf["FX"]):
+        if str(pata) != patas.ARS or fx is None or fx != fx:
+            continue
+        p = soberanas.get(str(cod))
+        if p is None:
+            continue
+        if p.moneda == "USB" and usb is None:
+            usb = float(fx)
+        elif p.moneda != "USB" and ccl is None:
+            ccl = float(fx)
+        if ccl is not None and usb is not None:
+            break
+    if ccl is None and usb is None:
+        return None
+    return SimpleNamespace(ccl=ccl, usb=usb, ccl_base="journal")
+
+
+def _consolidar_rueda_del_journal(dia: date, jpath: str, xlsx: str, hist_dir: str,
+                                  res: Dict[str, Any]) -> Dict[str, Any]:
+    """`reconstruir_cierre` con la rueda en el journal local con filas reales:
+    entra a la base TAL CUAL se capturó (filas LA, no RC; si la base tenía RC
+    de ese día, las reales las reemplazan por símbolo), la fila FX con el
+    CCL/MEP de esas filas + A3500, y la partición del cierre completo desde
+    `cierre_<dia>` del journal (con volumen / OHLC) o, si no está, desde la
+    base. El journal NO se toca. Llamar con `_reconstruir_lock` tomado."""
+    import pandas as pd
+
+    from backend.services import historico_byma
+    dia_fmt = res["dia_fmt"]
+    try:
+        jf = pd.read_parquet(jpath)
+        jf["fecha_hoy"] = pd.to_datetime(jf["fecha_hoy"]).dt.date
+        jf = jf[jf["fecha_hoy"] == dia]
+        saved = append_and_save(jf, xlsx)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[historico_writer] consolidar el %s desde el journal falló", dia_fmt)
+        res["error"] = f"no pude consolidar el {dia_fmt} desde el journal local: {exc}"
+        return res
+    res.update(ok=True, fuente="journal", rows=int(len(jf)), journal=jpath,
+               total_rows=saved.get("total_rows"))
+    try:
+        fila = _fx_row_reconstruida(dia, _fx_desde_journal(jf))
+        if fila:
+            _guardar_fx(hist_dir, fila=fila)
+            res["fx"] = True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] FX del %s desde el journal falló: %s", dia_fmt, exc)
+    try:
+        consolidar_cierres_journal()                     # la partición real (volumen / OHLC) si la hay
+        from backend.services import cierres
+        r_cie = cierres.importar_base(force=True)        # si no, desde la base (sólo fechas sin partición)
+        if r_cie.get("error"):
+            logger.warning("[historico_writer] partición de cierres del %s: %s", dia_fmt, r_cie["error"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] partición de cierres del %s falló: %s", dia_fmt, exc)
+    try:
+        historico_byma.refresh()
+    except Exception:  # noqa: BLE001
+        logger.exception("[historico_writer] refresh tras consolidar el journal falló")
+    logger.warning("[historico_writer] cierre del %s CONSOLIDADO desde el journal local: %d filas reales "
+                   "(no se reconstruye con RC) → %s", dia_fmt, res["rows"], xlsx)
+    return res
+
+
 def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -> Dict[str, Any]:
     """Rearma en la base la rueda `dia` que le falta (ver el bloque de
     arriba): primero desde los cierres del feed, si no desde la rueda
@@ -2368,6 +2448,14 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
             res["skipped"] = (f"la base ya tiene el {dia_fmt} con {ya} filas reales — no se pisa "
                               "(el aviso de hueco venía de un espejo parquet desactualizado)")
             return res
+        jpath = _journal_days().get(dia)
+        if jpath and _journal_reales(jpath) > 0:
+            # Esta máquina CAPTURÓ la rueda con precios reales (ese día no era
+            # writer: sólo premium / básico la usó, o falló la base) → se
+            # consolida desde el journal. Nunca se reconstruye con RC encima ni
+            # se pisa ese journal (15/10: la reconstrucción del día siguiente
+            # reemplazaba el cierre real por RC — "sin perder historiales").
+            return _consolidar_rueda_del_journal(dia, jpath, xlsx, hist_dir, res)
         previos = _ultimos_previos(base_df, dia)
         settle = _settle_24hs(dia)
         rows: List[Dict[str, Any]] = []
@@ -3167,8 +3255,10 @@ class HistoricoAutosave:
                 logger.info("[historico_writer] disparo de las %s del %s vencido al despertar — rearmo para el próximo",
                             self.hhmm, disparo.strftime("%d/%m"))
                 continue
-            # Antes de guardar HOY: huecos anteriores (el feed todavía trae los
-            # cierres de ayer; a partir de mañana ya no).
+            # Antes de guardar HOY: lo que el journal tenga (días capturados
+            # sin writer) y después los huecos anteriores (el feed todavía trae
+            # los cierres de ayer; a partir de mañana ya no).
+            await self._catch_up_journal(loop)
             try:
                 self.last_reconstruccion = await loop.run_in_executor(None, reconstruir_faltantes)
                 self._log_reconstruccion(self.last_reconstruccion)
@@ -3275,6 +3365,18 @@ class HistoricoAutosave:
         except Exception:  # noqa: BLE001
             logger.exception("[historico_writer] mail de feed caído falló")
 
+    async def _catch_up_journal(self, loop) -> None:
+        """consolidar_journal + consolidar_cierres_journal (no-op sin writer o
+        sin nada pendiente; un error se loguea y se sigue)."""
+        for fn, que in ((consolidar_journal, "journal"), (consolidar_cierres_journal, "cierre completo")):
+            try:
+                r = await loop.run_in_executor(None, fn)
+                if r and r.get("consolidados"):
+                    logger.info("[historico_writer] catch-up del %s OK: %s", que,
+                                r.get("dias") or r.get("consolidados"))
+            except Exception:  # noqa: BLE001
+                logger.exception("[historico_writer] catch-up del %s falló", que)
+
     async def _reconstruir_al_arrancar(self, loop) -> None:
         from backend.config import settings
         if not settings.historico_reconstruir:
@@ -3295,6 +3397,11 @@ class HistoricoAutosave:
                 logger.info("[historico_writer] sin superuser conectado tras %.0f min: la "
                             "reconstrucción del arranque sólo journalea en esta instancia",
                             _ESPERA_WRITER_S / 60)
+        # El catch-up del principio de `_run` corre antes de que entre nadie:
+        # con el muro de login puesto no hacía nada. Ahora que (quizás) hay
+        # writer, lo del journal entra ANTES de buscar huecos — un día que esta
+        # máquina capturó real nunca se reconstruye con RC.
+        await self._catch_up_journal(loop)
         reg = await loop.run_in_executor(None, regresion_detalle)
         if reg["bloqueantes"]:
             logger.warning("[historico_writer] la base perdió %s%s — no reconstruyo ni escribo hasta que "

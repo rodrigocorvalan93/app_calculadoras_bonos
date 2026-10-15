@@ -252,8 +252,21 @@ más limpio posible, con la menor cantidad de máquinas escribiendo; premium y
 básico sólo journalean. Hasta el 15/10 era la feature `base_writer`, premium
 por default: ya no existe (salió de `auth.FEATURES` y de /admin, que ahora lo
 aclara con una nota) y una entrada vieja en `role_features` se ignora sola (no
-está en `FEATURE_KEYS`). Un día sin superuser en ninguna instancia no escribe
-la rueda: la rearma después la reconstrucción (RC) como cualquier hueco.
+está en `FEATURE_KEYS`). Un día sin superuser la instancia journalea las
+filas REALES (local, por máquina) y **nunca se pierden** (15/10, "sin perder
+historiales"): `HistoricoAutosave._catch_up_journal` (consolidar_journal +
+consolidar_cierres_journal) corre en `_reconstruir_al_arrancar` DESPUÉS de
+esperar al superuser (el del principio de `_run` corre sin nadie logueado y
+con el muro no hacía nada) y antes de cada `reconstruir_faltantes` de las
+17:01; y `reconstruir_cierre` con la rueda en el journal con filas reales la
+CONSOLIDA desde ahí (`_consolidar_rueda_del_journal`: filas LA tal cual —
+pisan RC del mismo día por símbolo —, fila FX con el CCL/MEP de la columna
+`FX` de las patas en pesos + A3500, partición desde `cierre_<dia>` del
+journal o desde la base) y nunca la rearma con RC ni pisa ese journal. Antes
+la reconstrucción del día siguiente reemplazaba el cierre real por RC (lo
+encontró la revisión de #254). El journal es POR MÁQUINA: la rueda entra
+cuando un superuser usa ESA instancia; sólo una rueda que ninguna máquina
+capturó se rearma con RC. Regresión: `tests/test_journal_real_no_se_pisa.py`.
 `auth.marcar_visto` corre en el
 middleware (cookie y token de Excel, ~100 ns, memoria del proceso),
 `auth.writer_presente()` resuelve el rol al momento, y
