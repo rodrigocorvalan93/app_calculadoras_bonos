@@ -34,6 +34,7 @@ def _is_future_vto(vto: object) -> bool:
 _lock = threading.Lock()
 _codes: Optional[List[str]] = None
 _objs: Optional[Dict[str, object]] = None
+_mayus: Optional[Dict[str, Optional[str]]] = None   # MAYÚSCULAS → código (None si es ambiguo)
 _bono_cls = None
 
 
@@ -72,10 +73,36 @@ def _load_universe() -> Tuple[List[str], Dict[str, object]]:
 
 
 def ensure_loaded() -> None:
-    global _codes, _objs
+    global _codes, _objs, _mayus
     with _lock:
         if _codes is None or _objs is None:
             _codes, _objs = _load_universe()
+            _mayus = None
+
+
+def canonico(code: Optional[str]) -> Optional[str]:
+    """El código TAL CUAL existe en el universo, sin distinguir mayúsculas; None
+    si no existe. Primero exacto; si no, por mayúsculas y sólo con UN candidato
+    (un nombre ambiguo no se adivina). 15/10: el add-in de Excel manda el código
+    en mayúsculas y las fichas de cálculo terminan en minúscula — la pata TAMAR
+    de los duales (`TMVE8v`, `TXMD8v`) y el CER proyectado (`TX26j`) daban
+    "Bono 'TMVE8V' no encontrado" en =OMS.TIR / =OMS.MARGEN."""
+    global _mayus
+    c = (code or "").strip()
+    if not c:
+        return None
+    ensure_loaded()
+    objs = _objs or {}
+    if c in objs:
+        return c
+    m = _mayus
+    if m is None:
+        m = {}
+        for k in objs:
+            u = k.upper()
+            m[u] = None if u in m else k
+        _mayus = m
+    return m.get(c.upper())
 
 
 def all_codes() -> List[str]:

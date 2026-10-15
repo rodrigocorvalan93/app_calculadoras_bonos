@@ -491,11 +491,16 @@ def test_particion_con_temporal_unico_y_catchup_del_cierre_completo(tmp_path, mo
     hw.write_cierre_journal(_particion_tx26(d8, 70.0), d8)
     assert hw.consolidar_cierres_journal() is None
     assert not os.path.isfile(hw.cierre_path(str(tmp_path), d8))
-    # poda: el cierre completo más viejo que 90 días se va con el resto del journal
+    # poda (15/10, "sin perder historiales"): el cierre completo de hace más de
+    # 90 días se va SÓLO si su partición compartida ya lo tiene; sin ella es la
+    # única copia de esa rueda y queda (antes se borraba por edad)
     viejo = date(2026, 1, 5)
     hw.write_cierre_journal(_particion_tx26(viejo, 1.0), viejo)
     monkeypatch.setattr(hw, "_now", lambda: datetime(2026, 9, 25, 17, 5, tzinfo=ZoneInfo("America/Argentina/Buenos_Aires")))
-    hw._prune_journal()
+    hw._prune_journal(hist_dir=str(tmp_path))
+    assert viejo in hw._cierre_journal_days()
+    hw.escribir_particion(_particion_tx26(viejo, 1.0), str(tmp_path), viejo)
+    hw._prune_journal(hist_dir=str(tmp_path))
     dias = hw._cierre_journal_days()
     assert viejo not in dias and d0 in dias and d8 in dias
     cierres.refresh()
