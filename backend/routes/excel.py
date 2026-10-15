@@ -803,14 +803,22 @@ def _macro_section() -> Dict[str, Dict[str, Any]]:
 
 def _calc_batch(items: list) -> list:
     out = []
+    from backend.services import bond_universe
+
     for it in items:
         try:
-            code = str(it.get("code") or "").strip().upper()
+            crudo = str(it.get("code") or "").strip()
+            if it.get("tipo") == "macro":              # último dato macro (OMS.MACRO): sin especie ni precio
+                out.append(_calc_macro(str(it.get("serie") or crudo.upper())))
+                continue
+            # El código como está en el universo, sin distinguir mayúsculas: el
+            # add-in lo manda en MAYÚSCULAS y las fichas de cálculo terminan en
+            # minúscula (`TMVE8v`, `TX26j`) → antes "Bono 'TMVE8V' no encontrado"
+            # y, sin precio, "Sin precio de mercado" (el strip de la v / j para el
+            # ticker es case-sensitive). Un código desconocido sigue en mayúsculas.
+            code = bond_universe.canonico(crudo) or crudo.upper()
             if it.get("tipo") == "meta":               # ficha estática: no necesita modo ni valor
                 out.append(_calc_meta(code))
-                continue
-            if it.get("tipo") == "macro":              # último dato macro (OMS.MACRO): sin especie ni precio
-                out.append(_calc_macro(str(it.get("serie") or code)))
                 continue
             modo = str(it.get("modo") or "precio").strip().lower()
             plazo = "CI" if str(it.get("plazo") or "").upper().startswith("CI") else "24hs"

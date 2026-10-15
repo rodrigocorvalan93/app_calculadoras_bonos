@@ -563,6 +563,22 @@ un fixture con la estructura conocida de la página (`tests/test_bna_fx.py`) —
 si el BNA cambia el HTML, `snapshot()["error"]` lo dice y las celdas quedan
 en el último dato guardado.
 
+## Add-in de Excel — códigos de cálculo en minúscula (15/10)
+
+`=OMS.TIR` / `=OMS.MARGEN` / `=OMS.PRECIO` / `=OMS.VENCIMIENTO` de la pata
+TAMAR de un dual (`TMVE8v`, `TXMD8v`, …) y del CER proyectado (`TX26j`, …)
+daban "Bono 'TMVE8V' no encontrado": `functions.js` (`calcItem`,
+`vencimientoFn`) y `routes/excel._calc_batch` pasaban el código a MAYÚSCULAS y
+las fichas de cálculo terminan en minúscula; sin precio, además, "Sin precio de
+mercado" (el strip de la `v` / `j` para el ticker, `symbols.calc_to_md_code`,
+es case-sensitive a propósito: `SUPV`). `bond_universe.canonico(código)` = el
+código TAL CUAL está en el universo, exacto o sin distinguir mayúsculas (sólo
+con UN candidato; hoy no hay dos códigos que difieran sólo en mayúsculas — lo
+chequea el test), None si no existe; `_calc_batch` lo usa (desconocido → en
+mayúsculas como antes; `macro` sigue con la serie). El arreglo es del server:
+anda también con el `functions.js` viejo cacheado en Office. Regresión:
+`test_excel_api.test_calc_patas_de_calculo_en_minuscula_desde_excel`.
+
 ## Posiciones — Categoría de las tenencias
 
 `routes/posiciones._clasif(h, obj)` → `(categoría, fuente)`. Con ficha en
