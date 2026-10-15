@@ -31,8 +31,11 @@ ahí se lee esa. El viejo queda quieto y el chequeo de arranque lo borra
 cuando nadie lo escribió en una semana (una PC con la versión anterior
 todavía corriendo lo sigue tocando hasta que reinicia).
 
-Lo que SÍ se comparte a propósito queda en `data/` (pizarra, preferencias de
-escenario, alertas: por usuario, escrito sólo cuando el usuario cambia algo).
+Lo que SÍ se comparte a propósito queda en `data/`: pizarra y preferencias de
+escenario (por usuario, escritas cuando el usuario cambia algo) y alertas (las
+edita el superuser y además cada instancia las marca disparadas al cruzar:
+escritura rara; una copia en conflicto de ellas puede traer un cambio del
+usuario, por eso el chequeo de arranque NO las limpia).
 """
 from __future__ import annotations
 

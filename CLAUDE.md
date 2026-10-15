@@ -1254,8 +1254,13 @@ copia en conflicto con el nombre de la PC. Lo mismo, en chico, con
 feed, lo que bajó su poller) va a `services/estado_local.dir_local()` =
 `BONOS_LOCAL_DIR` o `%LOCALAPPDATA%\bonos` (Mac/Linux `~/.local/share/bonos`;
 la misma carpeta del journal y de `primary_rechazados.json`), NUNCA a `data/`
-ni a la raíz del clon. En `data/` queda sólo lo compartido a propósito y
-escrito por acción del usuario (pizarra, preferencias de escenario, alertas).
+ni a la raíz del clon. En `data/` queda sólo lo compartido a propósito:
+pizarra y preferencias de escenario (escritas por acción del usuario) y
+alertas (además cada instancia las marca disparadas al cruzar: escritura rara;
+sus copias en conflicto pueden traer un cambio del usuario y NO se limpian).
+`bcra_data_backup.json` sigue reescribiéndose en la raíz con cada
+`indices.main()` a propósito (decisión del desk, 15/10): es la semilla
+versionada que lee Históricos.
 `estado_local.ruta(nombre, env)` = dónde se escribe (respeta
 `MARKET_SNAPSHOT_PATH` / `RIESGO_PAIS_PATH` / `BNA_FX_PATH`);
 `ruta_lectura` = la local o, si todavía no existe y no hay override, el viejo
