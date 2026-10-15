@@ -565,6 +565,20 @@ def default_root() -> Path:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """Lo que corre el .bat. Un Ctrl+C a mitad de la bajada o del borrado
+    (15/10: el desk lo cortó con miles de copias bajando) sale sin
+    traceback y con 0: cmd igual pregunta "¿Desea terminar el trabajo por
+    lotes?" y, si se sigue, la app arranca; lo que faltó lo baja OneDrive
+    cuando la app lo lea, la carpeta no se fija y el próximo arranque retoma."""
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        _say("[onedrive] cortado con Ctrl+C: sigo sin bajar el resto (OneDrive lo baja cuando la app "
+             "lo lea; el próximo arranque retoma)")
+        return 0
+
+
+def _main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Bajar a esta PC los archivos del código que OneDrive "
                                              "dejó 'sólo en la nube' (Archivos a petición)")
     ap.add_argument("--listar", action="store_true", help="sólo informar, sin bajar ni fijar")

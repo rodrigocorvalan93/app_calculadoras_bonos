@@ -1275,7 +1275,10 @@ un marcador "sólo en la nube" no lo descarga; el borrado viaja a SharePoint
 carpeta NO se fija (con el pin OneDrive las bajaría en segundo plano) y se
 reintenta en el próximo arranque. Con más de `DETALLE_MAX` (40) pendientes el
 progreso sale resumido por carpeta y cada ~10 %, no una línea por archivo.
-`--listar` muestra la basura sin borrarla. Sigue compartido a propósito (no es
+`--listar` muestra la basura sin borrarla. Un Ctrl+C a mitad de la bajada o
+del borrado sale sin traceback y con 0 (cmd pregunta igual si terminar el
+.bat; si se sigue, la app arranca y OneDrive baja lo que falte al leerlo) y
+no fija la carpeta. Sigue compartido a propósito (no es
 esto): `certs/` (SAN convergente entre máquinas, `https_local`),
 `auth_store.json`, `oms_audit.jsonl`. Regresión: `tests/test_estado_local.py`
 + `tests/test_onedrive.py` (casos de basura).

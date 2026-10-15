@@ -566,3 +566,21 @@ def test_hidratar_informa_el_progreso() -> None:
     finally:
         od._leer = real
     assert vistos == [(1, 10), (2, 15)]
+
+
+def test_ctrl_c_a_mitad_de_la_bajada_sale_limpio_y_no_fija(tmp_path, monkeypatch, capsys) -> None:
+    """15/10: el desk cortó con Ctrl+C mientras bajaba miles de copias y quedó
+    un traceback de KeyboardInterrupt. Ahora: mensaje, exit 0 (cmd pregunta
+    igual si terminar el .bat) y sin fijar la carpeta."""
+    root = _arbol(tmp_path)
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake({"bna_fx.py", "fx.py"}))
+
+    def leer(p: Path) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(onedrive, "_leer", leer)
+    monkeypatch.setattr(onedrive, "fijar", lambda *a, **k: pytest.fail("cortado: no se fija"))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "cortado con Ctrl+C" in out and "Traceback" not in out
