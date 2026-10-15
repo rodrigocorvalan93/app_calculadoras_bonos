@@ -391,42 +391,6 @@ S30A6 = {
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
 }
-S30S6 = {
-    "Nombre Security": "Letra del Tesoro Nacional en Pesos Capitalizable Vto 30 09 2026",
-    "Código": "S30S6",
-    "ISIN": "AR0379015875",
-    "Calificación": "CCC-",
-    "País": "Argentina",
-    "Clasificación": "Soberano",
-    "Industria": "Soberano Letras Zero Cupón (Ledes y Letes)",
-    "Moneda": "ARS",
-    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "16/03/2026",
-    "Vencimiento": "30/09/2026",
-    "Fecha Primer Cupón": None,
-    "Cupón / Spread": 0, # es un nro flotante
-    "Step-up": False, # Es binario True or False
-    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
-    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
-    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
-    "Convención Base": 360., # 365 o 360
-    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
-    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
-    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": (1+0.0253)**((194/360)*12), # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": 0, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": 0,
-    "Fechas de cupón": ['30/09/2026'], # Lista de fechas como ejemplo
-    "Amortización": None,
-    "Callable": False , # Es binario True or False
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": None  # Precio Call
-}
 S16O6 = {
     "Nombre Security": "Letra del Tesoro Nacional en Pesos Capitalizable Vto 16 10 2026",
     "Código": "S16O6",
@@ -1046,42 +1010,6 @@ D30A6 = {
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
 }
-D30S6 = {
-    "Nombre Security": "Bono del Tesoro Vinculado al Dólar Vto 30 09 2026",
-    "Código": "D30S6",
-    "ISIN": "AR0245811739",
-    "Calificación": "CCC-",
-    "País": "Argentina",
-    "Clasificación": "Soberano",
-    "Industria": "Soberanos Dolar Linked",
-    "Moneda": "ARS",
-    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "16/03/2026",
-    "Vencimiento": "30/09/2026",
-    "Fecha Primer Cupón": "30/09/2026",
-    "Cupón / Spread": 0., # es un nro flotante
-    "Step-up": False, # Es binario True or False
-    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
-    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
-    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
-    "Convención Base": 360., # 365 o 360
-    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
-    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
-    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": "A3500", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": -1, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": -3,
-    "Fechas de cupón": ["30/09/2026"], # Lista de fechas como ejemplo
-    "Amortización": None,
-    "Callable": False , # Es binario True or False
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": None  # Precio Call
-}
 D30O6 = {
     "Nombre Security": "Bono del Tesoro Vinculado al Dólar Vto 30 10 2026",
     "Código": "D30O6",
@@ -1117,43 +1045,6 @@ D30O6 = {
     "Tipo de Call": None,
     "Fecha Call": None,
     "Precio Call": None  # Precio Call
-}
-D30N6 = {
-    "Nombre Security": "Letra del Tesoro Vinculada al Dólar Cero Cupón Vto 30 11 2026",
-    "Código": "D30N6",
-    "ISIN": "AR0747244991", # CRYL / Aviso de Resultados 11/09/2026
-    "Calificación": "CCC-",
-    "País": "Argentina",
-    "Clasificación": "Soberano",
-    "Industria": "Soberanos Dolar Linked",
-    "Moneda": "ARS",
-    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "15/09/2026",
-    "Vencimiento": "30/11/2026",
-    "Fecha Primer Cupón": "30/11/2026",
-    "Cupón / Spread": 0., # es un nro flotante
-    "Step-up": False, # Es binario True or False
-    "Frecuencia de pago de cupón anual": 2., # entero ej semianual = 2, trimestral = 4
-    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
-    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
-    "Convención Base": 360., # 365 o 360
-    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
-    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
-    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": "A3500", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": -3, # → A3500 del 10/09/2026 (T-1 de la licitación del 11/09) desde emisión 15/09
-    "Días lag Ajuste": -3, # pago al A3500 del 3er día hábil previo al vencimiento
-    "Fechas de cupón": ["30/11/2026"], # Lista de fechas como ejemplo
-    "Amortización": None,
-    "Callable": False , # Es binario True or False
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": None,  # Precio Call
-    "Aviso Resultados": """https://www.argentina.gob.ar/noticias/llamado-licitacion-de-instrumentos-del-tesoro-nacional-denominados-en-pesos-y-en-dolares-10"""
 }
 D15E7 = {
     "Nombre Security": "Letra del Tesoro Vinculada al Dólar Cero Cupón Vto 15 01 2027",
@@ -1367,78 +1258,6 @@ TZVD8 = {
     "Días lag Ajuste base": -1, # Usualmente es -10 con CER o -5 con UVA
     "Días lag Ajuste": -3,
     "Fechas de cupón": ["15/12/2028"], # Lista de fechas como ejemplo
-    "Amortización": None,
-    "Callable": False , # Es binario True or False
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": None  # Precio Call
-}
-X30S6 = {
-    "Nombre Security": "Letra del Tesoro Nacional en Pesos Ajustada por CER a dto Vto 30 09 2026",
-    "Código": "X30S6",
-    "ISIN": "AR0362438175",
-    "Calificación": "CCC-",
-    "País": "Argentina",
-    "Clasificación": "Soberano",
-    "Industria": "Soberano Inflación",
-    "Moneda": "ARS",
-    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "16/03/2026",
-    "Vencimiento": "30/09/2026",
-    "Fecha Primer Cupón": "30/09/2026",
-    "Cupón / Spread": 0, # es un nro flotante
-    "Step-up": False, # Es binario True or False
-    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
-    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
-    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
-    "Convención Base": 360., # 365 o 360
-    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
-    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
-    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": "CER", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": -10,
-    "Fechas de cupón": ["30/09/2026"], # Lista de fechas como ejemplo
-    "Amortización": None,
-    "Callable": False , # Es binario True or False
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": None  # Precio Call
-}
-X30S6j = {
-    "Nombre Security": "Letra del Tesoro Nacional en Pesos Ajustada por CER a dto Vto 30 09 2026",
-    "Código": "X30S6",
-    "ISIN": "AR0362438175",
-    "Calificación": "CCC-",
-    "País": "Argentina",
-    "Clasificación": "Soberano",
-    "Industria": "Soberano Inflación Proyectado",
-    "Moneda": "ARS",
-    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "16/03/2026",
-    "Vencimiento": "30/09/2026",
-    "Fecha Primer Cupón": "30/09/2026",
-    "Cupón / Spread": 0, # es un nro flotante
-    "Step-up": False, # Es binario True or False
-    "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
-    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
-    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
-    "Convención Base": 360., # 365 o 360
-    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
-    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
-    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": "CER PROYECTADO", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": -10, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": -10,
-    "Fechas de cupón": ["30/09/2026"], # Lista de fechas como ejemplo
     "Amortización": None,
     "Callable": False , # Es binario True or False
     "Tipo de Call": None,
@@ -10444,6 +10263,98 @@ NPCED = {
     "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/a0c223dc-abcb-4e1f-857e-92315e33df2f",
     "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/995911d6-c899-4e93-9538-0d3d7aa65082"
 }
+NPCFD = {
+    "Nombre Security": "ON Central Puerto S.A. Clase F Vto 08 10 2029",
+    "Código": "NPCFD",
+    "ISIN": "AR0447164242",
+    "Calificación": "AAA.ar",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Energy",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "08/10/2026",
+    "Vencimiento": "08/10/2029",
+    "Fecha Primer Cupón": "08/04/2027",
+    "Cupón / Spread": 6.,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "08/04/2027",
+        "08/10/2027",
+        "08/04/2028",
+        "08/10/2028",
+        "08/04/2029",
+        "08/10/2029",
+    ],
+    "Amortización": None,
+    "Callable": True,
+    "Tipo de Call": "Call total o parcial a opción de la sociedad en cualquier momento desde la Fecha de Emisión y Liquidación, al 100% del valor nominal",
+    "Fecha Call": "08/10/2026",
+    "Precio Call": 1.,
+    "Comentarios": "ISIN PENDIENTE: la Clase F no figura todavía en el listado del MAE (emisión del 08/10/2026); completar al listar. Ticker NPCFD inferido del patrón del emisor en el MAE (NPCCO Clase C, NPCDO Clase D, NPCEO Clase E) con la letra D por MEP: confirmar el código real al listar. CALIFICACIÓN PENDIENTE: el suplemento dice que la calificación será otorgada por una o más calificadoras e informada mediante aviso complementario, sin nombrar la agencia; el Aviso de Resultados no la informa. Rescate Opcional: total o parcial a sola opción de la Compañía, en cualquier momento desde la Fecha de Emisión y Liquidación, al valor nominal más intereses devengados hasta la fecha de pago del Valor de Rescate, que se paga dentro de los 30 días de publicado el aviso; rescate parcial a prorrata. Sin período de no-call y sin prima. Rescate Opcional por Cuestiones Impositivas (tax call): total y no parcial, al 100% del capital; no se carga. Base Actual/365 textual del suplemento. VN emitido US$ 50.000.000 sobre US$ 61.767.115 ofertados en 2.939 órdenes; factor de prorrateo 56,2312%; TIR de corte 6,09%. Denominada, integrada y pagadera en Dólares Estadounidenses en Argentina (MEP), ley argentina; listado BYMA y negociación A3 Mercados. NO alcanzada por la exención de Bienes Personales de la Ley 27.638 y el Decreto 621/2021 por estar denominada en dólares.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/601f3aca-5cdd-4335-8255-bec1e08d3cf9",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/7e0814e4-9cc7-4a07-90da-fff92b10ffa8"
+}
+NPCFO = {
+    "Nombre Security": "ON Central Puerto S.A. Clase F Vto 08 10 2029",
+    "Código": "NPCFO",
+    "ISIN": "AR0447164242",
+    "Calificación": "AAA.ar",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Energy",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "08/10/2026",
+    "Vencimiento": "08/10/2029",
+    "Fecha Primer Cupón": "08/04/2027",
+    "Cupón / Spread": 6.,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "08/04/2027",
+        "08/10/2027",
+        "08/04/2028",
+        "08/10/2028",
+        "08/04/2029",
+        "08/10/2029",
+    ],
+    "Amortización": None,
+    "Callable": True,
+    "Tipo de Call": "Call total o parcial a opción de la sociedad en cualquier momento desde la Fecha de Emisión y Liquidación, al 100% del valor nominal",
+    "Fecha Call": "08/10/2026",
+    "Precio Call": 1.,
+    "Comentarios": "ISIN PENDIENTE: la Clase F no figura todavía en el listado del MAE (emisión del 08/10/2026); completar al listar. Ticker NPCFD inferido del patrón del emisor en el MAE (NPCCO Clase C, NPCDO Clase D, NPCEO Clase E) con la letra D por MEP: confirmar el código real al listar. CALIFICACIÓN PENDIENTE: el suplemento dice que la calificación será otorgada por una o más calificadoras e informada mediante aviso complementario, sin nombrar la agencia; el Aviso de Resultados no la informa. Rescate Opcional: total o parcial a sola opción de la Compañía, en cualquier momento desde la Fecha de Emisión y Liquidación, al valor nominal más intereses devengados hasta la fecha de pago del Valor de Rescate, que se paga dentro de los 30 días de publicado el aviso; rescate parcial a prorrata. Sin período de no-call y sin prima. Rescate Opcional por Cuestiones Impositivas (tax call): total y no parcial, al 100% del capital; no se carga. Base Actual/365 textual del suplemento. VN emitido US$ 50.000.000 sobre US$ 61.767.115 ofertados en 2.939 órdenes; factor de prorrateo 56,2312%; TIR de corte 6,09%. Denominada, integrada y pagadera en Dólares Estadounidenses en Argentina (MEP), ley argentina; listado BYMA y negociación A3 Mercados. NO alcanzada por la exención de Bienes Personales de la Ley 27.638 y el Decreto 621/2021 por estar denominada en dólares.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/601f3aca-5cdd-4335-8255-bec1e08d3cf9",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/7e0814e4-9cc7-4a07-90da-fff92b10ffa8"
+}
 NPCCO = {
     "Nombre Security": "ON Central Puerto S.A. Clase C Vto. 25 08 2029",
     "Código": "CEPU 29",
@@ -10552,7 +10463,7 @@ BYCHO = {
     "Nombre Security": "ON Banco Galicia Clase XVI en dólares Vto 10 10 2028",
     "Código": "GALIAR 28",
     "ISIN": "USP0R66CAB48",
-    "Calificación": "CCC+",
+    "Calificación": "B-",
     "País": "Argentina",
     "Clasificación": "Corporativo Hard Dolar",
     "Industria": "Financials",
@@ -10641,6 +10552,96 @@ BYCHC = {
                   En todos los casos, se adicionarán los intereses devengados e impagos hasta la fecha de rescate.""",
     "Aviso Resultados": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9317%2FBANCO%20DE%20GALICIA%20%2DHR%20ON%20EF%20CLASE%20XVI%20%20%20Internacional%20%2D%20Aviso%20de%20Resultados%2004%2D10%2D24%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9317&p=true&ga=1""",
     "Suplemento Prospecto": """https://mercadoabierto.sharepoint.com/sites/mae-archivos-publicos/Emisiones_ON/Forms/AllItems.aspx?id=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9317%2FBANCO%20DE%20GALICIA%20%20%2D%20HR%20ON%20EF%20CLASE%20XVI%20Internacional%202024%20Suplemento%2026%2D09%2D2024%2Epdf&parent=%2Fsites%2Fmae%2Darchivos%2Dpublicos%2FEmisiones%5FON%2FEmisionesON%2F9317&p=true&ga=1"""
+}
+YM44O = {
+    "Nombre Security": "ON YPF S.A. Clase XLIV Vto 18 06 2035",
+    "Código": "YM44O",
+    "ISIN": "USP989MJCB55",
+    "Calificación": None,
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Energy",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "18/09/2026",
+    "Vencimiento": "18/06/2035",
+    "Fecha Primer Cupón": "18/06/2027",
+    "Cupón / Spread": 7.55,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Personalizado",
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "18/06/2027", "18/12/2027", "18/06/2028", "18/12/2028",
+        "18/06/2029", "18/12/2029", "18/06/2030", "18/12/2030",
+        "18/06/2031", "18/12/2031", "18/06/2032", "18/12/2032",
+        "18/06/2033", "18/12/2033", "18/06/2034", "18/12/2034",
+        "18/06/2035",
+    ],
+    "Amortización": None,
+    "Callable": True,
+    "Tipo de Call": "Call total o parcial a opción de la emisora: make-whole (Tesoro + 50 pbs) hasta el 18/12/2030 y cronograma de precios fijos desde esa fecha",
+    "Fecha Call": "18/12/2030",
+    "Precio Call": {"18/12/2030 al 18/12/2031": 1.03775, "18/12/2031 al 18/12/2032": 1.01888, "18/12/2032 en adelante": 1.},
+    "Comentarios": "Emisión internacional bajo ley de Nueva York, denominada, integrada y pagadera en Dólares Estadounidenses EN EL EXTERIOR (no MEP): la integración se hace por transferencia a una cuenta fuera de la Argentina. Emitida bajo Régimen de Emisor Frecuente. Rescate Opcional en dos regímenes: (i) en cualquier momento antes del 18/12/2030 (Primera Fecha de Rescate), total o parcialmente, al mayor entre el make-whole (valores actuales descontados a la Tasa del Tesoro más 50 pbs, base 30/360 semestral, asumiendo vencimiento en la Primera Fecha de Rescate) y el 100% del VN, más intereses devengados; y (ii) desde el 18/12/2030, total o parcialmente, a 103,775% (12 meses desde 18/12/2030), 101,888% (desde 18/12/2031) y 100,0000% (desde 18/12/2032 en adelante), más intereses devengados e impagos y Montos Adicionales. En el campo Precio Call sólo entra el cronograma de precios fijos; el make-whole no es un precio fijo y no es representable. Intereses base 30/360. Precio de emisión 98,075% con rendimiento anual de 7,850%; VN emitido US$1.200.000.000 sobre US$2.170.000.000 ofertados; duration informada 6,30 años. Dos ISIN: Rule 144A US984245BC39 (CUSIP 984245BC3) y Regulation S USP989MJCB55 (CUSIP P989MJCB5); se carga el Reg S, que es el que lista el MAE. Sin calificación de riesgo local; sólo calificaciones internacionales, a informarse por aviso complementario.",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": ""
+}
+YM44C = {
+    "Nombre Security": "ON YPF S.A. Clase XLIV Vto 18 06 2035",
+    "Código": "YM44C",
+    "ISIN": "USP989MJCB55",
+    "Calificación": None,
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar",
+    "Industria": "Energy",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "18/09/2026",
+    "Vencimiento": "18/06/2035",
+    "Fecha Primer Cupón": "18/06/2027",
+    "Cupón / Spread": 7.55,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Personalizado",
+    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
+    "Convención Base": 360.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "18/06/2027", "18/12/2027", "18/06/2028", "18/12/2028",
+        "18/06/2029", "18/12/2029", "18/06/2030", "18/12/2030",
+        "18/06/2031", "18/12/2031", "18/06/2032", "18/12/2032",
+        "18/06/2033", "18/12/2033", "18/06/2034", "18/12/2034",
+        "18/06/2035",
+    ],
+    "Amortización": None,
+    "Callable": True,
+    "Tipo de Call": "Call total o parcial a opción de la emisora: make-whole (Tesoro + 50 pbs) hasta el 18/12/2030 y cronograma de precios fijos desde esa fecha",
+    "Fecha Call": "18/12/2030",
+    "Precio Call": {"18/12/2030 al 18/12/2031": 1.03775, "18/12/2031 al 18/12/2032": 1.01888, "18/12/2032 en adelante": 1.},
+    "Comentarios": "Emisión internacional bajo ley de Nueva York, denominada, integrada y pagadera en Dólares Estadounidenses EN EL EXTERIOR (no MEP): la integración se hace por transferencia a una cuenta fuera de la Argentina. Emitida bajo Régimen de Emisor Frecuente. Rescate Opcional en dos regímenes: (i) en cualquier momento antes del 18/12/2030 (Primera Fecha de Rescate), total o parcialmente, al mayor entre el make-whole (valores actuales descontados a la Tasa del Tesoro más 50 pbs, base 30/360 semestral, asumiendo vencimiento en la Primera Fecha de Rescate) y el 100% del VN, más intereses devengados; y (ii) desde el 18/12/2030, total o parcialmente, a 103,775% (12 meses desde 18/12/2030), 101,888% (desde 18/12/2031) y 100,0000% (desde 18/12/2032 en adelante), más intereses devengados e impagos y Montos Adicionales. En el campo Precio Call sólo entra el cronograma de precios fijos; el make-whole no es un precio fijo y no es representable. Intereses base 30/360. Precio de emisión 98,075% con rendimiento anual de 7,850%; VN emitido US$1.200.000.000 sobre US$2.170.000.000 ofertados; duration informada 6,30 años. Dos ISIN: Rule 144A US984245BC39 (CUSIP 984245BC3) y Regulation S USP989MJCB55 (CUSIP P989MJCB5); se carga el Reg S, que es el que lista el MAE. Sin calificación de riesgo local; sólo calificaciones internacionales, a informarse por aviso complementario.",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": ""
 }
 IRCPO = {
     "Nombre Security": "ON IRSA Clase XXIV en USD Vto 31 03 2035",
@@ -11061,46 +11062,6 @@ RAC8C = {
     "Comentarios": "Pata cable (DIRTY) de la ON Raghsa Clase 8. Mismos terminos que RAC8: ley de Nueva York, Reg S, 7,95% nominal anual semestral, 30/360, bullet al 04/08/2036, call sin prima desde el 04/08/2027 (103/102/101/100) y make-whole T+50 pb previo.",
     "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/175cc20d-b409-4d4e-89c8-a9bb6eeec14e",
     "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/71e07210-f397-4213-bbdd-b0eec42fab52"
-}
-BF48C = {
-    "Nombre Security": "ON Banco BBVA Argentina S.A. Clase 48 Vto 24 01 2028 C",
-    "Código": "BF48C",
-    "ISIN": "AR0751637247", # MAE / Aviso de Resultados 21/07/2026
-    "Calificación": "AAA(arg)",
-    "País": "Argentina",
-    "Clasificación": "Corporativo Hard Dolar",
-    "Industria": "Financials",
-    "Moneda": "USD",
-    "Quote Price Convention": "DIRTY",
-    "Plazo habitual de liquidación: t +": 1.,
-    "Emisión": "24/07/2026",
-    "Vencimiento": "24/01/2028",
-    "Fecha Primer Cupón": "24/01/2027",
-    "Cupón / Spread": 3.75,
-    "Step-up": False,
-    "Frecuencia de pago de cupón anual": 2.,
-    "Convención fechas de pago": "Regular",
-    "Convención de devengamiento": "Actual",
-    "Convención Base": 365.,
-    "Tipo de Amortización": "BULLET",
-    "Tipo Tasa Interés": "FIJA",
-    "Index": None,
-    "Días Lag índice desde inc": 0,
-    "Días Lag índice hasta inc": 0,
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": None,
-    "Factor Capitalización": 1.,
-    "Días lag Ajuste base": None,
-    "Días lag Ajuste": None,
-    "Fechas de cupón": ["24/01/2027", "24/07/2027", "24/01/2028"],
-    "Amortización": None,
-    "Callable": False,
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": None,
-    "Comentarios": "USD Cable, integrada en dólares. Tasa fija 3,75% n.a., intereses semestrales, amortización íntegra al vencimiento. VN emitido USD 42.074.070. Licitación 21/07/2026, emisión y liquidación 24/07/2026 (T+3). Emitida junto con las Clases 49 (USD MEP, 12 meses) y 50 (USD MEP, 24 meses).",
-    "Aviso Resultados": "https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQDZpJws9ETtTLzQ_yIRw_ltARDnMPCpXu-bWgKFay5Thno",
-    "Suplemento Prospecto": "https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQCoG_KxUZydT4Qlf1Zi2cKeAfGVQ339qbCC7AnKUP39zUo",
 }
 VSCVO = {
     "Nombre Security": "ON Vista Oil & Gas Argentina S.A.U. Clase XXIX Vto 10 06 2033",
@@ -17157,6 +17118,60 @@ OTS6D = {
     "Aviso Resultados": """https://aif2.cnv.gov.ar/presentations/publicview/9ec9ef97-ff77-4039-a313-9e3e0449119e""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/42c9d502-e9d5-4113-aacb-9a1595e80828#"""
 }
+OTS7D = {
+    "Nombre Security": "ON Otamerica Ebytem S.A. Serie VII Vto 25 09 2030",
+    "Código": "OTS7D",
+    "ISIN": "AR0216321130",
+    "Calificación": None,
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Energy",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "25/09/2026",
+    "Vencimiento": "25/09/2030",
+    "Fecha Primer Cupón": "25/06/2027",
+    "Cupón / Spread": 6.25,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Personalizado",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "25/06/2027",
+        "25/09/2027",
+        "25/12/2027",
+        "25/03/2028",
+        "25/06/2028",
+        "25/09/2028",
+        "25/12/2028",
+        "25/03/2029",
+        "25/06/2029",
+        "25/09/2029",
+        "25/12/2029",
+        "25/03/2030",
+        "25/06/2030",
+        "25/09/2030",
+    ],
+    "Amortización": None,
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "Primer cupón a los 9 meses de la emisión y luego trimestral; el primer período de devengamiento es de 9 meses. No hay rescate a opción de la emisora: el único rescate previsto es por razones impositivas (total y no parcial), remitido al título 29 del Cap. IX del Prospecto del Programa; no se carga. Integrable en efectivo (Dólar MEP) y/o en especie con las ON Serie V (OTS5O, ISIN AR0034370418, vto 23/10/2026) a relación de canje 1:1. VN emitido US$ 80.000.000 (US$ 11.340.857 suscriptos en especie); factor de prorrateo 93,3944%. Ley argentina; listado BYMA y negociación A3 Mercados, con posible elegibilidad Euroclear/Clearstream.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/141e6c19-3040-49b8-bed9-9de26df9350e",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/2d68b6e3-44d2-4bf6-8b87-ac0f1bece1b0"
+}
 AFCID = {
     "Nombre Security": "ON Banco Comafi S.A. Clase XVII Vto. 07 11 2026",
     "Código": "AFCID",
@@ -17359,7 +17374,7 @@ HJCLD = {
     "Nombre Security": "ON John Deere Credit Compañía Financiera S.A. Clase XX Vto 08 12 2028",
     "Código": "HJCLD",
     "ISIN": "AR0438063809",
-    "Calificación": "AA(arg)",
+    "Calificación": "AAA(arg)",
     "País": "Argentina",
     "Clasificación": "Corporativo Hard Dolar MEP",
     "Industria": "Financials",
@@ -17399,6 +17414,51 @@ HJCLD = {
     "Comentarios": "Solo rescate por razones impositivas (tax call, no se carga). El suplemento aclara que las ON no serán rescatables en ningún otro caso ni a opción de la Emisora ni de los tenedores. Denominada y pagadera en USD localmente en Argentina vía CVSA. Tasa de corte 6,50% n.a. (factor de prorrateo 81,7243%; duration informada 2,36 años).",
     "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/c805ccb6-7a3c-4f8d-b15f-f36884b7794b",
     "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/1d94f604-376f-4afe-b765-38a5006b696e",
+}
+HJCMD = {
+    "Nombre Security": "ON John Deere Credit Compañía Financiera S.A. Clase XXI Vto 28 03 2029",
+    "Código": "HJCMD",
+    "ISIN": "AR0687629284",
+    "Calificación": "AAA(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo Hard Dolar MEP",
+    "Industria": "Financials",
+    "Moneda": "USB",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "28/09/2026",
+    "Vencimiento": "28/03/2029",
+    "Fecha Primer Cupón": "28/03/2027",
+    "Cupón / Spread": 6.,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "28/03/2027",
+        "28/09/2027",
+        "28/03/2028",
+        "28/09/2028",
+        "28/03/2029",
+    ],
+    "Amortización": None,
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "Emisión bajo el Régimen Simplificado de Emisor Frecuente (Sección VI, Cap. V, Tít. II Normas CNV); emisor frecuente CNV N° 10. Código CVSA 59758. Ticker informado en el Aviso de Resultados: HJCMO (código MAE); en la casa va la letra D por ser MEP. ATENCIÓN: el Aviso de Suscripción (puntos 1 a 32) NO contiene cláusula de rescate ni base para el cómputo de intereses; ambos salen del Suplemento de Prospecto del 18/09/2026, que no fue provisto. Callable: False es provisorio por falta de confirmación. Base Actual/365 asumida por default corporativo. La Emisora podrá solicitar que las ON cuenten con especie asignada en Euroclear. VN emitido US$ 35.903.000 sobre US$ 39.316.000 ofertados en 2.142 órdenes, sin prorrateo (máximo autorizado US$ 40 M ampliable a US$ 80 M). Valor Nominal Unitario y unidad mínima de negociación US$ 1.000. Denominada y pagadera en Dólares Estadounidenses en la República Argentina (MEP), ley argentina; listado BYMA y negociación A3 Mercados.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/3120625b-5dbb-4bea-9ccf-ee9ff8f3444b",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/0b2a1861-fb9c-4be6-8716-972c0aa3bc52"
 }
 PVC5D = {
     "Nombre Security": "ON Banco Provincia de Buenos Aires Clase V Vto 08 06 2027",
@@ -19076,7 +19136,7 @@ pagados, excluyendo la fecha de rescate.""",
     "Suplemento Prospecto": """https://aif2.cnv.gov.ar/presentations/publicview/5f1063eb-2c24-42fd-bf43-2577020e7898#"""
 }
 VMC1D = {
-    "Nombre Security": "ON VMOS S.A. Clase 1 Vto 22 09 2030",
+    "Nombre Security": "ON VMOS S.A. Clase I Vto 22 09 2030",
     "Código": "VMC1D",
     "ISIN": "AR0735310937",
     "Calificación": "AAA(arg)",
@@ -19494,7 +19554,7 @@ TML27 = {
     "Emisión": "30/06/2026",
     "Vencimiento": "30/07/2027",
     "Fecha Primer Cupón": None,
-    "Cupón / Spread": 5.4, # es un nro flotante
+    "Cupón / Spread": 4.5, # es un nro flotante
     "Step-up": False, # Es binario True or False
     "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
     "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
@@ -22082,61 +22142,6 @@ MR40O = {
     "Comentarios": "Base promedio A3500 ultimos 3 días habilies y lo mismo de pago",
     "Aviso Resultados": """""",
     "Suplemento Prospecto": """"""
-}
-LUC4O = {
-    "Nombre Security": "ON Luz de Tres Picos S.A. Clase 4 Vto 29 09 2026",
-    "Código": "LUC4O",
-    "ISIN": "ARLUZT560047",
-    "Calificación": "AA-(arg)",
-    "País": "Argentina",
-    "Clasificación": "Corporativo Dolar Linked",
-    "Industria": "Energy",
-    "Moneda": "ARS",
-    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "29/09/2022",
-    "Vencimiento": "29/09/2026",
-    "Fecha Primer Cupón": "20/12/2022",
-    "Cupón / Spread": 0., # es un nro flotante
-    "Step-up": False, # Es binario True or False
-    "Frecuencia de pago de cupón anual": 4., # entero ej semianual = 2, trimestral = 4
-    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
-    "Convención de devengamiento": "Actual", # Actual, ISMA-30, NASD-30
-    "Convención Base": 365., # 365 o 360
-    "Tipo de Amortización": "AMORTIZABLE", # AMORTIZBALE O BULLET
-    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
-    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": "A3500", # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": 1., # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": -3, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": -3,
-    "Fechas de cupón": [
-    "29/12/2022",
-    "29/3/2023",
-    "29/6/2023",
-    "29/9/2023",
-    "29/12/2023",
-    "29/3/2024",
-    "29/6/2024",
-    "29/9/2024",
-    "29/12/2024",
-    "29/3/2025",
-    "29/6/2025",
-    "29/9/2025",
-    "29/12/2025",
-    "29/3/2026",
-    "29/6/2026",
-    "29/9/2026"], # Lista de fechas como ejemplo
-    "Amortización": ([0] * 13 + [33.33] + [33.33] + [33.34]),
-    "Callable": False , # Es binario True or False
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": None,  # Precio Call
-    "Comentarios": "Base promedio A3500 ultimos 3 días habilies y lo mismo de pago",
-    "Aviso Resultados": """https://www.mae.com.ar/descarga/docs/M/LUC4O/Y/MPMAE-RES-LUZ%20DE%20TRES%20PICOS%20Clase%204-%20Aviso%20Resultado%2026-09-22.pdf""",
-    "Suplemento Prospecto": """https://www.mae.com.ar/descarga/docs/M/LUC4O/Y/MPMAE-ANU-%20ON%20LUZ%20DE%20TRES%20PICOS%20CLASE%204%20Suplemento%20de%20Prospecto%2022-09-2022.pdf"""
 }
 PEC7O = {
     "Nombre Security": "ON Petrolera Aconcagua Energía S.A. Serie VII Vto 14 09 2027",
@@ -26239,6 +26244,96 @@ NDG34 = {
     "Aviso Resultados": "",
     "Suplemento Prospecto": ""
 }
+SJO35 = {
+    "Nombre Security": "Títulos de Deuda Provincia de San Juan 2035 Vto 01 10 2035",
+    "Código": "SJO35",
+    "ISIN": "USP84469AC23",
+    "Calificación": None,
+    "País": "Argentina",
+    "Clasificación": "Sub-soberano",
+    "Industria": "Sub-soberano USD Ley Extranjera",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "01/10/2026",
+    "Vencimiento": "01/10/2035",
+    "Fecha Primer Cupón": "01/04/2027",
+    "Cupón / Spread": 9.55,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "ISMA-30",
+    "Convención Base": 360.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "01/04/2027", "01/10/2027", "01/04/2028", "01/10/2028",
+        "01/04/2029", "01/10/2029", "01/04/2030", "01/10/2030",
+        "01/04/2031", "01/10/2031", "01/04/2032", "01/10/2032",
+        "01/04/2033", "01/10/2033", "01/04/2034", "01/10/2034",
+        "01/04/2035", "01/10/2035",
+    ],
+    "Amortización": ([0] * 13 + [33.] + [0] + [33.] + [0] + [34.]),
+    "Callable": True,
+    "Tipo de Call": "Make-whole (Tasa del Tesoro + 50 pbs) total o parcial en cualquier momento antes del 01/08/2035; call a la par total o parcial a partir del 01/08/2035",
+    "Fecha Call": "01/08/2035",
+    "Precio Call": 1.,
+    "Comentarios": "Título público provincial (sub-soberano) ley del Estado de Nueva York, denominado y pagadero en Dólares Estadounidenses EN EL EXTERIOR, colocado bajo Norma 144A / Reglamento S. Fiduciario, Agente de Registro, Pago y Transferencia: The Bank of New York Mellon. ISIN cargado: Reglamento S USP84469AC23 (coincide con el que publica el MAE para SJO35); el ISIN 144A es US798367AC28. CUSIP: 144A 798367 AC2 / Reg S P84469 AC2. Precio de emisión 98,234% del VN (bajo la par): rendimiento aplicable 9,875% contra cupón de 9,550% n.a. Base 30/360 textual del prospecto ('un año de 360 días compuesto por doce meses de 30 días'). Amortización en 3 cuotas anuales desde el 01/10/2033: 33% / 33% / 34% del capital original. RESCATE: (i) Make-Whole antes del 01/08/2035, total o parcial, en una o más oportunidades, al mayor entre el valor presente de los flujos remanentes descontados a Tasa del Tesoro + 50 pbs (base semestral 30/360) menos devengados, y el 100% del capital; (ii) Rescate a la Par a partir del 01/08/2035, total o parcial, al 100% del capital más devengados; (iii) Rescate por razones impositivas, total y no parcial, al 100%. Se carga la pata (ii) por ser la única con precio determinable; el make-whole queda documentado acá. CALIFICACIÓN PENDIENTE: Fitch B- y Moody's B3 son PRELIMINARES, escala INTERNACIONAL, sujetas a confirmación; no son escala nacional (arg) y las definitivas serán comunicadas por la Provincia. Sin legajo CNV: por el art. 83 de la Ley 26.831 la Provincia no requiere aprobación previa de la CNV y los documentos se publicaron en BYMA/A3, no en la AIF. VN emitido US$ 600.000.000 (el máximo ofrecido); fondos brutos US$ 589.404.000. Listado BYMA vía BCBA y negociación A3 Mercados.",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": ""
+}
+SJO5D = {
+    "Nombre Security": "Títulos de Deuda Provincia de San Juan 2035 Vto 01 10 2035",
+    "Código": "SJO5D",
+    "ISIN": "USP84469AC23",
+    "Calificación": None,
+    "País": "Argentina",
+    "Clasificación": "Sub-soberano",
+    "Industria": "Sub-soberano USD Ley Extranjera",
+    "Moneda": "USD",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "01/10/2026",
+    "Vencimiento": "01/10/2035",
+    "Fecha Primer Cupón": "01/04/2027",
+    "Cupón / Spread": 9.55,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 2.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "ISMA-30",
+    "Convención Base": 360.,
+    "Tipo de Amortización": "AMORTIZABLE",
+    "Tipo Tasa Interés": "FIJA",
+    "Index": None,
+    "Días Lag índice desde inc": 0,
+    "Días Lag índice hasta inc": 0,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "01/04/2027", "01/10/2027", "01/04/2028", "01/10/2028",
+        "01/04/2029", "01/10/2029", "01/04/2030", "01/10/2030",
+        "01/04/2031", "01/10/2031", "01/04/2032", "01/10/2032",
+        "01/04/2033", "01/10/2033", "01/04/2034", "01/10/2034",
+        "01/04/2035", "01/10/2035",
+    ],
+    "Amortización": ([0] * 13 + [33.] + [0] + [33.] + [0] + [34.]),
+    "Callable": True,
+    "Tipo de Call": "Make-whole (Tasa del Tesoro + 50 pbs) total o parcial en cualquier momento antes del 01/08/2035; call a la par total o parcial a partir del 01/08/2035",
+    "Fecha Call": "01/08/2035",
+    "Precio Call": 1.,
+    "Comentarios": "Título público provincial (sub-soberano) ley del Estado de Nueva York, denominado y pagadero en Dólares Estadounidenses EN EL EXTERIOR, colocado bajo Norma 144A / Reglamento S. Fiduciario, Agente de Registro, Pago y Transferencia: The Bank of New York Mellon. ISIN cargado: Reglamento S USP84469AC23 (coincide con el que publica el MAE para SJO35); el ISIN 144A es US798367AC28. CUSIP: 144A 798367 AC2 / Reg S P84469 AC2. Precio de emisión 98,234% del VN (bajo la par): rendimiento aplicable 9,875% contra cupón de 9,550% n.a. Base 30/360 textual del prospecto ('un año de 360 días compuesto por doce meses de 30 días'). Amortización en 3 cuotas anuales desde el 01/10/2033: 33% / 33% / 34% del capital original. RESCATE: (i) Make-Whole antes del 01/08/2035, total o parcial, en una o más oportunidades, al mayor entre el valor presente de los flujos remanentes descontados a Tasa del Tesoro + 50 pbs (base semestral 30/360) menos devengados, y el 100% del capital; (ii) Rescate a la Par a partir del 01/08/2035, total o parcial, al 100% del capital más devengados; (iii) Rescate por razones impositivas, total y no parcial, al 100%. Se carga la pata (ii) por ser la única con precio determinable; el make-whole queda documentado acá. CALIFICACIÓN PENDIENTE: Fitch B- y Moody's B3 son PRELIMINARES, escala INTERNACIONAL, sujetas a confirmación; no son escala nacional (arg) y las definitivas serán comunicadas por la Provincia. Sin legajo CNV: por el art. 83 de la Ley 26.831 la Provincia no requiere aprobación previa de la CNV y los documentos se publicaron en BYMA/A3, no en la AIF. VN emitido US$ 600.000.000 (el máximo ofrecido); fondos brutos US$ 589.404.000. Listado BYMA vía BCBA y negociación A3 Mercados.",
+    "Aviso Resultados": "",
+    "Suplemento Prospecto": ""
+}
 NDG4C = {
     "Nombre Security": "Título de Deuda Provincia del Neuquén 7,35% Cable Vto 25 08 2034",
     "Código": "NDG4C",
@@ -26290,45 +26385,7 @@ NDG4C = {
 }
 
 # CORPORATIVOS TASA FIJA
-PS36O = {
-    "Nombre Security": "ON PSA Finance Argentina Cia Financiera Serie 36 Vto 19 09 2026",
-    "Código": "PS36O",
-    "ISIN": "AR0863684780",
-    "Calificación": "AA(arg)",
-    "País": "Argentina",
-    "Clasificación": "Corporativo Tasa Fija",
-    "Industria": "Financials",
-    "Moneda": "ARS",
-    "Plazo habitual de liquidación: t +": 1., # debe ser un entero
-    "Emisión": "19/12/2025",
-    "Vencimiento": "19/09/2026",
-    "Fecha Primer Cupón": "19/09/2026",
-    "Cupón / Spread": 0., # es un nro flotante
-    "Step-up": False, # Es binario True or False
-    "Frecuencia de pago de cupón anual": 1., # entero ej semianual = 2, trimestral = 4
-    "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"
-    "Convención de devengamiento": "ISMA-30", # Actual, ISMA-30, NASD-30
-    "Convención Base": 360., # 365 o 360
-    "Tipo de Amortización": "BULLET", # AMORTIZBALE O BULLET
-    "Tipo Tasa Interés": "FIJA", # FIJA o VARIABLE
-    "Index": None, # Badlar o el que sea hasta ahora solo se implementó badlar
-    "Días Lag índice desde inc": 0, # enteros negativos
-    "Días Lag índice hasta inc": 0, # enteros negativos
-    "Valor Nominal": 100.,
-    "Ajuste sobre Capital": None, # None, "CER", "CER PROYECTADO", "A3500, "A3500 PROYECTADO"
-    "Factor Capitalización": (1+0.0265)**(9), # Factor de ajuste, por defecto 1
-    "Días lag Ajuste base": None, # Usualmente es -10 con CER o -5 con UVA
-    "Días lag Ajuste": None,
-    "Fechas de cupón": ["19/09/2026"], # Lista de fechas como ejemplo
-    "Amortización": None,
-    "Callable": False , # Es binario True or False
-    "Tipo de Call": None,
-    "Fecha Call": None,
-    "Precio Call": "",  # Precio Call
-    "Comentarios": "",
-    "Aviso Resultados": "https://mercadoabierto.sharepoint.com/:b:/s/mae-archivos-publicos/IQDRfDddCcIQRa14FLlV5ShTAUmxg5KSLRN3gfzfAr2esuI",
-    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/ddc7c222-e288-4157-b4e6-44eff269486c#",
-}
+
 PS38O = {
     "Nombre Security": "ON PSA Finance Argentina Cia Financiera Serie 38 Vto 26 03 2027",
     "Código": "PS38O",
@@ -26445,6 +26502,50 @@ RB68O = {
     "Comentarios": "Tasa efectiva mensual fija 2,15%, capitaliza mensualmente y paga todo (capital + interés) en la Fecha de Vencimiento (VPV=VNO×(1+Tm)^((días/360)×12), días=270 en 30/360). Sin call operativo; solo Rescate por Razones Impositivas (tax call), no cargado.",
     "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/07618116-d359-4b07-bda6-f3eca5e3fef5",
     "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/53a6a055-0bbd-4bb5-8c3c-5bc0dfd0479c"
+}
+RB69O = {
+    "Nombre Security": "ON Rombo Compañía Financiera S.A. Serie 69 Vto 25 09 2027",
+    "Código": "RB69O",
+    "ISIN": "AR0461040807",
+    "Calificación": "A1+(arg)",
+    "País": "Argentina",
+    "Clasificación": "Corporativo TAMAR",
+    "Industria": "Financials",
+    "Moneda": "ARS",
+    "Plazo habitual de liquidación: t +": 1.,
+    "Emisión": "25/09/2026",
+    "Vencimiento": "25/09/2027",
+    "Fecha Primer Cupón": "25/12/2026",
+    "Cupón / Spread": 4.5,
+    "Step-up": False,
+    "Frecuencia de pago de cupón anual": 4.,
+    "Convención fechas de pago": "Regular",
+    "Convención de devengamiento": "Actual",
+    "Convención Base": 365.,
+    "Tipo de Amortización": "BULLET",
+    "Tipo Tasa Interés": "VARIABLE",
+    "Index": "TAMAR",
+    "Días Lag índice desde inc": -7,
+    "Días Lag índice hasta inc": -7,
+    "Valor Nominal": 100.,
+    "Ajuste sobre Capital": None,
+    "Factor Capitalización": 1.,
+    "Días lag Ajuste base": None,
+    "Días lag Ajuste": None,
+    "Fechas de cupón": [
+        "25/12/2026",
+        "25/03/2027",
+        "25/06/2027",
+        "25/09/2027",
+    ],
+    "Amortización": None,
+    "Callable": False,
+    "Tipo de Call": None,
+    "Fecha Call": None,
+    "Precio Call": None,
+    "Comentarios": "Tasa Base: promedio aritmético simple truncado a 4 decimales de la Tasa TAMAR Privada (plazo fijo mayorista 30-35 días, bancos privados, metodología BCRA), desde el 7mo Día Hábil anterior al inicio del Período de Devengamiento hasta el 7mo Día Hábil anterior a la Fecha de Pago de Intereses (excluyendo este último). Tasa Sustituta prevista si el BCRA suspende la publicación. Margen de Corte 4,50% (podía ser negativo; si la Tasa de Interés diera negativa se considera 0,00%). Base Actual/365 textual del suplemento. Rescate: ÚNICAMENTE por razones impositivas (sección 6.2.1 del cap. X del Prospecto); el suplemento aclara que 'no serán rescatables en ningún otro caso (ni a opción de la Emisora ni a opción de los Obligacionistas)' — no hay call ni put. Calificación A1+(arg) de FIX (informe 17/09/2026), asignada a las Series 69 y 70 en conjunto; es de CORTO plazo, coherente con la regla <=12 meses. Programa calificado AAA(arg) por FIX y AA.ar por Moody's Local. VN emitido $30.009.162.500 sobre $31.509.162.500 ofertados en 47 órdenes, sin prorrateo. La Serie 70 (tasa efectiva mensual fija, 9 meses) fue DECLARADA DESIERTA: no se carga. Ley argentina.",
+    "Aviso Resultados": "https://aif2.cnv.gov.ar/presentations/publicview/f6853e82-b6ee-4323-af6d-a3acdf39027b",
+    "Suplemento Prospecto": "https://aif2.cnv.gov.ar/presentations/publicview/3f337fc3-3e89-466e-aff5-6a40f0d292fe"
 }
 SXC7O = {
     "Nombre Security": "ON Mercado Pago Servicios de Procesamiento S.R.L. Clase 7 Vto 24 11 2026",
@@ -29362,7 +29463,6 @@ ERL26 = {
 ##### Definiciones de bonos #####
 
 # CORPORATIVOS TASA FIJA
-PS36O = rentafija.Bono(PS36O)
 PS38O = rentafija.Bono(PS38O)
 RB65O = rentafija.Bono(RB65O)
 RB68O = rentafija.Bono(RB68O)
@@ -29509,7 +29609,6 @@ VSCQO = rentafija.Bono(VSCQO)
 LMS6O = rentafija.Bono(LMS6O)
 YMCTO = rentafija.Bono(YMCTO)
 PEC7O = rentafija.Bono(PEC7O)
-LUC4O = rentafija.Bono(LUC4O)
 PEC8O = rentafija.Bono(PEC8O)
 PNECO = rentafija.Bono(PNECO)
 PN40O = rentafija.Bono(PN40O)
@@ -29574,11 +29673,14 @@ VSCTO = rentafija.Bono(VSCTO)
 VSCTC = rentafija.Bono(VSCTC)
 BYCHO = rentafija.Bono(BYCHO)
 BYCHC = rentafija.Bono(BYCHC)
+YM44O = rentafija.Bono(YM44O)
+YM44C = rentafija.Bono(YM44C)
 NPCED = rentafija.Bono(NPCED)
+NPCFD = rentafija.Bono(NPCFD)
+NPCFO = rentafija.Bono(NPCFO)
 NPCCO = rentafija.Bono(NPCCO)
 NPCCC = rentafija.Bono(NPCCC)
 RAC8C = rentafija.Bono(RAC8C)
-BF48C = rentafija.Bono(BF48C)
 PN38O = rentafija.Bono(PN38O)
 PN38C = rentafija.Bono(PN38C)
 YCAMO = rentafija.Bono(YCAMO)
@@ -29671,6 +29773,7 @@ PQCSD = rentafija.Bono(PQCSD)
 SBC3D = rentafija.Bono(SBC3D)
 OTS5D = rentafija.Bono(OTS5D)
 OTS6D = rentafija.Bono(OTS6D)
+OTS7D = rentafija.Bono(OTS7D)
 LOC5D = rentafija.Bono(LOC5D)
 LOC6D = rentafija.Bono(LOC6D)
 NZC2D = rentafija.Bono(NZC2D)
@@ -29695,6 +29798,7 @@ PVC3D = rentafija.Bono(PVC3D)
 PVC5D = rentafija.Bono(PVC5D)
 PVC8D = rentafija.Bono(PVC8D)
 HJCLD = rentafija.Bono(HJCLD)
+HJCMD = rentafija.Bono(HJCMD)
 TLCOD = rentafija.Bono(TLCOD)
 TLCQD = rentafija.Bono(TLCQD)
 BY34D = rentafija.Bono(BY34D)
@@ -29809,7 +29913,6 @@ AERBD = rentafija.Bono(AERBD)
 YFCKD = rentafija.Bono(YFCKD)
 
 # SOBS EN MONEDA LOCAL
-S30S6 = rentafija.Bono(S30S6)
 S16O6 = rentafija.Bono(S16O6)
 S30O6 = rentafija.Bono(S30O6)
 S13N6 = rentafija.Bono(S13N6)
@@ -29828,7 +29931,6 @@ T30A7 = rentafija.Bono(T30A7)
 T31Y7 = rentafija.Bono(T31Y7)
 T30J7 = rentafija.Bono(T30J7)
 TY30P = rentafija.Bono(TY30P)
-X30S6 = rentafija.Bono(X30S6)
 TZXO6 = rentafija.Bono(TZXO6)
 X30N6 = rentafija.Bono(X30N6)
 X29E7 = rentafija.Bono(X29E7)
@@ -29850,7 +29952,6 @@ TZXD7 = rentafija.Bono(TZXD7)
 TZX28 = rentafija.Bono(TZX28)
 TZXS8 = rentafija.Bono(TZXS8)
 TZXD8 = rentafija.Bono(TZXD8)
-X30S6j = rentafija.Bono(X30S6j)
 X30N6j = rentafija.Bono(X30N6j)
 X29E7j = rentafija.Bono(X29E7j)
 TX26j = rentafija.Bono(TX26j)
@@ -29879,9 +29980,7 @@ DICP = rentafija.Bono(DICP)
 TX31 = rentafija.Bono(TX31)
 PARP = rentafija.Bono(PARP)
 CUAP = rentafija.Bono(CUAP)
-D30S6 = rentafija.Bono(D30S6)
 D30O6 = rentafija.Bono(D30O6)
-D30N6 = rentafija.Bono(D30N6)
 D15E7 = rentafija.Bono(D15E7)
 TMVE8 = rentafija.Bono(TMVE8)
 TMVE8v = rentafija.Bono(TMVE8v)
@@ -29947,6 +30046,8 @@ BPB8D = rentafija.Bono(BPB8D)
 CO32D = rentafija.Bono(CO32D)
 ERM33 = rentafija.Bono(ERM33)
 CO35D = rentafija.Bono(CO35D)
+SJO35 = rentafija.Bono(SJO35)
+SJO5D = rentafija.Bono(SJO5D)
 SFD34 = rentafija.Bono(SFD34)
 BDC33 = rentafija.Bono(BDC33)
 BDC36 = rentafija.Bono(BDC36)
@@ -29959,6 +30060,7 @@ SFD34C = rentafija.Bono(SFD34C)
 BDC33C = rentafija.Bono(BDC33C)
 BDC36C = rentafija.Bono(BDC36C)
 PUA36C = rentafija.Bono(PUA36C)
+
 NDG4C = rentafija.Bono(NDG4C)
 
 # SUBSOB BADLAR/TAMAR
@@ -30000,20 +30102,20 @@ todos_los_bonos = [
     # SOBERANOS PESOS (SOBS)
 
     S13N6, S29E7,
-    S30S6, S16O6, S30O6, S30N6,
+    S16O6, S30O6, S30N6,
     TO26, TTD26,
     TTD26v,
     T15E7, T30A7, T31Y7, T30J7, TY30P,
-    X30S6, TZXO6,
+    TZXO6,
     X30N6, TZXD6, TZXM7, TZXA7, TZXY7, TZX27,
     TZXS7, TZXO7, TZXD7, X29E7,
     TZXS8, TZX28, TX26, TX28, TX31, TZXM8, TZXD8, TZXM9,
     TX26j, TZXD6j,
     TZX27j, TZXA7j, TZXY7j, TZXS7j, TZXO7j, TZXD7j,
     TZXS8j, TZX28j, TZXM7j, TZXM8j, TZXD8j, TZXM9j,
-    TZXO6j, X30N6j, X30S6j, X29E7j,
+    TZXO6j, X30N6j, X29E7j,
     DICP, PARP, CUAP,
-    D30O6, D30S6, D30N6, D15E7, TZVD8,
+    D30O6, D15E7, TZVD8,
     D31M7, TMVE8, TMVE8v, TZV27, TZV28,
     TXMJ9, TXMJ9v, TXMJ9j,
     TXMJ8, TXMJ8v, TXMJ8j,
@@ -30039,9 +30141,9 @@ todos_los_bonos = [
     # SUBSOB HARD-DÓLAR
 
     CO32D, BDC33, SFD34, CO35D, ERM33, PUA36,
-    BDC36, NDG34,
+    BDC36, NDG34, SJO35,
     CO32DC, BDC33C, SFD34C, CO35DC, ERM33C, PUA36C,
-    BDC36C, NDG4C,
+    BDC36C, NDG4C, SJO5D,
 
     # SUBSOB BADLAR/TAMAR
 
@@ -30062,7 +30164,7 @@ todos_los_bonos = [
 
     # CORPORATIVOS TASA FIJA
 
-    PS36O, PS38O, RB65O, TY38O,
+    PS38O, RB65O, TY38O,
     VWCHO, TY40O, RB68O, SXC7O,
 
     # CORPORATIVOS BADLAR
@@ -30097,7 +30199,7 @@ todos_los_bonos = [
     MR36O, MR40O, VSCMO, MSSBO, VSCJO,
     SNEAO, VSCIO, PQCKO, TLCFO, 
     OLC3O, RZ9AO, VSCQO, LMS6O, YMCTO,
-    PEC7O, LUC4O, PEC8O, PNECO, PN40O, 
+    PEC7O, PEC8O, PNECO, PN40O, 
     YFCFO, YMCRO, GN42O, CACAO, PQCQO, FO4BO,
     YFCAO, PQCOO,
     PECHO, RZAAO, CS46O, CP39O,
@@ -30107,11 +30209,11 @@ todos_los_bonos = [
     TSC3O, TSC3C, TSC4O, TSC4C, PLC5O, PLC5C, MGC3O, MGC3C, YMCJO, YMCIO, YMCIC, YM34O, YM34C, ARC1O, ARC1C,
     MGC9O, MGC9C, GNCXO, GNCXC, GN49O, GN49C, YFCJO, YFCJC, PNDCO, PNDCC, AEC2O, AEC2C, BACGO, BACGC,
     TTCDO, TTCDC, VSCTO, VSCTC, BYCHO, BYCHC, NPCCO, NPCCC, NPCED, PN38O, PN38C, YCAMO, YCAMC, CAC5O, CAC5C,
-    BACAO, BACAC, RC1CO, RC1CC, RCCJO, RCCJC, PNXCO, PNXCC, PN43O, PN43C, TLCPO, TLCPC, PLC4O,
+    BACAO, BACAC, RC1CO, RC1CC, RCCJO, RCCJC, PNXCO, PNXCC, PN43O, PN43C, TLCPO, TLCPC, PLC4O, NPCFD, NPCFO,
     YMCXO, YMCXC, IRCFO, IRCFC, YMCUO, YMCUC, YMC1O, YMC1C, YM39O, YM39C, MGCOO, MGCOC, MGCRO, MGCRC, RUCDO, RUCDC,
     DNC7O, DNC7C, TLCMO, TLCMC, LMS8D, IRCPO, IRCPC, VSCOD, VSCUO, VSCUC, VSCVO, VSCVC,
     CP38O, CP38C, TLCTO, TLCTC, VSCXO, VSCXC, BACHO, BACHC, TTCAO, TTCAC, DNCAO, DNCAC, T673C,
-    BYY3C, EAC4C, PLC7O, PLC7C, DNCBC, VSCYO, VSCYC, RAC8C, BF48C,
+    BYY3C, EAC4C, PLC7O, PLC7C, DNCBC, VSCYO, VSCYC, RAC8C, YM44C, YM44O,
 
     # CORPORATIVOS HARD DÓLAR MEP
 
@@ -30119,8 +30221,8 @@ todos_los_bonos = [
     PLC1D, PLC2D, PLC3D, MIC3D, OT42D, PQCSD, OTS5D, OTS6D, TLCVD, MTC2D, COC4D, SBC4D,
     LOC5D, LOC6D, TTC9D, TTCBD, IRCOD, PN35D, EMC1D, T672D, SBC3D, HBCGD, PFC4D, PVC8D,
     VSCPD, GOC4D, EAC3D, YFCLD, YFCMD, YFCND, YFCOD, SBC2D, RUCED, IRCQD, BCCLD, VMC1D,
-    PVC3D, TLCOD, TLCQD, CACBD, CACDD, YM35D, YM37D, YM38D, YM40D, BYY2D, AFCRD,
-    YM41D, YM42D, YM43D, BYCWD, PUC2D, T641D, BYCXD, FO4AD, CS52D, AFCTD, BY34D,
+    PVC3D, TLCOD, TLCQD, CACBD, CACDD, YM35D, YM37D, YM38D, YM40D, BYY2D, AFCRD, OTS7D,
+    YM41D, YM42D, YM43D, BYCWD, PUC2D, T641D, BYCXD, FO4AD, CS52D, AFCTD, BY34D, HJCMD,
     MCC1D, MCC2D, MSSGD, ZZC1O, GYC5O, CS47D, CS48D, CICBD, BF44D, BF45D, YFCPD,
     CS49D, CS50D, PN37D, CIC8D, CIC9D, CICAD, HJCKD, CP40D, TLCUD, CS53D, BPCWD,
     PECGD, PQCRD, PQC1C, PQCTD, HJCGD, HBCDD, YMCYD, LUC5D, MIC6D, JNC7D, CWCAD,
@@ -30186,87 +30288,3 @@ BONDS = {
 #           falta cargar la Serie XII 2027 con sus cashflows correctos.
 # ======================================================================
 
-
-
-# --- Especie ad-hoc agregada desde la app ---
-PDSJAR35 = {
-    'Nombre Security': 'Titulo de Deuda Provincia de San Juan Vto 27 04 2030',
-    'Código': 'PDSJAR35',
-    'ISIN': None,
-    'Calificación': None,
-    'País': 'Argentina',
-    'Clasificación': 'Corporativo Hard Dolar',
-    'Industria': None,
-    'Legislación': None,
-    'Moneda': 'USD',
-    'Plazo habitual de liquidación: t +': 1.0,
-    'Emisión': '01/10/2026',
-    'Vencimiento': '01/10/2035',
-    'Fecha Primer Cupón': '01/04/2027',
-    'Cupón / Spread': 9.55,
-    'Step-up': False,
-    'Frecuencia de pago de cupón anual': 2.0,
-    'Convención fechas de pago': 'Regular',
-    'Convención de devengamiento': 'ISMA-30',
-    'Convención Base': 360.0,
-    'Tipo de Amortización': 'AMORTIZABLE',
-    'Tipo Tasa Interés': 'FIJA',
-    'Index': None,
-    'Días Lag índice desde inc': 0,
-    'Días Lag índice hasta inc': 0,
-    'Valor Nominal': 100.0,
-    'Ajuste sobre Capital': None,
-    'Factor Capitalización': 1.0,
-    'Días lag Ajuste base': -10,
-    'Días lag Ajuste': -10,
-    'Fechas de cupón': ['01/04/2027', '01/10/2027', '01/04/2028', '01/10/2028', '01/04/2029', '01/10/2029', '01/04/2030', '01/10/2030', '01/04/2031', '01/10/2031', '01/04/2032', '01/10/2032', '01/04/2033', '01/10/2033', '01/04/2034', '01/10/2034', '01/04/2035', '01/10/2035'],
-    'Amortización': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 33.0, 0.0, 33.0, 0.0, 34.0],
-    'Quote Price Convention': 'CLEAN',
-    'Callable': False,
-    'Tipo de Call': None,
-    'Fecha Call': None,
-    'Precio Call': None,
-}
-PDSJAR35 = rentafija.Bono(PDSJAR35)
-
-
-# --- Especie ad-hoc agregada desde la app ---
-PDSJAR35C = {
-    'Nombre Security': 'Titulo de Deuda Provincia de San Juan Vto 27 04 2030',
-    'Código': 'PDSJAR35C',
-    'ISIN': None,
-    'Calificación': None,
-    'País': 'Argentina',
-    'Clasificación': 'Corporativo Hard Dolar',
-    'Industria': None,
-    'Legislación': None,
-    'Moneda': 'USD',
-    'Plazo habitual de liquidación: t +': 1.0,
-    'Emisión': '01/10/2026',
-    'Vencimiento': '01/10/2035',
-    'Fecha Primer Cupón': '01/04/2027',
-    'Cupón / Spread': 9.55,
-    'Step-up': False,
-    'Frecuencia de pago de cupón anual': 2.0,
-    'Convención fechas de pago': 'Regular',
-    'Convención de devengamiento': 'ISMA-30',
-    'Convención Base': 360.0,
-    'Tipo de Amortización': 'AMORTIZABLE',
-    'Tipo Tasa Interés': 'FIJA',
-    'Index': None,
-    'Días Lag índice desde inc': 0,
-    'Días Lag índice hasta inc': 0,
-    'Valor Nominal': 100.0,
-    'Ajuste sobre Capital': None,
-    'Factor Capitalización': 1.0,
-    'Días lag Ajuste base': -10,
-    'Días lag Ajuste': -10,
-    'Fechas de cupón': ['01/04/2027', '01/10/2027', '01/04/2028', '01/10/2028', '01/04/2029', '01/10/2029', '01/04/2030', '01/10/2030', '01/04/2031', '01/10/2031', '01/04/2032', '01/10/2032', '01/04/2033', '01/10/2033', '01/04/2034', '01/10/2034', '01/04/2035', '01/10/2035'],
-    'Amortización': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 33.0, 0.0, 33.0, 0.0, 34.0],
-    'Quote Price Convention': 'DIRTY',
-    'Callable': False,
-    'Tipo de Call': None,
-    'Fecha Call': None,
-    'Precio Call': None,
-}
-PDSJAR35C = rentafija.Bono(PDSJAR35C)
