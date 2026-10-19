@@ -38,6 +38,64 @@ _upper: Optional[Dict[str, str]] = None       # CÓDIGO EN MAYÚSCULAS → códi
 _bono_cls = None
 
 
+def _sanear_inyeccion_a3500() -> int:
+    """especies.py, al importarse, inyecta en `rentafija.inputs['a3500']` una
+    fila con la fecha de HOY (`indices.refresh_a3500_in_rentafija`: el SIOPEL
+    del arranque o, si MAE no responde, el último cierre relabelado) — un
+    mecanismo del Streamlit legacy. En la app hacía que
+    `pricing.a3500_aplicable()` creyera que el BCRA ya publicó el A3500 del día
+    y los DLK se valuaban TODO el día contra ese número en vez del mayorista
+    intradía (desk 19/10). Acá se saca: en la serie queda sólo lo que publicó
+    el BCRA (backup en memoria de `historico`); el FX del día entra por el
+    override intradía de pricing. No toca especies.py (regla del 10/09).
+    Devuelve cuántas filas sacó."""
+    try:
+        import rentafija
+        from backend.services import historico
+
+        df = rentafija.inputs.get("a3500")
+        if df is None or len(df) == 0:
+            return 0
+        pts = historico.series_points("a3500").get("points") or []
+        if not pts:                       # sin backup no se puede distinguir: no tocar
+            return 0
+        bcra = {str(p[0])[:10] for p in pts}
+        hoy = hoy_ba()
+        malas = []
+        for ix in df.index:
+            d = _a_date(ix)
+            if d is not None and d >= hoy and d.isoformat() not in bcra:
+                malas.append(ix)
+        if not malas:
+            return 0
+        vals = [float(df.loc[ix].iloc[0]) for ix in malas]
+        rentafija.inputs["a3500"] = df.drop(index=malas)
+        logger.warning("[bond_universe] saqué %d fila(s) de hoy inyectada(s) en inputs['a3500'] "
+                       "(%s) que el BCRA no publicó: el DLK intradía usa el mayorista",
+                       len(malas), ", ".join(f"{_a_date(i)} = {v:.4f}" for i, v in zip(malas, vals)))
+        return len(malas)
+    except Exception:  # noqa: BLE001 — nunca voltea la carga del universo
+        logger.exception("[bond_universe] no pude sanear inputs['a3500']")
+        return 0
+
+
+def _a_date(x: object):
+    """date / Timestamp / 'AAAA-MM-DD' → date (None si no se puede)."""
+    if isinstance(x, datetime):
+        return x.date()
+    if hasattr(x, "isoformat") and hasattr(x, "year") and not hasattr(x, "hour"):
+        return x                                   # date puro
+    if hasattr(x, "date"):
+        try:
+            return x.date()
+        except Exception:  # noqa: BLE001
+            return None
+    try:
+        return datetime.strptime(str(x)[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
 def _load_universe() -> Tuple[List[str], Dict[str, object]]:
     """Import especies and enumerate every Bono instance found."""
     import especies  # noqa: WPS433 - intentional lazy import
@@ -45,6 +103,7 @@ def _load_universe() -> Tuple[List[str], Dict[str, object]]:
 
     global _bono_cls
     _bono_cls = rentafija.Bono
+    _sanear_inyeccion_a3500()
 
     objs: Dict[str, object] = {}
     orphans_live: List[str] = []

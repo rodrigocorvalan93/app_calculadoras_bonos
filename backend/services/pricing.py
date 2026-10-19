@@ -237,30 +237,70 @@ def _last_series_value(key: str, colname: str) -> Tuple[Optional[Any], float]:
 
 
 # ── FX aplicable a DLK (A3500 cierre vs mayorista intradía) ─────────────────
-# Durante la rueda, la serie A3500 tiene el dato de AYER (el BCRA publica el
-# del día a la tarde) y el mercado valúa los DLK contra el mayorista del día
-# (SIOPEL). Regla: serie con fecha de HOY (cierre ya publicado) manda; si no,
-# intradía de HOY si existe; si no, la serie (último dato). Cacheado 2 s —
-# las tablas de curvas lo consultan por fila. (El cache se instancia más
-# abajo, junto a los otros: LockedTTLCache se importa diferido por un ciclo.)
+# Durante la rueda, el BCRA todavía no publicó el A3500 del día (sale a la
+# tarde) y el mercado valúa los DLK contra el mayorista del día (SIOPEL).
+# Regla: A3500 de HOY ya PUBLICADO por el BCRA → manda el cierre; si no, el
+# intradía de HOY si existe; si no, el último publicado. Cacheado 2 s — las
+# tablas de curvas lo consultan por fila. (El cache se instancia más abajo,
+# junto a los otros: LockedTTLCache se importa diferido por un ciclo.)
+#
+# "Publicado" se decide con el backup BCRA en memoria (`historico`, lo que
+# escribió indices.main()), NO con `rentafija.inputs['a3500']`: especies.py
+# le inyecta al importarse una fila con la fecha de HOY (el SIOPEL del
+# arranque, o el último cierre relabelado si MAE no responde — mecanismo del
+# Streamlit legacy) y con eso la regla creía que el cierre del día ya estaba y
+# los DLK se valuaban TODO el día contra ese número (desk 19/10). La fila
+# inyectada se saca al cargar el universo (bond_universe._sanear_inyeccion_a3500).
+
+
+def _coerce_date(x: Any) -> Optional[date]:
+    """date / Timestamp / 'AAAA-MM-DD' → date (None si no se puede)."""
+    if x is None:
+        return None
+    if isinstance(x, date) and not isinstance(x, datetime):
+        return x
+    if hasattr(x, "date"):
+        try:
+            return x.date()
+        except Exception:  # noqa: BLE001
+            return None
+    try:
+        return date.fromisoformat(str(x)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _a3500_bcra() -> Tuple[Optional[date], float]:
+    """(fecha, valor) del ÚLTIMO A3500 publicado por el BCRA según el backup
+    en memoria (`historico.series_points`). Fuente de verdad para "¿ya está el
+    A3500 de hoy?". Sin backup cargado → (None, nan) y el llamador cae a la
+    serie de rentafija."""
+    try:
+        from backend.services import historico
+        pts = historico.series_points("a3500").get("points") or []
+        if pts:
+            f, v = pts[-1]
+            return _coerce_date(f), float(v)
+    except Exception:  # noqa: BLE001
+        pass
+    return None, float("nan")
 
 
 def a3500_aplicable() -> Dict[str, Any]:
     """{'value', 'fuente' ('A3500'|'SIOPEL'|'DLR/SPOT'), 'fecha', 'intradia'}."""
     def _compute() -> Dict[str, Any]:
-        fecha, serie = _last_series_value("a3500", "tca3500")
-        out = {"value": serie if np.isfinite(serie) else float("nan"),
+        fecha, valor = _a3500_bcra()
+        if fecha is None or not np.isfinite(valor):
+            f_raw, valor = _last_series_value("a3500", "tca3500")     # sin backup: la serie
+            fecha = _coerce_date(f_raw)
+        out = {"value": valor if np.isfinite(valor) else float("nan"),
                "fuente": "A3500", "fecha": fecha, "intradia": False}
         from backend.config import settings
         if not settings.dlk_fx_intradia:
             return out
-        # ¿La serie ya tiene el A3500 de HOY? → es el cierre oficial, manda.
-        try:
-            f = fecha.date() if hasattr(fecha, "date") else fecha
-            if f is not None and f >= hoy_ba():
-                return out
-        except Exception:  # noqa: BLE001
-            pass
+        # ¿El BCRA ya publicó el A3500 de HOY? → es el cierre oficial, manda.
+        if fecha is not None and fecha >= hoy_ba():
+            return out
         from backend.services import dolares
         intra = dolares.oficial_intradia_hoy()
         if intra is not None:
@@ -272,12 +312,21 @@ def a3500_aplicable() -> Dict[str, Any]:
 
 
 def _dlk_fx_auto() -> Optional[float]:
-    """Override automático para un DLK sin TC custom: el mayorista intradía
-    de HOY cuando el A3500 del día todavía no está publicado. None = usar la
-    serie (sin override), el comportamiento de siempre."""
+    """Override automático para un DLK sin TC custom: el FX que corresponde
+    aplicar HOY cuando difiere del último de `rentafija.inputs['a3500']` —
+    el mayorista intradía mientras el A3500 del día no está publicado, o el
+    publicado cuando la serie de rentafija todavía no lo tiene (inyección de
+    especies al arrancar; el BCRA publicó y `inputs.refresh()` aún no corrió).
+    None = la serie ya coincide: sin override, el comportamiento de siempre."""
     a = a3500_aplicable()
-    if a.get("intradia") and a.get("value") == a.get("value"):
-        return float(a["value"])
+    v = a.get("value")
+    if v is None or v != v:
+        return None
+    if a.get("intradia"):
+        return float(v)
+    _, serie = _last_series_value("a3500", "tca3500")
+    if not np.isfinite(serie) or abs(float(serie) - float(v)) > 1e-9:
+        return float(v)
     return None
 
 

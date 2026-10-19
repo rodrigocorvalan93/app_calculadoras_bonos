@@ -78,10 +78,144 @@ def test_official_fx_fecha_del_siopel_no_de_la_serie(monkeypatch) -> None:
     assert of["source"] == "A3500" and of["date"] == ayer
 
 
+def test_siopel_de_hoy_viejo_es_el_ultimo_recurso(monkeypatch) -> None:
+    """Desk 19/10: 'durante el día hay que usar el último de SIOPEL hasta que
+    se publique el A3500'. Con MAE sin responder un rato (o el mayorista ya
+    cerrado), el último SIOPEL de HOY vale igual — recién si tampoco hay eso
+    se cae a la serie (ayer). Un SIOPEL de AYER sigue sin valer."""
+    class _SinSpot:                       # el store no tiene DLR/SPOT (otro test pudo sembrarlo)
+        @staticmethod
+        def get(symbol):
+            return None
+
+    monkeypatch.setattr(dolares.marketdata_store, "get_store", lambda: _SinSpot())
+    hoy_0 = datetime.now(dolares._TZ_BA).replace(hour=0, minute=5, second=0, microsecond=0)
+    monkeypatch.setitem(dolares._mae_snap, "ust", {"last": 1480.0, "hora": "15:00"})
+    monkeypatch.setitem(dolares._mae_snap, "ts", max(hoy_0.timestamp(), time.time() - 3 * 3600))   # hoy, viejo
+    r = dolares.oficial_intradia_hoy()
+    assert r is not None and r["last"] == 1480.0 and r["source"] == "SIOPEL"
+    monkeypatch.setitem(dolares._mae_snap, "ts", (hoy_0 - timedelta(hours=2)).timestamp())        # ayer
+    assert dolares.oficial_intradia_hoy() is None
+
+
 # ── pricing.a3500_aplicable — la regla de arbitraje ─────────────────────────
 def _con_serie(monkeypatch, fecha, valor=1474.7):
+    """El BCRA (backup `historico`) y la serie de rentafija dicen lo mismo."""
+    f = fecha.date() if hasattr(fecha, "date") else fecha
+    monkeypatch.setattr(pricing, "_a3500_bcra", lambda: (f, valor))
     monkeypatch.setattr(pricing, "_last_series_value",
                         lambda k, c: (fecha, valor) if k == "a3500" else (None, float("nan")))
+
+
+def _serie_rentafija(monkeypatch, fecha, valor):
+    monkeypatch.setattr(pricing, "_last_series_value",
+                        lambda k, c: (fecha, valor) if k == "a3500" else (None, float("nan")))
+
+
+def test_inyeccion_de_especies_no_cuenta_como_a3500_de_hoy(monkeypatch) -> None:
+    """Regresión desk 19/10: especies.py inyecta al importarse una fila de HOY
+    en inputs['a3500'] (el SIOPEL del arranque, o el cierre de ayer
+    relabelado) y la regla la tomaba por el cierre publicado → los DLK se
+    valuaban todo el día contra ese número. Manda lo que publicó el BCRA
+    (historico), no la serie de rentafija."""
+    ayer = hoy_ba() - timedelta(days=1)
+    monkeypatch.setattr(pricing, "_a3500_bcra", lambda: (ayer, 1474.7))
+    _serie_rentafija(monkeypatch, hoy_ba(), 1474.7)                 # cierre de ayer relabelado HOY
+    monkeypatch.setattr(dolares, "oficial_intradia_hoy",
+                        lambda: {"last": 1480.0, "source": "SIOPEL", "hora": "12:30"})
+    a = pricing.a3500_aplicable()
+    assert a["intradia"] and a["value"] == 1480.0 and a["fuente"] == "SIOPEL"
+    assert pricing._dlk_fx_auto() == 1480.0
+    # sin intradía: el último del BCRA (ayer), nunca la fila inyectada (SIOPEL del arranque)
+    pricing._a3500_aplicable_cache.clear()
+    _serie_rentafija(monkeypatch, hoy_ba(), 1499.0)
+    monkeypatch.setattr(dolares, "oficial_intradia_hoy", lambda: None)
+    a = pricing.a3500_aplicable()
+    assert not a["intradia"] and a["value"] == 1474.7 and a["fecha"] == ayer
+    assert pricing._dlk_fx_auto() == 1474.7        # la serie tiene 1499 inyectado → override con el BCRA
+
+
+def test_bcra_publico_y_rentafija_todavia_no_refresco(monkeypatch) -> None:
+    """16:05: el backup ya tiene el A3500 de HOY (historico.refresh) pero
+    inputs['a3500'] sigue con el de ayer hasta que inputs.refresh() termine →
+    el override lleva el publicado, no el intradía ni el de ayer."""
+    hoy = hoy_ba()
+    monkeypatch.setattr(pricing, "_a3500_bcra", lambda: (hoy, 1481.3))
+    _serie_rentafija(monkeypatch, hoy - timedelta(days=1), 1474.7)
+    monkeypatch.setattr(dolares, "oficial_intradia_hoy",
+                        lambda: {"last": 1480.0, "source": "SIOPEL", "hora": "15:00"})
+    a = pricing.a3500_aplicable()
+    assert not a["intradia"] and a["value"] == 1481.3 and a["fecha"] == hoy
+    assert pricing._dlk_fx_auto() == 1481.3
+    # serie ya refrescada y coincidente → sin override (comportamiento de siempre)
+    pricing._a3500_aplicable_cache.clear()
+    _serie_rentafija(monkeypatch, hoy, 1481.3)
+    assert pricing._dlk_fx_auto() is None
+
+
+def test_sin_backup_cae_a_la_serie_de_rentafija(monkeypatch) -> None:
+    monkeypatch.setattr(pricing, "_a3500_bcra", lambda: (None, float("nan")))
+    _serie_rentafija(monkeypatch, hoy_ba() - timedelta(days=1), 1474.7)
+    monkeypatch.setattr(dolares, "oficial_intradia_hoy", lambda: None)
+    a = pricing.a3500_aplicable()
+    assert a["value"] == 1474.7 and a["fecha"] == hoy_ba() - timedelta(days=1) and not a["intradia"]
+
+
+def test_sanear_inyeccion_de_especies(monkeypatch) -> None:
+    """Al cargar el universo se saca de inputs['a3500'] la fila de HOY que
+    inyectó especies.py si el BCRA no la publicó; una fila de hoy que SÍ está
+    en el backup se respeta; sin backup no se toca nada."""
+    import pandas as pd
+    import rentafija
+    from backend.services import bond_universe, historico
+
+    hoy, ayer = hoy_ba(), hoy_ba() - timedelta(days=1)
+    antes = ayer - timedelta(days=1)
+    orig = rentafija.inputs.get("a3500")
+
+    def _bcra(puntos):
+        monkeypatch.setattr(historico, "series_points",
+                            lambda key, *a, **k: {"label": "", "points": puntos if key == "a3500" else []})
+
+    def _serie(fechas):
+        return pd.DataFrame({"tca3500": [1470.0, 1474.7, 1499.0][:len(fechas)]},
+                            index=pd.Index(fechas, name="fecha"))
+    try:
+        rentafija.inputs["a3500"] = _serie([antes, ayer, hoy])          # hoy = inyección (SIOPEL del arranque)
+        _bcra([(antes.isoformat(), 1470.0), (ayer.isoformat(), 1474.7)])
+        assert bond_universe._sanear_inyeccion_a3500() == 1
+        assert list(rentafija.inputs["a3500"].index) == [antes, ayer]
+        assert bond_universe._sanear_inyeccion_a3500() == 0            # idempotente
+        # el BCRA ya publicó hoy → la fila de hoy es legítima y queda
+        rentafija.inputs["a3500"] = _serie([antes, ayer, hoy])
+        _bcra([(ayer.isoformat(), 1474.7), (hoy.isoformat(), 1499.0)])
+        assert bond_universe._sanear_inyeccion_a3500() == 0
+        assert hoy in list(rentafija.inputs["a3500"].index)
+        # sin backup: no se puede distinguir, no se toca
+        _bcra([])
+        assert bond_universe._sanear_inyeccion_a3500() == 0
+        # índice string (como inyecta el legacy en algún camino) también se reconoce
+        rentafija.inputs["a3500"] = _serie([antes, ayer, hoy.isoformat()])
+        _bcra([(antes.isoformat(), 1470.0), (ayer.isoformat(), 1474.7)])
+        assert bond_universe._sanear_inyeccion_a3500() == 1
+    finally:
+        rentafija.inputs["a3500"] = orig
+
+
+def test_al_cargar_el_universo_la_serie_termina_en_lo_publicado() -> None:
+    """Integración: con especies importado, la última fecha de inputs['a3500']
+    nunca pasa la última publicada por el BCRA (el backup)."""
+    import rentafija
+    from backend.services import bond_universe, historico
+
+    bond_universe.ensure_loaded()
+    pts = historico.series_points("a3500").get("points") or []
+    if not pts:
+        pytest.skip("sin backup BCRA")
+    ultima = date.fromisoformat(pts[-1][0])
+    fechas = [bond_universe._a_date(ix) for ix in rentafija.inputs["a3500"].index]
+    assert max(f for f in fechas if f is not None) <= ultima
+    assert pricing.a3500_aplicable()["fecha"] == ultima or pricing.a3500_aplicable()["intradia"]
 
 
 def test_a3500_de_hoy_publicado_manda(monkeypatch) -> None:

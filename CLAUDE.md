@@ -100,6 +100,28 @@ true when `moneda in ("USD","USB")` **or** the classification/industria
 says hard-dollar — a MEP (USB) or pesos-quoted hard-dollar bond keeps
 180/360, not the días/365 default.
 
+## DLK — FX aplicable intradía (SIOPEL hasta que el BCRA publique, 19/10)
+
+`pricing.a3500_aplicable()`: A3500 de HOY ya publicado → manda el cierre; si
+no, el mayorista intradía de hoy (`dolares.oficial_intradia_hoy`: SIOPEL
+fresco → DLR/SPOT de hoy → el ÚLTIMO SIOPEL de hoy aunque el fetch tenga más
+de 15 min — MAE caído un rato o rueda cerrada —; nunca uno de ayer); si no, el
+último publicado. **"Publicado" se decide con el backup BCRA en memoria**
+(`historico.series_points("a3500")`, `pricing._a3500_bcra`), NO con
+`rentafija.inputs['a3500']`: `especies.py` le inyecta al importarse una fila
+con la fecha de HOY (`indices.refresh_a3500_in_rentafija`: el SIOPEL del
+arranque o, sin MAE, el último cierre relabelado — mecanismo del Streamlit
+legacy) y con eso la regla creía que el cierre del día ya estaba: los DLK se
+valuaban TODO el día contra ese número (desk 19/10). Esa fila se saca al
+cargar el universo (`bond_universe._sanear_inyeccion_a3500`: filas con fecha
+≥ hoy que el backup no tiene; sin backup no toca nada; especies.py NO se
+modifica). `_dlk_fx_auto()` pone el override por-objeto siempre que el FX
+aplicable difiera del último de la serie de rentafija (intradía, o el
+publicado mientras `inputs.refresh()` todavía no corrió); si coinciden, sin
+override (numéricamente igual que siempre). El card de YAS muestra la fuente
+("mayorista intradía (SIOPEL)" / "cierre"). `DLK_FX_INTRADIA=0` apaga el
+intradía. Regresión: `tests/test_dlk_fx_intradia.py`.
+
 ## Spreads vs UST (hard-dollar)
 
 `backend/services/ust.py` — stdlib puro (lo importa también `bymaapi.py`
