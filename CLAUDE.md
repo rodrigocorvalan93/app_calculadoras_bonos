@@ -118,9 +118,19 @@ cargar el universo (`bond_universe._sanear_inyeccion_a3500`: filas con fecha
 modifica). `_dlk_fx_auto()` pone el override por-objeto siempre que el FX
 aplicable difiera del último de la serie de rentafija (intradía, o el
 publicado mientras `inputs.refresh()` todavía no corrió); si coinciden, sin
-override (numéricamente igual que siempre). El card de YAS muestra la fuente
+override (numéricamente igual que siempre). Sábado / domingo / feriado
+(`_es_rueda_hoy`, calendario de `dias_habiles`) → el último publicado, sin
+intradía (el poller MAE corre 24×7 y dejaba el SIOPEL del viernes como "de
+hoy"). Un arranque DESPUÉS de la publicación (la inyección PISA el A3500 del
+día con el SIOPEL del arranque) → el saneo repone el valor del backup. Los
+caminos que copian el bono a secas (`total_return._bond_tr_base`,
+`tr_realizado`, perfil de vencimientos de Posiciones) llevan el mismo
+override vía `pricing.aplicar_fx_dlk(obj, code)` — si agregás otro
+`_bond_obj_copy` de un DLK, llamalo. El card de YAS muestra la fuente
 ("mayorista intradía (SIOPEL)" / "cierre"). `DLK_FX_INTRADIA=0` apaga el
-intradía. Regresión: `tests/test_dlk_fx_intradia.py`.
+intradía. Queda afuera a propósito: si `bcra_data_backup.json` no se pudo
+escribir, "publicado" sigue al backup viejo (el refresh vespertino lo
+reintenta cada 10 min). Regresión: `tests/test_dlk_fx_intradia.py`.
 
 ## Spreads vs UST (hard-dollar)
 

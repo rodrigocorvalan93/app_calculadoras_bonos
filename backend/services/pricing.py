@@ -254,9 +254,14 @@ def _last_series_value(key: str, colname: str) -> Tuple[Optional[Any], float]:
 
 
 def _coerce_date(x: Any) -> Optional[date]:
-    """date / Timestamp / 'AAAA-MM-DD' → date (None si no se puede)."""
+    """date / Timestamp / 'AAAA-MM-DD' → date (None si no se puede; NaT → None)."""
     if x is None:
         return None
+    try:
+        if x != x:                                 # pd.NaT / NaN: isinstance(NaT, datetime) es True
+            return None
+    except Exception:  # noqa: BLE001
+        pass
     if isinstance(x, date) and not isinstance(x, datetime):
         return x
     if hasattr(x, "date"):
@@ -301,6 +306,11 @@ def a3500_aplicable() -> Dict[str, Any]:
         # ¿El BCRA ya publicó el A3500 de HOY? → es el cierre oficial, manda.
         if fecha is not None and fecha >= hoy_ba():
             return out
+        # Sábado / domingo / feriado: no hay rueda del mayorista ni A3500 del
+        # día — el último publicado ES el aplicable. Sin esto el poller MAE
+        # (corre 24×7) dejaba el SIOPEL del viernes como "intradía de hoy".
+        if not _es_rueda_hoy():
+            return out
         from backend.services import dolares
         intra = dolares.oficial_intradia_hoy()
         if intra is not None:
@@ -309,6 +319,35 @@ def a3500_aplicable() -> Dict[str, Any]:
         return out
 
     return _a3500_aplicable_cache.get_or_compute("v", _compute)
+
+
+def _es_rueda_hoy() -> bool:
+    """¿Hoy (BA) es día hábil en Argentina? Mismo calendario que rentafija
+    (`dias_habiles`, con los feriados agregados a mano). Ante cualquier
+    problema con el calendario, True (se comporta como siempre)."""
+    try:
+        import dias_habiles as dh
+        hoy = hoy_ba()
+        return dh.siguiente_dia_habil_ar(hoy) == hoy
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def aplicar_fx_dlk(obj: Any, code: str) -> Optional[float]:
+    """Pone el override automático de FX (`_a3500_override`) en la COPIA de
+    un DLK que no lo tiene todavía — lo mismo que hace compute_metrics — para
+    los caminos que toman `_bond_obj_copy` a secas (Total Return / Escenario,
+    TR realizado, perfil de vencimientos): sin esto priceaban los flujos
+    contra la serie mientras la TIR de entrada venía del SIOPEL. Devuelve el
+    FX aplicado o None (no es DLK, ya tenía override, o no corresponde)."""
+    if obj is None or getattr(obj, "_a3500_override", None) is not None:
+        return None
+    if _bond_index_kind(code) != "a3500":
+        return None
+    auto = _dlk_fx_auto()
+    if auto is not None:
+        obj._a3500_override = auto
+    return auto
 
 
 def _dlk_fx_auto() -> Optional[float]:

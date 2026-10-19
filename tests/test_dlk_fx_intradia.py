@@ -153,6 +153,47 @@ def test_bcra_publico_y_rentafija_todavia_no_refresco(monkeypatch) -> None:
     assert pricing._dlk_fx_auto() is None
 
 
+def test_finde_o_feriado_no_busca_intradia(monkeypatch) -> None:
+    """Sábado / domingo / feriado: el último A3500 publicado ES el aplicable.
+    El poller MAE corre 24×7, así que sin este corte el SIOPEL del viernes
+    pasaba como "intradía de hoy" (revisión 19/10)."""
+    ayer = hoy_ba() - timedelta(days=1)
+    es_rueda_real = pricing._es_rueda_hoy
+    monkeypatch.setattr(pricing, "_a3500_bcra", lambda: (ayer, 1474.7))
+    _serie_rentafija(monkeypatch, ayer, 1474.7)
+    monkeypatch.setattr(dolares, "oficial_intradia_hoy",
+                        lambda: {"last": 1480.0, "source": "SIOPEL", "hora": "15:00"})
+    monkeypatch.setattr(pricing, "_es_rueda_hoy", lambda: False)
+    a = pricing.a3500_aplicable()
+    assert not a["intradia"] and a["value"] == 1474.7 and pricing._dlk_fx_auto() is None
+    pricing._a3500_aplicable_cache.clear()
+    monkeypatch.setattr(pricing, "_es_rueda_hoy", lambda: True)
+    assert pricing.a3500_aplicable()["intradia"]
+    # el calendario real: un sábado no es rueda, un miércoles común sí
+    monkeypatch.setattr(pricing, "hoy_ba", lambda: date(2026, 10, 17))        # sábado
+    assert es_rueda_real() is False
+    monkeypatch.setattr(pricing, "hoy_ba", lambda: date(2026, 10, 14))        # miércoles
+    assert es_rueda_real() is True
+
+
+def test_aplicar_fx_dlk_en_una_copia(monkeypatch) -> None:
+    """Total Return / TR realizado / perfil de vencimientos copian el bono a
+    secas: el helper les pone el mismo override que compute_metrics (sólo
+    DLK, sólo si no lo tenían)."""
+    from backend.services import bond_universe
+
+    code = _dlk_code()
+    monkeypatch.setattr(pricing, "_dlk_fx_auto", lambda: 1480.0)
+    obj = pricing._bond_obj_copy(code)
+    assert pricing.aplicar_fx_dlk(obj, code) == 1480.0 and obj._a3500_override == 1480.0
+    obj._a3500_override = 1400.0                                              # ya tenía (TC custom)
+    assert pricing.aplicar_fx_dlk(obj, code) is None and obj._a3500_override == 1400.0
+    bond_universe.ensure_loaded()
+    al30 = pricing._bond_obj_copy("AL30")                                     # no es DLK
+    assert pricing.aplicar_fx_dlk(al30, "AL30") is None and getattr(al30, "_a3500_override", None) is None
+    assert pricing.aplicar_fx_dlk(None, code) is None
+
+
 def test_sin_backup_cae_a_la_serie_de_rentafija(monkeypatch) -> None:
     monkeypatch.setattr(pricing, "_a3500_bcra", lambda: (None, float("nan")))
     _serie_rentafija(monkeypatch, hoy_ba() - timedelta(days=1), 1474.7)
@@ -198,6 +239,19 @@ def test_sanear_inyeccion_de_especies(monkeypatch) -> None:
         rentafija.inputs["a3500"] = _serie([antes, ayer, hoy.isoformat()])
         _bcra([(antes.isoformat(), 1470.0), (ayer.isoformat(), 1474.7)])
         assert bond_universe._sanear_inyeccion_a3500() == 1
+        # arranque DESPUÉS de que el BCRA publicó: la inyección PISÓ el valor de
+        # hoy con el SIOPEL del arranque → se repone el publicado (revisión 19/10)
+        rentafija.inputs["a3500"] = _serie([antes, ayer, hoy])                 # hoy = 1499 (SIOPEL)
+        _bcra([(ayer.isoformat(), 1474.7), (hoy.isoformat(), 1481.3)])
+        assert bond_universe._sanear_inyeccion_a3500() == 1
+        assert float(rentafija.inputs["a3500"].loc[hoy, "tca3500"]) == 1481.3
+        assert bond_universe._sanear_inyeccion_a3500() == 0
+        # un NaT en el índice no voltea el saneo
+        rentafija.inputs["a3500"] = pd.DataFrame({"tca3500": [1470.0, 1499.0, 1.0]},
+                                                 index=pd.Index([antes, hoy, pd.NaT], name="fecha"))
+        _bcra([(antes.isoformat(), 1470.0)])
+        assert bond_universe._sanear_inyeccion_a3500() == 1
+        assert bond_universe._a_date(pd.NaT) is None and pricing._coerce_date(pd.NaT) is None
     finally:
         rentafija.inputs["a3500"] = orig
 
@@ -259,7 +313,10 @@ def test_escape_hatch_apagado(monkeypatch) -> None:
 def _dlk_code():
     from backend.services import bond_universe, curves
     bond_universe.ensure_loaded()
-    codes = curves.build_curve_codes().get("dlk") or []
+    # Las claves reales son dolarlinked / corp_dlk / dualdlk (no existe "dlk":
+    # con esa clave este test se salteaba siempre — revisión 19/10).
+    g = curves.build_curve_codes()
+    codes = (g.get("dolarlinked") or []) + (g.get("corp_dlk") or []) + (g.get("dualdlk") or [])
     if not codes:
         pytest.skip("sin DLK en el universo")
     return codes[0]

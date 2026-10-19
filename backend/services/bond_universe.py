@@ -59,28 +59,53 @@ def _sanear_inyeccion_a3500() -> int:
         pts = historico.series_points("a3500").get("points") or []
         if not pts:                       # sin backup no se puede distinguir: no tocar
             return 0
-        bcra = {str(p[0])[:10] for p in pts}
+        bcra = {str(p[0])[:10]: float(p[1]) for p in pts}
         hoy = hoy_ba()
-        malas = []
+        col = "tca3500" if "tca3500" in df.columns else df.columns[0]
+        malas, pisadas = [], []
         for ix in df.index:
             d = _a_date(ix)
-            if d is not None and d >= hoy and d.isoformat() not in bcra:
-                malas.append(ix)
-        if not malas:
+            if d is None or d < hoy:
+                continue
+            iso = d.isoformat()
+            if iso not in bcra:
+                malas.append(ix)                                   # fila de hoy que el BCRA no publicó
+            else:
+                try:
+                    v = float(df.loc[ix, col])
+                except (TypeError, ValueError, KeyError):
+                    continue
+                if abs(v - bcra[iso]) > 1e-9:
+                    pisadas.append((ix, v, bcra[iso]))              # publicado, pero pisado por la inyección
+        if not malas and not pisadas:
             return 0
-        vals = [float(df.loc[ix].iloc[0]) for ix in malas]
-        rentafija.inputs["a3500"] = df.drop(index=malas)
-        logger.warning("[bond_universe] saqué %d fila(s) de hoy inyectada(s) en inputs['a3500'] "
-                       "(%s) que el BCRA no publicó: el DLK intradía usa el mayorista",
-                       len(malas), ", ".join(f"{_a_date(i)} = {v:.4f}" for i, v in zip(malas, vals)))
-        return len(malas)
+        nuevo = df.drop(index=malas) if malas else df.copy()
+        for ix, _v, bueno in pisadas:
+            # La app arrancó DESPUÉS de que el BCRA publicó: la inyección PISÓ
+            # el A3500 del día con el SIOPEL/MAE del arranque → se repone el publicado.
+            nuevo.loc[ix, col] = bueno
+        rentafija.inputs["a3500"] = nuevo
+        if malas:
+            logger.warning("[bond_universe] saqué %d fila(s) de hoy inyectada(s) en inputs['a3500'] "
+                           "(%s) que el BCRA no publicó: el DLK intradía usa el mayorista",
+                           len(malas), ", ".join(f"{_a_date(i)} = {float(df.loc[i, col]):.4f}" for i in malas))
+        if pisadas:
+            logger.warning("[bond_universe] repuse el A3500 publicado en inputs['a3500'] que la inyección "
+                           "del arranque había pisado: %s",
+                           ", ".join(f"{_a_date(i)}: {v:.4f} → {b:.4f}" for i, v, b in pisadas))
+        return len(malas) + len(pisadas)
     except Exception:  # noqa: BLE001 — nunca voltea la carga del universo
         logger.exception("[bond_universe] no pude sanear inputs['a3500']")
         return 0
 
 
 def _a_date(x: object):
-    """date / Timestamp / 'AAAA-MM-DD' → date (None si no se puede)."""
+    """date / Timestamp / 'AAAA-MM-DD' → date (None si no se puede; NaT → None)."""
+    try:
+        if x != x:                                 # pd.NaT / NaN (NaT es instancia de datetime)
+            return None
+    except Exception:  # noqa: BLE001
+        pass
     if isinstance(x, datetime):
         return x.date()
     if hasattr(x, "isoformat") and hasattr(x, "year") and not hasattr(x, "hour"):
