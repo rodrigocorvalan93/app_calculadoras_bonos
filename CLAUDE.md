@@ -516,6 +516,24 @@ un fixture con la estructura conocida de la página (`tests/test_bna_fx.py`) —
 si el BNA cambia el HTML, `snapshot()["error"]` lo dice y las celdas quedan
 en el último dato guardado.
 
+## Add-in de Excel — patas calculadas en minúscula (15/10)
+
+Las fichas calculadas llevan sufijo en MINÚSCULA (`…v` = pata TAMAR de los
+duales: `TMVE8v`, `TXMD8v`, …; `…j` = CER proyectado: `TXMD8j`, …; 49 en el
+universo) y `functions.js` — también el que cada Excel tiene cacheado — manda
+el código EN MAYÚSCULAS: `OMS.TIREA("TMVE8v"; …)` / `OMS.MARGEN` llegaban como
+`TMVE8V` y daban "Bono 'TMVE8V' no encontrado". `bond_universe.resolve(code)`
+(exacta primero, después `_upper_map` = {MAYÚSCULAS: código}, O(1); dos códigos
+que chocaran en mayúsculas quedan fuera del mapa, nunca se adivina) y
+`routes/excel._codigo_calc` lo aplican a TODO item del batch `/excel/v1/calc`
+(precio / tir / tna / margen / duration / tr / meta): el resultado lleva el
+código de la ficha (`codigo: "TMVE8v"`); un código inexistente sigue en
+mayúsculas (mismo error, mismo símbolo de mercado). Sin precio, la pata usa el
+last del ticker base (`md_symbol("TXMD8v") = … TXMD8 …`). El arreglo es del
+server a propósito: no hace falta reinstalar el add-in. Si un endpoint nuevo
+recibe un código tipeado por el usuario, resolvelo con `bond_universe.resolve`
+(nunca `.upper()` a secas). Regresión: `tests/test_excel_patas_minuscula.py`.
+
 ## Posiciones — Categoría de las tenencias
 
 `routes/posiciones._clasif(h, obj)` → `(categoría, fuente)`. Con ficha en

@@ -801,11 +801,26 @@ def _macro_section() -> Dict[str, Dict[str, Any]]:
     return {s: _calc_macro(s) for s in _MACRO_SNAPSHOT_SERIES}
 
 
+def _codigo_calc(raw: object) -> str:
+    """Código de la ficha para un item del batch. functions.js (también los ya
+    instalados, con el JS cacheado por Office) manda el código EN MAYÚSCULAS,
+    y las patas calculadas llevan sufijo en minúscula (`TMVE8v`, `TXMD8v`,
+    `TXMD8j`, …): se resuelve contra el universo sin distinguir mayúsculas. Un
+    código que no existe sigue en mayúsculas, como antes (mismo mensaje de
+    error, mismo símbolo de mercado)."""
+    from backend.services import bond_universe
+
+    c = str(raw or "").strip()
+    if not c:
+        return ""
+    return bond_universe.resolve(c) or c.upper()
+
+
 def _calc_batch(items: list) -> list:
     out = []
     for it in items:
         try:
-            code = str(it.get("code") or "").strip().upper()
+            code = _codigo_calc(it.get("code"))
             if it.get("tipo") == "meta":               # ficha estática: no necesita modo ni valor
                 out.append(_calc_meta(code))
                 continue

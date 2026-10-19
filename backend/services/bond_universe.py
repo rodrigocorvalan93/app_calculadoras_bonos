@@ -34,6 +34,7 @@ def _is_future_vto(vto: object) -> bool:
 _lock = threading.Lock()
 _codes: Optional[List[str]] = None
 _objs: Optional[Dict[str, object]] = None
+_upper: Optional[Dict[str, str]] = None       # CÓDIGO EN MAYÚSCULAS → código del universo
 _bono_cls = None
 
 
@@ -71,11 +72,32 @@ def _load_universe() -> Tuple[List[str], Dict[str, object]]:
     return codes, objs
 
 
+def _upper_map(codes: List[str]) -> Dict[str, str]:
+    """{CÓDIGO.upper(): código} para resolver sin distinguir mayúsculas. Si dos
+    códigos chocaran al pasarlos a mayúsculas (hoy no pasa: 593 códigos, 0
+    choques), ninguno entra al mapa: sólo la coincidencia exacta los encuentra
+    y nunca se elige uno al azar."""
+    out: Dict[str, str] = {}
+    dup = set()
+    for c in codes:
+        k = c.upper()
+        if k in out:
+            dup.add(k)
+        out[k] = c
+    for k in dup:
+        out.pop(k, None)
+    if dup:
+        logger.warning("[bond_universe] códigos que sólo difieren en mayúsculas (sin resolución "
+                       "insensible): %s", ", ".join(sorted(dup)))
+    return out
+
+
 def ensure_loaded() -> None:
-    global _codes, _objs
+    global _codes, _objs, _upper
     with _lock:
         if _codes is None or _objs is None:
             _codes, _objs = _load_universe()
+            _upper = _upper_map(_codes)
 
 
 def all_codes() -> List[str]:
@@ -87,3 +109,20 @@ def get(code: str):
     """Return the singleton Bono instance (or None if unknown)."""
     ensure_loaded()
     return (_objs or {}).get(code)
+
+
+def resolve(code: object) -> Optional[str]:
+    """Código del universo para lo que tipeó el usuario, SIN distinguir
+    mayúsculas: "tmve8v" / "TMVE8V" → "TMVE8v", "gd30" → "GD30". Las patas
+    calculadas llevan sufijo en minúscula (`…j` CER proyectado, `…v` pata TAMAR
+    de los duales) y quien normaliza a mayúsculas (el add-in de Excel lo hace
+    en el cliente Y en el server) las perdía: "Bono 'TMVE8V' no encontrado".
+    Coincidencia exacta primero; None si no existe. O(1)."""
+    c = str(code or "").strip()
+    if not c:
+        return None
+    if _objs is None or _upper is None:      # sin lock en el camino caliente (batch del add-in)
+        ensure_loaded()
+    if c in (_objs or {}):
+        return c
+    return (_upper or {}).get(c.upper())
