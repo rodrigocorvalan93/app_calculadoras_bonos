@@ -618,7 +618,9 @@ Inicio en su lista entra igual).
 + `partials/inicio_body.html`): el mercado en una pantalla — Tipos de cambio
 (oficial · MEP · CCL · brecha · canje, de `dolares.summary`), Tasas (TAMAR /
 BADLAR del macro + caución ARS/USD BYMA del riel + caución ARS/USD MAE),
-Mercado (Merval ARS y en CCL, riesgo país, SPY y EWZ), una tarjeta por
+Mercado (Merval ARS y en CCL, riesgo país, SPY y EWZ cada uno en pesos y,
+debajo, en CCL — `inicio._en_ccl`: CEDEAR ÷ CCL, variación contra el cierre
+de ayer en CCL, el mismo criterio del Merval; desk 07/10), una tarjeta por
 segmento soberano (Globales · Bonares · CER · Tasa fija · Dólar linked ·
 TAMAR · Duales) con último · var · var % · TIR · Δ TIR (`delta_yield_bps`)
 · TEM · margen (sólo si el segmento lo tiene), Panel líder y futuros de

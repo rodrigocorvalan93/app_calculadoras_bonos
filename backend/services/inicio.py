@@ -318,6 +318,24 @@ def tasas() -> List[Dict[str, Any]]:
     return rows
 
 
+def _en_ccl(last: Optional[float], close: Optional[float],
+            ccl: Optional[float], ccl_vp: Optional[float]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """(nivel, Δ, Δ %) de un precio en pesos medido en dólares CCL. Nivel =
+    `last / CCL`; la variación es contra el cierre de AYER también en CCL
+    (`close / CCL de ayer`, con CCL de ayer = CCL de hoy / (1 + var CCL)) —
+    así la var % en CCL ≈ var ARS − var CCL y no repite la de pesos. Sin CCL →
+    todo None; sin variación del CCL → sólo el nivel. Lo comparten MERVAL y
+    los CEDEARs (SPY / EWZ) de la tarjeta Mercado."""
+    if last is None or not ccl:
+        return None, None, None
+    v = last / ccl
+    if close and ccl_vp is not None and ccl_vp > -1.0:
+        close_ccl = close / (ccl / (1.0 + ccl_vp))
+        if close_ccl:
+            return v, v - close_ccl, v / close_ccl - 1.0
+    return v, None, None
+
+
 def mercado(summary: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     mv = _safe("merval_row", equities.merval_row, None) or {}
@@ -328,26 +346,28 @@ def mercado(summary: Dict[str, Any]) -> List[Dict[str, Any]]:
                  "var_pct": vpct / 100.0 if vpct is not None else None})
     usd = summary.get("usd") or {}
     ccl, ccl_vp = _f(usd.get("last")), _f(usd.get("var_pct"))
-    v_ccl = px_ccl = vp_ccl = None
-    if last is not None and ccl:
-        v_ccl = last / ccl
-        if close and ccl_vp is not None and ccl_vp > -1.0:
-            close_ccl = close / (ccl / (1.0 + ccl_vp))
-            px_ccl = v_ccl - close_ccl
-            vp_ccl = v_ccl / close_ccl - 1.0 if close_ccl else None
-    rows.append({"label": "MERVAL", "sub": f"en CCL · {usd.get('base')}" if usd.get("base") else "en CCL",
-                 "fmt": "int", "value": v_ccl, "var_px": px_ccl, "var_pct": vp_ccl})
+    sub_ccl = f"en CCL · {usd.get('base')}" if usd.get("base") else "en CCL"
+    v_ccl, px_ccl, vp_ccl = _en_ccl(last, close, ccl, ccl_vp)
+    rows.append({"label": "MERVAL", "sub": sub_ccl, "fmt": "int", "value": v_ccl, "var_px": px_ccl, "var_pct": vp_ccl})
     rp = _safe("riesgo_pais", riesgo_pais.snapshot, {}) or {}
     rows.append({"label": "Riesgo país", "sub": f"EMBI · {rp['fecha']}" if rp.get("fecha") else "EMBI",
                  "tip": "EMBI+ Argentina (JP Morgan), dato diario, vía ArgentinaDatos (api.argentinadatos.com); "
                         "variación contra la observación anterior",
                  "fmt": "int", "value": _f(rp.get("valor")),
                  "var_px": _f(rp.get("var")), "var_pct": _f(rp.get("var_pct"))})
+    # CEDEARs de referencia: cada uno en pesos y, debajo, en dólares CCL (el
+    # mismo precio del CEDEAR ÷ CCL — NO el precio del ETF en Nueva York: el
+    # ratio del CEDEAR queda adentro; sirve para ver si el CEDEAR se movió más
+    # que el dólar). Pedido del desk 07/10.
     for code in ("SPY", "EWZ"):
         r = _safe(f"row_for {code}", lambda code=code: equities.row_for(code), None) or {}
-        vp = _f(r.get("var_pct"))
-        rows.append({"label": code, "sub": "CEDEAR · ARS", "fmt": "num", "value": _f(r.get("last")),
+        c_last, c_close, vp = _f(r.get("last")), _f(r.get("close")), _f(r.get("var_pct"))
+        rows.append({"label": code, "sub": "CEDEAR · ARS", "fmt": "num", "value": c_last,
                      "var_px": _f(r.get("var_px")), "var_pct": vp / 100.0 if vp is not None else None})
+        v, px, vpc = _en_ccl(c_last, c_close, ccl, ccl_vp)
+        rows.append({"label": code, "sub": sub_ccl, "fmt": "num", "value": v, "var_px": px, "var_pct": vpc,
+                     "tip": f"CEDEAR {code} en pesos ÷ CCL{(' (' + str(usd.get('base')) + ')') if usd.get('base') else ''}; "
+                            "variación contra el cierre de ayer medido en CCL (≈ var ARS − var CCL)"})
     return rows
 
 

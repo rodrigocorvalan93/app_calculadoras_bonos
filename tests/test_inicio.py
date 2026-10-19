@@ -155,12 +155,16 @@ def test_kpis_tipos_de_cambio_y_mercado() -> None:
     assert tc["Canje"]["var_pp"] == pytest.approx(0.21) and tc["Canje"]["sub"] == "CCL / MEP · GD30"
     # Merval en CCL: nivel / CCL, variación contra el cierre en CCL de ayer
     import backend.services.inicio as mod
-    orig = mod.equities.merval_row
+    orig, orig_rf = mod.equities.merval_row, mod.equities.row_for
+    cedears = {"SPY": {"last": 45_000.0, "close": 44_000.0, "var_px": 1_000.0, "var_pct": (45 / 44 - 1) * 100},
+               "EWZ": {"last": 9_000.0, "close": 9_100.0, "var_px": -100.0, "var_pct": (90 / 91 - 1) * 100}}
     mod.equities.merval_row = lambda: {"last": 2_900_000.0, "close": 2_800_000.0, "var_pct": (29 / 28 - 1) * 100}
+    mod.equities.row_for = lambda code, plazo="24hs": cedears.get(code)
     try:
-        m = {r["label"] + "|" + (r["sub"] or ""): r for r in inicio.mercado(summary)}
+        filas = inicio.mercado(summary)
     finally:
-        mod.equities.merval_row = orig
+        mod.equities.merval_row, mod.equities.row_for = orig, orig_rf
+    m = {r["label"] + "|" + (r["sub"] or ""): r for r in filas}
     ars = m["MERVAL|ARS"]
     assert ars["value"] == 2_900_000.0 and ars["var_px"] == 100_000.0 and ars["var_pct"] == pytest.approx(29 / 28 - 1)
     ccl = m["MERVAL|en CCL · GD30"]
@@ -168,6 +172,30 @@ def test_kpis_tipos_de_cambio_y_mercado() -> None:
     close_ccl = 2_800_000 / (1450 / 1.02)
     assert ccl["var_pct"] == pytest.approx(2_900_000 / 1450 / close_ccl - 1)
     assert any(k.startswith("Riesgo país|EMBI") for k in m)      # "EMBI" sin dato, "EMBI · DD/MM/AAAA" con dato
+    # SPY / EWZ: la versión en CCL va DEBAJO de la de pesos (desk 07/10), mismo
+    # criterio que el Merval: CEDEAR ÷ CCL, variación contra el cierre en CCL de ayer
+    assert [(r["label"], r["sub"]) for r in filas] == [
+        ("MERVAL", "ARS"), ("MERVAL", "en CCL · GD30"), ("Riesgo país", filas[2]["sub"]),
+        ("SPY", "CEDEAR · ARS"), ("SPY", "en CCL · GD30"), ("EWZ", "CEDEAR · ARS"), ("EWZ", "en CCL · GD30")]
+    spy = m["SPY|CEDEAR · ARS"]
+    assert spy["value"] == 45_000.0 and spy["var_px"] == 1_000.0 and spy["var_pct"] == pytest.approx(45 / 44 - 1)
+    spy_ccl = m["SPY|en CCL · GD30"]
+    assert spy_ccl["fmt"] == "num" and spy_ccl["value"] == pytest.approx(45_000 / 1450)
+    spy_close_ccl = 44_000 / (1450 / 1.02)
+    assert spy_ccl["var_px"] == pytest.approx(45_000 / 1450 - spy_close_ccl)
+    assert spy_ccl["var_pct"] == pytest.approx(45_000 / 1450 / spy_close_ccl - 1)
+    assert spy_ccl["var_pct"] == pytest.approx((45 / 44) / 1.02 - 1)            # ≈ var ARS − var CCL
+    assert "GD30" in spy_ccl["tip"] and "÷ CCL" in spy_ccl["tip"]
+    ewz_ccl = m["EWZ|en CCL · GD30"]
+    assert ewz_ccl["value"] == pytest.approx(9_000 / 1450) and ewz_ccl["var_pct"] == pytest.approx((90 / 91) / 1.02 - 1)
+    # sin CCL no hay versión en dólares (la fila queda con "—"), la de pesos sigue
+    sin_ccl = dict(summary, usd={})
+    mod.equities.row_for = lambda code, plazo="24hs": cedears.get(code)
+    try:
+        m2 = {r["label"] + "|" + (r["sub"] or ""): r for r in inicio.mercado(sin_ccl)}
+    finally:
+        mod.equities.row_for = orig_rf
+    assert m2["SPY|en CCL"]["value"] is None and m2["SPY|en CCL"]["var_pct"] is None and m2["SPY|CEDEAR · ARS"]["value"] == 45_000.0
 
 
 # ── riesgo país ─────────────────────────────────────────────────────────────
@@ -290,7 +318,7 @@ def test_resumen_nunca_lanza_con_fuentes_caidas(monkeypatch) -> None:
     res = inicio.resumen()
     assert res["lideres"] == [] and res["futuros"] == []
     assert [r["label"] for r in res["tc"]][:3] == ["Oficial · A3500", "USD MEP", "USD CCL"] or res["tc"][0]["label"].startswith("Oficial")
-    assert len(res["tasas"]) == 6 and len(res["mercado"]) == 5
+    assert len(res["tasas"]) == 6 and len(res["mercado"]) == 7       # Merval ×2 · riesgo país · SPY ×2 · EWZ ×2
     assert os.environ.get("RIESGO_PAIS") == "0"          # la suite no sale a la red
 
 
