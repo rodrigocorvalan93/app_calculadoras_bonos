@@ -304,12 +304,18 @@ def oficial_intradia_hoy() -> Optional[Dict[str, Any]]:
         ts = _mae_snap.get("ts") or 0.0
     if ust and ust.get("last") and (time.time() - ts) < _SIOPEL_FRESCO_SECONDS:
         return {"last": float(ust["last"]), "source": "SIOPEL", "hora": ust.get("hora")}
+    hoy = datetime.now(_TZ_BA).date()
     snap = marketdata_store.get_store().get(SPOT_SYMBOL)
     if snap is not None and snap.last and snap.last > 0 and snap.last_ts:
         from backend.services.historico_writer import _fecha_dato
-        hoy = datetime.now(_TZ_BA).date()
         if _fecha_dato(snap.last_ts) == hoy:
             return {"last": float(snap.last), "source": "DLR/SPOT", "hora": None}
+    # Último recurso: el ÚLTIMO SIOPEL de HOY aunque el último fetch OK tenga
+    # más de 15 min (MAE sin responder un rato, o la rueda del mayorista ya
+    # cerró y el A3500 todavía no salió): sigue siendo el mejor dato del día —
+    # mejor que el A3500 de ayer — hasta que el BCRA publique (desk 19/10).
+    if ust and ust.get("last") and ts and datetime.fromtimestamp(ts, _TZ_BA).date() == hoy:
+        return {"last": float(ust["last"]), "source": "SIOPEL", "hora": ust.get("hora")}
     return None
 
 

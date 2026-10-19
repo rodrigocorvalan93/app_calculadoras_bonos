@@ -210,6 +210,7 @@ def _bond_tr_base(code: str, y0: float, y1: float, terminal_str: str, settle_str
     obj = pricing._bond_obj_copy(code)
     if obj is None or not hasattr(obj, "calcula_total_return"):
         return None
+    pricing.aplicar_fx_dlk(obj, code)       # DLK: mismo FX (intradía / publicado) que la TIR de entrada
     y0_eff = float(y0)
     if tamar_path and hasattr(obj, "aplica_sendero_tamar"):
         try:

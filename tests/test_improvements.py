@@ -112,9 +112,17 @@ def test_dlk_tir_reacts_to_a3500() -> None:
     prev_intradia = _settings.dlk_fx_intradia
     _settings.dlk_fx_intradia = False
     pricing._a3500_aplicable_cache.clear()
+    # Desde el 19/10 el A3500 "publicado" sale del backup BCRA en memoria
+    # (pricing._a3500_bcra, lo que escribió indices.main()) y la serie de
+    # rentafija es subordinada (un refresh de índices actualiza las dos): el
+    # cambio de la serie se simula en las DOS fuentes, como lo haría el refresh.
+    prev_bcra = pricing._a3500_bcra
+    fecha_ult = pricing._coerce_date(df.index[-1])
     try:
+        pricing._a3500_bcra = lambda: (fecha_ult, orig)
         t1 = pricing.metrics_for_market_price(dlk, price)["tirea"]
         df.iloc[-1, col] = orig * 1.10                          # +10% A3500
+        pricing._a3500_bcra = lambda: (fecha_ult, orig * 1.10)
         # El fingerprint DLK lee a3500_aplicable() (cache propio de 2 s) — se
         # limpia ESE cache para simular la expiración; antes el doble cache
         # (fingerprint también memoizado en _index_val_cache) encadenaba la
@@ -124,6 +132,7 @@ def test_dlk_tir_reacts_to_a3500() -> None:
         assert abs(t1 - t2) > 1e-9                              # la TIR reaccionó
     finally:
         _settings.dlk_fx_intradia = prev_intradia
+        pricing._a3500_bcra = prev_bcra
         df.iloc[-1, col] = orig
         pricing._a3500_aplicable_cache.clear()
         pricing._index_val_cache.clear()
