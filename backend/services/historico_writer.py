@@ -363,20 +363,137 @@ def _cierre_journal_days() -> Dict[date, str]:
     return out
 
 
-def _prune_journal(max_dias: int = 90) -> None:
-    """Higiene: journal más viejo que `max_dias` se borra (la base ya lo tiene
-    hace rato; el dedup protege si no). También los cierres completos
-    (`cierre_*.parquet`): antes quedaban para siempre (~1 MB por rueda,
-    auditoría 30/09)."""
+def _prune_journal(max_dias: int = 90, hist_dir: Optional[str] = None) -> None:
+    """Higiene: journal más viejo que `max_dias` se borra, pero SÓLO si la
+    copia compartida ya lo contiene (15/10, "sin perder historiales"; antes
+    era sólo por edad): un `px_tasas_` cuya rueda la base no tiene, o tiene
+    con menos filas reales que el journal (p. ej. sólo RC), queda; un
+    `cierre_` sin partición, o con una partición armada desde la base (sin
+    volumen / puntas) cuando el journal sí las tiene, queda. Esos días los
+    consolida `consolidar_journal` / `consolidar_cierres_journal`. Sin
+    carpeta de bases no se borra nada. Las marcas `sin_rueda` sí van por
+    edad (no son historia)."""
     limite = _now().date() - timedelta(days=max_dias)
-    viejos = [p for d, p in _journal_days().items() if d < limite]
-    viejos += [p for d, p in _cierre_journal_days().items() if d < limite]
-    viejos += [_sin_rueda_path(d) for d in _sin_rueda_days() if d < limite]
+    viejos = [_sin_rueda_path(d) for d in _sin_rueda_days() if d < limite]
+    if hist_dir is None:
+        from backend.services import deltapaths
+        hist_dir = deltapaths.historico_dir()
+    if hist_dir:
+        xlsx = os.path.join(hist_dir, HIST_FILENAME)
+        vencidos = {d: p for d, p in _journal_days().items() if d < limite}
+        if vencidos:
+            todas, reales = _claves_base_cached(xlsx), _claves_reales_base_cached(xlsx)
+            for d, p in vencidos.items():
+                if _journal_contenido_en_base(p, todas.get(d), reales.get(d)):
+                    viejos.append(p)
+        for d, p in _cierre_journal_days().items():
+            if d < limite and _cierre_contenido(p, cierre_path(hist_dir, d)):
+                viejos.append(p)
     for path in viejos:
         try:
             os.remove(path)
         except OSError:
             pass
+
+
+def _journal_contenido_en_base(path: str, claves_base: Optional[frozenset],
+                               claves_reales_base: Optional[frozenset]) -> bool:
+    """¿La base ya tiene todo lo de este journal? Por CLAVE (symbol, Código),
+    no por conteos (revisión 15/10: con iguales conteos dos máquinas pueden
+    tener símbolos distintos — permisos de market data por cuenta): cada fila
+    del journal que podría entrar a la base (con las métricas que exige el
+    writer) está en la base, y cada una REAL está en la base como real (una
+    fila que la base tiene sólo como RC no contiene el precio real). Journal
+    ilegible = no contenido (no se toca)."""
+    claves = _claves_journal_para_poda(path)
+    if claves is None:
+        return False
+    todas_j, reales_j = claves
+    return todas_j <= (claves_base or frozenset()) and reales_j <= (claves_reales_base or frozenset())
+
+
+def _claves_journal_para_poda(path: str) -> Optional[Tuple[frozenset, frozenset]]:
+    """(todas, reales): claves (symbol, Código) de las filas del journal que
+    pasan el `dropna(_REQUIRED)` del writer (las que no, nunca pueden estar en
+    la base y no frenan la poda). None si no se puede leer."""
+    try:
+        import pandas as pd
+        t = pd.read_parquet(path)
+    except Exception:  # noqa: BLE001
+        return None
+    if not {"symbol", "Código"}.issubset(t.columns):
+        return None
+    req = [c for c in _REQUIRED if c in t.columns]
+    if req:
+        t = t.dropna(subset=req)
+    claves = list(zip(t["symbol"].astype(str), t["Código"].astype(str)))
+    if "Price Source" in t.columns:
+        real = t["Price Source"].astype(str).str.strip().ne(PRICE_SOURCE_RC).tolist()
+    else:
+        real = [True] * len(claves)
+    return frozenset(claves), frozenset(k for k, r in zip(claves, real) if r)
+
+
+_COLS_VIVAS = ("volume", "open", "high", "low", "bid", "offer")
+_VIVOS_MEMO: Dict[str, Tuple[Tuple[int, int], bool]] = {}
+
+
+def _con_datos_vivos(path: str) -> Optional[bool]:
+    """¿El parquet de un cierre completo trae datos que sólo da el feed en
+    vivo (volumen / OHLC / puntas)? Una partición armada desde la base
+    (`cierres.importar_base`) no los tiene. Lee sólo esas columnas, memo por
+    (mtime, tamaño). None si no se puede leer."""
+    firma = _firma_archivo(path)
+    if firma is None:
+        return None
+    m = _VIVOS_MEMO.get(path)
+    if m and m[0] == firma:
+        return m[1]
+    try:
+        import pandas as pd
+        import pyarrow.parquet as pq
+        cols = [c for c in _COLS_VIVAS if c in pq.read_schema(path).names]
+        vivos = bool(cols) and bool(pd.read_parquet(path, columns=cols).notna().any().any())
+    except Exception:  # noqa: BLE001
+        return None
+    if len(_VIVOS_MEMO) > 400:
+        _VIVOS_MEMO.clear()
+    _VIVOS_MEMO[path] = (firma, vivos)
+    return vivos
+
+
+def _particion_mejorable(journal: str, particion: str) -> bool:
+    """Para el catch-up: la partición no está, o está armada desde la base y
+    el journal tiene la captura en vivo."""
+    if not os.path.isfile(particion):
+        return True
+    return _con_datos_vivos(journal) is True and _con_datos_vivos(particion) is False
+
+
+def _simbolos_parquet(path: str) -> Optional[frozenset]:
+    try:
+        import pandas as pd
+        return frozenset(pd.read_parquet(path, columns=["symbol"])["symbol"].astype(str))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _cierre_contenido(journal: str, particion: str) -> bool:
+    """¿La partición compartida ya contiene lo de este `cierre_` del journal?
+    Existe, tiene TODOS los símbolos del journal (revisión 15/10: el journal
+    de otra máquina puede traer símbolos que la writer no tenía suscriptos) y,
+    si el journal tiene datos vivos, la partición también."""
+    if not os.path.isfile(particion):
+        return False
+    j = _con_datos_vivos(journal)
+    if j is None:
+        return False
+    sj, sp = _simbolos_parquet(journal), _simbolos_parquet(particion)
+    if sj is None or sp is None or not sj <= sp:
+        return False
+    if not j:
+        return True
+    return bool(_con_datos_vivos(particion))
 
 
 def consolidar_cierres_journal() -> Optional[Dict[str, Any]]:
@@ -397,8 +514,10 @@ def consolidar_cierres_journal() -> Optional[Dict[str, Any]]:
     if not dias:
         return None
     sin_rueda = _sin_rueda_days()
-    pendientes = sorted(d for d, _ in dias.items()
-                        if d not in sin_rueda and not os.path.isfile(cierre_path(hist_dir, d)))
+    # Sin partición compartida, o con una armada desde la base (sin volumen /
+    # OHLC / puntas) cuando el journal tiene la captura en vivo (15/10).
+    pendientes = sorted(d for d, p in dias.items()
+                        if d not in sin_rueda and _particion_mejorable(p, cierre_path(hist_dir, d)))
     if not pendientes:
         return None
     import pandas as pd
@@ -664,6 +783,42 @@ def _claves_base_cached(xlsx_path: str) -> Dict[date, frozenset]:
     return res
 
 
+_claves_reales_cache: tuple = ()
+
+
+def _claves_reales_base_cached(xlsx_path: str) -> Dict[date, frozenset]:
+    """{rueda: claves (symbol, Código) con precio REAL} de la fuente FIEL,
+    cacheado por firma (para la poda del journal: una clave que la base tiene
+    sólo como RC no contiene el precio real del journal)."""
+    global _claves_reales_cache
+    key = _firmas_base(xlsx_path)
+    if key == (None, None):
+        return {}
+    if _claves_reales_cache and _claves_reales_cache[0] == key:
+        return _claves_reales_cache[1]
+    import pandas as pd
+    from backend.services import espejo
+    pq = os.path.splitext(xlsx_path)[0] + ".parquet"
+    hay_pq, hay_xlsx = os.path.isfile(pq), os.path.isfile(xlsx_path)
+    cols = ("fecha_hoy", "symbol", "Código", "Price Source")
+    res: Dict[date, frozenset] = {}
+    try:
+        if hay_pq and (not hay_xlsx or espejo.espejo_valido(pq, xlsx_path)):
+            df = pd.read_parquet(pq, columns=list(cols))
+        elif hay_xlsx:
+            df = pd.read_excel(xlsx_path, usecols=lambda c: c in cols)
+        else:
+            df = None
+        if df is not None and "Price Source" in df.columns:
+            df = df[df["Price Source"].astype(str).str.strip().ne(PRICE_SOURCE_RC)]
+        res = _claves_de_frame(df, pd) if df is not None else {}
+    except Exception as exc:  # noqa: BLE001 — sin huellas: la poda no borra nada
+        logger.debug("[historico_writer] no pude leer claves reales de la base (%s)", exc)
+        res = {}
+    _claves_reales_cache = (key, res)
+    return res
+
+
 def _claves_reales_journal(path: str) -> frozenset:
     """Claves (symbol, Código) con precio REAL (no RC) que journaleó esta máquina
     para una rueda; cacheado por firma del parquet."""
@@ -870,6 +1025,16 @@ def regresion_base(xlsx_path: Optional[str] = None,
             continue
         out[d] = {"motivo": motivo, "antes": (n_esp, r_esp), "ahora": (n, r)}
     return out
+
+
+def _reales_por_dia(df: "Any") -> Dict[Any, int]:
+    """{fecha_hoy: filas reales (no RC)} de un frame de la base."""
+    if df is None or not len(df) or "fecha_hoy" not in df.columns:
+        return {}
+    if "Price Source" not in df.columns:
+        return df.groupby("fecha_hoy").size().to_dict()
+    real = df["Price Source"].astype(str).str.strip().ne(PRICE_SOURCE_RC)
+    return real.groupby(df["fecha_hoy"]).sum().astype(int).to_dict()
 
 
 def _journal_reales(path: str) -> int:
@@ -1510,15 +1675,21 @@ def _append_and_save_locked(df: "Any", xlsx_path: str, np, pd,
     if incluir_journal:
         en_base = set(prev["fecha_hoy"]) if prev is not None else set()
         dias_df = set(df["fecha_hoy"]) if df is not None and len(df) else set()
+        reales_base: Optional[Dict[Any, int]] = None
         for dia, path in sorted(_journal_days().items()):
             # La rueda que viene fresca en `df` (hoy, o la que la reconstrucción
             # acaba de journalear) no se duplica desde el journal; de ahí entran
-            # las que a la base le FALTAN y las que perdió (regresión) si el
-            # journal las tiene con filas reales.
+            # las que a la base le FALTAN, las que perdió (regresión) si el
+            # journal las tiene con filas reales, y las que la base tiene SÓLO
+            # como RC si el journal las capturó reales (las reales pisan a las
+            # RC por símbolo en el dedup keep-last de abajo).
             if dia in dias_df:
                 continue
             if dia in en_base and (dia not in degradadas or _journal_reales(path) == 0):
-                continue
+                if reales_base is None:
+                    reales_base = _reales_por_dia(prev)
+                if reales_base.get(dia, 0) > 0 or _journal_reales(path) == 0:
+                    continue
             try:
                 jf = pd.read_parquet(path)
                 jf["fecha_hoy"] = pd.to_datetime(jf["fecha_hoy"]).dt.date
@@ -1641,8 +1812,12 @@ def consolidar_journal(*, reponer: bool = False) -> Optional[Dict[str, Any]]:
     resumen = _resumen_base_cached(xlsx)
     fechas = set(resumen)
     reg = regresion_detalle(xlsx, resumen=resumen)
+    # Faltan, se degradaron (regresión) o la base los tiene SÓLO como RC y este
+    # journal los capturó reales (15/10: antes un día RC nunca subía a real).
     pendientes = sorted(d for d, p in dias.items()
-                        if d not in fechas or (d in reg["detalle"] and _journal_reales(p) > 0))
+                        if d not in fechas
+                        or ((d in reg["detalle"] or resumen.get(d, (0, 0))[1] == 0)
+                            and _journal_reales(p) > 0))
     if not pendientes:
         return None
     fmt = ", ".join(str(d) for d in pendientes)
@@ -1661,6 +1836,22 @@ def consolidar_journal(*, reponer: bool = False) -> Optional[Dict[str, Any]]:
     except BaseEnRegresion as exc:           # el disco cambió entre el chequeo y la escritura
         logger.warning("[historico_writer] catch-up frenado: %s", exc)
         return {"skipped": str(exc), "consolidados": 0}
+    # Una rueda que la base NO tenía (capturada por una instancia que ese día
+    # no era writer) entra sin fila FX: el save_today no-writer no la journalea.
+    # CCL/MEP desde la columna FX de las patas en pesos + A3500 (best-effort;
+    # el merge FX nunca pisa celdas con valor).
+    for d in pendientes:
+        if d in fechas:
+            continue
+        try:
+            import pandas as pd
+            jf = pd.read_parquet(dias[d])
+            jf = jf[pd.to_datetime(jf["fecha_hoy"]).dt.date == d]
+            fila = _fx_row_reconstruida(d, _fx_desde_journal(jf))
+            if fila:
+                _guardar_fx(hist_dir, fila=fila)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[historico_writer] FX del %s desde el journal falló: %s", d, exc)
     try:
         from backend.services import historico_byma
         historico_byma.refresh()
@@ -1811,7 +2002,7 @@ def save_today(force: bool = False) -> Dict[str, Any]:
         res.update(saved)
         res["ok"] = True
         res["hora"] = _now().strftime("%H:%M")
-        _prune_journal()
+        _prune_journal(hist_dir=hist_dir)
     except BaseEnRegresion as exc:
         # El día ya quedó en el journal local; la base compartida no se toca
         # hasta que vuelvan las ruedas perdidas (o el superuser las reponga /
@@ -2309,6 +2500,86 @@ def _fx_row_reconstruida(dia: date, fx: "Any") -> Optional[Dict[str, Any]]:
     return fila
 
 
+def _fx_desde_journal(jf: "Any") -> "Any":
+    """CCL / MEP de la rueda desde las filas del journal: la columna `FX` de
+    las patas en pesos de los soberanos (`Pata` = ARS) es el tipo de cambio
+    por el que se dividió su precio — MEP para un bonar (ficha USB), CCL para
+    un global (USD). None si el journal no las trae (journals de antes del
+    13/10)."""
+    if jf is None or not len(jf) or "Pata" not in jf.columns or "FX" not in jf.columns:
+        return None
+    from types import SimpleNamespace
+
+    from backend.services import patas
+    ccl = usb = None
+    try:
+        soberanas = patas.soberanas()
+    except Exception:  # noqa: BLE001 — universo sin cargar: sin FX
+        return None
+    for cod, pata, fx in zip(jf["Código"], jf["Pata"], jf["FX"]):
+        if str(pata) != patas.ARS or fx is None or fx != fx:
+            continue
+        p = soberanas.get(str(cod))
+        if p is None:
+            continue
+        if p.moneda == "USB" and usb is None:
+            usb = float(fx)
+        elif p.moneda != "USB" and ccl is None:
+            ccl = float(fx)
+        if ccl is not None and usb is not None:
+            break
+    if ccl is None and usb is None:
+        return None
+    return SimpleNamespace(ccl=ccl, usb=usb, ccl_base="journal")
+
+
+def _consolidar_rueda_del_journal(dia: date, jpath: str, xlsx: str, hist_dir: str,
+                                  res: Dict[str, Any]) -> Dict[str, Any]:
+    """`reconstruir_cierre` con la rueda en el journal local con filas reales:
+    entra a la base TAL CUAL se capturó (filas LA, no RC; si la base tenía RC
+    de ese día, las reales las reemplazan por símbolo), la fila FX con el
+    CCL/MEP de esas filas + A3500, y la partición del cierre completo desde
+    `cierre_<dia>` del journal (con volumen / OHLC) o, si no está, desde la
+    base. El journal NO se toca. Llamar con `_reconstruir_lock` tomado."""
+    import pandas as pd
+
+    from backend.services import historico_byma
+    dia_fmt = res["dia_fmt"]
+    try:
+        jf = pd.read_parquet(jpath)
+        jf["fecha_hoy"] = pd.to_datetime(jf["fecha_hoy"]).dt.date
+        jf = jf[jf["fecha_hoy"] == dia]
+        saved = append_and_save(jf, xlsx)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[historico_writer] consolidar el %s desde el journal falló", dia_fmt)
+        res["error"] = f"no pude consolidar el {dia_fmt} desde el journal local: {exc}"
+        return res
+    res.update(ok=True, fuente="journal", rows=int(len(jf)), journal=jpath,
+               total_rows=saved.get("total_rows"))
+    try:
+        fila = _fx_row_reconstruida(dia, _fx_desde_journal(jf))
+        if fila:
+            _guardar_fx(hist_dir, fila=fila)
+            res["fx"] = True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] FX del %s desde el journal falló: %s", dia_fmt, exc)
+    try:
+        consolidar_cierres_journal()                     # la partición real (volumen / OHLC) si la hay
+        from backend.services import cierres
+        r_cie = cierres.importar_base(force=True)        # si no, desde la base (sólo fechas sin partición)
+        if r_cie.get("error"):
+            logger.warning("[historico_writer] partición de cierres del %s: %s", dia_fmt, r_cie["error"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[historico_writer] partición de cierres del %s falló: %s", dia_fmt, exc)
+    try:
+        historico_byma.refresh()
+    except Exception:  # noqa: BLE001
+        logger.exception("[historico_writer] refresh tras consolidar el journal falló")
+    logger.warning("[historico_writer] cierre del %s CONSOLIDADO desde el journal local: %d filas reales "
+                   "(no se reconstruye con RC) → %s", dia_fmt, res["rows"], xlsx)
+    return res
+
+
 def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -> Dict[str, Any]:
     """Rearma en la base la rueda `dia` que le falta (ver el bloque de
     arriba): primero desde los cierres del feed, si no desde la rueda
@@ -2368,6 +2639,14 @@ def reconstruir_cierre(dia: date, *, force: bool = False, plazo: str = "24hs") -
             res["skipped"] = (f"la base ya tiene el {dia_fmt} con {ya} filas reales — no se pisa "
                               "(el aviso de hueco venía de un espejo parquet desactualizado)")
             return res
+        jpath = _journal_days().get(dia)
+        if jpath and _journal_reales(jpath) > 0:
+            # Esta máquina CAPTURÓ la rueda con precios reales (ese día no era
+            # writer: sólo premium / básico la usó, o falló la base) → se
+            # consolida desde el journal. Nunca se reconstruye con RC encima ni
+            # se pisa ese journal (15/10: la reconstrucción del día siguiente
+            # reemplazaba el cierre real por RC — "sin perder historiales").
+            return _consolidar_rueda_del_journal(dia, jpath, xlsx, hist_dir, res)
         previos = _ultimos_previos(base_df, dia)
         settle = _settle_24hs(dia)
         rows: List[Dict[str, Any]] = []
@@ -3167,8 +3446,10 @@ class HistoricoAutosave:
                 logger.info("[historico_writer] disparo de las %s del %s vencido al despertar — rearmo para el próximo",
                             self.hhmm, disparo.strftime("%d/%m"))
                 continue
-            # Antes de guardar HOY: huecos anteriores (el feed todavía trae los
-            # cierres de ayer; a partir de mañana ya no).
+            # Antes de guardar HOY: lo que el journal tenga (días capturados
+            # sin writer) y después los huecos anteriores (el feed todavía trae
+            # los cierres de ayer; a partir de mañana ya no).
+            await self._catch_up_journal(loop)
             try:
                 self.last_reconstruccion = await loop.run_in_executor(None, reconstruir_faltantes)
                 self._log_reconstruccion(self.last_reconstruccion)
@@ -3275,6 +3556,18 @@ class HistoricoAutosave:
         except Exception:  # noqa: BLE001
             logger.exception("[historico_writer] mail de feed caído falló")
 
+    async def _catch_up_journal(self, loop) -> None:
+        """consolidar_journal + consolidar_cierres_journal (no-op sin writer o
+        sin nada pendiente; un error se loguea y se sigue)."""
+        for fn, que in ((consolidar_journal, "journal"), (consolidar_cierres_journal, "cierre completo")):
+            try:
+                r = await loop.run_in_executor(None, fn)
+                if r and r.get("consolidados"):
+                    logger.info("[historico_writer] catch-up del %s OK: %s", que,
+                                r.get("dias") or r.get("consolidados"))
+            except Exception:  # noqa: BLE001
+                logger.exception("[historico_writer] catch-up del %s falló", que)
+
     async def _reconstruir_al_arrancar(self, loop) -> None:
         from backend.config import settings
         if not settings.historico_reconstruir:
@@ -3295,6 +3588,11 @@ class HistoricoAutosave:
                 logger.info("[historico_writer] sin superuser conectado tras %.0f min: la "
                             "reconstrucción del arranque sólo journalea en esta instancia",
                             _ESPERA_WRITER_S / 60)
+        # El catch-up del principio de `_run` corre antes de que entre nadie:
+        # con el muro de login puesto no hacía nada. Ahora que (quizás) hay
+        # writer, lo del journal entra ANTES de buscar huecos — un día que esta
+        # máquina capturó real nunca se reconstruye con RC.
+        await self._catch_up_journal(loop)
         reg = await loop.run_in_executor(None, regresion_detalle)
         if reg["bloqueantes"]:
             logger.warning("[historico_writer] la base perdió %s%s — no reconstruyo ni escribo hasta que "

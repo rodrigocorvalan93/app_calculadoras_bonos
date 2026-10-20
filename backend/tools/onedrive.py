@@ -142,6 +142,17 @@ ORIGINAL_VIEJO_DIAS = 7
 TMP_MIN_EDAD_S = 600         # un .tmp más nuevo puede ser una escritura en curso de una PC vieja
 DETALLE_MAX = 40             # más pendientes que esto: progreso resumido, no una línea por archivo
 
+# Cachés de Python adentro del clon (15/10): cada PC compilaba sus .pyc en
+# `__pycache__` de la carpeta sincronizada y OneDrive los repartía a todas (un
+# set por versión de Python, huérfanos de módulos borrados, copias en conflicto
+# `<mod>.cpython-314-<PC>.pyc`, y con Archivos a petición una bajada por .pyc
+# al importar). Los launchers ahora ponen PYTHONPYCACHEPREFIX en
+# %LOCALAPPDATA%\bonos\pycache; con el prefijo activo los de adentro del clon
+# ya no se leen ni se escriben, así que se borran (Python regenera todo: no
+# hay historia ahí). Sin prefijo (launcher viejo, python a mano) NO se borran:
+# volverían a aparecer en el próximo import.
+CACHES_PY = frozenset({"__pycache__", ".pytest_cache", ".ruff_cache"})
+
 
 @dataclass
 class Archivo:
@@ -170,6 +181,7 @@ class Escaneo:
     root_fijado: bool = False                        # la carpeta raíz ya está "siempre en este dispositivo"
     errores: List[Tuple[Path, OSError]] = field(default_factory=list)   # listados que fallaron
     basura: List[Archivo] = field(default_factory=list)  # restos de cachés por máquina (no se bajan)
+    caches_py: List[Path] = field(default_factory=list)  # __pycache__ / .pytest_cache / .ruff_cache del clon
 
 
 def es_windows() -> bool:
@@ -408,6 +420,8 @@ def escanear(root: Path, excluir: Iterable[str] = EXCLUIR,
         rel = rel if rel in _CARPETAS_CACHE else None
         for entry in entradas:
             if entry.name in excl:
+                if entry.name in CACHES_PY and _es_dir(entry):
+                    esc.caches_py.append(Path(entry.path))
                 continue
             try:
                 attrs, tag, size = _atributos(entry)
@@ -482,6 +496,54 @@ def borrar_basura(basura: Iterable[Archivo]) -> Tuple[int, int, List[Tuple[Archi
         n += 1
         b += a.size
     return n, b, fallos
+
+
+def prefijo_pycache() -> Optional[str]:
+    """El PYTHONPYCACHEPREFIX con el que corre este proceso (None = Python
+    escribe los .pyc al lado del código). Parcheable en los tests."""
+    return getattr(sys, "pycache_prefix", None)
+
+
+def borrar_caches_py(dirs: Iterable[Path]) -> Tuple[int, int, int, List[Tuple[Path, OSError]]]:
+    """Borra las carpetas de caché de Python (de abajo hacia arriba, sin
+    seguir links). Un marcador "sólo en la nube" se borra sin bajarlo.
+    Devuelve (carpetas borradas, archivos, bytes, fallos)."""
+    n_dirs = n_arch = n_bytes = 0
+    fallos: List[Tuple[Path, OSError]] = []
+    for d in dirs:
+        ok = True
+        for raiz, carpetas, archivos in os.walk(d, topdown=False, followlinks=False):
+            for a in archivos:
+                fp = os.path.join(raiz, a)
+                try:
+                    tam = os.lstat(fp).st_size
+                    os.remove(fp)
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    fallos.append((Path(fp), e))
+                    ok = False
+                    continue
+                n_arch += 1
+                n_bytes += tam
+            for c in carpetas:
+                try:
+                    os.rmdir(os.path.join(raiz, c))
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    fallos.append((Path(raiz) / c, e))
+                    ok = False
+        try:
+            os.rmdir(d)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            if ok:
+                fallos.append((d, e))
+            continue
+        n_dirs += 1
+    return n_dirs, n_arch, n_bytes, fallos
 
 
 def por_carpeta(archivos: Iterable[Archivo], root: Path) -> List[Tuple[str, int, int]]:
@@ -627,6 +689,21 @@ def _main(argv: Optional[List[str]] = None) -> int:
                 _say(f"[onedrive] ! {_n(len(fallos_b))} no se pudieron borrar (p. ej. {a0.path.name}: {e0}); "
                      "no se bajan, la carpeta no se fija todavía (OneDrive los bajaría) y se reintenta "
                      "en el próximo arranque")
+
+    if esc.caches_py:
+        if args.listar:
+            _say(f"[onedrive] {_n(len(esc.caches_py))} carpetas de caché de Python adentro del clon "
+                 f"({'se borran al arrancar' if prefijo_pycache() else 'se borran cuando el launcher use PYTHONPYCACHEPREFIX'})")
+        elif prefijo_pycache():
+            nd, na, nb, fallos_py = borrar_caches_py(esc.caches_py)
+            if na or nd:
+                _say(f"[onedrive] borré {_n(nd)} carpetas de caché de Python del código ({_n(na)} archivos, "
+                     f"{_tam(nb)}): ahora los .pyc de cada PC van a su carpeta local "
+                     f"({prefijo_pycache()}) y no viajan por OneDrive")
+            if fallos_py:
+                a0, e0 = fallos_py[0]
+                _say(f"[onedrive] ! {_n(len(fallos_py))} no se pudieron borrar (p. ej. {a0.name}: {e0}); "
+                     "se reintenta en el próximo arranque")
 
     if not esc.pendientes:
         say(f"[onedrive] código completo en esta PC ({esc.total} archivos"

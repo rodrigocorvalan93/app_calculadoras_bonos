@@ -15,6 +15,8 @@ setlocal
 cd /d "%~dp0"
 
 set "PY=%LOCALAPPDATA%\venvs\bonos\Scripts\python.exe"
+REM .pyc fuera de la carpeta sincronizada (igual que "run_backend (CORRER APP).bat")
+set "PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\bonos\pycache"
 if not exist "%PY%" (
   echo [ERROR] No existe el entorno %PY%
   echo Corre primero "run_backend (CORRER APP).bat" una vez ^(crea el entorno^) y volve a intentar.

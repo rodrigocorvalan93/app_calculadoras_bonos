@@ -584,3 +584,48 @@ def test_ctrl_c_a_mitad_de_la_bajada_sale_limpio_y_no_fija(tmp_path, monkeypatch
     assert onedrive.main(["--carpeta", str(root)]) == 0
     out = capsys.readouterr().out
     assert "cortado con Ctrl+C" in out and "Traceback" not in out
+
+
+def test_caches_de_python_se_borran_solo_con_el_prefijo_activo(tmp_path, monkeypatch, capsys) -> None:
+    """15/10: cada PC compilaba sus .pyc en __pycache__ adentro del clon y
+    OneDrive los repartía (un set por versión de Python, copias en conflicto).
+    Con PYTHONPYCACHEPREFIX (lo ponen los launchers) los de adentro ya no se
+    usan y se borran; sin el prefijo volverían a aparecer, así que no se tocan."""
+    root = _arbol(tmp_path)                                          # trae __pycache__/m.pyc en la raíz
+    svc_cache = root / "backend" / "services" / "__pycache__"
+    svc_cache.mkdir()
+    (svc_cache / "fx.cpython-314.pyc").write_bytes(b"p" * 100)
+    (svc_cache / "fx.cpython-314-DAM-NB-CIO.pyc").write_bytes(b"p" * 100)   # copia en conflicto
+    (root / ".pytest_cache" / "v").mkdir(parents=True)
+    (root / ".pytest_cache" / "v" / "lastfailed").write_bytes(b"{}")
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
+    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (True, ""))
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    esc = onedrive.escanear(root, raices=[])
+    assert sorted(str(p.relative_to(root)) for p in esc.caches_py) == sorted(
+        [".pytest_cache", "__pycache__", os.path.join("backend", "services", "__pycache__")])
+    # sin prefijo (launcher viejo / python a mano): no se tocan
+    monkeypatch.setattr(onedrive, "prefijo_pycache", lambda: None)
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    assert (root / "__pycache__" / "m.pyc").exists() and "caché de Python" not in capsys.readouterr().out
+    # --listar sólo informa
+    monkeypatch.setattr(onedrive, "prefijo_pycache", lambda: "C:\\Users\\p\\AppData\\Local\\bonos\\pycache")
+    onedrive.main(["--carpeta", str(root), "--listar"])
+    assert "3 carpetas de caché de Python" in capsys.readouterr().out and svc_cache.exists()
+    # con el prefijo: se borran (los .py nunca)
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert not (root / "__pycache__").exists() and not svc_cache.exists() and not (root / ".pytest_cache").exists()
+    assert "borré 3 carpetas de caché de Python del código (4 archivos" in out
+    assert (root / "backend" / "services" / "fx.py").exists() and (root / ".git" / "objects" / "aa").exists()
+
+
+def test_los_launchers_ponen_los_pyc_fuera_del_clon() -> None:
+    for nombre in ("run_backend (CORRER APP).bat", "backfill_historico.bat"):
+        bat = (ROOT / nombre).read_text(encoding="utf-8")
+        i = bat.index('set "PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\\bonos\\pycache"')
+        assert i < bat.index("backend.tools.onedrive"), nombre             # antes del primer python del backend
+        assert bat.isascii(), nombre
+    cmd = (ROOT / "correr_app.command").read_text(encoding="utf-8")
+    assert cmd.index("export PYTHONPYCACHEPREFIX=") < cmd.index('"$PY" -m')

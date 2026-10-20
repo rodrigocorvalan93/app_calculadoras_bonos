@@ -480,3 +480,49 @@ def test_funciones_beacon_wiring():
         html = (base / nombre).read_text(encoding="utf-8")
         assert "OMS_BEACON" in html and "/excel/v1/beacon" in html and p in html
         assert html.index("OMS_BEACON") < html.index("appsforoffice.microsoft.com")
+
+
+async def test_calc_patas_de_calculo_en_minuscula_desde_excel(auth_on):
+    """15/10: el desk no podía sacar TIR ni margen de la pata TAMAR de un dual
+    (`TMVE8v`, `TXMD8v`): el add-in manda el código en MAYÚSCULAS y la ficha
+    termina en `v` minúscula → "Bono 'TMVE8V' no encontrado" (y, sin precio,
+    "Sin precio de mercado": el strip de la v para el ticker es case-sensitive).
+    Lo mismo con el CER proyectado (`…j`). El server resuelve el código del
+    universo sin distinguir mayúsculas (`bond_universe.resolve`)."""
+    from backend.services import bond_universe, pricing, symbols as syms
+
+    bond_universe.ensure_loaded()
+    assert bond_universe.resolve("TMVE8V") == "TMVE8v" == bond_universe.resolve("tmve8v")
+    assert bond_universe.resolve("TX26J") == "TX26j" and bond_universe.resolve("al30d") == "AL30D"
+    assert bond_universe.resolve("NOEXISTE") is None and bond_universe.resolve("") is None
+    # un código que en mayúsculas sería ambiguo no se adivina
+    up = {}
+    for c in bond_universe.all_codes():
+        up.setdefault(c.upper(), []).append(c)
+    assert all(len(v) == 1 for v in up.values()), "hay códigos que sólo difieren en mayúsculas"
+
+    auth.create_user("mesa_dual", "clave123", "basico")
+    tok = auth.set_excel_access("mesa_dual", True)
+    settle = pricing.settlement_date_str("24hs")
+    # el ticker de mercado de la pata v es el del dual (TXMD8): el add-in sin precio usa ése
+    mds.get_store().update_from_md(syms.md_symbol("TXMD8v"), {"LA": {"price": 105.0, "size": 1}})
+    margen = pricing.compute_metrics("TMVE8v", "margen", 0.03, settle=settle, include_cashflows=False)
+    por_px = pricing.compute_metrics("TXMD8v", "precio", 105.0, settle=settle, include_cashflows=False)
+    body = {"items": [
+        {"code": "TMVE8V", "modo": "margen", "valor": 0.03},      # como lo manda el add-in
+        {"code": "TXMD8V", "modo": "tir", "valor": 0.30},
+        {"code": "TXMD8V", "modo": "precio"},                      # sin precio: el de mercado de TXMD8
+        {"code": "TX26J", "tipo": "meta"},
+    ]}
+    async with _client() as ac:
+        r = await ac.post("/excel/v1/calc", json=body, headers={"X-OMS-Token": tok})
+    assert r.status_code == 200
+    res = r.json()["results"]
+    # mismos números que el YAS web (mismo compute_metrics, mismo código de ficha)
+    assert "error" not in res[0] and res[0]["codigo"] == "TMVE8v"
+    assert res[0]["tirea"] == pytest.approx(margen["tirea"]) and res[0]["margen_tna"] == pytest.approx(0.03)
+    assert "error" not in res[1] and res[1]["codigo"] == "TXMD8v" and res[1]["tirea"] == pytest.approx(0.30)
+    assert "error" not in res[2] and res[2]["codigo"] == "TXMD8v"
+    assert res[2]["precio_mercado_pct"] == pytest.approx(105.0) and res[2]["tirea"] == pytest.approx(por_px["tirea"])
+    assert res[2]["margen_tna"] == pytest.approx(por_px["margen_tna"])
+    assert "error" not in res[3] and res[3]["vencimiento"]
