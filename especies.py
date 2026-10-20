@@ -19554,7 +19554,7 @@ TML27 = {
     "Emisión": "30/06/2026",
     "Vencimiento": "30/07/2027",
     "Fecha Primer Cupón": None,
-    "Cupón / Spread": 4.5, # es un nro flotante
+    "Cupón / Spread": 5.4, # es un nro flotante
     "Step-up": False, # Es binario True or False
     "Frecuencia de pago de cupón anual": 0., # entero ej semianual = 2, trimestral = 4
     "Convención fechas de pago": "Regular", # "Regular" o "Presonalizado"

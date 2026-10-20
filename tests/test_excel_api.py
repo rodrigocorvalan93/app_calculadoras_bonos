@@ -488,13 +488,13 @@ async def test_calc_patas_de_calculo_en_minuscula_desde_excel(auth_on):
     termina en `v` minúscula → "Bono 'TMVE8V' no encontrado" (y, sin precio,
     "Sin precio de mercado": el strip de la v para el ticker es case-sensitive).
     Lo mismo con el CER proyectado (`…j`). El server resuelve el código del
-    universo sin distinguir mayúsculas (`bond_universe.canonico`)."""
+    universo sin distinguir mayúsculas (`bond_universe.resolve`)."""
     from backend.services import bond_universe, pricing, symbols as syms
 
     bond_universe.ensure_loaded()
-    assert bond_universe.canonico("TMVE8V") == "TMVE8v" == bond_universe.canonico("tmve8v")
-    assert bond_universe.canonico("TX26J") == "TX26j" and bond_universe.canonico("al30d") == "AL30D"
-    assert bond_universe.canonico("NOEXISTE") is None and bond_universe.canonico("") is None
+    assert bond_universe.resolve("TMVE8V") == "TMVE8v" == bond_universe.resolve("tmve8v")
+    assert bond_universe.resolve("TX26J") == "TX26j" and bond_universe.resolve("al30d") == "AL30D"
+    assert bond_universe.resolve("NOEXISTE") is None and bond_universe.resolve("") is None
     # un código que en mayúsculas sería ambiguo no se adivina
     up = {}
     for c in bond_universe.all_codes():

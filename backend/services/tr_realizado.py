@@ -74,6 +74,7 @@ def _cupones_entre(code: str, d1: date, d2: date) -> Optional[float]:
     obj = pricing._bond_obj_copy(code)
     if obj is None or not hasattr(obj, "generate_cashflows"):
         return None
+    pricing.aplicar_fx_dlk(obj, code)       # DLK: flujos al FX aplicable de hoy, como el resto de la app
     try:
         obj.generate_cashflows(d1.strftime("%d/%m/%Y"))
         cf = obj.cashflow_cpn_full

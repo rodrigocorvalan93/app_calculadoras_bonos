@@ -100,6 +100,38 @@ true when `moneda in ("USD","USB")` **or** the classification/industria
 says hard-dollar — a MEP (USB) or pesos-quoted hard-dollar bond keeps
 180/360, not the días/365 default.
 
+## DLK — FX aplicable intradía (SIOPEL hasta que el BCRA publique, 19/10)
+
+`pricing.a3500_aplicable()`: A3500 de HOY ya publicado → manda el cierre; si
+no, el mayorista intradía de hoy (`dolares.oficial_intradia_hoy`: SIOPEL
+fresco → DLR/SPOT de hoy → el ÚLTIMO SIOPEL de hoy aunque el fetch tenga más
+de 15 min — MAE caído un rato o rueda cerrada —; nunca uno de ayer); si no, el
+último publicado. **"Publicado" se decide con el backup BCRA en memoria**
+(`historico.series_points("a3500")`, `pricing._a3500_bcra`), NO con
+`rentafija.inputs['a3500']`: `especies.py` le inyecta al importarse una fila
+con la fecha de HOY (`indices.refresh_a3500_in_rentafija`: el SIOPEL del
+arranque o, sin MAE, el último cierre relabelado — mecanismo del Streamlit
+legacy) y con eso la regla creía que el cierre del día ya estaba: los DLK se
+valuaban TODO el día contra ese número (desk 19/10). Esa fila se saca al
+cargar el universo (`bond_universe._sanear_inyeccion_a3500`: filas con fecha
+≥ hoy que el backup no tiene; sin backup no toca nada; especies.py NO se
+modifica). `_dlk_fx_auto()` pone el override por-objeto siempre que el FX
+aplicable difiera del último de la serie de rentafija (intradía, o el
+publicado mientras `inputs.refresh()` todavía no corrió); si coinciden, sin
+override (numéricamente igual que siempre). Sábado / domingo / feriado
+(`_es_rueda_hoy`, calendario de `dias_habiles`) → el último publicado, sin
+intradía (el poller MAE corre 24×7 y dejaba el SIOPEL del viernes como "de
+hoy"). Un arranque DESPUÉS de la publicación (la inyección PISA el A3500 del
+día con el SIOPEL del arranque) → el saneo repone el valor del backup. Los
+caminos que copian el bono a secas (`total_return._bond_tr_base`,
+`tr_realizado`, perfil de vencimientos de Posiciones) llevan el mismo
+override vía `pricing.aplicar_fx_dlk(obj, code)` — si agregás otro
+`_bond_obj_copy` de un DLK, llamalo. El card de YAS muestra la fuente
+("mayorista intradía (SIOPEL)" / "cierre"). `DLK_FX_INTRADIA=0` apaga el
+intradía. Queda afuera a propósito: si `bcra_data_backup.json` no se pudo
+escribir, "publicado" sigue al backup viejo (el refresh vespertino lo
+reintenta cada 10 min). Regresión: `tests/test_dlk_fx_intradia.py`.
+
 ## Spreads vs UST (hard-dollar)
 
 `backend/services/ust.py` — stdlib puro (lo importa también `bymaapi.py`
@@ -563,21 +595,23 @@ un fixture con la estructura conocida de la página (`tests/test_bna_fx.py`) —
 si el BNA cambia el HTML, `snapshot()["error"]` lo dice y las celdas quedan
 en el último dato guardado.
 
-## Add-in de Excel — códigos de cálculo en minúscula (15/10)
+## Add-in de Excel — patas calculadas en minúscula (15/10)
 
-`=OMS.TIR` / `=OMS.MARGEN` / `=OMS.PRECIO` / `=OMS.VENCIMIENTO` de la pata
-TAMAR de un dual (`TMVE8v`, `TXMD8v`, …) y del CER proyectado (`TX26j`, …)
-daban "Bono 'TMVE8V' no encontrado": `functions.js` (`calcItem`,
-`vencimientoFn`) y `routes/excel._calc_batch` pasaban el código a MAYÚSCULAS y
-las fichas de cálculo terminan en minúscula; sin precio, además, "Sin precio de
-mercado" (el strip de la `v` / `j` para el ticker, `symbols.calc_to_md_code`,
-es case-sensitive a propósito: `SUPV`). `bond_universe.canonico(código)` = el
-código TAL CUAL está en el universo, exacto o sin distinguir mayúsculas (sólo
-con UN candidato; hoy no hay dos códigos que difieran sólo en mayúsculas — lo
-chequea el test), None si no existe; `_calc_batch` lo usa (desconocido → en
-mayúsculas como antes; `macro` sigue con la serie). El arreglo es del server:
-anda también con el `functions.js` viejo cacheado en Office. Regresión:
-`test_excel_api.test_calc_patas_de_calculo_en_minuscula_desde_excel`.
+Las fichas calculadas llevan sufijo en MINÚSCULA (`…v` = pata TAMAR de los
+duales: `TMVE8v`, `TXMD8v`, …; `…j` = CER proyectado: `TXMD8j`, …; 49 en el
+universo) y `functions.js` — también el que cada Excel tiene cacheado — manda
+el código EN MAYÚSCULAS: `OMS.TIREA("TMVE8v"; …)` / `OMS.MARGEN` llegaban como
+`TMVE8V` y daban "Bono 'TMVE8V' no encontrado". `bond_universe.resolve(code)`
+(exacta primero, después `_upper_map` = {MAYÚSCULAS: código}, O(1); dos códigos
+que chocaran en mayúsculas quedan fuera del mapa, nunca se adivina) y
+`routes/excel._codigo_calc` lo aplican a TODO item del batch `/excel/v1/calc`
+(precio / tir / tna / margen / duration / tr / meta): el resultado lleva el
+código de la ficha (`codigo: "TMVE8v"`); un código inexistente sigue en
+mayúsculas (mismo error, mismo símbolo de mercado). Sin precio, la pata usa el
+last del ticker base (`md_symbol("TXMD8v") = … TXMD8 …`). El arreglo es del
+server a propósito: no hace falta reinstalar el add-in. Si un endpoint nuevo
+recibe un código tipeado por el usuario, resolvelo con `bond_universe.resolve`
+(nunca `.upper()` a secas). Regresión: `tests/test_excel_patas_minuscula.py`.
 
 ## Posiciones — Categoría de las tenencias
 
@@ -681,7 +715,9 @@ Inicio en su lista entra igual).
 + `partials/inicio_body.html`): el mercado en una pantalla — Tipos de cambio
 (oficial · MEP · CCL · brecha · canje, de `dolares.summary`), Tasas (TAMAR /
 BADLAR del macro + caución ARS/USD BYMA del riel + caución ARS/USD MAE),
-Mercado (Merval ARS y en CCL, riesgo país, SPY y EWZ), una tarjeta por
+Mercado (Merval ARS y en CCL, riesgo país, SPY y EWZ cada uno en pesos y,
+debajo, en CCL — `inicio._en_ccl`: CEDEAR ÷ CCL, variación contra el cierre
+de ayer en CCL, el mismo criterio del Merval; desk 07/10), una tarjeta por
 segmento soberano (Globales · Bonares · CER · Tasa fija · Dólar linked ·
 TAMAR · Duales) con último · var · var % · TIR · Δ TIR (`delta_yield_bps`)
 · TEM · margen (sólo si el segmento lo tiene), Panel líder y futuros de

@@ -801,24 +801,31 @@ def _macro_section() -> Dict[str, Dict[str, Any]]:
     return {s: _calc_macro(s) for s in _MACRO_SNAPSHOT_SERIES}
 
 
-def _calc_batch(items: list) -> list:
-    out = []
+def _codigo_calc(raw: object) -> str:
+    """Código de la ficha para un item del batch. functions.js (también los ya
+    instalados, con el JS cacheado por Office) manda el código EN MAYÚSCULAS,
+    y las patas calculadas llevan sufijo en minúscula (`TMVE8v`, `TXMD8v`,
+    `TXMD8j`, …): se resuelve contra el universo sin distinguir mayúsculas. Un
+    código que no existe sigue en mayúsculas, como antes (mismo mensaje de
+    error, mismo símbolo de mercado)."""
     from backend.services import bond_universe
 
+    c = str(raw or "").strip()
+    if not c:
+        return ""
+    return bond_universe.resolve(c) or c.upper()
+
+
+def _calc_batch(items: list) -> list:
+    out = []
     for it in items:
         try:
-            crudo = str(it.get("code") or "").strip()
-            if it.get("tipo") == "macro":              # último dato macro (OMS.MACRO): sin especie ni precio
-                out.append(_calc_macro(str(it.get("serie") or crudo.upper())))
-                continue
-            # El código como está en el universo, sin distinguir mayúsculas: el
-            # add-in lo manda en MAYÚSCULAS y las fichas de cálculo terminan en
-            # minúscula (`TMVE8v`, `TX26j`) → antes "Bono 'TMVE8V' no encontrado"
-            # y, sin precio, "Sin precio de mercado" (el strip de la v / j para el
-            # ticker es case-sensitive). Un código desconocido sigue en mayúsculas.
-            code = bond_universe.canonico(crudo) or crudo.upper()
+            code = _codigo_calc(it.get("code"))
             if it.get("tipo") == "meta":               # ficha estática: no necesita modo ni valor
                 out.append(_calc_meta(code))
+                continue
+            if it.get("tipo") == "macro":              # último dato macro (OMS.MACRO): sin especie ni precio
+                out.append(_calc_macro(str(it.get("serie") or code)))
                 continue
             modo = str(it.get("modo") or "precio").strip().lower()
             plazo = "CI" if str(it.get("plazo") or "").upper().startswith("CI") else "24hs"

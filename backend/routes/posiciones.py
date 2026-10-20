@@ -682,6 +682,7 @@ def _perfil_vencimientos(selected: Optional[int],
         if obj is None or not hasattr(obj, "generate_cashflows") or not cant:
             otros += valor
             continue
+        pricing.aplicar_fx_dlk(obj, code)   # DLK: flujos en pesos al FX aplicable de hoy
         mon = (getattr(obj, "moneda", "") or "").upper()
         rate = 1.0
         if mon == "USD":
