@@ -329,6 +329,188 @@ def _fmt_ruedas(fechas: List[date], n: int = 6) -> str:
     return s + (f" (+{len(fechas) - n})" if len(fechas) > n else "")
 
 
+# ── contención estricta ("sin perder historiales", 15/10) ──────────────────
+# Antes "no aporta" salía de comparar FECHAS y totales de filas: una copia con
+# precios reales de un día que la principal tiene sólo como RC, una copia FX
+# con una celda de caución que la principal no, un apartado ilegible o un
+# temporal legible (la única copia de una escritura que no llegó al replace)
+# caían en "Borrar las que no aportan". Ahora una copia es borrable en lote
+# sólo si se PRUEBA que todo lo suyo está en la principal: cada fila ENTERA
+# con todos sus valores (px/tasas incluidas las métricas: una TIR corregida a
+# mano es historia) o, en el historial FX, cada celda con valor. Y sólo si se
+# pudo leer TODA la copia (`_una_tabla`: un parquet o un xlsx de UNA hoja;
+# nunca un .xlsm — un libro con más hojas o macros queda para revisar a mano).
+_RE_NUM = re.compile(r"^-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$")
+_CONT_MEMO: Dict[tuple, Optional[Tuple[bool, int]]] = {}
+_PRINC_MEMO: Dict[tuple, Any] = {}          # (principal, fuente, firma, qué) → frame / set normalizado
+
+
+def _norm(v: Any) -> Any:
+    """Valor comparable entre xlsx y parquet: NaN/None → None, números
+    redondeados (int y float iguales), fechas a ISO, texto sin espacios."""
+    import math
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)) or type(v).__module__ == "numpy":
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return str(v).strip()
+        return None if math.isnan(f) else round(f, 8)
+    if isinstance(v, (datetime, date)) or hasattr(v, "isoformat"):     # date / datetime / Timestamp
+        try:
+            return v.isoformat()          # ISO COMPLETO: una hora distinta es otro valor
+        except Exception:  # noqa: BLE001
+            return str(v)
+    t = str(v).strip()
+    if t in ("", "nan", "NaT", "None", "<NA>"):
+        return None
+    if _RE_NUM.match(t):
+        # el mismo número guardado como texto en un archivo y como número en
+        # el otro ("1790105400000" vs 1790105400000) es el mismo valor
+        try:
+            return round(float(t), 8)
+        except ValueError:
+            pass
+    return t
+
+
+def _filas_norm(df: Any, cols: List[str]) -> Set[tuple]:
+    return {tuple(_norm(v) for v in fila) for fila in df[cols].itertuples(index=False, name=None)}
+
+
+def _una_tabla(path: str) -> bool:
+    """¿`_leer_copia` ve TODO el contenido del archivo? Un parquet sí; un
+    xlsx sólo si tiene UNA hoja; un .xlsm nunca (las macros no se comparan).
+    Revisión 15/10: "Delta - Especies-NOTEBOOK.xlsx" con la edición en la
+    segunda hoja salía 'no aporta' mirando sólo la primera."""
+    ext = _ext_efectiva(path)
+    if ext == ".parquet":
+        return True
+    if ext != ".xlsx":
+        return False
+    try:
+        import pandas as pd
+        with pd.ExcelFile(path) as xl:
+            return len(xl.sheet_names) == 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _fuente_principal(principal: str) -> str:
+    """El archivo que se lee por la principal: su espejo parquet si es un xlsx
+    con espejo FIEL (~0,1 s contra ~20 s de openpyxl con el GIL tomado)."""
+    if _ext_efectiva(principal) in (".xlsx", ".xlsm"):
+        try:
+            from backend.services import espejo
+            pq = os.path.splitext(principal)[0] + ".parquet"
+            if espejo.espejo_valido(pq, principal):
+                return pq
+        except Exception:  # noqa: BLE001
+            pass
+    return principal
+
+
+def _memo_principal(principal: str, que: tuple, fn: Any) -> Any:
+    """Frame / conjunto normalizado de la principal UNA vez por firma de su
+    fuente: las K copias de una misma base comparten la lectura."""
+    src = _fuente_principal(principal)
+    key = (principal, src, _firma(src), que)
+    with _lock:
+        if key in _PRINC_MEMO:
+            return _PRINC_MEMO[key]
+    val = fn(src)
+    with _lock:
+        for k in [k for k in _PRINC_MEMO if k[0] == principal and k[1:3] != key[1:3]]:
+            _PRINC_MEMO.pop(k, None)                  # sólo la versión vigente de cada principal
+        _PRINC_MEMO[key] = val
+    return val
+
+
+def _contencion(copia: str, principal: str) -> Optional[Tuple[bool, int]]:
+    """(contenida, faltantes): ¿todo lo de `copia` está en `principal`? None
+    si no se puede comparar (ilegible, la copia no se puede leer entera,
+    columnas que la principal no tiene). Memo por las firmas de los dos."""
+    fc, fp = _firma(copia), _firma(principal)
+    if fc is None or fp is None:
+        return None
+    key = (copia, fc, principal, fp)
+    if key in _CONT_MEMO:
+        return _CONT_MEMO[key]
+    res: Optional[Tuple[bool, int]] = None
+    try:
+        if _una_tabla(copia):
+            c = _leer_copia(copia)
+            res = _comparar(c, principal)
+    except Exception:  # noqa: BLE001
+        res = None
+    if len(_CONT_MEMO) > 200:
+        _CONT_MEMO.clear()
+    _CONT_MEMO[key] = res
+    return res
+
+
+def _celdas_fx(df: Any) -> Set[tuple]:
+    """(fecha, columna, valor) de cada celda con valor del historial FX."""
+    cols = [k for k in df.columns if k != "fecha_hoy"]
+    out: Set[tuple] = set()
+    for fila in df[["fecha_hoy"] + cols].itertuples(index=False, name=None):
+        f = _norm(fila[0])
+        for k, v in zip(cols, fila[1:]):
+            nv = _norm(v)
+            if nv is not None:
+                out.add((f, k, nv))
+    return out
+
+
+def _comparar(c: Any, principal: str) -> Optional[Tuple[bool, int]]:
+    base = _base_de(principal)
+    pr = _memo_principal(principal, ("frame",), _leer_copia)
+    if base and base[0] == "fx":
+        # celda por celda: una columna que la principal no tiene = celdas vacías
+        if "fecha_hoy" not in c.columns or "fecha_hoy" not in pr.columns:
+            return None
+        faltan = _celdas_fx(c) - _memo_principal(principal, ("fx",), lambda _s: _celdas_fx(pr))
+        return (not faltan, len(faltan))
+    # px/tasas, acciones, particiones y cualquier otra tabla: la fila ENTERA en
+    # todas las columnas de la copia (una que la principal no tiene → None)
+    cols = list(c.columns)
+    if not cols or any(k not in pr.columns for k in cols):
+        return None
+    filas_p = _memo_principal(principal, ("filas",) + tuple(cols), lambda _s: _filas_norm(pr, cols))
+    faltan = _filas_norm(c, cols) - filas_p
+    return (not faltan, len(faltan))
+
+
+def _cont_de(copia: str, principal: str, solo_cache: bool) -> Tuple[bool, Optional[Tuple[bool, int]]]:
+    """(hecho, contención). Con `solo_cache` (el GET de la tarjeta) no lee
+    nada: hecho=False si todavía no se comparó (la memo no la tiene)."""
+    if not solo_cache:
+        return True, _contencion(copia, principal)
+    key = (copia, _firma(copia), principal, _firma(principal))
+    if key not in _CONT_MEMO:
+        return False, None
+    return True, _CONT_MEMO[key]
+
+
+def _veredicto_contencion(e: Dict[str, Any], cont: Optional[Tuple[bool, int]], que: str) -> None:
+    """aporta False sólo con contención probada; si no, None (revisar a mano)."""
+    reciente = " · más reciente que la principal" if e.get("mas_reciente") else ""
+    if cont is None:
+        e["aporta"] = None
+        e["veredicto"] = f"{que}: no se pudo comparar fila por fila con la principal — revisar a mano{reciente}"
+    elif cont[0]:
+        e["aporta"] = False
+        e["veredicto"] = f"no aporta: {que} — todas sus filas ya están en la principal{reciente}"
+    else:
+        e["aporta"] = None
+        e["veredicto"] = (f"{que}, pero tiene {cont[1]} fila{'s' if cont[1] != 1 else ''}/celda{'s' if cont[1] != 1 else ''} "
+                          "que la principal no (correcciones, instrumentos o valores): revisar a mano, NO borrar en lote"
+                          + reciente)
+
+
 def _analizar_entrada(e: Dict[str, Any], solo_cache: bool = False) -> None:
     """Completa `e` con sus stats, las del principal y el veredicto. Con
     `solo_cache` no lee nada: lo no revisado queda con veredicto None."""
@@ -340,14 +522,10 @@ def _analizar_entrada(e: Dict[str, Any], solo_cache: bool = False) -> None:
     e["mas_reciente"] = None
     e["mas_filas"] = None
     e["incorporable"] = False
-    if e["tipo"] == "temporal":
-        if time.time() - float(e.get("mtime_ts") or 0) < _TMP_MIN_EDAD_S:
-            # Recién escrito: puede ser un writer a punto de hacer os.replace.
-            e["aporta"] = None
-            e["veredicto"] = "temporal reciente (posible escritura en curso): no borrar todavía"
-        else:
-            e["aporta"] = False
-            e["veredicto"] = "temporal de una escritura cortada: no sirve, se puede borrar"
+    if e["tipo"] == "temporal" and time.time() - float(e.get("mtime_ts") or 0) < _TMP_MIN_EDAD_S:
+        # Recién escrito: puede ser un writer a punto de hacer os.replace.
+        e["aporta"] = None
+        e["veredicto"] = "temporal reciente (posible escritura en curso): no borrar todavía"
         return
     st, fechas = stats_de(e["path"], solo_cache)
     if st is None:
@@ -355,9 +533,14 @@ def _analizar_entrada(e: Dict[str, Any], solo_cache: bool = False) -> None:
     e["stats"] = st
     if st.get("error"):
         e["veredicto"] = f"ilegible ({st['error']})"
-        if e["tipo"] == "corrupto":
-            e["veredicto"] = "apartado por ilegible; sigue ilegible — se puede borrar"
+        if e["tipo"] == "temporal" and e.get("datos"):
+            # Una tabla (xlsx / parquet) cortada a mitad de escritura no se
+            # puede leer: no hay nada que recuperar.
             e["aporta"] = False
+            e["veredicto"] = "temporal de una escritura cortada (ilegible): no tiene nada recuperable, se puede borrar"
+        elif e["tipo"] == "corrupto":
+            e["veredicto"] = ("apartado por ilegible; sigue ilegible — puede tener datos recuperables a mano: "
+                              "NO se borra en lote")
         return
     p = e.get("principal")
     if not p:
@@ -376,6 +559,11 @@ def _analizar_entrada(e: Dict[str, Any], solo_cache: bool = False) -> None:
     if fechas is None or pfechas is None:
         if pst.get("error"):
             e["veredicto"] = f"la principal está ilegible ({pst['error']}): NO borrar esta copia sin revisar"
+        elif e.get("datos") and "filas" in st and "filas" in pst:
+            # tabla sin columna de fecha (p. ej. una partición): fila por fila
+            hecho, cont = _cont_de(e["path"], p, solo_cache)
+            if hecho:
+                _veredicto_contencion(e, cont, f"{st['filas']} vs {pst['filas']} filas de la principal")
         elif "filas" in st and "filas" in pst:
             e["veredicto"] = (f"{st['filas']} vs {pst['filas']} filas de la principal; sin fechas para comparar"
                               + (" · más reciente que la principal" if e["mas_reciente"] else ""))
@@ -394,25 +582,13 @@ def _analizar_entrada(e: Dict[str, Any], solo_cache: bool = False) -> None:
                           f"({e['ruedas_extra_fmt']})" + (f"; le faltan {menos} de la principal" if menos else "")
                           + (" · más reciente" if e["mas_reciente"] else ""))
     else:
-        mas_filas = (st.get("filas") or 0) > (pst.get("filas") or 0)
-        mas_reales = (st.get("reales") or 0) > (pst.get("reales") or 0)
-        if mas_filas or mas_reales:
-            # Mismas RUEDAS que la principal pero MÁS filas/reales: puede traer
-            # instrumentos nuevos o correcciones dentro de esas fechas que la
-            # principal no tiene (A01). No alcanza con comparar fechas → NO es
-            # borrable en lote; queda para revisar/incorporar a mano.
-            e["aporta"] = None
-            det = f"{st.get('filas', '?')} vs {pst.get('filas', '?')} filas"
-            if mas_reales:
-                det += f" ({st.get('reales')} vs {pst.get('reales')} reales)"
-            e["veredicto"] = (f"mismas ruedas que la principal pero {det} — puede tener instrumentos "
-                              "o correcciones que la principal no: revisar a mano, NO borrar en lote"
-                              + (" · más reciente" if e["mas_reciente"] else ""))
-        else:
-            e["aporta"] = False
-            e["veredicto"] = (f"no aporta: la principal tiene sus {st.get('ruedas', 0)} ruedas"
-                              + (f" y {menos} más" if menos else "")
-                              + (" (aunque esta copia es más reciente)" if e["mas_reciente"] else ""))
+        # Mismas ruedas (o menos): comparar FILA POR FILA (A01: dentro de esas
+        # fechas puede traer instrumentos, correcciones o filas reales donde la
+        # principal tiene RC). Sin contención probada no es borrable en lote.
+        que = (f"la principal tiene sus {st.get('ruedas', 0)} ruedas" + (f" y {menos} más" if menos else ""))
+        hecho, cont = _cont_de(e["path"], p, solo_cache)
+        if hecho:
+            _veredicto_contencion(e, cont, que)
 
 
 def _base_de(principal: str) -> Optional[Tuple[str, str]]:

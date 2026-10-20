@@ -61,6 +61,11 @@ if not defined PYBASE (
 REM --- 2) venv por maquina, FUERA de OneDrive ---
 set "VENVDIR=%LOCALAPPDATA%\venvs\bonos"
 set "PY=%VENVDIR%\Scripts\python.exe"
+REM --- .pyc FUERA de la carpeta sincronizada (15/10): sin esto cada PC
+REM     escribia __pycache__ adentro del clon y OneDrive los repartia a todas
+REM     (un set por version de Python, copias en conflicto, bajadas al importar).
+REM     Python los regenera solo; el chequeo de OneDrive borra los viejos.
+set "PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\bonos\pycache"
 if not exist "%PY%" (
   echo Primera vez en esta PC: creando entorno en %VENVDIR% ...
   %PYBASE% -m venv "%VENVDIR%"

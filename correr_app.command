@@ -64,6 +64,9 @@ fi
 # --- 2) venv por maquina, FUERA de OneDrive ---
 VENVDIR="$HOME/.venvs/bonos"
 PY="$VENVDIR/bin/python"
+# .pyc fuera de la carpeta del codigo (15/10; en Windows evita que OneDrive los
+# reparta entre PCs): Python los regenera solo.
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$HOME/.cache/bonos/pycache}"
 if [ ! -x "$PY" ]; then
   echo "Primera vez en esta Mac: creando entorno en $VENVDIR ..."
   "$PYBASE" -m venv "$VENVDIR" || {
