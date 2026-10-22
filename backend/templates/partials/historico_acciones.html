@@ -48,7 +48,7 @@
             <input type="date" name="desde" value="{{ desde or '' }}"></label>
           <label class="field"><span>Hasta</span>
             <input type="date" name="hasta" value="{{ hasta or '' }}"></label>
-          <label class="field"><span>vs Merval</span>
+          <label class="field"><span>vs MSCI Merval</span>
             <select name="cmp">
               <option value="1" {% if comparar %}selected{% endif %}>Sí</option>
               <option value="0" {% if not comparar %}selected{% endif %}>No</option>
@@ -107,7 +107,7 @@
       <div class="metric-value" style="font-size:15px">{% if pa.es_tir %}{{ con(rt.desvio, 2, ud) }} · {{ con(rt.vol_anual, 1, ud) }}{% else %}{{ pct(rt.vol_anual, 1) }} · {{ pct(st.mdd, 1) }}{% endif %}</div>
     </div>
     <div class="metric">
-      <div class="metric-label">vs Merval · β · ρ · relativo</div>
+      <div class="metric-label">vs MSCI Merval · β · ρ · relativo</div>
       <div class="metric-value" style="font-size:15px">{% if pa.cmp and not pa.cmp.insuficiente %}{{ nv(pa.cmp.beta, 2) }} · {{ nv(pa.cmp.corr, 2) }} · <span class="{{ 'var-up' if pa.cmp.ret_rel >= 0 else 'var-down' }}">{{ pct(pa.cmp.ret_rel, 1) }}</span>{% elif pa.ticker == "MERVAL" %}es el índice{% elif pa.panel == "B" %}no aplica a bonos{% else %}—{% endif %}</div>
     </div>
   </div>
@@ -132,7 +132,7 @@
           <text class="pa-mlabel" x="{{ g.x1 - 2 }}" y="{{ g.max.y - 3 }}" text-anchor="end">máx {{ con(st.max, dec, un) }}</text>
           <line class="pa-minmax" x1="{{ g.x0 }}" x2="{{ g.x1 }}" y1="{{ g.min.y }}" y2="{{ g.min.y }}"/>
           <text class="pa-mlabel" x="{{ g.x1 - 2 }}" y="{{ g.min.y + 11 }}" text-anchor="end">mín {{ con(st.min, dec, un) }}</text>
-          {% if g.overlay %}<polyline class="pa-overlay" points="{{ g.overlay }}"><title>Merval rebasado al nivel inicial de {{ pa.ticker }}</title></polyline>{% endif %}
+          {% if g.overlay %}<polyline class="pa-overlay" points="{{ g.overlay }}"><title>MSCI Merval rebasado al nivel inicial de {{ pa.ticker }}</title></polyline>{% endif %}
           <polyline class="fc-line" points="{{ g.poly }}"/>
           <circle class="fc-dot" cx="{{ g.last.cx }}" cy="{{ g.last.cy }}" r="4">
             <title>{{ pa.hasta }} · {{ con(st.ultimo, dec, un) }} · percentil {{ (st.percentil * 100) | ar_num(0) }} · z {{ nv(st.z, 2) }}σ</title></circle>
@@ -162,7 +162,7 @@
             Última variación {{ con(rt.ultimo, 2, ud) }} ({{ rt.ultimo_fecha }}) = {{ nv(rt.z_ultimo, 2) }}σ · media {{ con(rt.media, 3, ud) }} · σ diaria {{ con(rt.desvio, 2, ud) }} ·
             días positivos {{ pct(rt.pos_pct, 0) }} · mayor {{ con(rt.max, 2, ud) }} ({{ rt.max_fecha }}) · menor {{ con(rt.min, 2, ud) }} ({{ rt.min_fecha }}).
           {% endif %}
-          {% if pa.cmp and not pa.cmp.insuficiente %}Merval en la ventana {{ pct(pa.cmp.ret_merval, 1) }} ({{ pa.cmp.n }} ruedas comunes).{% endif %}
+          {% if pa.cmp and not pa.cmp.insuficiente %}MSCI Merval en la ventana {{ pct(pa.cmp.ret_merval, 1) }} ({{ pa.cmp.n }} ruedas comunes).{% endif %}
         </p>
       </div>
     </div>
