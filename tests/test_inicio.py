@@ -165,9 +165,9 @@ def test_kpis_tipos_de_cambio_y_mercado() -> None:
     finally:
         mod.equities.merval_row, mod.equities.row_for = orig, orig_rf
     m = {r["label"] + "|" + (r["sub"] or ""): r for r in filas}
-    ars = m["MERVAL|ARS"]
+    ars = m["MSCI Merval|ARS"]
     assert ars["value"] == 2_900_000.0 and ars["var_px"] == 100_000.0 and ars["var_pct"] == pytest.approx(29 / 28 - 1)
-    ccl = m["MERVAL|en CCL · GD30"]
+    ccl = m["MSCI Merval|en CCL · GD30"]
     assert ccl["value"] == pytest.approx(2_900_000 / 1450)
     close_ccl = 2_800_000 / (1450 / 1.02)
     assert ccl["var_pct"] == pytest.approx(2_900_000 / 1450 / close_ccl - 1)
@@ -175,7 +175,7 @@ def test_kpis_tipos_de_cambio_y_mercado() -> None:
     # SPY / EWZ: la versión en CCL va DEBAJO de la de pesos (desk 07/10), mismo
     # criterio que el Merval: CEDEAR ÷ CCL, variación contra el cierre en CCL de ayer
     assert [(r["label"], r["sub"]) for r in filas] == [
-        ("MERVAL", "ARS"), ("MERVAL", "en CCL · GD30"), ("Riesgo país", filas[2]["sub"]),
+        ("MSCI Merval", "ARS"), ("MSCI Merval", "en CCL · GD30"), ("Riesgo país", filas[2]["sub"]),
         ("SPY", "CEDEAR · ARS"), ("SPY", "en CCL · GD30"), ("EWZ", "CEDEAR · ARS"), ("EWZ", "en CCL · GD30")]
     spy = m["SPY|CEDEAR · ARS"]
     assert spy["value"] == 45_000.0 and spy["var_px"] == 1_000.0 and spy["var_pct"] == pytest.approx(45 / 44 - 1)

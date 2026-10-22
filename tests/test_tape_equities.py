@@ -53,7 +53,7 @@ async def test_tape_merval_usd_aparece() -> None:
         tp = await ac.get("/tape")
     assert tp.status_code == 200
     # DOS entradas: nivel en $ (índice crudo, 0 decimales) y en US$ (por CCL)
-    assert ">MERVAL<" in tp.text and "MERVAL US$" in tp.text
+    assert ">MSCI Merval<" in tp.text and "MSCI Merval US$" in tp.text
     assert "2.500.000" in tp.text                                # nivel ARS sin decimales
 
 
@@ -108,21 +108,21 @@ async def test_panel_lideres_encabeza_con_el_merval_y_oclh_ocultable() -> None:
                                     "LO": {"price": 2_440_000.0}})
     equities._merval_sym = None
     rows = equities.panel_rows("lideres")
-    assert rows[0]["code"] == "MERVAL" and rows[0]["indice"] is True
+    assert rows[0]["code"] == "MSCI Merval" and rows[0]["indice"] is True
     assert rows[0]["last"] == 2_500_000.0 and rows[0]["open"] == 2_460_000.0
     assert abs(rows[0]["var_pct"] - (2_500_000.0 / 2_450_000.0 - 1) * 100) < 1e-9
     assert rows[0]["bid"] is None and rows[0]["vwap"] is None and rows[0]["volume"] is None
     assert rows[0]["volume_frac"] == 0.0 and rows[0]["range_pos"] is not None
     assert sum(1 for r in rows if r.get("indice")) == 1 and any(r["code"] == "GGAL" for r in rows)
     todas = equities.panel_rows("todas")
-    assert todas[0]["code"] == "MERVAL" and todas[0]["panel"] == "I"
-    assert not any(r["code"] == "MERVAL" for r in equities.panel_rows("general"))
+    assert todas[0]["code"] == "MSCI Merval" and todas[0]["panel"] == "I"
+    assert not any(r["code"] == "MSCI Merval" for r in equities.panel_rows("general"))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.get("/mercado/table?panel=lideres&plazo=24hs")
         g = await ac.get("/mercado/table?panel=general&plazo=24hs")
     assert r.status_code == 200
     html = r.text
-    i_merval = html.index("MERVAL")
+    i_merval = html.index("MSCI Merval")
     assert i_merval < html.index(">GGAL<")                             # encabeza la tabla
     fila = html[html.rfind("<tr", 0, i_merval):html.index("</tr>", i_merval)]
     assert 'data-pin' in fila and 'row-indice' in fila and "2.500.000,00" in fila
@@ -225,4 +225,4 @@ def test_indice_msci_merval_mmsci_es_el_ticker_nuevo() -> None:
     equities._merval_cands["n"] = -1
     assert "MERV - XMEV - MMSCI - spot" in equities.merval_candidatos()
     assert equities.merval_snapshot().symbol == "MERV - XMEV - MMSCI - spot"
-    assert equities.merval_row()["code"] == "MERVAL"                            # la fila/etiqueta sigue MERVAL
+    assert equities.merval_row()["code"] == "MSCI Merval"                       # etiqueta visible (desk 22/10); el ticker interno sigue MERVAL

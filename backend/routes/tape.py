@@ -81,10 +81,10 @@ def _items(plazo: str = "24hs") -> List[Dict[str, Any]]:
     msnap = equities.merval_snapshot()
     if msnap is not None and msnap.last is not None:
         var_ars = _var(msnap.last, msnap.close)
-        items.append({"code": "MERVAL", "px": msnap.last, "var": var_ars,
+        items.append({"code": "MSCI Merval", "px": msnap.last, "var": var_ars,
                       "kind": "ars", "dec": 0})
         if ccl:
-            items.append({"code": "MERVAL US$", "px": msnap.last / ccl,
+            items.append({"code": "MSCI Merval US$", "px": msnap.last / ccl,
                           "var": _cable(var_ars), "kind": "usd"})
     # EWZ / SPY vistos en cable (precio ARS/CCL; var ajustada por CCL).
     for code in ("EWZ", "SPY"):
