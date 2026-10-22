@@ -953,7 +953,12 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   (docstring con antes/después). Y el ⧉ de "copiar tabla" sólo va antes de un
   `.table-scroll` que TIENE una tabla adentro: Series diarias / Curva por
   fechas envuelven el svg solo en `.card-body.table-scroll` y recibían un
-  segundo ⧉ que no copiaba nada, encimado al del gráfico (revisión 22/10); el dim
+  segundo ⧉ que no copiaba nada, encimado al del gráfico (revisión 22/10);
+  un svg decorativo (`aria-hidden="true"`: los sparklines de YAS, 64 px) no
+  recibe ⧉ (tapaba el último punto del trazo y el tooltip mín/máx). Queda
+  como está, cosmético y de antes: en los svg con `max-width` (Series
+  diarias / Curva por fechas) el ⧉ se apoya en el borde derecho del card, no
+  del svg; el dim
   `.htmx-request` excluye `[data-delta-scope]` (Mercado no lleva md-update
   en su trigger); el `scrollLeft` de cada `.table-scroll` del target se
   conserva a través del swap (app.js, "Scroll horizontal…"); `.live-meta`

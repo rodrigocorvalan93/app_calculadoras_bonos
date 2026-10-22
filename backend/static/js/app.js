@@ -1840,6 +1840,9 @@ window.lsSet = function (k, v) {
     if (!root || !root.querySelectorAll) return;
     root.querySelectorAll('svg').forEach(function (svg) {
       if (svg.closest('.chart-copy-skip') || svg.closest('button') || svg.closest('a')) return;
+      // Decorativos (aria-hidden: los sparklines de YAS, 64 px de alto): el ⧉
+      // tapaba el último punto del trazo y el tooltip mín/máx (revisión 22/10).
+      if (svg.getAttribute('aria-hidden') === 'true') return;
       var w = svg.getAttribute('width') || (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width) || 0;
       if (!(svg.getAttribute('role') === 'img' || parseFloat(w) >= 200)) return;   // íconos afuera
       var prev = svg.previousElementSibling;

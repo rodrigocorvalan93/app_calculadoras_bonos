@@ -66,6 +66,11 @@ def test_boton_copiar_grafico_svg_no_corre_el_grafico() -> None:
     # segundo ⧉ que no copiaba nada, encimado al del gráfico (revisión 22/10).
     j = JS.index("root.querySelectorAll('.table-scroll').forEach(function (ts) {")
     assert "if (!ts.querySelector('table')) return;" in JS[j:j + 600]
+    # Y un svg decorativo (aria-hidden: los sparklines de YAS, 64 px) no recibe
+    # ⧉: el botón tapaba el último punto del trazo y el tooltip mín/máx.
+    assert "if (svg.getAttribute('aria-hidden') === 'true') return;" in bloque
+    yas = (ROOT / "backend/templates/partials/yas_hist.html").read_text(encoding="utf-8")
+    assert re.search(r'<svg class="yas-hist-svg"[^>]*aria-hidden="true"', yas)
 
 
 def test_flash_es_solo_color_sin_escala() -> None:
