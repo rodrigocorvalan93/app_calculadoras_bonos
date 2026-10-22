@@ -107,7 +107,7 @@ def main() -> None:
         from backend.services import equities
         for c in equities.LIDERES + equities.GENERAL + equities.CEDEARS:
             seed(syms.md_symbol(c, "24hs"), _px(c) * 40); n += 1
-        store.update_from_md("MERV - XMEV - I.MERVAL - 24hs", {"IV": {"price": 2_000_000.0, "date": _ts()},
+        store.update_from_md("MERV - XMEV - MMSCI - 24hs", {"IV": {"price": 2_000_000.0, "date": _ts()},
                                                               "CL": {"price": 1_974_000.0}, "OP": 1_980_000.0,
                                                               "HI": 2_010_000.0, "LO": 1_970_000.0})
     except Exception as exc:  # noqa: BLE001

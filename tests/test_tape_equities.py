@@ -191,3 +191,36 @@ async def test_market_diag_lista_las_variantes_del_indice() -> None:
         assert r.status_code == 200
         ind = r.json()["indices"]
         assert ind["elegido"] and any(v["symbol"] == "MERV - XMEV - I.MERVAL" for v in ind["variantes"])
+
+
+def test_indice_msci_merval_mmsci_es_el_ticker_nuevo() -> None:
+    """Desde el 22/10 el índice es el MSCI Merval y el broker lo publica como
+    MMSCI (desk): las variantes MMSCI / I.MMSCI están en MERVAL_SYMBOLS (y por
+    lo tanto en el seed del WS), el escaneo del store y el seed con el universo
+    del broker las reconocen por token (`es_simbolo_indice`, también I.MERVAL
+    por si el broker lo sigue mandando) y `merval_snapshot` elige la que el
+    feed actualiza: con el I.MERVAL viejo clavado en un cierre y el MMSCI con
+    el IV en vivo, manda MMSCI."""
+    from backend.services import equities, marketdata_store as mds
+
+    assert "MERV - XMEV - MMSCI - 24hs" in equities.MERVAL_SYMBOLS
+    assert "MERV - XMEV - I.MERVAL - 24hs" in equities.MERVAL_SYMBOLS          # el viejo sigue
+    assert set(equities.MERVAL_SYMBOLS) <= set(equities.all_symbols())         # todas van al seed
+    assert equities.es_simbolo_indice("MERV - XMEV - MMSCI - 24hs")
+    assert equities.es_simbolo_indice("MERV - XMEV - I.MMSCI - CI")
+    assert equities.es_simbolo_indice("I.MERVAL")
+    assert not equities.es_simbolo_indice("MERV - XMEV - GGAL - 24hs")
+    assert not equities.es_simbolo_indice("MERV - XMEV - MERV - 24hs")         # el prefijo MERV no es el índice
+
+    store = mds.get_store()
+    equities._merval_cands.update(n=-1, at=0.0, syms=[])
+    store.update_from_md("MERV - XMEV - I.MERVAL - 24hs", {"CL": {"price": 2_400_000.0}})
+    store.update_from_md("MERV - XMEV - MMSCI - 24hs", {"IV": {"price": 2_650_000.0, "date": "2026-10-22T11:00:00"}})
+    s = equities.merval_snapshot()
+    assert s is not None and s.symbol == "MERV - XMEV - MMSCI - 24hs" and s.last == 2_650_000.0
+    # un string que no está en la tupla pero lleva el token también entra al escaneo
+    store.update_from_md("MERV - XMEV - MMSCI - spot", {"IV": {"price": 2_660_000.0}})
+    equities._merval_cands["n"] = -1
+    assert "MERV - XMEV - MMSCI - spot" in equities.merval_candidatos()
+    assert equities.merval_snapshot().symbol == "MERV - XMEV - MMSCI - spot"
+    assert equities.merval_row()["code"] == "MERVAL"                            # la fila/etiqueta sigue MERVAL

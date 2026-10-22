@@ -40,7 +40,7 @@
         {% for r in rows %}
           {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
           {% if r.indice %}
-          <tr class="row-indice" data-pin title="Índice Merval · nivel y variación del día (sin libro)">
+          <tr class="row-indice" data-pin title="Índice MSCI Merval (MMSCI) · nivel y variación del día (sin libro)">
             <td style="text-align:left;font-weight:650">{{ r.code }} <span class="pill" style="font-size:10px;margin-left:4px">índice</span></td>
           {% else %}
           <tr style="cursor:pointer"

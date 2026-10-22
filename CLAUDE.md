@@ -1547,3 +1547,16 @@ el tape e Inicio. `GET /market/diag` → `indices` = variantes en el store
 (last / close / last_ts / updated_at / seq) y `elegido`: ahí se ve bajo qué
 string manda el broker el IV en cada máquina. Regresión:
 `test_tape_equities.test_merval_snapshot_elige_la_variante_que_el_feed_actualiza`.
+**MSCI Merval = `MMSCI` (22/10)**: el índice pasó a llamarse MSCI Merval y el
+broker lo publica con el ticker `MMSCI` (desk). `equities.MERVAL_SYMBOLS`
+lleva primero las variantes `MMSCI` / `I.MMSCI` (con y sin plazo) y conserva
+las de `I.MERVAL` por si el broker las sigue mandando; `equities.
+es_simbolo_indice(s)` (tokens `INDICE_TOKENS` = MMSCI, MERVAL) reemplaza al
+`"MERVAL" in s.upper()` del escaneo de candidatos y del seed con el universo
+del broker en `main`; `merval_snapshot` sigue eligiendo la variante que el
+feed actualiza, así el cambio de nombre no deja el índice clavado en el
+cierre viejo de I.MERVAL. La etiqueta / ticker interno del histórico sigue
+siendo `MERVAL` (`historico_writer.MERVAL_TICKER`: la serie de acciones no se
+parte); `backfill_acciones._MERVAL_SYMS` prueba MMSCI / I.MMSCI antes que los
+nombres viejos en BYMA Open Data; `dev_ticks` siembra `MERV - XMEV - MMSCI -
+24hs`. Regresión: `test_tape_equities.test_indice_msci_merval_mmsci_es_el_ticker_nuevo`.
