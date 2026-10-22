@@ -219,6 +219,8 @@ def test_indice_msci_merval_mmsci_es_el_ticker_nuevo() -> None:
     s = equities.merval_snapshot()
     assert s is not None and s.symbol == "MERV - XMEV - MMSCI - 24hs" and s.last == 2_650_000.0
     # un string que no está en la tupla pero lleva el token también entra al escaneo
+    import time
+    time.sleep(0.05)   # Windows: time.time() avanza de a ~16 ms; dos updates en el mismo tick empatan en updated_at y gana el primero
     store.update_from_md("MERV - XMEV - MMSCI - spot", {"IV": {"price": 2_660_000.0}})
     equities._merval_cands["n"] = -1
     assert "MERV - XMEV - MMSCI - spot" in equities.merval_candidatos()
