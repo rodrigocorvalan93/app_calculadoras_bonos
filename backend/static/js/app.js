@@ -1830,7 +1830,8 @@ window.lsSet = function (k, v) {
     box.appendChild(b);
   };
   // SVG del server (series diarias, forwards, escenario, break-even, semanal…):
-  // hermano ANTES del svg (mismo truco de margen negativo que .tbl-copy).
+  // hermano ANTES del svg, flotante y con caja de margen de alto cero (CSS
+  // .chart-copy-inline): no corre el svg ni lo que sigue, esté o no.
   function injectSvg(root) {
     if (!root || !root.querySelectorAll) return;
     root.querySelectorAll('svg').forEach(function (svg) {
@@ -1845,6 +1846,12 @@ window.lsSet = function (k, v) {
       svg.parentNode.insertBefore(b, svg);
     });
   }
+  // En afterSwap (síncrono, antes del primer paint del contenido nuevo), como
+  // el ⧉ de las tablas: el histórico de Forwards se swapea entero en cada
+  // md-update y con la inyección sólo en afterSettle (20 ms después) el botón
+  // faltaba un frame por tick — parpadeaba y, con el CSS viejo, movía el
+  // gráfico (22/10). afterSettle queda de red; injectSvg es idempotente.
+  document.body.addEventListener('htmx:afterSwap', function (evt) { injectSvg(evt.detail.elt || evt.target); });
   document.body.addEventListener('htmx:afterSettle', function (evt) { injectSvg(evt.detail.elt || evt.target); });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { injectSvg(document); });
   else injectSvg(document);

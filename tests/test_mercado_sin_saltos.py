@@ -34,6 +34,30 @@ def test_boton_copiar_tiene_alto_neto_cero() -> None:
     assert "-18px" not in b
 
 
+def test_boton_copiar_grafico_svg_no_corre_el_grafico() -> None:
+    """Forwards · Histórico del forward (desk 22/10): el ⧉ de los SVG del
+    server se inyectaba sólo en afterSettle (20 ms después del swap) y era un
+    bloque con margin-bottom -22 px entre el margin-bottom de las tarjetas
+    (.metrics-grid, 12 px) y el margin-top del svg (10 px): rompía el colapso de
+    esos márgenes (12 + 18 − 22 + 10 = 18 en vez de 12) → en cada md-update el
+    svg y el pie bajaban 6 px por un frame y el botón parpadeaba. Medido con
+    Playwright sobre el server con ticks (8 s, ~1 tick/s): antes 10 frames sin
+    botón, 16 cambios de posición (svg 1381 → 1387 → 1381, card 626 → 632);
+    después 0 / 0 / 0 layout shifts. Ahora el botón es un float a la derecha con
+    caja de margen de alto cero (fuera del flujo: esté o no, nada se mueve) y
+    se inyecta en afterSwap, antes del primer paint, como el ⧉ de las tablas."""
+    (b,) = _bloques(".chart-copy.chart-copy-inline")
+    assert "float: right" in b and "position: relative" in b
+    assert "height: 18px" in b and "box-sizing: border-box" in b
+    assert "margin: 0 2px -18px 0" in b             # margen negativo = alto exacto → caja de margen de alto 0
+    assert "-22px" not in b and "auto;" not in b.replace("top: auto", "").replace("right: auto", "")
+    i = JS.index("function injectSvg(root)")
+    bloque = JS[i:i + 2500]
+    assert "document.body.addEventListener('htmx:afterSwap', function (evt) { injectSvg(" in bloque
+    assert "document.body.addEventListener('htmx:afterSettle', function (evt) { injectSvg(" in bloque
+    assert "if (prev && prev.classList && prev.classList.contains('chart-copy')) return;" in bloque   # idempotente
+
+
 def test_flash_es_solo_color_sin_escala() -> None:
     assert "tick-pop" not in CSS_SIN_COMENTARIOS     # ni keyframes ni una segunda animación
     up, down = _bloques(".tick-up"), _bloques(".tick-down")

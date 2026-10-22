@@ -936,7 +936,18 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   tick); el botón ⧉ (`.tbl-copy`, que app.js inyecta ADENTRO del swap) tiene
   alto neto cero (`height: 14px` + `margin-bottom: -14px`; con -18 px la
   tabla saltaba 4 px por un frame en cada swap completo — acciones = cada
-  tick) y se inyecta en `htmx:afterSwap` (antes del paint); el dim
+  tick) y se inyecta en `htmx:afterSwap` (antes del paint); **el ⧉ de los
+  SVG del server** (`.chart-copy-inline`, 22/10) es un `float: right` con
+  caja de margen de alto CERO (`height: 18px` + `margin-bottom: -18px`,
+  fuera del flujo) y también se inyecta en `afterSwap`: era un bloque con
+  `-22px` que, entre el `margin-bottom` de `.metrics-grid` (12) y el
+  `margin-top` del svg (10), rompía el COLAPSO de esos márgenes (+6 px) y
+  como faltaba un frame por tick (sólo `afterSettle`) el Histórico del
+  forward bajaba y subía 6 px en cada md-update (video del desk; el "cero
+  corrimiento" de un hermano con margen negativo depende de los márgenes de
+  los vecinos — un float de alto cero, no). Medición:
+  `tests/test_mercado_sin_saltos.test_boton_copiar_grafico_svg_no_corre_el_grafico`
+  (docstring con antes/después); el dim
   `.htmx-request` excluye `[data-delta-scope]` (Mercado no lleva md-update
   en su trigger); el `scrollLeft` de cada `.table-scroll` del target se
   conserva a través del swap (app.js, "Scroll horizontal…"); `.live-meta`
