@@ -19,7 +19,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.config import settings
-from backend.locale_ar import fmt_pct, hoy_ba, parse_ar_num
+from backend.locale_ar import fmt_num, fmt_pct, hoy_ba, parse_ar_num
 from backend.cache_seq import seq_cached
 from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_svc, historico_byma, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
 
@@ -1238,32 +1238,85 @@ def _matrix_from_rows(rows: list[dict], include: set[str] | None = None,
 
 
 def _whatif_from_rows(rows: list[dict], include: set[str] | None,
-                      overrides: dict[str, float], settle: str | None = None):
+                      overrides: dict[str, float], settle: str | None = None,
+                      mostrados: dict[str, float] | None = None):
     """(filas editables, matriz). Un bono SIN editar reusa la TIR/Duration ya
     calculada en su fila (cero pricing extra); sólo los editados recalculan —
     con el MISMO settle de la pestaña, así la TIR editada es comparable con
-    las filas no editadas (y pega el cache de curvas, no una key aparte)."""
+    las filas no editadas (y pega el cache de curvas, no una key aparte).
+    `mostrados` = los precios de mercado que mostró el render anterior
+    (`mkt_<CODE>`): "editado" se decide contra eso (`_precio_editado`)."""
     if include is not None:
         rows = [r for r in rows if r["code"] in include]
     capped, trunc, total = _fwd_points(rows)   # mismo tope/criterio que la matriz
+    mostrados = mostrados or {}
     out = []
     for r in capped:
         code = r["code"]
         mkt = r.get("px_calc")            # precio nativo de mercado (el que valuó la fila)
         ov = overrides.get(code)
-        if ov is not None:
+        if _precio_editado(ov, mkt, mostrados.get(code)):
             # Pricear con la MISMA ficha que valuó la fila (calc = nativa …D/…C
             # para especies pesos/clean de hard-dollar): antes el override iba
             # a `code` y la fila editada se comparaba con otra ficha.
             m = pricing.metrics_for_market_price(r.get("calc") or code, ov, settle) or {}
-            tirea, duration, price = m.get("tirea"), m.get("duration"), ov
+            tirea, duration, price, edited = m.get("tirea"), m.get("duration"), ov, True
         else:                              # reusa lo ya calculado en la fila
-            tirea, duration, price = r.get("tirea"), r.get("duration"), mkt
+            tirea, duration, price, edited = r.get("tirea"), r.get("duration"), mkt, False
         out.append({"code": code, "market": mkt, "price": price,
-                    "tirea": tirea, "duration": duration, "edited": ov is not None})
+                    "tirea": tirea, "duration": duration, "edited": edited})
     matrix = _forwards_matrix(out)
     matrix["truncated"], matrix["total"] = trunc, total
     return out, matrix
+
+
+def _precio_editado(ov: float | None, mkt: float | None,
+                    mostrado: float | None = None) -> bool:
+    """¿El precio del what-if es una EDICIÓN? Los inputs vienen pre-cargados
+    con el precio de mercado a 2 decimales (`ar_num(2)`), así que a partir del
+    primer cambio TODOS viajan con valor: un valor igual al que el input
+    MOSTRABA (`mostrado` = hidden `mkt_<CODE>` del mismo render; sin él, el
+    mercado vivo `mkt`) no es edición. Contra el mercado vivo no alcanza: el
+    panel no se redibuja con cada tick y el precio pre-cargado queda viejo
+    apenas el bono opera (parecía editado con Δ de pocos bps). Antes las 22
+    filas quedaban resaltadas y re-valuadas al precio redondeado tras tocar
+    una sola, y así seguían al borrarla."""
+    if ov is None:
+        return False
+    ref = mostrado if mostrado is not None else mkt
+    if ref is None:
+        return True
+    return fmt_num(ov, 2) != fmt_num(ref, 2)
+
+
+def _fwd_whatif(a: dict, b: dict, overrides: dict[str, float], settle: str | None,
+                mostrados: dict[str, float] | None = None) -> float | None:
+    """Forward corto→largo del par con los precios editados en el what-if: sólo
+    el bono editado se re-valúa (misma ficha `calc` y mismo settle que su fila,
+    como `_whatif_from_rows`); el otro reusa la TIR/Duration ya calculada.
+    Pricing sincrónico (~ms por cache miss): llamar desde el pool. None si
+    ninguno de los dos está editado (precio distinto del que mostraba el
+    input: `mostrados`, hidden `mkt_<CODE>`)."""
+    from backend.services import forwards_hist as fh
+
+    mostrados = mostrados or {}
+
+    def _editado(r: dict) -> bool:
+        return _precio_editado(overrides.get(r["code"]), r.get("px_calc"), mostrados.get(r["code"]))
+
+    if not (_editado(a) or _editado(b)):
+        return None
+
+    def _yd(r: dict) -> tuple:
+        ov = overrides.get(r["code"])
+        if not _editado(r):
+            return r.get("tirea"), r.get("duration")
+        m = pricing.metrics_for_market_price(r.get("calc") or r["code"], ov, settle) or {}
+        return m.get("tirea"), m.get("duration")
+
+    y1, t1 = _yd(a)
+    y2, t2 = _yd(b)
+    return fh.fwd_rate(y1, t1, y2, t2)
 
 
 async def _forwards_for(curve_key: str, plazo: str, only_quoting: bool, leg: str,
@@ -1281,8 +1334,10 @@ async def _matrix_async(rows: list[dict], include: set[str] | None = None,
         _row_pool, _matrix_from_rows, rows, include, metric)
 
 
-def _price_overrides(request: Request) -> dict[str, float]:
+def _price_overrides(request: Request, prefix: str = "price_") -> dict[str, float]:
     """Lee los `price_<CODE>` del query (what-if): precio nativo % VN > 0.
+    Con `prefix="mkt_"`, los precios de mercado que MOSTRÓ el último render del
+    what-if (hidden por fila): contra eso se decide si un precio está editado.
 
     Los inputs del what-if son <input type="text" inputmode="decimal"> en es-AR
     (antes type=number: Safari/Firefox rechazan la coma decimal y mandaban ""),
@@ -1293,7 +1348,7 @@ def _price_overrides(request: Request) -> dict[str, float]:
     """
     out: dict[str, float] = {}
     for k, v in request.query_params.multi_items():
-        if not k.startswith("price_"):
+        if not k.startswith(prefix):
             continue
         s = (v or "").strip()
         if not s:
@@ -1305,19 +1360,20 @@ def _price_overrides(request: Request) -> dict[str, float]:
             except ValueError:
                 continue
         if f is not None and math.isfinite(f) and f > 0:
-            out[k[len("price_"):]] = f
+            out[k[len(prefix):]] = f
     return out
 
 
 async def _whatif_rows(curve_key: str, plazo: str, only_quoting: bool, leg: str,
-                       include: set[str] | None, overrides: dict[str, float]):
+                       include: set[str] | None, overrides: dict[str, float],
+                       mostrados: dict[str, float] | None = None):
     rows, _meta = await _rows_for(curve_key, plazo, only_quoting, leg)
     # El loop de overrides recalcula (metrics_for_market_price) por bono editado:
     # con precios editados/stale son cache-misses (~27 ms c/u, hasta ~1,35 s en el
     # peor caso). Fuera del event loop, como todo el resto del pricing de curvas.
     loop = asyncio.get_running_loop()
     settle = pricing.settlement_date_str(plazo)
-    return await loop.run_in_executor(_row_pool, _whatif_from_rows, rows, include, overrides, settle)
+    return await loop.run_in_executor(_row_pool, _whatif_from_rows, rows, include, overrides, settle, mostrados)
 
 
 @forwards_router.get("/forwards", response_class=HTMLResponse)
@@ -1414,23 +1470,36 @@ async def forwards_hist_partial(
 ) -> HTMLResponse:
     """Histórico del forward de un par: media/desvío/percentil/z de la serie
     reconstruida de la base diaria + el fwd de HOY desde las filas cacheadas
-    de la curva (cero pricing extra: reusa _rows_for)."""
+    de la curva (cero pricing extra: reusa _rows_for). Si el request trae los
+    precios del what-if (`price_<CODE>`, el `#wi-prices` que el panel incluye)
+    y alguno de los dos bonos del par está editado, también el forward
+    what-if (`fwd_wi`: segundo punto del gráfico + línea en la tarjeta)."""
     from backend.services import forwards_hist as fh, historico_byma
 
     st = ch = None
+    wi_delta_bps = None
     if corto and largo and corto != largo:
         rows, _meta = await _rows_for(curve, plazo, only_quoting, leg)
         by = {r["code"]: r for r in rows}
         a, b = by.get(corto), by.get(largo)
-        fwd_hoy = None
+        fwd_hoy = fwd_wi = None
         if a and b:
             fwd_hoy = fh.fwd_rate(a.get("tirea"), a.get("duration"),
                                   b.get("tirea"), b.get("duration"))
-        st = fh.stats(corto, largo, ventana=ventana, fwd_hoy=fwd_hoy)
+            overrides = _price_overrides(request)
+            if corto in overrides or largo in overrides:
+                # Sólo con un precio del par en el request: 1-2 valuaciones, en el
+                # pool (None si ninguno está realmente editado: _precio_editado).
+                mostrados = _price_overrides(request, "mkt_")
+                fwd_wi = await asyncio.get_running_loop().run_in_executor(
+                    _row_pool, _fwd_whatif, a, b, overrides, pricing.settlement_date_str(plazo), mostrados)
+        st = fh.stats(corto, largo, ventana=ventana, fwd_hoy=fwd_hoy, fwd_whatif=fwd_wi)
         ch = fh.chart(st)
+        if fwd_wi is not None and fwd_hoy is not None:
+            wi_delta_bps = (fwd_wi - fwd_hoy) * 1e4
     return _render(request, "partials/forwards_hist.html",
                    st=st, ch=ch, corto=corto, largo=largo, ventana=ventana,
-                   hb_ok=historico_byma.available())
+                   wi_delta_bps=wi_delta_bps, hb_ok=historico_byma.available())
 
 
 @forwards_router.get("/forwards/whatif", response_class=HTMLResponse)
@@ -1445,7 +1514,8 @@ async def forwards_whatif(
 ) -> HTMLResponse:
     include = set(code or []) if filtered else None
     overrides = _price_overrides(request)
-    wi_rows, wi_fwd = await _whatif_rows(curve, plazo, only_quoting, leg, include, overrides)
+    mostrados = _price_overrides(request, "mkt_")      # lo que mostró el render anterior
+    wi_rows, wi_fwd = await _whatif_rows(curve, plazo, only_quoting, leg, include, overrides, mostrados)
     return _render(
         request, "partials/forwards_whatif.html",
         wi_rows=wi_rows, wi_fwd=wi_fwd, selected_def=curves.curve_def(curve),

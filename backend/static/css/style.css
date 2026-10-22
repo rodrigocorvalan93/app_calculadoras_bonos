@@ -514,6 +514,10 @@ select {
   background: var(--accent-soft);
 }
 .metric.metric-highlight .metric-value { color: var(--accent); }
+/* "◯ what-if …" al lado del Fwd hoy del histórico de Forwards (sólo con un
+   precio editado del par): el mismo celeste del anillo del gráfico, en la
+   misma línea que el valor (la tarjeta no cambia de alto al aparecer). */
+.metric-wi { font-size: 11.5px; font-weight: 600; color: var(--cyan); margin-left: 8px; white-space: nowrap; letter-spacing: 0; }
 
 .metric.metric-positive .metric-value { color: var(--green); }
 .metric.metric-negative .metric-value { color: var(--red); }
@@ -1410,6 +1414,10 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .fut-chart .fc-vlabel, .fut-chart .fc-xlabel { fill: var(--text-muted); font-size: 11px; }
 .fut-chart .fc-line { fill: none; stroke: var(--accent); stroke-width: 2; }
 .fut-chart .fc-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 1; }
+/* Forward what-if del histórico de Forwards: anillo celeste (mismo celeste que
+   la fila editada del what-if) con relleno del panel, encima del punto de hoy
+   — si los dos valores coinciden se ve el anillo alrededor del punto. */
+.fut-chart .fc-dot-wi { fill: var(--panel); fill-opacity: 0.35; stroke: var(--cyan); stroke-width: 2; }
 .fut-chart .fc-bar { fill: var(--cyan); }
 .fut-chart .fc-blabel { fill: var(--text-soft); font-size: 10.5px; font-weight: 600; }
 .fut-chart .fc-avg { stroke: var(--accent); stroke-width: 1.4; stroke-dasharray: 5 4; opacity: 0.85; }
@@ -1676,7 +1684,21 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 }
 /* Copiar gráfico (⧉) arriba a la derecha: en uPlot como hijo absoluto del
    contenedor (.chart-copy-shift deja lugar al ⤓ PNG de Gráficos); en los SVG
-   del server como hermano anterior con margen negativo (cero corrimiento). */
+   del server como hermano anterior FLOTANTE a la derecha con margen inferior
+   = su alto (18 px: 12 de línea + 2×2 de padding + 2×1 de borde, border-box)
+   → caja de margen de alto CERO, fuera del flujo: esté o no, el svg y lo que
+   sigue quedan exactamente donde estaban — en un contenedor block de ancho
+   definido, que es donde viven todos los svg del server (.card-body,
+   #fwd-hist, #be-chart…); en uno que mide por contenido (td auto,
+   fit-content, ítem flex/grid con basis auto) el ANCHO del botón sí cuenta
+   (revisión 22/10). La versión anterior era un bloque
+   con margin-bottom -22 px y "cero corrimiento" sólo en el papel: metido
+   entre el margin-bottom de las tarjetas (.metrics-grid, 12 px) y el
+   margin-top del svg (10 px) rompía el COLAPSO de esos dos márgenes
+   (12 + 18 − 22 + 10 = 18 en vez de 12) y, como se inyecta adentro del swap
+   de htmx, el histórico de Forwards bajaba 6 px por un frame en cada tick
+   (desk 22/10; medido con backend/tools/fwd_hist_probe.py sobre
+   dev_ticks.py: svg 1381 → 1387 → 1381, 10 frames sin botón → 0 / 0). */
 .chart-copy {
   position: absolute; top: 6px; right: 8px; z-index: 7;
   font-size: 12px; line-height: 1; padding: 2px 7px; border: 1px solid var(--border);
@@ -1686,7 +1708,8 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .chart-copy:hover, .chart-copy.ok { opacity: 1; color: var(--text); }
 .chart-copy.chart-copy-shift { right: 70px; }
 .chart-copy.chart-copy-inline {
-  position: relative; top: auto; right: auto; display: block; margin: 0 2px -22px auto; z-index: 3;
+  float: right; position: relative; top: auto; right: auto; display: block; z-index: 3;
+  height: 18px; box-sizing: border-box; margin: 0 2px -18px 0;
 }
 .hm-datos > summary::-webkit-details-marker { display: none; }
 .graf-dl {

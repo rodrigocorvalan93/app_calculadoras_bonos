@@ -265,15 +265,16 @@ async def lifespan(app: FastAPI):
         feed_txt = "login al broker falló (sin datos vivos)"
         if ok:
             seed = _initial_symbols()
-            # Índices: además de las variantes conocidas de I.MERVAL (ya en el
-            # seed), buscamos en el universo REAL del broker cualquier símbolo
-            # con 'MERVAL' — robusto al naming exacto que use cada endpoint.
-            # De paso calienta el cache de instruments para el pre-trade.
+            # Índices: además de las variantes conocidas (MMSCI = MSCI Merval
+            # desde el 22/10, e I.MERVAL; ya en el seed), buscamos en el
+            # universo REAL del broker cualquier símbolo con esos tokens —
+            # robusto al naming exacto que use cada endpoint. De paso
+            # calienta el cache de instruments para el pre-trade.
             try:
-                from backend.services import instruments
+                from backend.services import equities as eq_svc, instruments
                 todos = await instruments.valid_symbols()
                 if todos:
-                    extra = [s for s in todos if "MERVAL" in s.upper() and s not in seed]
+                    extra = [s for s in todos if eq_svc.es_simbolo_indice(s) and s not in seed]
                     if extra:
                         seed.extend(extra)
                         logger.info("[main] índices del broker sumados al seed: %s", extra)

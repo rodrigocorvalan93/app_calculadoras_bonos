@@ -936,7 +936,35 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   tick); el botón ⧉ (`.tbl-copy`, que app.js inyecta ADENTRO del swap) tiene
   alto neto cero (`height: 14px` + `margin-bottom: -14px`; con -18 px la
   tabla saltaba 4 px por un frame en cada swap completo — acciones = cada
-  tick) y se inyecta en `htmx:afterSwap` (antes del paint); el dim
+  tick) y se inyecta en `htmx:afterSwap` (antes del paint); **el ⧉ de los
+  SVG del server** (`.chart-copy-inline`, 22/10) es un `float: right` con
+  caja de margen de alto CERO (`height: 18px` + `margin-bottom: -18px`,
+  fuera del flujo) y también se inyecta en `afterSwap`: era un bloque con
+  `-22px` que, entre el `margin-bottom` de `.metrics-grid` (12) y el
+  `margin-top` del svg (10), rompía el COLAPSO de esos márgenes (+6 px) y
+  como faltaba un frame por tick (sólo `afterSettle`) el Histórico del
+  forward bajaba y subía 6 px en cada md-update (video del desk; el "cero
+  corrimiento" de un hermano con margen negativo depende de los márgenes de
+  los vecinos — un float de alto cero, no, mientras el contenedor sea un
+  block de ancho definido como todos los `.card-body` / `#fwd-hist` /
+  `#be-chart` de hoy: en un `td` auto o un `fit-content` el ANCHO del botón
+  sí entra al cálculo). `injectSvg` toma los svg con `role="img"` o con
+  `width` ≥ 200 px: `graficos_svg.html` y `historico_semanal.html` llevan
+  `width="100%"` sin role y NO reciben ⧉ (a propósito se deja así: el de
+  Qué pasó vive en un `td` de tabla auto). Medición: `DEV_TICKS_HIST=1
+  python backend/tools/dev_ticks.py 8765` + `python
+  backend/tools/fwd_hist_probe.py http://127.0.0.1:8765/forwards` (por frame:
+  posición de tarjetas / ⧉ / svg / pie, frames sin ⧉, swaps, layout-shifts);
+  regresión: `tests/test_mercado_sin_saltos.test_boton_copiar_grafico_svg_no_corre_el_grafico`
+  (docstring con antes/después). Y el ⧉ de "copiar tabla" sólo va antes de un
+  `.table-scroll` que TIENE una tabla adentro: Series diarias / Curva por
+  fechas envuelven el svg solo en `.card-body.table-scroll` y recibían un
+  segundo ⧉ que no copiaba nada, encimado al del gráfico (revisión 22/10);
+  un svg decorativo (`aria-hidden="true"`: los sparklines de YAS, 64 px) no
+  recibe ⧉ (tapaba el último punto del trazo y el tooltip mín/máx). Queda
+  como está, cosmético y de antes: en los svg con `max-width` (Series
+  diarias / Curva por fechas) el ⧉ se apoya en el borde derecho del card, no
+  del svg; el dim
   `.htmx-request` excluye `[data-delta-scope]` (Mercado no lleva md-update
   en su trigger); el `scrollLeft` de cada `.table-scroll` del target se
   conserva a través del swap (app.js, "Scroll horizontal…"); `.live-meta`
@@ -987,6 +1015,44 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   Tests: `tests/test_book_ordenes_propias.py`. Para mirar un libro con ticks
   constantes: `DEV_TICKS_FOCUS=S13N6 python backend/tools/dev_ticks.py 8765`
   (alterna un tick de sólo tamaños —flashea— con uno de precios).
+
+## Forwards · Histórico del forward — punto what-if (22/10)
+
+El punto lleno (naranja) del gráfico es el forward de HOY del par con el
+mismo precio que la matriz (último si operó, si no cierre previo de BYMA:
+`_rows_for`). Pedido del desk: si en el what-if de la misma pestaña se edita
+el precio de alguno de los dos bonos del par, un SEGUNDO punto con el
+forward what-if. `#fwd-hist` incluye `#wi-prices` en cada pedido (los
+`price_<CODE>` del panel, cuando ya se reveló) y se dispara también con
+`change from:#forwards-whatif`; lleva `data-skip-same` (revisión 22/10: el
+HTML del histórico es idéntico en la mayoría de los ticks y se re-swapeaba
+entero — svg incluido — ~1 vez/s; ahora app.js cancela el swap idéntico, el
+panel sigue en tiempo real cuando el par cambia); `forwards_hist_partial` lee los overrides con
+el mismo `_price_overrides` del what-if y SÓLO si `corto` o `largo` está
+editado re-valúa ese bono (`_fwd_whatif`: misma ficha `calc` y settle que su
+fila, como `_whatif_from_rows`; el otro reusa su TIR/Duration; en el
+`_row_pool`) → `fh.stats(fwd_whatif=…)` deja `fwd_wi` / `percentil_wi` /
+`z_wi`, `fh.chart` lo suma a la escala y devuelve `whatif` (misma x que hoy)
+→ anillo celeste `.fc-dot-wi` (relleno del panel, encima del punto de hoy:
+si coinciden se ve el anillo alrededor), línea "◯ what-if … · Δ bps"
+(`.metric-wi`, en la MISMA línea que el valor: la tarjeta no cambia de alto)
+en la tarjeta Fwd hoy y leyenda en el pie. Sin precio editado del par (input
+vacío, otro bono, what-if sin revelar) no cambia nada; la key del
+`seq_cached` es el query string entero, así que los precios entran solos.
+**"Editado" = distinto del precio que MOSTRABA el input** (`_precio_editado`:
+`fmt_num(ov, 2) != fmt_num(mostrado, 2)`; `mostrado` = hidden `mkt_<CODE>`
+que el what-if deja por fila con el mercado de ESE render, leído con
+`_price_overrides(request, "mkt_")`; sin hidden, el `px_calc` vivo de la
+fila): el what-if pre-carga cada input con el mercado a 2 decimales y a
+partir del primer `change` TODOS viajan con valor — antes una sola edición
+dejaba las 22 filas `wi-edited` y re-valuadas al precio redondeado (y así
+quedaban al borrarla) —, y comparar contra el mercado VIVO tampoco sirve: el
+panel no se redibuja por tick y un input sin tocar "difería" apenas operaba
+el bono (anillo con Δ de pocos bps sin haber editado). `_whatif_from_rows` y
+`_fwd_whatif` usan la misma regla. Regresión:
+`test_forwards_hist.test_chart_y_stats_con_what_if`,
+`test_forwards_hist_punto_what_if_solo_con_precio_editado`,
+`test_precio_editado_es_distinto_del_que_mostraba_el_input`.
 
 ## Noticias — marquesina (09/10)
 
@@ -1492,3 +1558,16 @@ el tape e Inicio. `GET /market/diag` → `indices` = variantes en el store
 (last / close / last_ts / updated_at / seq) y `elegido`: ahí se ve bajo qué
 string manda el broker el IV en cada máquina. Regresión:
 `test_tape_equities.test_merval_snapshot_elige_la_variante_que_el_feed_actualiza`.
+**MSCI Merval = `MMSCI` (22/10)**: el índice pasó a llamarse MSCI Merval y el
+broker lo publica con el ticker `MMSCI` (desk). `equities.MERVAL_SYMBOLS`
+lleva primero las variantes `MMSCI` / `I.MMSCI` (con y sin plazo) y conserva
+las de `I.MERVAL` por si el broker las sigue mandando; `equities.
+es_simbolo_indice(s)` (tokens `INDICE_TOKENS` = MMSCI, MERVAL) reemplaza al
+`"MERVAL" in s.upper()` del escaneo de candidatos y del seed con el universo
+del broker en `main`; `merval_snapshot` sigue eligiendo la variante que el
+feed actualiza, así el cambio de nombre no deja el índice clavado en el
+cierre viejo de I.MERVAL. La etiqueta / ticker interno del histórico sigue
+siendo `MERVAL` (`historico_writer.MERVAL_TICKER`: la serie de acciones no se
+parte); `backfill_acciones._MERVAL_SYMS` prueba MMSCI / I.MMSCI antes que los
+nombres viejos en BYMA Open Data; `dev_ticks` siembra `MERV - XMEV - MMSCI -
+24hs`. Regresión: `test_tape_equities.test_indice_msci_merval_mmsci_es_el_ticker_nuevo`.

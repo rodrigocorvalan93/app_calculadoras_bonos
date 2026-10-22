@@ -1590,6 +1590,10 @@ window.lsSet = function (k, v) {
   function inject(root) {
     if (!root || !root.querySelectorAll) return;
     root.querySelectorAll('.table-scroll').forEach(function (ts) {
+      // Sólo si adentro hay una tabla: Series diarias / Curva por fechas
+      // envuelven un svg solo en .card-body.table-scroll y recibían un ⧉ de
+      // "copiar tabla" que no copiaba nada, encimado al ⧉ del gráfico (22/10).
+      if (!ts.querySelector('table')) return;
       var prev = ts.previousElementSibling;
       if (prev && prev.classList && prev.classList.contains('tbl-copy')) return;
       ts.parentNode.insertBefore(mkBtn(), ts);
@@ -1830,11 +1834,15 @@ window.lsSet = function (k, v) {
     box.appendChild(b);
   };
   // SVG del server (series diarias, forwards, escenario, break-even, semanal…):
-  // hermano ANTES del svg (mismo truco de margen negativo que .tbl-copy).
+  // hermano ANTES del svg, flotante y con caja de margen de alto cero (CSS
+  // .chart-copy-inline): no corre el svg ni lo que sigue, esté o no.
   function injectSvg(root) {
     if (!root || !root.querySelectorAll) return;
     root.querySelectorAll('svg').forEach(function (svg) {
       if (svg.closest('.chart-copy-skip') || svg.closest('button') || svg.closest('a')) return;
+      // Decorativos (aria-hidden: los sparklines de YAS, 64 px de alto): el ⧉
+      // tapaba el último punto del trazo y el tooltip mín/máx (revisión 22/10).
+      if (svg.getAttribute('aria-hidden') === 'true') return;
       var w = svg.getAttribute('width') || (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width) || 0;
       if (!(svg.getAttribute('role') === 'img' || parseFloat(w) >= 200)) return;   // íconos afuera
       var prev = svg.previousElementSibling;
@@ -1845,6 +1853,12 @@ window.lsSet = function (k, v) {
       svg.parentNode.insertBefore(b, svg);
     });
   }
+  // En afterSwap (síncrono, antes del primer paint del contenido nuevo), como
+  // el ⧉ de las tablas: el histórico de Forwards se swapea entero en cada
+  // md-update y con la inyección sólo en afterSettle (20 ms después) el botón
+  // faltaba un frame por tick — parpadeaba y, con el CSS viejo, movía el
+  // gráfico (22/10). afterSettle queda de red; injectSvg es idempotente.
+  document.body.addEventListener('htmx:afterSwap', function (evt) { injectSvg(evt.detail.elt || evt.target); });
   document.body.addEventListener('htmx:afterSettle', function (evt) { injectSvg(evt.detail.elt || evt.target); });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { injectSvg(document); });
   else injectSvg(document);

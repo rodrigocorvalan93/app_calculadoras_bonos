@@ -34,6 +34,45 @@ def test_boton_copiar_tiene_alto_neto_cero() -> None:
     assert "-18px" not in b
 
 
+def test_boton_copiar_grafico_svg_no_corre_el_grafico() -> None:
+    """Forwards · Histórico del forward (desk 22/10): el ⧉ de los SVG del
+    server se inyectaba sólo en afterSettle (20 ms después del swap) y era un
+    bloque con margin-bottom -22 px entre el margin-bottom de las tarjetas
+    (.metrics-grid, 12 px) y el margin-top del svg (10 px): rompía el colapso de
+    esos márgenes (12 + 18 − 22 + 10 = 18 en vez de 12) → en cada md-update el
+    svg y el pie bajaban 6 px por un frame y el botón parpadeaba. Medido con
+    Playwright sobre el server con ticks (8 s, ~1 tick/s): antes 10 frames sin
+    botón, 16 cambios de posición (svg 1381 → 1387 → 1381, card 626 → 632);
+    después 0 / 0 / 0 layout shifts. Ahora el botón es un float a la derecha con
+    caja de margen de alto cero (fuera del flujo: esté o no, nada se mueve) y
+    se inyecta en afterSwap, antes del primer paint, como el ⧉ de las tablas."""
+    (b,) = _bloques(".chart-copy.chart-copy-inline")
+    assert "float: right" in b and "position: relative" in b
+    assert "height: 18px" in b and "box-sizing: border-box" in b
+    assert "margin: 0 2px -18px 0" in b             # margen negativo = alto exacto → caja de margen de alto 0
+    assert "-22px" not in b and "margin-left" not in b   # ni el bloque viejo (-22) ni un margin-left: auto suelto
+    i = JS.index("function injectSvg(root)")
+    bloque = JS[i:i + 2500]
+    assert "document.body.addEventListener('htmx:afterSwap', function (evt) { injectSvg(" in bloque
+    assert "document.body.addEventListener('htmx:afterSettle', function (evt) { injectSvg(" in bloque
+    assert "if (prev && prev.classList && prev.classList.contains('chart-copy')) return;" in bloque   # idempotente
+    # Y un tick que no cambia el HTML del histórico no lo swapea (cero teardown
+    # del svg por tick): opt-in al skip de swaps idénticos de app.js.
+    tpl = (ROOT / "backend/templates/partials/forwards_body.html").read_text(encoding="utf-8")
+    assert re.search(r'<div id="fwd-hist"[^>]*\bdata-skip-same\b', tpl), tpl[tpl.index('id="fwd-hist"') - 20:][:200]
+    assert "if (t.__lastHtml === html) { evt.detail.shouldSwap = false; return; }" in JS
+    # Un .table-scroll SIN tabla adentro (Series diarias / Curva por fechas
+    # envuelven el svg solo) no recibe el ⧉ de "copiar tabla": quedaba un
+    # segundo ⧉ que no copiaba nada, encimado al del gráfico (revisión 22/10).
+    j = JS.index("root.querySelectorAll('.table-scroll').forEach(function (ts) {")
+    assert "if (!ts.querySelector('table')) return;" in JS[j:j + 600]
+    # Y un svg decorativo (aria-hidden: los sparklines de YAS, 64 px) no recibe
+    # ⧉: el botón tapaba el último punto del trazo y el tooltip mín/máx.
+    assert "if (svg.getAttribute('aria-hidden') === 'true') return;" in bloque
+    yas = (ROOT / "backend/templates/partials/yas_hist.html").read_text(encoding="utf-8")
+    assert re.search(r'<svg class="yas-hist-svg"[^>]*aria-hidden="true"', yas)
+
+
 def test_flash_es_solo_color_sin_escala() -> None:
     assert "tick-pop" not in CSS_SIN_COMENTARIOS     # ni keyframes ni una segunda animación
     up, down = _bloques(".tick-up"), _bloques(".tick-down")

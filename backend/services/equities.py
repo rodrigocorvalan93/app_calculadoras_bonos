@@ -57,9 +57,26 @@ CEDEARS: List[str] = [
     # Salud / telco
     "PFE", "JNJ", "MRK", "ABBV", "LLY", "UNH", "GILD", "BMY", "T", "VZ",
 ]
-# Índice Merval (si el broker lo sirve; símbolo crudo, sin plazo).
-MERVAL_SYMBOLS = ("MERV - XMEV - I.MERVAL - 24hs", "MERV - XMEV - I.MERVAL - CI",
+# Índice Merval (si el broker lo sirve; símbolo crudo, sin plazo). Desde el
+# 22/10 el índice es el MSCI Merval y el ticker nuevo es MMSCI (desk): van
+# primero sus variantes (con y sin el prefijo I. de índice, con y sin plazo);
+# las de I.MERVAL quedan por si el broker las sigue publicando — manda la que
+# el feed actualiza (merval_snapshot), no el orden de esta tupla.
+INDICE_TOKENS = ("MMSCI", "MERVAL")
+MERVAL_SYMBOLS = ("MERV - XMEV - MMSCI - 24hs", "MERV - XMEV - MMSCI - CI",
+                  "MERV - XMEV - MMSCI", "MMSCI",
+                  "MERV - XMEV - I.MMSCI - 24hs", "MERV - XMEV - I.MMSCI - CI",
+                  "MERV - XMEV - I.MMSCI", "I.MMSCI",
+                  "MERV - XMEV - I.MERVAL - 24hs", "MERV - XMEV - I.MERVAL - CI",
                   "MERV - XMEV - I.MERVAL", "I.MERVAL")
+
+
+def es_simbolo_indice(symbol: str) -> bool:
+    """¿Es (una variante de) el índice — MSCI Merval `MMSCI` o el viejo
+    `I.MERVAL` — bajo el string que use el broker? Lo usan el escaneo de
+    candidatos del store y el seed del WS con el universo real del broker."""
+    u = (symbol or "").upper()
+    return any(t in u for t in INDICE_TOKENS)
 
 
 def panel_tickers(panel: str) -> List[str]:
@@ -261,8 +278,9 @@ _MERVAL_RESCAN_S = 30.0
 
 
 def merval_candidatos() -> List[str]:
-    """Símbolos del store que son el índice Merval: las variantes conocidas
-    más cualquier otro string con 'MERVAL' que mande el broker."""
+    """Símbolos del store que son el índice (MSCI Merval `MMSCI` / viejo
+    `I.MERVAL`): las variantes conocidas más cualquier otro string con esos
+    tokens que mande el broker (`es_simbolo_indice`)."""
     import time as _t
     store = mds.get_store()
     n = store.stats().get("symbols") if hasattr(store, "stats") else None
@@ -271,7 +289,7 @@ def merval_candidatos() -> List[str]:
     if c["n"] != n or now - c["at"] > _MERVAL_RESCAN_S:
         vistos = list(MERVAL_SYMBOLS)
         for s in store.symbols():
-            if "MERVAL" in s.upper() and s not in vistos:
+            if es_simbolo_indice(s) and s not in vistos:
                 vistos.append(s)
         c.update(n=n, at=now, syms=vistos)
     return c["syms"]

@@ -39,7 +39,7 @@ _BYMA_BASE = "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free
 _BYMA_HIST = "chart/historical-series/history"
 _TIMEOUT = 15.0
 _PAUSA = 0.15                             # entre tickers: no martillar el sitio
-_MERVAL_SYMS = ("I.MERVAL", "MERVAL", "MERV")
+_MERVAL_SYMS = ("MMSCI", "I.MMSCI", "I.MERVAL", "MERVAL", "MERV")   # MSCI Merval (22/10) primero, después los nombres viejos
 
 
 def _fecha(s: Any) -> Optional[date]:

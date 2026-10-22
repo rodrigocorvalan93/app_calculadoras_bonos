@@ -9,8 +9,12 @@ del store avanza y app.js dispara `md-update` en todas las pestañas abiertas.
 
 Abrir http://127.0.0.1:<puerto>/mercado (o cualquier panel live). Auth
 apagada y host loopback (el guard de arranque lo permite). Nunca contra una
-base real: es sólo para el navegador. Medición automática del parpadeo:
-`backend/tools/flicker_probe.py`."""
+base real: es sólo para el navegador. `DEV_TICKS_HIST=1` parchea además
+`historico_byma` en memoria con una base diaria sintética (TIREA/Duration por
+rueda para los bonos de las curvas) para que /forwards "Histórico del
+forward" rinda sin Delta Bases. Medición automática del parpadeo:
+`backend/tools/flicker_probe.py` (tablas) y `backend/tools/fwd_hist_probe.py`
+(histórico de forwards)."""
 from __future__ import annotations
 
 import logging
@@ -46,6 +50,38 @@ def _px(c: str) -> float:
     return 95.0 + (sum(map(ord, c)) * 7 % 900) / 10
 
 
+def _base_historica_sintetica(codes: list[str], n: int = 100) -> int:
+    """`DEV_TICKS_HIST=1`: historico_byma parcheado en memoria con 100 ruedas
+    sintéticas (TIREA ± 1 % alrededor de la TIR a su precio sembrado, Duration
+    = la real de la ficha a ese precio, así el orden corto/largo de los selects
+    coincide con la base) para que /forwards "Histórico del forward" y lo que
+    lee la base diaria rindan sin Delta Bases. Nunca toca el disco. Devuelve
+    cuántos códigos entraron."""
+    from backend.services import historico_byma as hb, pricing
+
+    dates = [f"2026-{4 + i // 30:02d}-{(i % 30) + 1:02d}" for i in range(n)]
+    rnd = random.Random(3)
+    settle = pricing.settlement_date_str("24hs")
+    by_code: dict = {}
+    for c in codes:
+        try:
+            m = pricing.metrics_for_market_price(c, _px(c), settle) or {}
+        except Exception:  # noqa: BLE001
+            m = {}
+        dur = m.get("duration")
+        if not dur:
+            continue
+        base = m.get("tirea") if m.get("tirea") is not None else 0.25
+        by_code[c] = {"dates": dates,
+                      "vals": {"TIREA": [base + rnd.uniform(-0.01, 0.01) for _ in range(n)],
+                               "Duration": [float(dur)] * n}}
+    fake = {"loaded": True, "by_code": by_code, "last_update": "v-dev"}
+    hb.ensure_loaded = lambda: fake                   # type: ignore[assignment]
+    hb.meta = lambda: {"last_update": "v-dev"}        # type: ignore[assignment]
+    hb.available = lambda: True                       # type: ignore[assignment]
+    return len(by_code)
+
+
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
     intervalo = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
@@ -71,11 +107,14 @@ def main() -> None:
         from backend.services import equities
         for c in equities.LIDERES + equities.GENERAL + equities.CEDEARS:
             seed(syms.md_symbol(c, "24hs"), _px(c) * 40); n += 1
-        store.update_from_md("MERV - XMEV - I.MERVAL - 24hs", {"IV": {"price": 2_000_000.0, "date": _ts()},
+        store.update_from_md("MERV - XMEV - MMSCI - 24hs", {"IV": {"price": 2_000_000.0, "date": _ts()},
                                                               "CL": {"price": 1_974_000.0}, "OP": 1_980_000.0,
                                                               "HI": 2_010_000.0, "LO": 1_970_000.0})
     except Exception as exc:  # noqa: BLE001
         print("equities:", exc)
+    if os.environ.get("DEV_TICKS_HIST") == "1":
+        n_hist = _base_historica_sintetica(sorted({c for codes in curves.build_curve_codes().values() for c in codes}))
+        print(f"base histórica sintética: {n_hist} códigos (historico_byma parcheado en memoria)", flush=True)
     print(f"sembrados {n} símbolos · tick cada {intervalo:g} s · http://127.0.0.1:{port}/mercado", flush=True)
 
     # DEV_TICKS_FOCUS=S13N6,TX26 → esos códigos tickean en CADA ciclo, alternando
