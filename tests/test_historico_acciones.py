@@ -305,7 +305,7 @@ async def test_http_pestana_acciones(base_acciones, monkeypatch) -> None:
         assert r.status_code == 200
         for frag in ('name="ticker"', 'name="base"', 'name="modo"', 'name="cmp"', "pa-band1", "pa-band2",
                      "pa-tend", "pa-overlay", "Distribución vs normal", "pa-normal", "pa-hist",
-                     'id="pa-tbl"', "vs Merval", 'value="GGAL" selected', "canal de tendencia"):
+                     'id="pa-tbl"', "vs MSCI Merval", 'value="GGAL" selected', "canal de tendencia"):
             assert frag in r.text, frag
         assert r.text.count("<svg") == 2
         # cache: misma combinación → mismo HTML sin recomputar

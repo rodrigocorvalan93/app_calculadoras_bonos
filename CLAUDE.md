@@ -1566,8 +1566,11 @@ es_simbolo_indice(s)` (tokens `INDICE_TOKENS` = MMSCI, MERVAL) reemplaza al
 `"MERVAL" in s.upper()` del escaneo de candidatos y del seed con el universo
 del broker en `main`; `merval_snapshot` sigue eligiendo la variante que el
 feed actualiza, así el cambio de nombre no deja el índice clavado en el
-cierre viejo de I.MERVAL. La etiqueta / ticker interno del histórico sigue
-siendo `MERVAL` (`historico_writer.MERVAL_TICKER`: la serie de acciones no se
-parte); `backfill_acciones._MERVAL_SYMS` prueba MMSCI / I.MMSCI antes que los
+cierre viejo de I.MERVAL. La etiqueta VISIBLE es "MSCI Merval" (tape:
+"MSCI Merval" / "MSCI Merval US$", Inicio, fila `indice` de Líderes
+—`merval_row()["code"]`—, "vs MSCI Merval" en Históricos · Acciones; desk
+22/10) pero el ticker interno del histórico sigue siendo `MERVAL`
+(`historico_writer.MERVAL_TICKER`, `price_action.MERVAL`, el código que se
+tipea en Comparar: la serie de acciones no se parte); `backfill_acciones._MERVAL_SYMS` prueba MMSCI / I.MMSCI antes que los
 nombres viejos en BYMA Open Data; `dev_ticks` siembra `MERV - XMEV - MMSCI -
 24hs`. Regresión: `test_tape_equities.test_indice_msci_merval_mmsci_es_el_ticker_nuevo`.

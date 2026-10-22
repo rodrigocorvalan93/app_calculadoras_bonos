@@ -263,7 +263,7 @@ def merval_row() -> Optional[Dict[str, Any]]:
     snap = merval_snapshot()
     if snap is None:
         return None
-    r = _row_from_snap("MERVAL", snap)
+    r = _row_from_snap("MSCI Merval", snap)
     r.update({"bid": None, "bid_size": None, "offer": None, "offer_size": None, "vwap": None,
               "volume": None, "nominal": None, "volume_frac": 0.0, "indice": True})
     return r

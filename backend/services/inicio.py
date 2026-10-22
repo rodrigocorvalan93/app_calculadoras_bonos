@@ -341,14 +341,14 @@ def mercado(summary: Dict[str, Any]) -> List[Dict[str, Any]]:
     mv = _safe("merval_row", equities.merval_row, None) or {}
     last, close = _f(mv.get("last")), _f(mv.get("close"))
     vpct = _f(mv.get("var_pct"))
-    rows.append({"label": "MERVAL", "sub": "ARS", "fmt": "int", "value": last,
+    rows.append({"label": "MSCI Merval", "sub": "ARS", "fmt": "int", "value": last,
                  "var_px": (last - close) if (last is not None and close) else None,
                  "var_pct": vpct / 100.0 if vpct is not None else None})
     usd = summary.get("usd") or {}
     ccl, ccl_vp = _f(usd.get("last")), _f(usd.get("var_pct"))
     sub_ccl = f"en CCL · {usd.get('base')}" if usd.get("base") else "en CCL"
     v_ccl, px_ccl, vp_ccl = _en_ccl(last, close, ccl, ccl_vp)
-    rows.append({"label": "MERVAL", "sub": sub_ccl, "fmt": "int", "value": v_ccl, "var_px": px_ccl, "var_pct": vp_ccl})
+    rows.append({"label": "MSCI Merval", "sub": sub_ccl, "fmt": "int", "value": v_ccl, "var_px": px_ccl, "var_pct": vp_ccl})
     rp = _safe("riesgo_pais", riesgo_pais.snapshot, {}) or {}
     rows.append({"label": "Riesgo país", "sub": f"EMBI · {rp['fecha']}" if rp.get("fecha") else "EMBI",
                  "tip": "EMBI+ Argentina (JP Morgan), dato diario, vía ArgentinaDatos (api.argentinadatos.com); "
