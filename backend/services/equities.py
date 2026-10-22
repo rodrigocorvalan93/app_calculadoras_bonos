@@ -62,7 +62,11 @@ CEDEARS: List[str] = [
 # primero sus variantes (con y sin el prefijo I. de índice, con y sin plazo);
 # las de I.MERVAL quedan por si el broker las sigue publicando — manda la que
 # el feed actualiza (merval_snapshot), no el orden de esta tupla.
-INDICE_TOKENS = ("MMSCI", "MERVAL")
+# Tokens que identifican al índice en el string del broker: el ticker nuevo
+# (MMSCI), el viejo (MERVAL) y las grafías con "MSCI" que un endpoint podría
+# usar (I.MSCI, "MSCI MERVAL", MSCIMERVAL). "MSCI" a secas NO: sería un CEDEAR
+# de MSCI Inc. si BYMA lo listara.
+INDICE_TOKENS = ("MMSCI", "MERVAL", "I.MSCI", "MSCI MERVAL", "MSCIMERVAL")
 MERVAL_SYMBOLS = ("MERV - XMEV - MMSCI - 24hs", "MERV - XMEV - MMSCI - CI",
                   "MERV - XMEV - MMSCI", "MMSCI",
                   "MERV - XMEV - I.MMSCI - 24hs", "MERV - XMEV - I.MMSCI - CI",
