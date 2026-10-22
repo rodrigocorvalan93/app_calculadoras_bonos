@@ -945,9 +945,15 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   como faltaba un frame por tick (sólo `afterSettle`) el Histórico del
   forward bajaba y subía 6 px en cada md-update (video del desk; el "cero
   corrimiento" de un hermano con margen negativo depende de los márgenes de
-  los vecinos — un float de alto cero, no). Medición:
-  `tests/test_mercado_sin_saltos.test_boton_copiar_grafico_svg_no_corre_el_grafico`
-  (docstring con antes/después); el dim
+  los vecinos — un float de alto cero, no). Medición: `DEV_TICKS_HIST=1
+  python backend/tools/dev_ticks.py 8765` + `python
+  backend/tools/fwd_hist_probe.py http://127.0.0.1:8765/forwards` (por frame:
+  posición de tarjetas / ⧉ / svg / pie, frames sin ⧉, swaps, layout-shifts);
+  regresión: `tests/test_mercado_sin_saltos.test_boton_copiar_grafico_svg_no_corre_el_grafico`
+  (docstring con antes/después). Y el ⧉ de "copiar tabla" sólo va antes de un
+  `.table-scroll` que TIENE una tabla adentro: Series diarias / Curva por
+  fechas envuelven el svg solo en `.card-body.table-scroll` y recibían un
+  segundo ⧉ que no copiaba nada, encimado al del gráfico (revisión 22/10); el dim
   `.htmx-request` excluye `[data-delta-scope]` (Mercado no lleva md-update
   en su trigger); el `scrollLeft` de cada `.table-scroll` del target se
   conserva a través del swap (app.js, "Scroll horizontal…"); `.live-meta`

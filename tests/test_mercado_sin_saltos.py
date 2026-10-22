@@ -61,6 +61,11 @@ def test_boton_copiar_grafico_svg_no_corre_el_grafico() -> None:
     tpl = (ROOT / "backend/templates/partials/forwards_body.html").read_text(encoding="utf-8")
     assert re.search(r'<div id="fwd-hist"[^>]*\bdata-skip-same\b', tpl), tpl[tpl.index('id="fwd-hist"') - 20:][:200]
     assert "if (t.__lastHtml === html) { evt.detail.shouldSwap = false; return; }" in JS
+    # Un .table-scroll SIN tabla adentro (Series diarias / Curva por fechas
+    # envuelven el svg solo) no recibe el ⧉ de "copiar tabla": quedaba un
+    # segundo ⧉ que no copiaba nada, encimado al del gráfico (revisión 22/10).
+    j = JS.index("root.querySelectorAll('.table-scroll').forEach(function (ts) {")
+    assert "if (!ts.querySelector('table')) return;" in JS[j:j + 600]
 
 
 def test_flash_es_solo_color_sin_escala() -> None:

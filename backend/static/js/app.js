@@ -1590,6 +1590,10 @@ window.lsSet = function (k, v) {
   function inject(root) {
     if (!root || !root.querySelectorAll) return;
     root.querySelectorAll('.table-scroll').forEach(function (ts) {
+      // Sólo si adentro hay una tabla: Series diarias / Curva por fechas
+      // envuelven un svg solo en .card-body.table-scroll y recibían un ⧉ de
+      // "copiar tabla" que no copiaba nada, encimado al ⧉ del gráfico (22/10).
+      if (!ts.querySelector('table')) return;
       var prev = ts.previousElementSibling;
       if (prev && prev.classList && prev.classList.contains('tbl-copy')) return;
       ts.parentNode.insertBefore(mkBtn(), ts);

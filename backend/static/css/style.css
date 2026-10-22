@@ -1693,7 +1693,8 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
    margin-top del svg (10 px) rompía el COLAPSO de esos dos márgenes
    (12 + 18 − 22 + 10 = 18 en vez de 12) y, como se inyecta adentro del swap
    de htmx, el histórico de Forwards bajaba 6 px por un frame en cada tick
-   (desk 22/10, medido con tests/fwd_probe: svg 1381 → 1387 → 1381). */
+   (desk 22/10; medido con backend/tools/fwd_hist_probe.py sobre
+   dev_ticks.py: svg 1381 → 1387 → 1381, 10 frames sin botón → 0 / 0). */
 .chart-copy {
   position: absolute; top: 6px; right: 8px; z-index: 7;
   font-size: 12px; line-height: 1; padding: 2px 7px; border: 1px solid var(--border);
