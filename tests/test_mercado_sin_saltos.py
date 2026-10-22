@@ -50,7 +50,7 @@ def test_boton_copiar_grafico_svg_no_corre_el_grafico() -> None:
     assert "float: right" in b and "position: relative" in b
     assert "height: 18px" in b and "box-sizing: border-box" in b
     assert "margin: 0 2px -18px 0" in b             # margen negativo = alto exacto → caja de margen de alto 0
-    assert "-22px" not in b and "auto;" not in b.replace("top: auto", "").replace("right: auto", "")
+    assert "-22px" not in b and "margin-left" not in b   # ni el bloque viejo (-22) ni un margin-left: auto suelto
     i = JS.index("function injectSvg(root)")
     bloque = JS[i:i + 2500]
     assert "document.body.addEventListener('htmx:afterSwap', function (evt) { injectSvg(" in bloque
