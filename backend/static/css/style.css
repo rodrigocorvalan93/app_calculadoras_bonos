@@ -1687,7 +1687,11 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
    del server como hermano anterior FLOTANTE a la derecha con margen inferior
    = su alto (18 px: 12 de línea + 2×2 de padding + 2×1 de borde, border-box)
    → caja de margen de alto CERO, fuera del flujo: esté o no, el svg y lo que
-   sigue quedan exactamente donde estaban. La versión anterior era un bloque
+   sigue quedan exactamente donde estaban — en un contenedor block de ancho
+   definido, que es donde viven todos los svg del server (.card-body,
+   #fwd-hist, #be-chart…); en uno que mide por contenido (td auto,
+   fit-content, ítem flex/grid con basis auto) el ANCHO del botón sí cuenta
+   (revisión 22/10). La versión anterior era un bloque
    con margin-bottom -22 px y "cero corrimiento" sólo en el papel: metido
    entre el margin-bottom de las tarjetas (.metrics-grid, 12 px) y el
    margin-top del svg (10 px) rompía el COLAPSO de esos dos márgenes

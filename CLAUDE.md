@@ -945,7 +945,13 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   como faltaba un frame por tick (sólo `afterSettle`) el Histórico del
   forward bajaba y subía 6 px en cada md-update (video del desk; el "cero
   corrimiento" de un hermano con margen negativo depende de los márgenes de
-  los vecinos — un float de alto cero, no). Medición: `DEV_TICKS_HIST=1
+  los vecinos — un float de alto cero, no, mientras el contenedor sea un
+  block de ancho definido como todos los `.card-body` / `#fwd-hist` /
+  `#be-chart` de hoy: en un `td` auto o un `fit-content` el ANCHO del botón
+  sí entra al cálculo). `injectSvg` toma los svg con `role="img"` o con
+  `width` ≥ 200 px: `graficos_svg.html` y `historico_semanal.html` llevan
+  `width="100%"` sin role y NO reciben ⧉ (a propósito se deja así: el de
+  Qué pasó vive en un `td` de tabla auto). Medición: `DEV_TICKS_HIST=1
   python backend/tools/dev_ticks.py 8765` + `python
   backend/tools/fwd_hist_probe.py http://127.0.0.1:8765/forwards` (por frame:
   posición de tarjetas / ⧉ / svg / pie, frames sin ⧉, swaps, layout-shifts);
