@@ -20,7 +20,11 @@
               <td><input type="text" inputmode="decimal" class="wi-px" name="price_{{ o.code }}"
                          value="{% if o.price is not none %}{{ o.price | ar_num(2) }}{% endif %}"
                          placeholder="{% if o.market is not none %}{{ o.market | ar_num(2) }}{% else %}—{% endif %}"
-                         autocomplete="off"></td>
+                         autocomplete="off">
+                  {# El precio de mercado que MOSTRÓ este render: "editado" = el
+                     input difiere de esto (no del mercado vivo, que sigue
+                     moviéndose mientras el panel no se redibuja). #}
+                  <input type="hidden" name="mkt_{{ o.code }}" value="{% if o.market is not none %}{{ o.market | ar_num(2) }}{% endif %}"></td>
               <td style="color:var(--accent)">{{ o.tirea | ar_pct(2) }}</td>
               <td>{{ o.duration | ar_num(2) }}</td>
             </tr>

@@ -83,9 +83,13 @@ def serie(corto: str, largo: str) -> Dict[str, Any]:
 
 
 def stats(corto: str, largo: str, ventana: int = VENTANA_DEFAULT,
-          fwd_hoy: Optional[float] = None) -> Dict[str, Any]:
+          fwd_hoy: Optional[float] = None,
+          fwd_whatif: Optional[float] = None) -> Dict[str, Any]:
     """Media / desvío / min / max de la serie (ventana en ruedas; 0 = toda) y
-    la posición del forward de HOY: percentil empírico y z-score."""
+    la posición del forward de HOY: percentil empírico y z-score. `fwd_whatif`
+    (el forward del par con los precios editados en el what-if de Forwards,
+    sólo cuando alguno de los dos bonos tiene precio editado) entra como
+    `fwd_wi` con su propio percentil / z (`percentil_wi` / `z_wi`)."""
     from backend.services import historico_byma as hb
 
     ver = (hb.meta() or {}).get("last_update") or ""
@@ -94,15 +98,25 @@ def stats(corto: str, largo: str, ventana: int = VENTANA_DEFAULT,
     out = dict(s)
     out["fwd_hoy"] = fwd_hoy
     out["percentil"] = out["z"] = None
+    out["fwd_wi"] = fwd_whatif
+    out["percentil_wi"] = out["z_wi"] = None
     fw = s.get("fwds") or []
-    if fwd_hoy is not None and fw:
-        menores = sum(1 for v in fw if v < fwd_hoy)
-        iguales = sum(1 for v in fw if v == fwd_hoy)
-        out["percentil"] = (menores + 0.5 * iguales) / len(fw)
-        if s["desvio"]:
-            out["z"] = (fwd_hoy - s["media"]) / s["desvio"]
+    if fw:
+        if fwd_hoy is not None:
+            out["percentil"], out["z"] = _posicion(fw, s, fwd_hoy)
+        if fwd_whatif is not None:
+            out["percentil_wi"], out["z_wi"] = _posicion(fw, s, fwd_whatif)
     out["aviso_n"] = 0 < len(fw) < _N_MIN_AVISO
     return out
+
+
+def _posicion(fw: List[float], s: Dict[str, Any], v: float) -> tuple:
+    """(percentil empírico, z-score) de un valor contra la serie de la ventana."""
+    menores = sum(1 for x in fw if x < v)
+    iguales = sum(1 for x in fw if x == v)
+    percentil = (menores + 0.5 * iguales) / len(fw)
+    z = (v - s["media"]) / s["desvio"] if s["desvio"] else None
+    return percentil, z
 
 
 def _stats_base(corto: str, largo: str, ventana: int) -> Dict[str, Any]:
@@ -125,15 +139,19 @@ def _stats_base(corto: str, largo: str, ventana: int) -> Dict[str, Any]:
 
 def chart(st: Dict[str, Any], *, width: int = 880, height: int = 210) -> Optional[Dict[str, Any]]:
     """Geometría SVG de la serie: línea del forward + media punteada + banda
-    ±1σ + punto del valor de HOY. Estilo fc-* (mismo look que el resto)."""
+    ±1σ + punto del valor de HOY (+ el anillo del what-if, `whatif`, a la
+    misma x que hoy, cuando `st["fwd_wi"]` existe). Estilo fc-* (mismo look
+    que el resto)."""
     fwds: List[float] = st.get("fwds") or []
     if len(fwds) < 2:
         return None
     from backend.services.svg_charts import _nice_ticks
 
     hoy = st.get("fwd_hoy")
-    lo = min(fwds + ([hoy] if hoy is not None else []))
-    hi = max(fwds + ([hoy] if hoy is not None else []))
+    wi = st.get("fwd_wi")
+    extra = [v for v in (hoy, wi) if v is not None]     # los dos entran a la escala vertical
+    lo = min(fwds + extra)
+    hi = max(fwds + extra)
     span = (hi - lo) or 0.01
     lo -= span * 0.08
     hi += span * 0.08
@@ -165,5 +183,6 @@ def chart(st: Dict[str, Any], *, width: int = 880, height: int = 210) -> Optiona
                    "h": round(abs(Y(media - desvio) - Y(media + desvio)), 2)}
                   if media is not None and desvio else None),
         "hoy": ({"cx": X(n - 1), "cy": Y(hoy)} if hoy is not None else None),
+        "whatif": ({"cx": X(n - 1), "cy": Y(wi)} if wi is not None else None),
         "xlabels": xlabels, "xlabel_y": height - 8,
     }

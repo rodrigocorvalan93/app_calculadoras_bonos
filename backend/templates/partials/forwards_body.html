@@ -79,11 +79,17 @@
     <div class="card-body">
       {# El histórico es estático (la base cambia 1 vez por día) — se pide al
          cargar y al tocar los controles; el fwd de HOY se refresca junto con
-         el resto vía md-update/30s, costo µs sobre filas ya cacheadas. #}
-      <div id="fwd-hist"
+         el resto vía md-update/30s, costo µs sobre filas ya cacheadas. Los
+         precios editados del what-if (#wi-prices, cuando el panel ya se
+         reveló) viajan en cada pedido: con uno de los dos bonos del par
+         editado el server suma el forward what-if (anillo celeste).
+         data-skip-same: si el HTML que llega es idéntico al último aplicado
+         (la mayoría de los ticks no mueven este par) se cancela el swap —
+         cero teardown del svg por tick (app.js "Skip de swaps idénticos"). #}
+      <div id="fwd-hist" data-skip-same
            hx-get="/forwards/hist"
-           hx-trigger="load, change from:#fwd-hist-controls, md-update from:body, every 30s"
-           hx-include="[name=curve],[name=plazo],[name=leg],[name=only_quoting],[name=fw-corto],[name=fw-largo],[name=fw-ventana]"
+           hx-trigger="load, change from:#fwd-hist-controls, change from:#forwards-whatif delay:250ms, md-update from:body, every 30s"
+           hx-include="[name=curve],[name=plazo],[name=leg],[name=only_quoting],[name=fw-corto],[name=fw-largo],[name=fw-ventana],#wi-prices"
            hx-swap="innerHTML"></div>
     </div>
   </div>

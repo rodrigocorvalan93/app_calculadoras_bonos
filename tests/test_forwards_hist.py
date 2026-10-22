@@ -79,6 +79,110 @@ def test_chart_geometria(monkeypatch) -> None:
     assert all(ch["y0"] <= t["y"] <= ch["y1"] for t in ch["yticks"])
 
 
+def test_chart_y_stats_con_what_if(monkeypatch) -> None:
+    """El forward recalculado con los precios editados del what-if entra como
+    SEGUNDO punto (`whatif`, misma x que hoy) con percentil / z propios y
+    también manda en la escala vertical; sin what-if no hay punto ni stats."""
+    _base_sintetica(monkeypatch, n=50, ver="v6")
+    s = fh.serie("AAA", "BBB")
+    hoy = s["fwds"][-1]
+    st = fh.stats("AAA", "BBB", ventana=0, fwd_hoy=hoy, fwd_whatif=hoy + 0.5)   # muy por encima del máximo
+    assert st["fwd_wi"] == pytest.approx(hoy + 0.5)
+    assert st["percentil_wi"] == 1.0 and st["z_wi"] > 0
+    assert st["percentil"] == pytest.approx(fh.stats("AAA", "BBB", ventana=0, fwd_hoy=hoy)["percentil"])
+    ch = fh.chart(st)
+    assert ch["whatif"] is not None and ch["whatif"]["cx"] == ch["hoy"]["cx"]
+    assert ch["y0"] <= ch["whatif"]["cy"] < ch["hoy"]["cy"]          # entra en la escala, arriba del de hoy
+    st0 = fh.stats("AAA", "BBB", ventana=0, fwd_hoy=hoy)
+    assert st0["fwd_wi"] is None and st0["percentil_wi"] is None and st0["z_wi"] is None
+    assert fh.chart(st0)["whatif"] is None
+
+
+@pytest.mark.asyncio
+async def test_forwards_hist_punto_what_if_solo_con_precio_editado(monkeypatch) -> None:
+    """Con un precio editado en el what-if (`price_<CODE>`, lo que el panel
+    manda con `#wi-prices`) para uno de los dos bonos del par, el histórico
+    muestra el anillo celeste (`fc-dot-wi`) y la línea "what-if" con la Δ en
+    bps; sin precio, con el input vacío o con un precio de OTRO bono, nada."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    from backend.routes import curves as rc
+    from backend.services import bond_universe, curves, historico_byma as hb, marketdata_store as mds
+    from backend.services import symbols as syms
+
+    bond_universe.ensure_loaded()
+    codes = (curves.build_curve_codes().get("cer") or [])[:6]
+    px = {c: 1150.0 + i * 40 for i, c in enumerate(codes)}
+    for c in codes:
+        mds.get_store().update_from_md(syms.md_symbol(c, "24hs"), {"LA": {"price": px[c]}})
+    rows, _ = await rc._rows_for("cer", "24hs", True, "native")
+    cand = rc._candidates_from_rows([r for r in rows if r["code"] in codes])
+    if len(cand) < 2:
+        pytest.skip("sin dos bonos CER valuables con precio sintético")
+    corto, largo = cand[0], cand[1]
+    dates = [f"2026-{4 + i // 30:02d}-{(i % 30) + 1:02d}" for i in range(40)]
+    by = {corto: {"dates": dates, "vals": {"TIREA": [0.30] * 40, "Duration": [0.5] * 40}},
+          largo: {"dates": dates, "vals": {"TIREA": [0.35] * 40, "Duration": [1.0] * 40}}}
+    fake = {"loaded": True, "by_code": by, "last_update": "v-wi"}
+    monkeypatch.setattr(hb, "ensure_loaded", lambda: fake)
+    monkeypatch.setattr(hb, "meta", lambda: {"last_update": "v-wi"})
+    monkeypatch.setattr(hb, "available", lambda: True)
+    base = {"curve": "cer", "fw-corto": corto, "fw-largo": largo, "fw-ventana": "0"}
+    ar = lambda v: f"{v:.2f}".replace(".", ",")                       # es-AR, como lo manda el input  # noqa: E731
+    editado = ar(px[corto] * 0.99)
+    # el input viene pre-cargado con el precio de mercado a 2 decimales: eso NO es edición
+    pre = {f"price_{corto}": ar(px[corto]), f"price_{largo}": ar(px[largo]),
+           f"mkt_{corto}": ar(px[corto]), f"mkt_{largo}": ar(px[largo])}
+    # el panel se dibujó con otro precio (el mercado se movió después) y el
+    # usuario no tocó nada: el input sigue igual a lo que mostraba → tampoco
+    viejo = {f"price_{corto}": ar(px[corto] * 1.02), f"price_{largo}": ar(px[largo]),
+             f"mkt_{corto}": ar(px[corto] * 1.02), f"mkt_{largo}": ar(px[largo])}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        sin = await ac.get("/forwards/hist", params=base)
+        vacio = await ac.get("/forwards/hist", params={**base, f"price_{corto}": ""})
+        otro = await ac.get("/forwards/hist", params={**base, "price_ZZZZ": "100"})
+        igual = await ac.get("/forwards/hist", params={**base, **pre})
+        stale = await ac.get("/forwards/hist", params={**base, **viejo})
+        con = await ac.get("/forwards/hist", params={**base, **pre, f"price_{corto}": editado})
+    for r in (sin, vacio, otro, igual, stale, con):
+        assert r.status_code == 200
+    assert 'class="fc-dot"' in sin.text                                  # el de hoy, siempre
+    for r in (sin, vacio, otro, igual, stale):
+        assert "fc-dot-wi" not in r.text and "what-if" not in r.text
+    assert "fc-dot-wi" in con.text and 'class="fc-dot"' in con.text      # los dos puntos
+    assert "◯ what-if" in con.text and " bps" in con.text
+    assert "el anillo celeste, el del what-if" in con.text
+
+
+def test_precio_editado_es_distinto_del_que_mostraba_el_input() -> None:
+    """El what-if pre-carga cada input con el precio de mercado a 2 decimales
+    (`ar_num(2)`) y a partir del primer cambio TODOS viajan con valor: sólo un
+    precio distinto del que MOSTRABA el input (hidden `mkt_<CODE>` del mismo
+    render; sin él, el mercado vivo) cuenta como edición — para el resaltado y
+    la re-valuación del what-if y para el anillo del histórico. Antes una sola
+    edición dejaba las 22 filas como `wi-edited`, re-valuadas al precio
+    redondeado, y las seguía mostrando así después de borrarla; y contra el
+    mercado VIVO un input sin tocar parecía editado apenas el bono operaba."""
+    from backend.routes import curves as rc
+
+    assert rc._precio_editado(None, 175.8437) is False
+    assert rc._precio_editado(175.84, 175.8437) is False        # lo que muestra el input (sin hidden)
+    assert rc._precio_editado(175.85, 175.8437) is True
+    assert rc._precio_editado(150.0, 175.8437) is True
+    assert rc._precio_editado(150.0, None) is True              # sin precio de mercado: lo que tipeó manda
+    assert rc._precio_editado(175.84, 176.90, mostrado=175.84) is False   # el mercado se movió, el input no
+    assert rc._precio_editado(175.84, 175.84, mostrado=176.90) is True    # tipeó justo el mercado nuevo: editó
+    rows = [{"code": "A", "px_calc": 175.8437, "calc": "A", "tirea": 0.30, "duration": 0.5, "volume": 1.0},
+            {"code": "B", "px_calc": 90.0, "calc": "B", "tirea": 0.35, "duration": 1.0, "volume": 1.0}]
+    wi, _m = rc._whatif_from_rows(rows, None, {"A": 175.84, "B": 90.0}, None)
+    assert [r["edited"] for r in wi] == [False, False]
+    assert wi[0]["tirea"] == 0.30 and wi[0]["price"] == 175.8437   # reusa la fila, no re-valúa al redondeado
+    wi2, _m = rc._whatif_from_rows(rows, None, {"A": 170.0, "B": 90.0}, None, {"A": 170.0, "B": 90.0})
+    assert [r["edited"] for r in wi2] == [False, False]           # mostraba 170 y sigue en 170: sin tocar
+    assert rc._fwd_whatif(rows[0], rows[1], {"A": 170.0, "B": 90.0}, None, {"A": 170.0, "B": 90.0}) is None
+
+
 @pytest.mark.asyncio
 async def test_forwards_hist_endpoint(monkeypatch) -> None:
     from httpx import ASGITransport, AsyncClient
