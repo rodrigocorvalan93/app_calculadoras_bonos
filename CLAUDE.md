@@ -999,6 +999,44 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   constantes: `DEV_TICKS_FOCUS=S13N6 python backend/tools/dev_ticks.py 8765`
   (alterna un tick de sólo tamaños —flashea— con uno de precios).
 
+## Forwards · Histórico del forward — punto what-if (22/10)
+
+El punto lleno (naranja) del gráfico es el forward de HOY del par con el
+mismo precio que la matriz (último si operó, si no cierre previo de BYMA:
+`_rows_for`). Pedido del desk: si en el what-if de la misma pestaña se edita
+el precio de alguno de los dos bonos del par, un SEGUNDO punto con el
+forward what-if. `#fwd-hist` incluye `#wi-prices` en cada pedido (los
+`price_<CODE>` del panel, cuando ya se reveló) y se dispara también con
+`change from:#forwards-whatif`; lleva `data-skip-same` (revisión 22/10: el
+HTML del histórico es idéntico en la mayoría de los ticks y se re-swapeaba
+entero — svg incluido — ~1 vez/s; ahora app.js cancela el swap idéntico, el
+panel sigue en tiempo real cuando el par cambia); `forwards_hist_partial` lee los overrides con
+el mismo `_price_overrides` del what-if y SÓLO si `corto` o `largo` está
+editado re-valúa ese bono (`_fwd_whatif`: misma ficha `calc` y settle que su
+fila, como `_whatif_from_rows`; el otro reusa su TIR/Duration; en el
+`_row_pool`) → `fh.stats(fwd_whatif=…)` deja `fwd_wi` / `percentil_wi` /
+`z_wi`, `fh.chart` lo suma a la escala y devuelve `whatif` (misma x que hoy)
+→ anillo celeste `.fc-dot-wi` (relleno del panel, encima del punto de hoy:
+si coinciden se ve el anillo alrededor), línea "◯ what-if … · Δ bps"
+(`.metric-wi`, en la MISMA línea que el valor: la tarjeta no cambia de alto)
+en la tarjeta Fwd hoy y leyenda en el pie. Sin precio editado del par (input
+vacío, otro bono, what-if sin revelar) no cambia nada; la key del
+`seq_cached` es el query string entero, así que los precios entran solos.
+**"Editado" = distinto del precio que MOSTRABA el input** (`_precio_editado`:
+`fmt_num(ov, 2) != fmt_num(mostrado, 2)`; `mostrado` = hidden `mkt_<CODE>`
+que el what-if deja por fila con el mercado de ESE render, leído con
+`_price_overrides(request, "mkt_")`; sin hidden, el `px_calc` vivo de la
+fila): el what-if pre-carga cada input con el mercado a 2 decimales y a
+partir del primer `change` TODOS viajan con valor — antes una sola edición
+dejaba las 22 filas `wi-edited` y re-valuadas al precio redondeado (y así
+quedaban al borrarla) —, y comparar contra el mercado VIVO tampoco sirve: el
+panel no se redibuja por tick y un input sin tocar "difería" apenas operaba
+el bono (anillo con Δ de pocos bps sin haber editado). `_whatif_from_rows` y
+`_fwd_whatif` usan la misma regla. Regresión:
+`test_forwards_hist.test_chart_y_stats_con_what_if`,
+`test_forwards_hist_punto_what_if_solo_con_precio_editado`,
+`test_precio_editado_es_distinto_del_que_mostraba_el_input`.
+
 ## Noticias — marquesina (09/10)
 
 `services/news.py` (stdlib, thread daemon cada 120 s, NUNCA en un request).

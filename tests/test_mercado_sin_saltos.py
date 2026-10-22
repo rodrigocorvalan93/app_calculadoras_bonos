@@ -56,6 +56,11 @@ def test_boton_copiar_grafico_svg_no_corre_el_grafico() -> None:
     assert "document.body.addEventListener('htmx:afterSwap', function (evt) { injectSvg(" in bloque
     assert "document.body.addEventListener('htmx:afterSettle', function (evt) { injectSvg(" in bloque
     assert "if (prev && prev.classList && prev.classList.contains('chart-copy')) return;" in bloque   # idempotente
+    # Y un tick que no cambia el HTML del histórico no lo swapea (cero teardown
+    # del svg por tick): opt-in al skip de swaps idénticos de app.js.
+    tpl = (ROOT / "backend/templates/partials/forwards_body.html").read_text(encoding="utf-8")
+    assert re.search(r'<div id="fwd-hist"[^>]*\bdata-skip-same\b', tpl), tpl[tpl.index('id="fwd-hist"') - 20:][:200]
+    assert "if (t.__lastHtml === html) { evt.detail.shouldSwap = false; return; }" in JS
 
 
 def test_flash_es_solo_color_sin_escala() -> None:

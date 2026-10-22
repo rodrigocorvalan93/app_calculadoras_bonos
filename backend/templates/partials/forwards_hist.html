@@ -7,7 +7,10 @@
 <div class="metrics-grid metrics-margen">
   <div class="metric metric-highlight">
     <div class="metric-label">Fwd hoy {{ corto }}→{{ largo }}</div>
-    <div class="metric-value">{{ st.fwd_hoy | ar_pct(2) if st.fwd_hoy is not none else "—" }}</div>
+    {# El what-if va EN LA MISMA LÍNEA que el valor (span): la tarjeta no
+       cambia de alto cuando aparece o desaparece, y el gráfico no se mueve.
+       Sólo con un precio editado (≠ mercado) para alguno de los dos bonos. #}
+    <div class="metric-value">{{ st.fwd_hoy | ar_pct(2) if st.fwd_hoy is not none else "—" }}{% if st.fwd_wi is not none %} <span class="metric-wi" title="Forward del par con los precios editados en el what-if (anillo celeste del gráfico)">◯ what-if {{ st.fwd_wi | ar_pct(2) }}{% if wi_delta_bps is not none %} · {{ '+' if wi_delta_bps >= 0 else '' }}{{ wi_delta_bps | ar_num(0) }} bps{% endif %}</span>{% endif %}</div>
   </div>
   <div class="metric">
     <div class="metric-label">Media ({{ st.n }} ruedas)</div>
@@ -48,6 +51,11 @@
     <circle class="fc-dot" cx="{{ ch.hoy.cx }}" cy="{{ ch.hoy.cy }}" r="4">
       <title>hoy: {{ st.fwd_hoy | ar_pct(2) }} · percentil {{ (st.percentil * 100) | ar_num(0) }} · z {{ st.z | ar_num(2) }}σ</title></circle>
   {% endif %}
+  {% if ch.whatif %}
+    {# Anillo (relleno del panel) encima del punto de hoy: si coinciden, se ve igual. #}
+    <circle class="fc-dot fc-dot-wi" cx="{{ ch.whatif.cx }}" cy="{{ ch.whatif.cy }}" r="5.5">
+      <title>what-if: {{ st.fwd_wi | ar_pct(2) }}{% if st.percentil_wi is not none %} · percentil {{ (st.percentil_wi * 100) | ar_num(0) }} · z {{ st.z_wi | ar_num(2) }}σ{% endif %}</title></circle>
+  {% endif %}
   {% for xl in ch.xlabels %}
     <text class="fc-xlabel" x="{{ xl.x }}" y="{{ ch.xlabel_y }}" text-anchor="middle">{{ xl.txt }}</text>
   {% endfor %}
@@ -58,6 +66,7 @@
   {# desde/hasta vienen ISO (YYYY-MM-DD) de la base → a mano a DD/MM/AAAA
      (ar_date sólo formatea date/datetime, un string pasa crudo). #}
   {{ st.desde[8:10] }}/{{ st.desde[5:7] }}/{{ st.desde[:4] }} → {{ st.hasta[8:10] }}/{{ st.hasta[5:7] }}/{{ st.hasta[:4] }} · fórmula idéntica a la matriz (TIREA+Duration del cierre diario).
+  {% if ch and ch.whatif %}El punto lleno es el forward de hoy (último / cierre previo de BYMA, como la matriz); el anillo celeste, el del what-if con los precios editados.{% endif %}
   {% if st.aviso_n %}<b style="color:var(--yellow)">⚠ Muestra chica ({{ st.n }} ruedas): percentil poco confiable.</b>{% endif %}
   Ojo con el percentil: el par tiene durations que se acortan rueda a rueda — contra ventanas largas compara
   momentos distintos de la curva; el z-score acompaña para leerlo con ese grano de sal.
