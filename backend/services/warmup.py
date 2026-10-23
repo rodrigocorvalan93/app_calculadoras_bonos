@@ -61,6 +61,12 @@ WARMUP_CURVE_KEYS = (
 # only CPU-bound bit; cache hits return immediately.
 _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="warmup")
 
+# Pausa después de cada TIR que el barrido calcula de verdad (ver _warm_code):
+# el worker suelta el GIL y un request que estaba esperando entra. Con ~300
+# cálculos por barrido en rueda son ~0,6 s más de barrido (8 s de intervalo);
+# sin ticks no hay cálculos y no hay pausas.
+_GIL_YIELD_S = 0.002
+
 # ── Refresh vespertino del A3500 oficial ──────────────────────────────────
 # El BCRA publica el A3500 del día ~16:00-17:00. La app carga los índices al
 # BOOT (para no pagar nada por request), así que un server levantado a la
@@ -188,8 +194,16 @@ def _warm_code(code: str, plazo: str, settle: Optional[str] = None) -> bool:
         if px is None:
             continue
         try:
-            pricing.metrics_for_market_price(code, px, settle)
-            warmed = True
+            computed = pricing.warm_market_price(code, px, settle)
+            warmed = warmed or computed is not None
+            if computed:
+                # Soltá el GIL después de CADA TIR calculada (sólo las que
+                # costaron: un touch es µs). Medido 22/10: el barrido con
+                # ticks tomaba el GIL 2-4 s seguidos cada 8 s y era el 67 %
+                # de la CPU del proceso — /market/seq idle p95 3,4 → 40 ms,
+                # Curvas / Inicio por tick p95 150 → 400 ms. Con el yield los
+                # paneles se intercalan entre cálculo y cálculo.
+                time.sleep(_GIL_YIELD_S)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[warmup] warm %s @ %s failed: %s", code, px, exc)
     return warmed

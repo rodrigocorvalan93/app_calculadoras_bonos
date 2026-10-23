@@ -912,7 +912,7 @@ def create_app() -> FastAPI:
             # que Office framea y que cargan office.js del CDN). Ninguna es
             # superficie de clickjacking (esa es la UI que cursa órdenes).
             _path = scope.get("path", "")
-            is_excel = _path.startswith("/excel/") or _path.startswith("/static/excel/")
+            is_excel = _path.startswith(("/excel/", "/static/excel/"))
             # CSRF: en métodos que mutan y con sesión por cookie, rechazar el
             # cross-site. Si no hay Origin ni Referer (clientes no-browser, tests)
             # se deja pasar; SameSite=Lax ya es la primera línea, esto es

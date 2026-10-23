@@ -280,7 +280,12 @@ class MarketDataStore:
         los store.get()/seq() del hot path en esa ventana."""
         with self._lock:
             items = [(sym, copy.copy(snap)) for sym, snap in self._data.items()]
-        return {sym: asdict(snap) for sym, snap in items}
+        # `vars()` plano, no `asdict`: los campos son escalares salvo las
+        # listas de niveles del libro, que `update_from_md` reemplaza enteras
+        # (nunca muta en el lugar) — el JSON que sale es el mismo y el
+        # `asdict` recursivo de ~2000 dataclasses costaba 32-37 ms cada 5 min
+        # (revisión 22/10), con `gc.collect` encima.
+        return {sym: dict(vars(snap)) for sym, snap in items}
 
     def restore(self, symbols: Dict[str, Any]) -> int:
         """Repone snapshots persistidos SIN bumpear la secuencia: no son

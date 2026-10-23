@@ -225,7 +225,7 @@ def rows_for_codes(codes: List[str], plazo: str = "24hs") -> List[Dict[str, Any]
     for c in codes:
         r = row_for(c, plazo)
         if r is None:
-            r = {"code": c, **{k: None for k in _STUB_KEYS}}
+            r = {"code": c, **dict.fromkeys(_STUB_KEYS)}
         rows.append(r)
     return _finish_rows(rows)
 

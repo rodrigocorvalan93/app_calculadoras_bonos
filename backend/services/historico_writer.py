@@ -2492,7 +2492,7 @@ def _fx_row_reconstruida(dia: date, fx: "Any") -> Optional[Dict[str, Any]]:
     usb = getattr(fx, "usb", None) if fx is not None else None
     if not (ccl or usb or a3500):
         return None
-    fila: Dict[str, Any] = {c: None for c in FX_COLUMNAS}
+    fila: Dict[str, Any] = dict.fromkeys(FX_COLUMNAS)
     fila.update({"fecha_hoy": dia, "ccl": ccl, "mep": usb,
                  "canje": (ccl / usb - 1.0) if (ccl and usb) else None,
                  "oficial_a3500": a3500,

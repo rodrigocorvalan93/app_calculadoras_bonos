@@ -243,36 +243,31 @@ def calcular_CER_diario_proyectado(df_inflamom, cer_inicial, fecha_inicial):
         freq="D",
     )
 
-    df_cer = pd.DataFrame(index=rango_fechas, columns=["CER"], dtype=float)
-    df_cer.iloc[0, 0] = cer_inicial
+    # Metodología BCRA, vectorizada (22/10): hasta el día 15 el factor diario
+    # usa la inflación del mes j-2 prorrateada por los días del mes j-1; del
+    # 16 en adelante la del mes j-1 prorrateada por los días del mes j. El
+    # loop día por día con DateOffset / to_period tardaba ~1,8 s por refresh
+    # de índices (boot, rollover y cada 15 min en la ventana 16-19 h sin A3500
+    # publicado); esto es el MISMO producto acumulado, bit a bit (cumprod es la
+    # misma multiplicación secuencial), en ms. Un mes sin dato de inflación
+    # cuenta como 0, igual que antes.
+    fechas = rango_fechas[1:]
+    per = fechas.to_period("M")
+    per_1 = per - 1
+    per_2 = per - 2
+    temprano = np.asarray(fechas.day <= 15)
+    infl_mes: dict = {}
+    for p, v in zip(df_inflamom.index.to_period("M"), df_inflamom["inflacionmom"]):
+        infl_mes.setdefault(p, v)             # la PRIMERA fila del mes, como el .iloc[0] del loop
+    mes_aplicable = np.where(temprano, per_2, per_1)
+    dias = np.where(temprano, per_1.days_in_month, per.days_in_month)
+    # Factores con floats de Python (el pow de la libc, como el loop); el pow
+    # vectorizado de numpy difiere en el último bit y el acumulado se nota.
+    factores = [(1.0 + float(infl_mes.get(p, 0.0)) / 100.0) ** (1.0 / int(d))
+                for p, d in zip(mes_aplicable, dias)]
+    cer = np.cumprod(np.array([float(cer_inicial)] + factores, dtype=np.float64))
 
-    for fecha in rango_fechas[1:]:
-        j_1 = (fecha - pd.DateOffset(months=1)).to_period("M")
-        j_2 = (fecha - pd.DateOffset(months=2)).to_period("M")
-        k = fecha.to_period("M").days_in_month
-        k_1 = (fecha - pd.DateOffset(months=1)).to_period("M").days_in_month
-
-        if fecha.day <= 15:
-            # inflacion del mes j_2
-            mask = df_inflamom.index.to_period("M") == j_2
-        else:
-            # inflacion del mes j_1
-            mask = df_inflamom.index.to_period("M") == j_1
-
-        if not mask.any():
-            # si no tenemos ese mes, asumimos 0
-            inflacion_mom = 0.0
-        else:
-            inflacion_mom = df_inflamom.loc[mask, "inflacionmom"].iloc[0]
-
-        if fecha.day <= 15:
-            F_t = (1 + inflacion_mom / 100.0) ** (1.0 / k_1)
-        else:
-            F_t = (1 + inflacion_mom / 100.0) ** (1.0 / k)
-
-        df_cer.loc[fecha, "CER"] = df_cer.loc[fecha - pd.DateOffset(days=1), "CER"] * F_t
-
-    df_cer.index = df_cer.index.date
+    df_cer = pd.DataFrame({"CER": cer}, index=rango_fechas.date)
     return df_cer
 
 

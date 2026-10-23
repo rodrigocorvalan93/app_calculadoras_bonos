@@ -160,7 +160,7 @@ def _refresh_vector() -> None:
     cafci.py sigue con el Excel (nunca degrada la pestaña)."""
     from backend.locale_ar import hoy_ba
     d = hoy_ba()   # CAFCI publica con fecha BA; naive pediría "mañana" de noche
-    for intento in range(6):                     # hoy + 5 hábiles atrás
+    for _ in range(6):                           # hoy + 5 hábiles atrás
         payload = _get("vectores/cafci_closing_prices", {"date": d.isoformat()})
         crudas = _rows_de(payload) if payload is not None else []
         rows = [n for r in crudas if (n := _normalize_precio(r)) is not None]

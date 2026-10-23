@@ -248,6 +248,7 @@ def test_e07_una_valuacion_genera_los_flujos_una_vez_y_da_lo_mismo(monkeypatch) 
         return orig(self, settlement_date)
 
     monkeypatch.setattr(rentafija.Bono, "generate_cashflows", contado)
+    pricing._flujos_cache.clear()
     for code in codes:
         gens.clear()
         m = pricing.compute_metrics(code, "precio", _PRECIOS_MUESTRA[code], settle=settle, include_cashflows=False)
@@ -255,7 +256,9 @@ def test_e07_una_valuacion_genera_los_flujos_una_vez_y_da_lo_mismo(monkeypatch) 
         assert len(gens) == 1, (code, gens)                # antes: 2 (tirea + intereses corridos)
         gens.clear()
         m2 = pricing.compute_metrics(code, "tir", m["tirea"], settle=settle, include_cashflows=False)
-        assert not m2.get("error") and len(gens) == 1
+        # 22/10: la segunda valuación del mismo (bono, liquidación, día) NO
+        # genera flujos — los toma del memo de pricing._flujos_de.
+        assert not m2.get("error") and len(gens) == 0, (code, gens)
         # round-trip precio→TIR→precio: el Newton de calcula_tirea corta con un
         # paso < 1e-4 en la TASA; en precio eso vale hasta P · D_mod · 1e-4
         # (D_mod = duration / (1 + TIREA)) — la cota, no un 1e-5 fijo.
