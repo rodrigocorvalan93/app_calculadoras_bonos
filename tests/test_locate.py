@@ -27,7 +27,7 @@ async def test_yas_locate_container() -> None:
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.post("/yas/recompute", data={
-            "code": "TX26", "mode": "precio", "value": "1450,00", "plazo": "24hs"})
+            "code": "TX28", "mode": "precio", "value": "1450,00", "plazo": "24hs"})
     assert r.status_code == 200
     assert "data-locate" in r.text and 'data-curve="cer"' in r.text
     assert "Ubicación en la curva" in r.text
@@ -40,9 +40,10 @@ async def test_comparador_locate_solo_misma_curva() -> None:
     from backend.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
-        # TX26 y TX28 son ambos CER (par robusto; TZX26 se reclasificó a lecap).
-        same = await ac.get("/comparador/result?a=TX26&b=TX28&mode=precio&val_a=1450&val_b=1500&plazo=24hs")
-        cross = await ac.get("/comparador/result?a=TX26&b=S31L6&mode=precio&val_a=1450&val_b=132&plazo=24hs")
+        # TZX27 y TX28 son ambos CER (par robusto; TZX26, TZXO6 y TX26 se
+        # reclasificaron a tasa fija → lecap, desk 23/10).
+        same = await ac.get("/comparador/result?a=TZX27&b=TX28&mode=precio&val_a=1450&val_b=1500&plazo=24hs")
+        cross = await ac.get("/comparador/result?a=TX28&b=S31L6&mode=precio&val_a=1500&val_b=132&plazo=24hs")
     assert same.status_code == 200 and cross.status_code == 200
     assert "data-locate" in same.text and 'data-curve="cer"' in same.text   # cer vs cer ✓
     assert "data-locate" not in cross.text                                  # cer vs lecap ✗
@@ -70,7 +71,8 @@ async def test_curvas_combinada_adhoc() -> None:
     bond_universe.ensure_loaded()
     union = cv.mix_codes(["globales", "bonares"])
     assert set(union) == set(cv.build_curve_codes()["globales"]) | set(cv.build_curve_codes()["bonares"])
-    assert cv.curve_key_for("TX26") == "cer"             # reverse-map intacto
+    assert cv.curve_key_for("TX28") == "cer"             # reverse-map intacto
+    assert cv.curve_key_for("TX26") == "lecap"           # ficha "Soberano ARS Tasa Fija" (desk 23/10)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.get("/curves/table", params={"curve": "mix:globales,bonares", "plazo": "24hs"})
     assert r.status_code == 200 and "Combinada" in r.text

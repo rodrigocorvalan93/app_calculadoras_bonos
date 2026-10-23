@@ -59,7 +59,7 @@ async def test_total_return_endpoints() -> None:
                           "&mode=params&level=2&slope=200&convex=0&anchor=1")
         assert tb.status_code == 200
         assert "Carry" in tb.text and "Ajuste" in tb.text and "TR total" in tb.text
-        assert 'name="y1__TX26"' in tb.text          # TIR final editable por fila
+        assert 'name="y1__TX28"' in tb.text          # TIR final editable por fila
         # Gráfico de columnas apiladas (SVG server-side, sin JS).
         assert 'class="tr-chart"' in tb.text and "<svg" in tb.text
         assert "Ganancia de capital" in tb.text and "Retorno Total" in tb.text
