@@ -873,14 +873,19 @@ def compute_metrics(
     # `generate_cashflows` la inversión caía al fallback `cnv_tna` con OTRA base y
     # el round-trip TNA→precio→TNA no era inverso en LECAP/bullets ARS).
     try:
+        # Flujos memoizados por (código, liquidación, índices, día): no dependen
+        # del precio y eran ~60 % de cada valuación (ver _flujos_de).
+        flujos = _flujos_de(obj, code, canonical_settle,
+                            memo=obj_override is None and fx_override is None and not bench_custom)
         if mode == "precio":
-            obj.calcula_tirea(float(value) / 100.0, canonical_settle)
+            obj.calcula_tirea(float(value) / 100.0, canonical_settle, _flujos_generados=flujos)
         elif mode == "tir":
-            obj.calcula_precio(float(value), canonical_settle)
+            obj.calcula_precio(float(value), canonical_settle, _flujos_generados=flujos)
         elif mode == "tna":
-            obj.calcula_intereses_corridos(canonical_settle)
+            if not flujos:
+                obj.calcula_intereses_corridos(canonical_settle)
             tir = tirea_from_tna(obj, float(value), freq_override, base_override)
-            obj.calcula_precio(tir, canonical_settle)
+            obj.calcula_precio(tir, canonical_settle, _flujos_generados=True)
         elif mode == "margen":
             idx_name = getattr(obj, "index", None)
             bench_pct = _bench_for(obj, idx_name)
@@ -892,9 +897,10 @@ def compute_metrics(
                                  "no se puede pricear por margen.")
                 return base
             tna_target = (bench_pct / 100.0) + float(value)
-            obj.calcula_intereses_corridos(canonical_settle)
+            if not flujos:
+                obj.calcula_intereses_corridos(canonical_settle)
             tir = tirea_from_tna(obj, tna_target, freq_override, base_override)
-            obj.calcula_precio(tir, canonical_settle)
+            obj.calcula_precio(tir, canonical_settle, _flujos_generados=True)
         else:
             base["error"] = f"Modo desconocido: {mode!r}"
             return base
@@ -1067,6 +1073,87 @@ _a3500_aplicable_cache = LockedTTLCache(maxsize=2, ttl=2)   # FX aplicable a DLK
 _curve_metrics_err_cache = LockedTTLCache(maxsize=1024, ttl=120)
 _INDEX_COLS = {"a3500": ("a3500", "tca3500"), "cer": ("CER", "CER"), "uva": ("UVA", "UVA")}
 
+# Memo de FLUJOS por (código, liquidación, día, huella del índice, FX override
+# del DLK, cupón del floater): lo que dejan `generate_cashflows` +
+# `calcula_intereses_corridos` sobre la copia per-request NO depende del precio
+# y era ~60 % de cada `calcula_tirea` (profiling 22/10: 4,85 de 7,90 s en
+# 1.435 valuaciones; el Newton, 3 %). Cada precio distinto del mismo bono
+# (last / bid / offer / cierre, cada tick) regeneraba los mismos DataFrames.
+# La entrada es el diff de atributos que esas dos funciones setean (por
+# identidad: todo lo que `generate_cashflows` asigna es un objeto nuevo), y
+# se repone con `obj.__dict__.update` sobre la copia siguiente: sus
+# consumidores (TIR, precio, duration, spreads UST, ticket, TR) sólo LEEN los
+# frames, así que compartirlos entre copias es seguro. Maxsize acotado: el
+# add-in puede mandar liquidaciones arbitrarias.
+_flujos_cache = LockedTTLCache(maxsize=3072, ttl=3600)
+
+
+def _flujos_de(obj: Any, code: str, settle: Optional[str], memo: bool) -> bool:
+    """Deja sobre `obj` los flujos + intereses corridos de `settle` (memo).
+    True → el caller pasa `_flujos_generados=True` a calcula_tirea /
+    calcula_precio. False (memo apagado: ficha ad-hoc, FX custom, benchmark
+    custom) → el camino de siempre, que los genera adentro."""
+    if not memo:
+        return False
+    try:
+        kind = _bond_index_kind(code)
+        key = (code, settle or "", hoy_ba().toordinal(), _index_fingerprint(kind),
+               getattr(obj, "_a3500_override", None), id(getattr(obj, "intereses", None)))
+    except Exception:  # noqa: BLE001 — sin key no hay memo, nunca sin valuación
+        return False
+    snap = _flujos_cache.get(key)
+    if snap is None:
+        before = dict(obj.__dict__)
+        obj.generate_cashflows(settle)
+        obj.calcula_intereses_corridos(settle, _flujos_generados=True)
+        snap = {k: v for k, v in obj.__dict__.items() if k not in before or before[k] is not v}
+        _flujos_cache.get_or_compute(key, lambda: snap)
+    else:
+        obj.__dict__.update(snap)
+    return True
+
+
+def _market_key(code: str, last_price_pct: Any, settle: Optional[str]):
+    """(key, kind, bucket) del cache de métricas a precio de mercado, o None si
+    el precio no sirve. Compartida por `metrics_for_market_price` (lee /
+    computa) y `warm_market_price` (toca / computa, daemon de warmup)."""
+    if last_price_pct is None:
+        return None
+    try:
+        v = float(last_price_pct)
+    except (TypeError, ValueError):
+        return None
+    # Sanity: descarta sizes/garbage, pero los CER viejos (DICP/PARP/CUAP)
+    # cotizan en decenas de miles de pesos por lámina, así que el techo
+    # tiene que ser alto. Solo filtramos no-positivos y valores absurdos.
+    if not (v > 0 and v < 10_000_000):
+        return None
+    bucket = round(v, 2)
+    # La key incluye el valor del índice (DLK/CER/UVA/floater → un cambio del
+    # A3500/CER/UVA/benchmark la invalida) y el día ordinal BA (rollover de fecha
+    # con settle=None → recomputa con el settlement del día nuevo, no el de ayer).
+    kind = _bond_index_kind(code)
+    key = (code, bucket, settle or "", _index_fingerprint(kind),
+           hoy_ba().toordinal())
+    return key, kind, bucket
+
+
+def warm_market_price(code: str, last_price_pct: Any, settle: Optional[str]) -> Optional[bool]:
+    """Para el daemon de warmup: si la métrica ya está caliente, extiende su
+    TTL (`touch`, µs, sin recalcular) y devuelve False; si no, la computa y
+    devuelve True. None = precio inservible. Antes el sweep sólo leía: con el
+    TTL de 1 h y los hits sin refresco, cada hora TODO el universo vencía y se
+    recalculaba en un mismo barrido (GIL tomado segundos)."""
+    k = _market_key(code, last_price_pct, settle)
+    if k is None:
+        return None
+    key, kind, _ = k
+    cache = _curve_metrics_cache_idx if kind else _curve_metrics_cache
+    if cache.touch(key):
+        return False
+    metrics_for_market_price(code, last_price_pct, settle)
+    return True
+
 
 def _bond_index_kind(code: str) -> str:
     k = _index_kind.get(code)
@@ -1182,25 +1269,10 @@ def metrics_for_market_price(
     dashes. A matured / non-quoted bond should never bring the page
     down because of one bad row.
     """
-    if last_price_pct is None:
+    k = _market_key(code, last_price_pct, settle)
+    if k is None:
         return None
-    try:
-        v = float(last_price_pct)
-    except (TypeError, ValueError):
-        return None
-    # Sanity: descarta sizes/garbage, pero los CER viejos (DICP/PARP/CUAP)
-    # cotizan en decenas de miles de pesos por lámina, así que el techo
-    # tiene que ser alto. Solo filtramos no-positivos y valores absurdos.
-    if not (v > 0 and v < 10_000_000):
-        return None
-
-    bucket = round(v, 2)
-    # La key incluye el valor del índice (DLK/CER/UVA/floater → un cambio del
-    # A3500/CER/UVA/benchmark la invalida) y el día ordinal BA (rollover de fecha
-    # con settle=None → recomputa con el settlement del día nuevo, no el de ayer).
-    kind = _bond_index_kind(code)
-    key = (code, bucket, settle or "", _index_fingerprint(kind),
-           hoy_ba().toordinal())
+    key, kind, bucket = k
 
     # ¿Falló hace <120 s con esta misma key? → guiones sin recomputar (evita
     # martillar un calc roto en cada poll) pero SIN pegar el error 1 h/1 día.
