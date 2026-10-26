@@ -1232,7 +1232,7 @@ async def _archivo_legible(path: str) -> None:
         await asyncio.get_running_loop().run_in_executor(None, base_export.probar_lectura, path)
     except OSError as exc:
         raise HTTPException(status_code=503, detail="archivo no disponible en esta máquina ahora "
-                                                    f"(OneDrive sin bajar o archivo en uso): {exc.strerror or exc}")
+                                                    f"(OneDrive sin bajar o archivo en uso): {exc.strerror or exc}") from exc
 
 
 @router.get("/historicos/base/archivo")

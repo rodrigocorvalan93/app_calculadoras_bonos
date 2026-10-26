@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import gzip
+import itertools
 import math
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -32,6 +33,16 @@ _bg_tasks: set = set()      # refs vivas de tasks fire-and-forget (create_task g
 # (seq del símbolo, fila). Ver _rows_for.
 _ROW_MEMO: Dict[tuple, tuple] = {}
 _ROW_MEMO_MAX = 4096
+
+
+def _podar_row_memo() -> None:
+    """Al tope, se va la mitad MÁS VIEJA (orden de inserción del dict; una fila
+    re-armada se reasigna en su lugar, así que el frente es lo que nadie
+    pidió hace más). Antes `clear()`: con ~4000 entradas vivas (Curvas +
+    Mercado + Inicio × plazos) cada tope re-armaba TODAS las curvas en el
+    tick siguiente — un pico de cientos de ms cada tanto (revisión 22/10)."""
+    for k in list(itertools.islice(_ROW_MEMO, len(_ROW_MEMO) // 2)):
+        _ROW_MEMO.pop(k, None)
 
 router = APIRouter(prefix="/curves", tags=["curves"])
 
@@ -490,7 +501,10 @@ async def _rows_for(
     # lleva `_rk` = (key, seq del símbolo), la identidad que usa el memo del
     # HTML por fila de la tabla de Curvas (_curve_rows_html).
     memo_ok = leg == "native" and fuente != "mae"
-    mae_ts = mae_svc.snapshot_ts() if memo_ok else None
+    # El snapshot MAE sólo entra a la fila con book=True (`row["mae"]`): en la
+    # key de Curvas (book=False) invalidaba TODAS las filas memoizadas cada vez
+    # que el poller MAE refrescaba (~20 s) sin que ninguna cambiara (revisión 22/10).
+    mae_ts = mae_svc.snapshot_ts() if (memo_ok and book) else None
     ref5 = historico_byma.ref_5d_version() if memo_ok else None
     store = marketdata_store.get_store()
 
@@ -508,7 +522,7 @@ async def _rows_for(
                 else:
                     r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
                     if len(_ROW_MEMO) >= _ROW_MEMO_MAX:
-                        _ROW_MEMO.clear()
+                        _podar_row_memo()
                     _ROW_MEMO[key] = (sseq, dict(r) if r is not None else None)
                 if r is not None:
                     r["_rk"] = (key, sseq)
@@ -1965,7 +1979,7 @@ async def graficos_data(
         bx = sorted({p[1] for p in ps})
         out = set(bx)
         if len(ps) >= 4 and bx and bx[-1] > bx[0]:
-            out |= set(float(v) for v in np.linspace(bx[0], bx[-1], 80))
+            out |= {float(v) for v in np.linspace(bx[0], bx[-1], 80)}
         return out
 
     xs = sorted(set().union(_grid(pts), *[_grid(cp) for cp in comp_pts]))

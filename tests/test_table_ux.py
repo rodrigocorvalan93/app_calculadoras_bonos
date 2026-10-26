@@ -15,7 +15,7 @@ async def test_curvas_mercado_ordenables_y_filtrables() -> None:
     from backend.main import app
 
     bond_universe.ensure_loaded()
-    for c in ("TX26", "TZX26"):
+    for c in ("TX28", "TZX27"):                       # CER (TX26 / TZX26 pasaron a lecap)
         mds.get_store().update_from_md(syms.md_symbol(c, "24hs"), {"LA": {"price": 100.0}, "CL": {"price": 99.0}})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         ct = (await ac.get("/curves/table?curve=cer&plazo=24hs")).text

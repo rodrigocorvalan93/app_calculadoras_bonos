@@ -721,7 +721,7 @@ class Bono:
         return intereses_corridos
 
 
-    def calcula_tirea(self, precio, settlement_date=None):
+    def calcula_tirea(self, precio, settlement_date=None, _flujos_generados=False):
         """
         Calcula la tasa interna de retorno efectiva anual (TIREA) de un instrumento financiero,
         utilizando el método de Newton-Raphson para encontrar la tasa de descuento que iguala
@@ -753,9 +753,15 @@ class Bono:
         Nota:
         - Este método asume una comprensión básica del método de Newton-Raphson,
         más detalles en: https://es.wikipedia.org/wiki/M%C3%A9todo_de_Newton
+        - _flujos_generados (interno): True cuando el caller YA dejó sobre este
+          objeto los flujos + intereses corridos de ESTA liquidación (memo de
+          cashflows de backend.services.pricing): se salta la generación, que
+          no depende del precio y era ~60 % del costo de cada TIR. Default
+          False = comportamiento de siempre.
         """
-        self.generate_cashflows(settlement_date)
-        self.calcula_intereses_corridos(settlement_date, _flujos_generados=True)
+        if not _flujos_generados:
+            self.generate_cashflows(settlement_date)
+            self.calcula_intereses_corridos(settlement_date, _flujos_generados=True)
         if precio <= 0:
             raise ValueError("No se ingresó un precio válido")
         if self.quote_price_cnv == 'CLEAN':
@@ -865,7 +871,7 @@ class Bono:
 
         return self.tirea
 
-    def calcula_precio(self, tasa_descuento, settlement_date=None):
+    def calcula_precio(self, tasa_descuento, settlement_date=None, _flujos_generados=False):
         '''
         Calcula el precio de un instrumento financiero utilizando una tasa de descuento dada.
         El precio se calcula como el valor presente de los flujos de caja futuros del instrumento.
@@ -884,10 +890,12 @@ class Bono:
 
         Retorna:
         - El precio del instrumento financiero, basado en la tasa de descuento dada.
+        - _flujos_generados: ver calcula_tirea.
         '''
         # Generar los flujos de caja (una sola vez: intereses corridos los reutiliza)
-        self.generate_cashflows(settlement_date)
-        self.calcula_intereses_corridos(settlement_date, _flujos_generados=True)
+        if not _flujos_generados:
+            self.generate_cashflows(settlement_date)
+            self.calcula_intereses_corridos(settlement_date, _flujos_generados=True)
 
         # Almacena nueva tasa:
         self.tirea = tasa_descuento.real

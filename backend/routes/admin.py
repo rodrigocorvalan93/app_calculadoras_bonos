@@ -228,7 +228,7 @@ async def set_tabs(request: Request) -> HTMLResponse:
     try:
         for role in ("premium", "basico"):
             prefix = f"tab_{role}_"
-            keys = [k[len(prefix):] for k in form.keys() if k.startswith(prefix)]
+            keys = [k[len(prefix):] for k in form if k.startswith(prefix)]
             auth.set_role_tabs(role, keys)
         return _ctx(request, msg="Permisos de pestañas actualizados.")
     except auth.AuthError as exc:
@@ -245,7 +245,7 @@ async def set_features(request: Request) -> HTMLResponse:
     try:
         for role in ("premium", "basico"):
             prefix = f"feat_{role}_"
-            keys = [k[len(prefix):] for k in form.keys() if k.startswith(prefix)]
+            keys = [k[len(prefix):] for k in form if k.startswith(prefix)]
             auth.set_role_features(role, keys)
         return _ctx(request, msg="Features por rol actualizadas.")
     except auth.AuthError as exc:

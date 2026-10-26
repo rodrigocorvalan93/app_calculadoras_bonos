@@ -1220,6 +1220,64 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
   `CRYPT_E_NO_REVOCATION_CHECK`) — sirve una CRL vacía firmada por la CA
   local, no expone datos.
 
+## Revisión de eficiencia 22-23/10 — memo de flujos y warmup que cede el GIL
+
+Análisis sobre `4799ad6` (bench in-process, barrido HTTP contra `dev_ticks`,
+py-spy y cProfile; scripts del análisis en el scratchpad de la sesión, el
+método es el de `bench_tick` + `profile_tick`). Hallazgo central: la
+matemática de una TIR (Newton) era el 3 % del costo; `generate_cashflows` +
+`calcula_intereses_corridos` el 61 % (andamiaje de pandas) y se repetían por
+cada precio distinto del mismo bono (last / bid / offer / cierre, cada tick).
+Y el daemon de warmup tomaba el GIL 2-4 s seguidos cada 8 s en rueda (67 %
+de la CPU del proceso sin clientes).
+
+- **Memo de flujos** (`pricing._flujos_de`, `_flujos_cache`, TTL 1 h, 3072
+  entradas): por (código, liquidación, día BA, huella del índice, FX override
+  del DLK, id del cupón del floater) se guarda el DIFF de atributos que
+  `generate_cashflows` + `calcula_intereses_corridos` dejan sobre la copia
+  per-request y se repone con `obj.__dict__.update` en la copia siguiente;
+  `rentafija.calcula_tirea / calcula_precio` aceptan `_flujos_generados=True`
+  (mismo patrón que `calcula_intereses_corridos`, 17/09) y se saltan la
+  generación. Los frames memoizados se COMPARTEN entre copias: todo consumidor
+  (TIR, precio, duration, spreads UST, ticket, TR, index_applied) sólo los lee —
+  si agregás uno que los mute, mutá una copia. Sin memo (camino de siempre):
+  `obj_override` (ad-hoc), `fx_override` (TC custom) y `bench_override`
+  aplicado (TAMAR/BADLAR custom) — todos mutan la copia. Un bono vencido a esa
+  liquidación tira adentro y no queda en el memo. Bit a bit igual al camino
+  viejo en todos los modos (`tests/test_flujos_memo.py`). Medido (miss por
+  tick, CL fijo, 50 llamadas, ms p50 / p95): Curvas corp_hdmep 52 / 73 →
+  26 / 40 · Inicio body 59 / 115 → 30 / 52 · delta Mercado 12 / 34 → 8,5 / 20
+  · Curvas cer 5,4 / 17 → 3,6 / 7,9.
+- **Warmup** (`warmup._warm_code`): `pricing.warm_market_price` toca el TTL
+  si la métrica ya está (µs) o la computa, y después de CADA TIR calculada
+  duerme `_GIL_YIELD_S` (2 ms) para que entre el request que esperaba el GIL;
+  un touch no paga pausa. Antes el sweep sólo leía (`get_or_compute` no
+  refresca el TTL): cada hora vencía TODO el universo y se recalculaba en un
+  mismo barrido. Medido con ticks 1 s + warmup (server sin clientes,
+  `/market/seq` a 20 Hz): p95 35 → 5,2 ms, p99 52 → 10,7, llamadas > 10 ms
+  23,5 % → 1,1 %. Una pestaña por tick (p50 / p95): corp_hdmep 82 / 284 →
+  51 / 86 · Inicio 92 / 326 → 50 / 86 · `/yas/market` 2,8 / 38 → 2,6 / 5 ·
+  libro 4,3 / 71 → 4,1 / 21. Los sweeps siguen tardando 2-3 s pero ya no
+  bloquean.
+- **Chico**: la key del memo de filas de Curvas / Inicio (`_rows_for`,
+  book=False) ya no lleva el snapshot MAE (sólo entra a la fila con
+  book=True; invalidaba TODAS las filas cada ~20 s); `_ROW_MEMO` al tope poda
+  la mitad más vieja (`_podar_row_memo`) en vez de vaciarse;
+  `MarketDataStore.to_persist` usa `vars()` plano (mismo JSON, sin el
+  `asdict` recursivo de 32-37 ms cada 5 min); `#be-chart` lleva
+  `data-skip-same`; `indices.calcular_CER_diario_proyectado` vectorizado
+  (cumprod de factores con floats de Python: bit a bit igual al loop,
+  `tests/test_cer_proyectado_vectorizado.py`; 1,8 s → ms por refresh de
+  índices: boot, rollover, cada 15 min en la ventana 16-19 h sin A3500).
+  Regresión: `tests/test_revision_2210.py`.
+- Queda afuera a propósito: seq por curva en vez de global (cambio grande
+  en app.js + rutas), Jinja al executor en los partials chicos (3,5 % del
+  tiempo medido) y el snapshot de Excel bajo ráfaga de 24 add-ins (p95 59 ms;
+  falta saber cuántos Excel abre el desk a la vez). `dev_ticks` mueve el `CL`
+  con cada tick y eso duplica el costo medido de Curvas (la TIR al cierre es
+  miss por tick ahí y hit en la rueda real): medir con `CL_FIJO=1` /
+  `profile_tick`.
+
 ## Auditoría 30/09 — trabajo por tick compartido e integridad del cierre
 
 Auditoría externa sobre `fcc335f` (100 llamadas por endpoint, "tick" = un
