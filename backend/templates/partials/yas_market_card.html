@@ -1,6 +1,6 @@
-{# Live market card. Polled every 3 s from yas.html. Renders dashes when
-   the store has no snapshot for the symbol (broker offline / not yet
-   subscribed). #}
+{# Live market card (md-update + every 15 s desde yas.html). Renders dashes
+   when the store has no snapshot for the symbol (broker offline / not yet
+   subscribed). «en uso» en el Last: la ficha está valuando a ese precio. #}
 <div class="market-card">
   <div class="market-card-head">
     <span class="market-card-sym">{{ symbol }}</span>
@@ -20,7 +20,7 @@
       <span class="mc-sub">{{ snap.bid_size | ar_int if (snap and snap.bid_size) else "" }}</span>
     </div>
     <div class="mc-cell mc-cell-last">
-      <span class="mc-lbl">Last</span>
+      <span class="mc-lbl">Last{% if en_uso %} <span class="tag tag-mkt" title="Es el precio que está usando la ficha (modo precio)">en uso</span>{% endif %}</span>
       <span class="mc-val" data-fl="mc-last">{{ snap.last | ar_num(4) if snap else "—" }}</span>
       <span class="mc-sub">{{ snap.last_size | ar_int if (snap and snap.last_size) else "" }}</span>
     </div>

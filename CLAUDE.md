@@ -1220,6 +1220,65 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
   `CRYPT_E_NO_REVOCATION_CHECK`) — sirve una CRL vacía firmada por la CA
   local, no expone datos.
 
+## YAS — layout y estados (rediseño 30/10)
+
+Pedido del desk (capturas del 30/10): pantalla compacta tipo "Instrumentos"
+del broker, ficha visible sin precio, resaltar el RESULTADO, precio de call.
+Mockup aprobado antes de tocar código. Todo reutiliza lo que ya había: el
+recompute es el mismo `compute_metrics` + `ticket_rows` con single-flight;
+la ficha sale de `bond_meta` (memoizado); sin endpoints de cálculo nuevos ni
+dependencias. Medido warm (uvicorn, loopback): `/yas/recompute` p50 7,7 ·
+p95 9,7 ms; vacío 2,5; `/yas/ficha` 2,0; `/yas/market` 1,9; `/yas` 5,0.
+
+- **Orden**: form (una fila; los custom a la derecha, su segunda fila sólo
+  con un toggle prendido) → **Ficha del instrumento** (`partials/yas_ficha.html`,
+  `GET /yas/ficha?code&plazo`, `#yas-ficha` con `data-skip-same`; se pide
+  SÓLO al cambiar bono o plazo — el strip viejo `yas_header.html` iba por
+  OOB en CADA tecleo y ya no existe) → panel de mercado → resultados
+  (`#yas-result`) → TR puntual → histórico. La ficha: código, nombre, chips
+  (clasificación / industria / moneda y pata / tipo de tasa + cupón / quote /
+  calificación / `Callable`), `kv-grid` de 12 datos (vencimiento, emisión,
+  moneda, cupón `cupon_label`, frecuencia, base + devengamiento, amortización
+  con `amort_cuotas` / `amort_desde`, quote, ajuste, legislación, liquidación
+  del plazo, rescate). Campos nuevos de `bond_meta`: `convencion_devengamiento`,
+  `cupon_label`, `amort_cuotas`, `amort_desde`, `tipo_call`, `fecha_call`,
+  `call_rows`.
+- **Rescate anticipado** (`call-box`, sólo si `callable` / `call_rows` /
+  `tipo_call` / `fecha_call`): el cronograma de `Precio Call` TAL COMO está
+  cargado (`pricing._call_rows`: dict ventana → fracción × 100 = % VN, texto
+  tal cual —"rescate con prima compensatoria"—; un número solo → una fila).
+  NO se derivan fechas desde la emisión (las claves `mX` de TSC4C no cuadran
+  con el texto del prospecto: m84 daría 2032 y el prospecto dice 2030) ni se
+  asume 100; sin precio → "No disponible en la ficha". `tipo_call` con
+  "put" → "del tenedor (put)". Los `Comentarios` del prospecto no llegan al
+  `Bono` (rentafija no los guarda) y por decisión del desk no se tocó
+  rentafija para traerlos.
+- **Estados** (`estado` en `yas_result.html`): `vacio` (valor en blanco) y
+  `invalido` (no parsea) → `.empty-state` neutro, sin `alert-error`, sin
+  tarjetas ni ticket, nunca números del valor anterior; el aviso va PEGADO
+  al campo por OOB (`#yas-value-hint`, clases `is-empty` / `is-invalid`; el
+  `:has()` del CSS pinta el input). `ok` → métricas + ticket + cashflows +
+  ubicación en la curva (igual que antes: `[data-locate]` + charts.js). TR
+  sin valor → `tr.vacio` (texto gris, no rojo). Sin cotización se calcula
+  igual con un valor manual.
+- **Énfasis**: lo INGRESADO sólo cambia la letra (`.metric.is-input`, celeste,
+  tag `ingresado`); el RESULTADO lleva fondo ámbar (`.metric.is-result`, tag
+  `resultado`): modo precio → TIREA y TNA; modo tir / tna / margen → el
+  precio. Mismo criterio en el ticket (`td.in` / `tr.res` / `tr.in-row`). Las
+  clases se deciden por `mode` en el template: cero lógica en el server. El
+  Last del panel de mercado lleva `en uso` cuando la ficha valúa a ese precio
+  (`/yas/market` recibe `mode` / `value` / `value_raw`).
+- **Formato y precisión**: el input muestra hasta 4 decimales
+  (`yas._fmt_input`, Alpine `fmtInput`); el crudo del autofill viaja en el
+  hidden `value_raw` y `_valor_efectivo` lo usa mientras coincida con el
+  input a 4 decimales (Alpine lo vacía con `@input`: lo tipeado manda).
+  `/market/snapshot/{code}` devuelve `last_native` (`market_last_native`:
+  AL30 / GD30 en pesos ÷ FX) y el autofill lo usa — antes precargaba el last
+  crudo en pesos sobre la ficha en dólares al cambiar de bono. Las tarjetas
+  secundarias van en % VN (val. técnico 101,5694; int. corridos 1,5694), el
+  ticket completo de siempre queda en un `<details>` (nada se pierde).
+- Regresión: `tests/test_yas_layout.py`.
+
 ## Revisión de eficiencia 22-23/10 — memo de flujos y warmup que cede el GIL
 
 Análisis sobre `4799ad6` (bench in-process, barrido HTTP contra `dev_ticks`,

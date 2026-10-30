@@ -1,18 +1,25 @@
-{% if metrics.get("error") %}
-  <div class="alert alert-error">{{ metrics.error }}</div>
-{% else %}
-
+{# Métricas (rediseño 30/10). Fila principal: Precio · TIREA · TNA · TEM ·
+   Duration. La variable INGRESADA sólo cambia el color de la letra (celeste,
+   tag «ingresado»); lo que se resalta con fondo es el RESULTADO (ámbar, tag
+   «resultado»): en modo precio, TIREA y TNA; en modo tir / tna / margen, el
+   precio. Todo sale del mismo dict de compute_metrics: las clases se deciden
+   por `mode`, que ya viene en el contexto (cero lógica nueva en el server). #}
+{% set in_precio = (mode == "precio") %}
+{% set in_tir = (mode == "tir") %}
+{% set in_tna = (mode == "tna") %}
+{% set in_margen = (mode == "margen") %}
 <div class="metrics-grid metrics-primary">
-  <div class="metric">
-    <span class="metric-label">Precio <span class="conv">% VN</span></span>
+  <div class="metric {{ 'is-input' if in_precio else 'is-result' }}">
+    <span class="metric-label">Precio <span class="conv">% VN</span> <span class="tag {{ 'tag-in' if in_precio else 'tag-res' }}">{{ "ingresado" if in_precio else "resultado" }}</span></span>
     <span class="metric-value">{{ metrics.precio_pct | ar_num(4) }}</span>
+    <span class="metric-sub">dirty · clean {{ metrics.precio_clean_pct | ar_num(4) }}</span>
   </div>
-  <div class="metric">
-    <span class="metric-label">TIREA</span>
+  <div class="metric {{ 'is-input' if in_tir else ('is-result' if in_precio else '') }}">
+    <span class="metric-label">TIREA{% if in_tir %} <span class="tag tag-in">ingresado</span>{% elif in_precio %} <span class="tag tag-res">resultado</span>{% endif %}</span>
     <span class="metric-value">{{ metrics.tirea | ar_pct(4) }}</span>
   </div>
-  <div class="metric">
-    <span class="metric-label">TNA <span class="conv">{{ metrics.tna_convention_label }}</span></span>
+  <div class="metric {{ 'is-input' if in_tna else ('is-result' if in_precio else '') }}">
+    <span class="metric-label">TNA <span class="conv">{{ metrics.tna_convention_label }}</span>{% if in_tna %} <span class="tag tag-in">ingresado</span>{% elif in_precio %} <span class="tag tag-res">resultado</span>{% endif %}</span>
     <span class="metric-value">{{ metrics.tna | ar_pct(4) }}</span>
     {# Referencia 1816: la TNA bajo SU convención de curva (la TIREA/TEA es la
        misma; sólo cambia la reexpresión). Se muestra SÓLO cuando difiere
@@ -21,7 +28,7 @@
     {% if metrics.get("conv_1816") and metrics.tna_1816 == metrics.tna_1816
           and metrics.tna == metrics.tna
           and ((metrics.tna - metrics.tna_1816) | abs) > 0.0001 %}
-    <span class="conv" style="color:var(--cyan)" title="TNA que reportaría 1816 para esta curva ({{ metrics.conv_1816 }}) — referencia, no cambia nuestro cálculo ni la TIREA">1816 {{ metrics.conv_1816 }}: {{ metrics.tna_1816 | ar_pct(2) }}</span>
+    <span class="metric-sub" style="color:var(--cyan)" title="TNA que reportaría 1816 para esta curva ({{ metrics.conv_1816 }}) — referencia, no cambia nuestro cálculo ni la TIREA">1816 {{ metrics.conv_1816 }}: {{ metrics.tna_1816 | ar_pct(2) }}</span>
     {% endif %}
   </div>
   <div class="metric">
@@ -40,59 +47,46 @@
     <span class="metric-value">{{ (metrics.paridad * 100) | ar_pct_pp(2) if metrics.paridad == metrics.paridad else "—" }}</span>
   </div>
   <div class="metric">
-    <span class="metric-label">Int. Corridos</span>
-    <span class="metric-value">{{ metrics.intereses_corridos | ar_num(6) }}</span>
+    <span class="metric-label">Val. técnico <span class="conv">% VN</span></span>
+    <span class="metric-value">{{ (metrics.valor_tecnico * 100) | ar_num(4) if metrics.valor_tecnico == metrics.valor_tecnico else "—" }}</span>
   </div>
   <div class="metric">
-    <span class="metric-label">Días Devengados</span>
-    <span class="metric-value">{{ metrics.dias_corridos | ar_int }}</span>
+    <span class="metric-label">Int. corridos <span class="conv">% VN</span></span>
+    <span class="metric-value">{{ (metrics.intereses_corridos * 100) | ar_num(4) if metrics.intereses_corridos == metrics.intereses_corridos else "—" }}</span>
   </div>
   <div class="metric">
-    <span class="metric-label">Días Remanentes</span>
-    <span class="metric-value">{{ metrics.dias_remanentes | ar_int }}</span>
+    <span class="metric-label">Días dev. / rem.</span>
+    <span class="metric-value">{{ metrics.dias_corridos | ar_int }} / {{ metrics.dias_remanentes | ar_int }}</span>
   </div>
   <div class="metric">
-    <span class="metric-label">Val. Residual</span>
+    <span class="metric-label">Val. residual</span>
     <span class="metric-value">{{ metrics.valor_residual | ar_pct_pp(2) }}</span>
   </div>
+  <div class="metric">
+    <span class="metric-label">Próx. cupón</span>
+    <span class="metric-value">{{ metrics.cashflows[0].fecha_cpn | ar_date if metrics.get("cashflows") else "—" }}</span>
+  </div>
 </div>
 
+{# Fila de contexto: sólo lo que aplica al bono (spreads UST en hard-dollar,
+   margen en floaters, índice aplicado en CER / UVA / DLK). Vacía → no se pinta. #}
 {% set idx_app = metrics.get("index_applied") %}
-{% if idx_app and idx_app.get("kind") %}
-<div class="index-applied">
-  <span class="index-applied-kind">{{ idx_app.kind }}</span>
-  <span class="index-applied-label">{{ idx_app.label }}</span>
-  <span class="index-applied-value">
-    {% if idx_app.value_fmt_hint == "percent_pp" %}
-      {{ idx_app.value | ar_pct_pp(4) }}
-    {% else %}
-      {{ idx_app.value | ar_num(4) }}
-    {% endif %}
-  </span>
-  <span class="index-applied-date">{{ idx_app.fecha | ar_date if idx_app.fecha else "" }}</span>
-</div>
-{% endif %}
-
-{% if metrics.tipo_tasa_interes in ("VARIABLE", "VARIABLE_CAP") and metrics.index %}
-<div class="metrics-grid metrics-margen">
+{% set has_idx = idx_app and idx_app.get("kind") %}
+{% set has_margen = metrics.tipo_tasa_interes in ("VARIABLE", "VARIABLE_CAP") and metrics.index %}
+{% set has_ust = metrics.z_spread_bps == metrics.z_spread_bps or metrics.g_spread_bps == metrics.g_spread_bps %}
+{% if has_idx or has_margen or has_ust %}
+<div class="metrics-grid metrics-ctx">
+  {% if has_margen %}
   <div class="metric metric-highlight">
     <span class="metric-label">Margen TNA vs {{ metrics.index }}</span>
     <span class="metric-value">{{ metrics.margen_tna | ar_pct(2) }}</span>
   </div>
   <div class="metric">
-    <span class="metric-label">{{ metrics.index }} aplicable ({{ "custom" if metrics.get("bench_custom") else "avg 5d" }})</span>
+    <span class="metric-label">{{ metrics.index }} aplicable <span class="conv">{{ "custom" if metrics.get("bench_custom") else "avg 5d" }}</span></span>
     <span class="metric-value">{{ metrics.benchmark_pct | ar_pct_pp(4) }}</span>
   </div>
-  <div class="metric">
-    <span class="metric-label">Tipo tasa</span>
-    <span class="metric-value">{{ metrics.tipo_tasa_interes }}</span>
-  </div>
-</div>
-{% endif %}
-
-{# Spreads vs Treasuries — sólo hard-dollar (NaN en el resto ⇒ bloque oculto) #}
-{% if metrics.z_spread_bps == metrics.z_spread_bps or metrics.g_spread_bps == metrics.g_spread_bps %}
-<div class="metrics-grid metrics-margen">
+  {% endif %}
+  {% if has_ust %}
   <div class="metric metric-highlight">
     <span class="metric-label">Z-spread vs UST{% if metrics.get("ust_fecha") %} <span class="conv">curva {{ metrics.ust_fecha | ar_date }}</span>{% endif %}</span>
     <span class="metric-value">{% if metrics.z_spread_bps == metrics.z_spread_bps %}{{ metrics.z_spread_bps | ar_int }} bps{% else %}—{% endif %}</span>
@@ -101,6 +95,13 @@
     <span class="metric-label">G-spread <span class="conv">TIREA − UST(dur)</span></span>
     <span class="metric-value">{% if metrics.g_spread_bps == metrics.g_spread_bps %}{{ metrics.g_spread_bps | ar_int }} bps{% else %}—{% endif %}</span>
   </div>
+  {% endif %}
+  {% if has_idx %}
+  <div class="metric">
+    <span class="metric-label"><span class="conv">{{ idx_app.kind }}</span> {{ idx_app.label }}</span>
+    <span class="metric-value">{% if idx_app.value_fmt_hint == "percent_pp" %}{{ idx_app.value | ar_pct_pp(4) }}{% else %}{{ idx_app.value | ar_num(4) }}{% endif %}</span>
+    {% if idx_app.fecha %}<span class="metric-sub">{{ idx_app.fecha | ar_date }}</span>{% endif %}
+  </div>
+  {% endif %}
 </div>
-{% endif %}
 {% endif %}

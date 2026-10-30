@@ -1,0 +1,67 @@
+{# Ficha del instrumento (rediseño 30/10): datos ESTÁTICOS de `bond_meta`
+   (memoizado) + la liquidación del plazo. Se ve haya o no precio: la pide
+   el form al cambiar de bono / plazo (`GET /yas/ficha`), no en cada tecleo.
+   Si es callable, el cronograma de rescate tal como está cargado en la
+   ficha (`Precio Call`): ventana en meses y precio en % VN; sin derivar
+   fechas ni asumir 100 (lo que falta queda "No disponible"). #}
+{% if meta %}
+{% set callable = meta.callable or meta.call_rows or meta.tipo_call or meta.fecha_call %}
+<div class="card ficha-card">
+  <div class="card-title">
+    <span>Ficha del instrumento</span>
+    <span class="card-title-aux">datos estáticos · no dependen del precio</span>
+  </div>
+  <div class="card-body">
+    <div class="ficha-head">
+      <span class="bond-code">{{ meta.codigo }}</span>
+      <span class="bond-name">{{ meta.nombre }}</span>
+      <div class="chips">
+        {% if meta.clasificacion %}<span class="chip">{{ meta.clasificacion }}</span>{% endif %}
+        {% if meta.industria and meta.industria != meta.clasificacion %}<span class="chip">{{ meta.industria }}</span>{% endif %}
+        {% if meta.moneda %}<span class="chip">{{ meta.moneda }}{% if meta.moneda == "USB" %} · MEP{% elif meta.moneda == "USD" %} · cable{% endif %}</span>{% endif %}
+        {% if meta.tipo_tasa_interes %}<span class="chip">{{ meta.tipo_tasa_interes }}{% if meta.cupon_label %} {{ meta.cupon_label }}{% endif %}</span>{% endif %}
+        {% if meta.quote_price_cnv %}<span class="chip">{{ meta.quote_price_cnv }}</span>{% endif %}
+        {% if meta.calificacion %}<span class="chip">{{ meta.calificacion }}</span>{% endif %}
+        {% if callable %}<span class="chip chip-call">{{ "Opción · put" if (meta.tipo_call and "put" in meta.tipo_call|lower) else "Callable" }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="kv-grid">
+      <div class="kv"><span class="kv-k">Vencimiento</span><span class="kv-v">{{ meta.vencimiento | ar_date }}</span></div>
+      <div class="kv"><span class="kv-k">Emisión</span><span class="kv-v">{{ meta.emision | ar_date if meta.emision else "—" }}</span></div>
+      <div class="kv"><span class="kv-k">Moneda</span><span class="kv-v">{{ meta.moneda or "—" }}{% if meta.moneda == "USB" %} <small>MEP</small>{% elif meta.moneda == "USD" %} <small>cable</small>{% endif %}</span></div>
+      <div class="kv"><span class="kv-k">Cupón</span><span class="kv-v">{{ meta.cupon_label or "—" }}</span></div>
+      <div class="kv"><span class="kv-k">Frecuencia</span><span class="kv-v">{% if meta.frecuencia %}{{ meta.frecuencia | ar_int }} <small>{{ {1: "anual", 2: "semestral", 4: "trimestral", 12: "mensual"}.get(meta.frecuencia | int, "pagos/año") }}</small>{% else %}— <small>bullet</small>{% endif %}</span></div>
+      <div class="kv"><span class="kv-k">Base devengo</span><span class="kv-v">{{ meta.convencion_base | ar_int if meta.convencion_base else "—" }}{% if meta.convencion_devengamiento %} <small>{{ meta.convencion_devengamiento }}</small>{% endif %}</span></div>
+      <div class="kv"><span class="kv-k">Amortización</span><span class="kv-v">{% if (meta.tipo_amortizacion or "")|upper == "BULLET" or meta.amort_cuotas == 1 %}Bullet <small>al vencimiento</small>{% elif meta.amort_cuotas %}Amortizable <small>{{ meta.amort_cuotas }} cuotas{% if meta.amort_desde %} desde {{ meta.amort_desde.strftime("%m/%Y") }}{% endif %}</small>{% else %}{{ meta.tipo_amortizacion or "—" }}{% endif %}</span></div>
+      <div class="kv"><span class="kv-k">Quote price</span><span class="kv-v">{{ meta.quote_price_cnv or "—" }}</span></div>
+      <div class="kv"><span class="kv-k">Ajuste / índice</span><span class="kv-v">{{ meta.ajuste_sobre_capital or meta.index or "—" }}</span></div>
+      <div class="kv"><span class="kv-k">Legislación</span><span class="kv-v">{{ meta.legislacion or "—" }}</span></div>
+      <div class="kv"><span class="kv-k">Liquidación</span><span class="kv-v">{{ settle or "—" }} <small>{{ plazo }}{% if (plazo or "")|upper == "24HS" %} · t+1{% endif %}</small></span></div>
+      <div class="kv"><span class="kv-k">Rescate anticipado</span><span class="kv-v{% if callable %} kv-call{% endif %}">{% if callable %}Sí{% if meta.tipo_call and "put" in meta.tipo_call|lower %} <small>put</small>{% elif meta.call_rows %} <small>ver cronograma</small>{% endif %}{% else %}No{% endif %}</span></div>
+    </div>
+
+    {% if callable %}
+    <div class="call-box">
+      <div class="call-head">
+        <b>{{ "Opción de rescate · del tenedor (put)" if (meta.tipo_call and "put" in meta.tipo_call|lower) else "Rescate anticipado · opción del emisor" }}</b>
+        {% if meta.call_rows %}<span>precio de rescate en <b class="call-unit">% del VN residual, clean</b> + intereses devengados a la fecha de rescate</span>{% endif %}
+        <span class="muted">fuente: ficha de especies.py</span>
+      </div>
+      <table class="call-table">
+        {% if meta.call_rows %}
+        <thead><tr><th>Ventana (meses desde la emisión, tal como está cargada)</th><th class="num">Precio de rescate</th></tr></thead>
+        {% endif %}
+        <tbody>
+          {% if meta.tipo_call %}<tr><td>Condición</td><td>{{ meta.tipo_call }}</td></tr>{% endif %}
+          {% if meta.fecha_call %}<tr><td>Fecha</td><td>{{ meta.fecha_call | ar_date }}</td></tr>{% endif %}
+          {% for r in meta.call_rows %}
+          <tr><td>{{ r.ventana or "—" }}</td><td class="num">{% if r.precio is not none %}{{ r.precio | ar_num(3) }} %{% else %}<span class="call-na">{{ r.texto or "No disponible" }}</span>{% endif %}</td></tr>
+          {% endfor %}
+          {% if not meta.call_rows %}<tr><td>Precio de rescate</td><td><span class="call-na">No disponible en la ficha</span></td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

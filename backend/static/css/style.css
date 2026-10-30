@@ -1301,6 +1301,97 @@ html, body, .topbar, .card, .fx-rail, .tape, .news-marquee, .footer {
 ::selection { background: var(--accent-soft); }
 @media (prefers-reduced-motion: reduce) { .rango i { transition: none; } }
 
+/* ── YAS · rediseño 30/10 ─────────────────────────────────────────────
+   Cabecera compacta, campo editable marcado, ficha estática siempre
+   visible (kv-grid), énfasis: lo INGRESADO sólo cambia la letra (celeste),
+   el RESULTADO lleva fondo ámbar; estado neutro sin valor. */
+.yas-head { display: flex; align-items: baseline; gap: 12px; margin: 8px 0 4px; flex-wrap: wrap; }
+.yas-head h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.005em; color: var(--text); }
+.yas-head p { margin: 0; font-size: 12.5px; }
+.yas-form { padding: 10px 14px; margin: 8px 0; }
+.yas-form .form-row { gap: 12px; }
+.yas-form .field-mode { padding-bottom: 6px; }
+.yas-form .toggles { margin-left: auto; display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+.yas-form .field-toggle { padding-bottom: 7px; }
+.field-value input {
+  border-color: var(--accent); background: var(--panel-3);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+  font-weight: 600; font-size: 14.5px; min-width: 150px;
+}
+.field-value .field-hint { font-size: 10.5px; color: var(--text-muted); min-height: 14px; line-height: 14px; white-space: nowrap; }
+.field-value .field-hint.is-invalid { color: var(--red); }
+.field-value:has(.field-hint.is-invalid) input { border-color: var(--red); box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.18); background: var(--panel-2); }
+.field-value:has(.field-hint.is-empty) input { border-color: var(--border); background: var(--panel-2); box-shadow: none; font-weight: 500; }
+.tag {
+  display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; line-height: 14px; vertical-align: middle;
+}
+.tag-in  { background: var(--cyan-soft); color: var(--cyan); border: 1px solid var(--cyan); }
+.tag-res { background: var(--accent); color: #0a0a0a; }
+.tag-mkt { background: var(--panel-3); color: var(--text-muted); border: 1px solid var(--border); }
+.market-card .mc-lbl { display: flex; gap: 6px; align-items: center; }
+
+.ficha-card .card-body { padding: 9px 12px; }
+.ficha-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ficha-head .bond-code { font-size: 17px; font-weight: 600; color: var(--accent); }
+.ficha-head .bond-name { color: var(--text-soft); font-size: 13px; }
+.ficha-head .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.chip { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-soft); background: var(--panel-2); white-space: nowrap; }
+.chip-call { border-color: var(--yellow); color: var(--yellow); }
+.kv-grid {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px;
+  background: var(--border-soft); border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; margin-top: 8px;
+}
+@media (max-width: 1100px) { .kv-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 700px)  { .kv-grid { grid-template-columns: repeat(2, 1fr); } }
+.kv { background: var(--panel); padding: 5px 10px 6px; display: flex; flex-direction: column; gap: 1px; min-height: 44px; min-width: 0; }
+.kv-k { font-size: 10.5px; color: var(--text-muted); font-weight: 500; }
+.kv-v { font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kv-v small { font-size: 10.5px; color: var(--text-muted); font-weight: 500; margin-left: 4px; }
+.kv-v.kv-call { color: var(--yellow); }
+.call-box { margin-top: 8px; border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: var(--radius); background: var(--panel-2); padding: 7px 12px 8px; }
+.call-head { display: flex; gap: 10px; align-items: baseline; font-size: 12px; color: var(--text-soft); flex-wrap: wrap; }
+.call-head b { color: var(--yellow); font-size: 12px; }
+.call-head b.call-unit { color: var(--text-soft); }
+.call-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 5px; }
+.call-table th, .call-table td { padding: 3px 8px; border-bottom: 1px solid var(--border-soft); text-align: left; }
+.call-table th { color: var(--text-muted); font-weight: 500; font-size: 11px; }
+.call-table th.num, .call-table td.num { text-align: right; }
+.call-table td.num { font-weight: 600; font-variant-numeric: tabular-nums; }
+.call-table tr:last-child td { border-bottom: 0; }
+.call-na { color: var(--text-muted); font-style: italic; font-weight: 400; }
+
+.yas .metrics-grid { margin-bottom: 10px; }
+.yas .metrics-secondary { grid-template-columns: repeat(6, 1fr); }
+.yas .metrics-secondary .metric { min-height: 48px; padding: 6px 10px 7px; }
+.yas .metrics-secondary .metric-value { font-size: 14.5px; }
+.metrics-ctx { grid-template-columns: repeat(4, 1fr); }
+.metrics-ctx .metric { min-height: 50px; }
+.metrics-ctx .metric-value { font-size: 15px; }
+@media (max-width: 900px) { .yas .metrics-secondary, .metrics-ctx { grid-template-columns: repeat(2, 1fr); } }
+.metric-sub { font-size: 10.5px; color: var(--text-muted); }
+.metric.is-input .metric-value { color: var(--cyan); }                 /* lo que escribiste: sólo la letra */
+.metric.is-result { background: var(--accent-soft); box-shadow: inset 0 2px 0 var(--accent); }   /* lo que sale del cálculo */
+.metric.is-result .metric-value { color: var(--accent); }
+.yas .ticket th, .yas .ticket td { padding: 5px 10px; white-space: nowrap; }
+.ticket td .tag { margin-left: 4px; }
+.ticket td .conv, .ticket th .conv { color: var(--cyan); font-size: 11px; font-weight: 500; }
+.ticket td.in { color: var(--cyan); font-weight: 600; }
+.ticket tr.in-row td { color: var(--cyan); font-weight: 600; }
+.ticket tr.res th, .ticket tr.res td { background: var(--accent-soft); }
+.ticket tr.res td { color: var(--accent); font-weight: 600; }
+.ticket-full { padding: 5px 10px 7px; border-top: 1px solid var(--border-soft); }
+.ticket-full summary { cursor: pointer; color: var(--cyan); font-size: 12px; }
+.ticket-full .ticket { margin-top: 6px; }
+.yas .yas-grid { gap: 10px; }
+.yas .card { margin-bottom: 10px; }
+.empty-state {
+  border: 1px dashed var(--border); border-radius: var(--radius); padding: 22px 16px; text-align: center;
+  color: var(--text-muted); font-size: 13px; background: var(--panel); margin: 0 0 10px;
+}
+.empty-state b { color: var(--text-soft); font-weight: 600; }
+
 /* ── 📍 Ubicación en la curva (YAS / Comparador) ───────────────────── */
 .locate-card { margin-top: 12px; }
 .locate-box { min-height: 240px; }

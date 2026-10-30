@@ -726,9 +726,83 @@ def bond_meta(code: str) -> Dict[str, Any]:
         "cupon_spread": getattr(obj, "cupon_spread", ""),
         "tipo_amortizacion": getattr(obj, "tipo_amortizacion", ""),
         "legislacion": getattr(obj, "legislacion", ""),
+        # Ficha del instrumento de YAS (22/10): todo estático, se arma UNA vez
+        # por código (este dict es memoizado) — cero costo en el recompute.
+        "convencion_devengamiento": getattr(obj, "convencion_devengamiento", "") or "",
+        "cupon_label": _cupon_label(obj),
+        "amort_cuotas": 0,
+        "amort_desde": None,
+        "tipo_call": getattr(obj, "tipo_call", None) or None,
+        "fecha_call": _fecha_call(obj),
+        "call_rows": _call_rows(getattr(obj, "precio_call", None)),
     }
+    try:
+        am = getattr(obj, "amortizacion", None)
+        fc = getattr(obj, "fechas_cupon", None) or []
+        if am is not None and len(am) == len(fc):
+            idx = [i for i, a in enumerate(am) if float(a) > 0]
+            meta["amort_cuotas"] = len(idx)
+            meta["amort_desde"] = fc[idx[0]] if idx else None
+    except Exception:  # noqa: BLE001 — ficha rara: la celda queda sin detalle
+        pass
     _meta_cache[code] = meta
     return meta
+
+
+def _cupon_label(obj) -> str:
+    """Cupón de la ficha en una línea: '7,75 %', '0,125 → 5,00 % step-up',
+    'TAMAR + 2,00 %' (floater). Vacío si la ficha no lo trae."""
+    from backend.locale_ar import fmt_num
+
+    cs = getattr(obj, "cupon_spread", None)
+    tipo = (getattr(obj, "tipo_tasa_interes", "") or "").upper()
+    idx = getattr(obj, "index", None) or ""
+    try:
+        if cs is None:
+            return ""
+        if isinstance(cs, (list, tuple)):
+            vals = [float(v) for v in cs if v is not None]
+            if not vals:
+                return ""
+            if len(set(vals)) == 1:
+                return f"{fmt_num(vals[0], 3).rstrip('0').rstrip(',')} %"
+            lo, hi = vals[0], vals[-1]
+            return f"{fmt_num(lo, 3).rstrip('0').rstrip(',')} → {fmt_num(hi, 2)} % step-up"
+        v = float(cs)
+        if tipo in ("VARIABLE", "VARIABLE_CAP") and idx:
+            return f"{idx} + {fmt_num(v, 2)} %"
+        return f"{fmt_num(v, 3).rstrip('0').rstrip(',')} %"
+    except (TypeError, ValueError):
+        return str(cs)
+
+
+def _fecha_call(obj):
+    f = getattr(obj, "fecha_call", None)
+    if f is None:
+        return None
+    try:
+        return f.date() if isinstance(f, datetime) else f
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _call_rows(precio_call) -> List[Dict[str, Any]]:
+    """Cronograma de rescate tal como está cargado en la ficha (`Precio Call`):
+    un dict {ventana: precio} → filas {ventana, precio (fracción → % VN) |
+    texto}. Un número solo → una fila sin ventana. No se derivan fechas ni se
+    asume 100: lo que la ficha no trae queda como 'No disponible' (desk 30/10)."""
+    rows: List[Dict[str, Any]] = []
+    if precio_call is None:
+        return rows
+    items = precio_call.items() if isinstance(precio_call, dict) else [("", precio_call)]
+    for ventana, v in items:
+        row: Dict[str, Any] = {"ventana": str(ventana), "precio": None, "texto": ""}
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            row["precio"] = float(v) * 100.0 if float(v) < 5 else float(v)   # 1.03875 → 103,875 % VN
+        elif v is not None:
+            row["texto"] = str(v)
+        rows.append(row)
+    return rows
 
 
 def _cashflows_from_obj(obj, limit: int = 40) -> List[Dict[str, Any]]:
