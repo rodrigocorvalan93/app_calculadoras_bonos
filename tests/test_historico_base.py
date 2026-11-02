@@ -6,6 +6,7 @@
 CSV es-AR). Base armada por el writer (xlsx + espejo + firma) en un tmp."""
 from __future__ import annotations
 
+import os
 import statistics
 import time
 from datetime import date, datetime, timedelta
@@ -83,7 +84,10 @@ def test_archivos_describe_los_cuatro_origenes(bases) -> None:
     assert px["xlsx"]["existe"] and px["parquet"]["existe"] and px["espejo_fiel"]
     assert px["ruedas"] == 5 and px["filas"] == 10 and px["reales"] == 10
     assert px["desde"] == "05/10/2026" and px["hasta"] == "09/10/2026"
-    assert px["xlsx"]["bytes"] > 0 and "/10/2026" in px["xlsx"]["mtime"]
+    # mtime = el del archivo recién escrito, en hora BA (no un mes hardcodeado:
+    # "/10/2026" dejó de valer el 01/11 — CI del 02/11)
+    esperado = datetime.fromtimestamp(os.stat(px["xlsx"]["path"]).st_mtime, hw._TZ).strftime("%d/%m/%Y %H:%M")
+    assert px["xlsx"]["bytes"] > 0 and px["xlsx"]["mtime"] == esperado
     assert a["fx"]["n"] == 5 and a["fx"]["parquet"]["existe"] and not a["fx"]["xlsx"]["existe"]
     ci = a["cierres"]
     assert ci["n"] == 5 and ci["desde"] == "05/10/2026" and ci["hasta"] == "09/10/2026" and ci["bytes"] > 0
