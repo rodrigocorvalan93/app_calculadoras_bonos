@@ -283,7 +283,7 @@ def test_el_bat_corre_el_preflight_antes_de_https_y_explica_el_error() -> None:
     i_one, i_https, i_uvi = (bat.index("backend.tools.onedrive"), bat.index("backend.tools.https_local"),
                              bat.index("-m uvicorn backend.main:app"))
     assert i_one < i_https < i_uvi                   # https_local ya importa medio backend
-    assert i_one < bat.index("pip install -r")       # y pip lee requirements.txt: tambien puede ser marcador
+    assert i_one < bat.index('-r "backend\\requirements.txt"')   # y pip lee requirements.txt: tambien puede ser marcador
     # exit 4 (archivos sin bajar) tiene su mensaje; cualquier otro error, el generico
     assert "if errorlevel 4 if not errorlevel 5 (" in bat[i_one:i_https]
     assert "if errorlevel 1 (" in bat[i_one:i_https] and "exit /b 4" in bat[i_one:i_https]

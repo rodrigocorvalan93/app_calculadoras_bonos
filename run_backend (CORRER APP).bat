@@ -11,7 +11,7 @@ REM  Navegador:       http://127.0.0.1:8000
 REM  Add-in de Excel: https://localhost:8443  (puente TLS: Office
 REM                   exige HTTPS para las funciones =OMS.*)
 REM ============================================================
-setlocal
+setlocal EnableDelayedExpansion
 
 REM Carpeta donde vive este .bat (raiz del proyecto)
 cd /d "%~dp0"
@@ -40,9 +40,21 @@ echo ============================================================
 echo   Carpeta : %CD%
 
 REM --- 1) Python base: py launcher (instalador oficial) o python del PATH ---
+REM Primero una version con wheels publicados para TODAS las dependencias
+REM (3.12 = la del CI, 3.13, 3.14); "py -3" a secas elige la MAS NUEVA instalada
+REM y un Python recien salido (3.15, 02/11) deja a pip compilando C para lo que
+REM todavia no tiene wheel (pedia "Microsoft Visual C++ 14.0"; PC de Carlos).
 set "PYBASE="
-py -3 --version >nul 2>&1
-if not errorlevel 1 set "PYBASE=py -3"
+for %%v in (3.12 3.13 3.14) do (
+  if not defined PYBASE (
+    py -%%v --version >nul 2>&1
+    if not errorlevel 1 set "PYBASE=py -%%v"
+  )
+)
+if not defined PYBASE (
+  py -3 --version >nul 2>&1
+  if not errorlevel 1 set "PYBASE=py -3"
+)
 if not defined PYBASE (
   python --version >nul 2>&1
   if not errorlevel 1 set "PYBASE=python"
@@ -114,9 +126,23 @@ fc /b "backend\requirements.txt" "%VENVDIR%\requirements.instalado" >nul 2>&1
 if errorlevel 1 (
   echo Instalando/actualizando dependencias ^(1-3 min la primera vez^)...
   "%PY%" -m pip install --upgrade pip >nul 2>&1
-  "%PY%" -m pip install -r "backend\requirements.txt"
+  REM --only-binary: nunca compilar C en la PC del desk (no hay MSVC). Si una
+  REM dependencia no tiene wheel para este Python, pip corta con "No matching
+  REM distribution" y abajo se explica: es un Python demasiado nuevo.
+  "%PY%" -m pip install --only-binary=:all: -r "backend\requirements.txt"
   if errorlevel 1 (
+    for /f "delims=" %%v in ('"%PY%" --version') do set "PYVER=%%v"
+    echo.
     echo [ERROR] La instalacion de dependencias fallo. Revisar la salida de pip.
+    echo   Entorno: %VENVDIR%  ^(!PYVER!^)
+    echo   Si dice "No matching distribution" o "Microsoft Visual C++ 14.0 or greater
+    echo   is required", ese Python es demasiado nuevo y alguna dependencia todavia
+    echo   no publica el paquete compilado para esa version. NO hace falta instalar
+    echo   Visual Studio / Build Tools. Solucion:
+    echo     1^) instalar Python 3.12:   winget install -e --id Python.Python.3.12
+    echo     2^) borrar el entorno viejo: rmdir /s /q "%VENVDIR%"
+    echo     3^) volver a abrir este .bat ^(lo recrea con 3.12^).
+    echo.
     pause
     exit /b 1
   )
