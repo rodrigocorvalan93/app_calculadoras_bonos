@@ -12,10 +12,15 @@ from backend.services import bond_universe, curves, escenario as esc, total_retu
 
 
 def _dates():
+    """Terminal RELATIVO al settle (+180 días): estaba fijo en 31/10/2026 y el
+    30/10/2026 quedó anterior a la liquidación t+1 → cero meses de ajuste y el
+    override de inflación no movía nada (bomba de tiempo del test, no del código)."""
+    from datetime import timedelta
     bond_universe.ensure_loaded()
     settle = tr.settle_str("24hs")
-    terminal = "31/10/2026"
-    return settle, terminal, tr._parse_d(settle), tr._parse_d(terminal)
+    sd = tr._parse_d(settle)
+    td = sd + timedelta(days=180)
+    return settle, td.strftime("%d/%m/%Y"), sd, td
 
 
 def test_helpers_buckets_fx_exit():
@@ -164,11 +169,12 @@ def test_bond_tr_want_duration_skips_durf_same_math():
 def test_infl_override_cer_solo_mueve_ajuste():
     """El override de inflación mueve el AJUSTE de CER/UVA = (1+infl)^meses − 1,
     pero NO la parte cara (carry/tr_real) — esa es real, libre de inflación."""
+    # TX28 (CER, vence 2028): TX26 vence el 09/11/2026, antes del terminal.
     settle, terminal, sd, td = _dates()
-    base = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5, want_duration=False)
-    inf2 = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5,
+    base = tr._bond_tr("TX28", 0.05, 0.05, terminal, settle, sd, td, 0.5, want_duration=False)
+    inf2 = tr._bond_tr("TX28", 0.05, 0.05, terminal, settle, sd, td, 0.5,
                        want_duration=False, infl_monthly=0.02)
-    inf5 = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5,
+    inf5 = tr._bond_tr("TX28", 0.05, 0.05, terminal, settle, sd, td, 0.5,
                        want_duration=False, infl_monthly=0.05)
     assert base and inf2 and inf5
     assert abs(inf2["carry"] - base["carry"]) < 1e-12        # carry no cambia
