@@ -242,25 +242,135 @@ async def paso_http(host: str) -> Optional[int]:
         return None
 
 
+def paso_credenciales(usuario: str, clave: str) -> None:
+    """De dónde salieron usuario y clave y si el loader de secrets.txt los tocó.
+
+    `OMSsecrets` NO pisa una variable que ya exista en el entorno de Windows
+    (una OMS_PASS vieja en "Variables de entorno" gana al archivo) y EXPANDE
+    `%VAR%`, `$VAR` y `~` adentro del valor (una clave con `$` o `%` llega
+    cambiada). Acá se compara el valor crudo del archivo con el que se usa,
+    sin imprimir ninguno."""
+    if USUARIO and CLAVE:
+        _paso("credenciales", True, "usuario y clave del bloque CONFIG (secrets.txt no interviene)")
+        return
+    try:
+        import OMSsecrets
+        ruta = OMSsecrets._resolve_secrets_path()
+    except Exception as e:  # noqa: BLE001
+        _paso("credenciales", None, f"no pude leer secrets.txt ({type(e).__name__}: {e})")
+        return
+    if not ruta:
+        _paso("credenciales", False, "no hay secrets.txt (ni SECRETS_FILE): sin usuario/clave")
+        return
+    crudo: Dict[str, str] = {}
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            for linea in f:
+                if "=" in linea and not linea.lstrip().startswith("#"):
+                    k, _, v = linea.partition("=")
+                    crudo[k.strip()] = v.rstrip("\r\n")
+    except OSError as e:
+        _paso("credenciales", False, f"{ruta}: {e}")
+        return
+    aplicadas = set(getattr(OMSsecrets, "_last_load", {}) or {})
+    avisos: List[str] = []
+    for nombre, usado, claves in (("usuario", usuario, ("PRIMARY_USER", "OMS_USER")),
+                                  ("clave", clave, ("PRIMARY_PASS", "OMS_PASS"))):
+        k = next((c for c in claves if c in crudo), None)
+        if k is None:
+            avisos.append(f"{nombre}: ninguna de {claves} está en el archivo")
+            continue
+        raw = crudo[k]
+        if k in os.environ and k not in aplicadas:
+            avisos.append(f"{nombre}: {k} viene del ENTORNO de Windows, no del archivo "
+                          "(revisar Variables de entorno del sistema / usuario)")
+        v = raw.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+            avisos.append(f"{nombre}: {k} está entre comillas en el archivo — el loader las saca")
+            v = v[1:-1]
+        if raw != raw.strip():
+            avisos.append(f"{nombre}: {k} tiene espacios al principio o al final en el archivo — el loader los saca")
+        raros = [c for c in ("%", "$", "~", "#") if c in v]
+        if raros:
+            avisos.append(f"{nombre}: {k} contiene {raros} — el loader expande %VAR% / $VAR / ~ "
+                          "(si la clave real los tiene, ponela en el bloque CONFIG del script)")
+        if len(v) != len(usado):
+            avisos.append(f"{nombre}: en el archivo tiene {len(v)} caracteres y se está usando uno de {len(usado)}: "
+                          "el valor en uso NO es el del archivo")
+    det = f"secrets.txt = {ruta} · usuario {len(usuario)} car. · clave {len(clave)} car."
+    if avisos:
+        _paso("credenciales", False, det)
+        for a in avisos:
+            _p(f"       ⚠ {a}")
+    else:
+        _paso("credenciales", True, det + " · tal cual están en el archivo")
+
+
 async def paso_login(host: str, usuario: str, clave: str):
-    """El MISMO PrimaryWS.login de la app; devuelve el cliente logueado o None."""
+    """El mismo POST que manda la app (`PrimaryWS.login`: j_spring_security_check
+    con j_username / j_password), pero SIN seguir redirects, para ver crudo qué
+    contestó el broker en cada salto. Devuelve un PrimaryWS con la sesión o None.
+
+    Cómo responde Spring Security (lo que hace matrizoms):
+        302 → /                 (o marketdata.html)   usuario y clave aceptados
+        302 → /login.html?error=true                  usuario o clave INCORRECTOS
+        200 con la página de login                    el POST no llegó al filtro de login
+    Nunca manda un 401 / 403 / 402 por clave mala: el "error" viaja en la URL."""
+    import httpx
     from backend.services.primary_ws import PrimaryWS
     if not usuario or not clave:
         _paso("login", False, "faltan usuario o clave (CONFIG o secrets.txt)")
         return None
-    cli = PrimaryWS(host)
+    http = httpx.AsyncClient(base_url=host, timeout=httpx.Timeout(TIMEOUT_S, connect=5.0),
+                             follow_redirects=False)
     t0 = time.perf_counter()
-    ok = await cli.login(usuario, clave)
+    try:
+        r = await http.post("j_spring_security_check", data={"j_username": usuario, "j_password": clave})
+    except httpx.HTTPError as e:
+        _paso("login", False, f"el POST no se completó: {type(e).__name__}: {e}",
+              (time.perf_counter() - t0) * 1000, error=f"login: {e}")
+        await http.aclose()
+        return None
     ms = (time.perf_counter() - t0) * 1000
-    st = cli.stats()
-    if ok:
-        n = len(list(cli._cookies.jar)) if cli._cookies is not None else 0
-        nombres = [ck.name for ck in cli._cookies.jar] if cli._cookies is not None else []
-        _paso("login", True, f"sesión abierta · {n} cookie(s) {nombres}", ms, cookies=nombres)
+    loc = r.headers.get("location", "")
+    set_cookie = [c.split("=", 1)[0] for c in r.headers.get_list("set-cookie")]
+    _p(f"       POST {host}j_spring_security_check  (j_username={usuario!r}, j_password=***)")
+    _p(f"       → HTTP {r.status_code}   Location: {loc or '-'}   Set-Cookie: {set_cookie or '-'}")
+    if r.status_code in (301, 302, 303, 307, 308) and loc:
+        # un salto más, para ver dónde cae (igual que follow_redirects=True en la app)
+        try:
+            r2 = await http.get(loc)
+            _p(f"       GET  {loc}  → HTTP {r2.status_code}   ({len(r2.content)} bytes"
+               f"{', título: ' + _titulo(r2.text) if r2.text else ''})")
+        except httpx.HTTPError as e:
+            _p(f"       GET  {loc}  → {type(e).__name__}: {e}")
+    else:
+        _p(f"       cuerpo ({len(r.content)} bytes): {r.text[:200]!r}")
+
+    final = loc.lower()
+    if r.status_code in (301, 302, 303, 307, 308) and not any(k in final for k in ("login", "error", "authentication")):
+        cli = PrimaryWS(host)
+        cli._http, cli._cookies = http, http.cookies          # la sesión que acabamos de abrir
+        cli._username, cli._password = usuario, clave
+        http.follow_redirects = True
+        nombres = [ck.name for ck in http.cookies.jar]
+        _paso("login", True, f"aceptado: redirige a {loc} · cookies {nombres}", ms, cookies=nombres)
         return cli
-    _paso("login", False, st.get("last_error") or "login falló (sin detalle)", ms,
-          error=st.get("last_error"))
+    await http.aclose()
+    if r.status_code in (301, 302, 303, 307, 308):
+        err = f"el broker RECHAZÓ usuario/clave: 302 → {loc}"
+    elif r.status_code == 200:
+        err = "HTTP 200 sin redirect: el POST no pasó por el login de Spring (¿path distinto en este broker?)"
+    else:
+        err = f"HTTP {r.status_code}: {r.text[:150]!r}"
+    _paso("login", False, err, ms, error=f"login: credenciales rechazadas ({err})" if "RECHAZ" in err else f"login: {err}")
     return None
+
+
+def _titulo(html: str) -> str:
+    import re
+    m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+    return m.group(1).strip()[:60] if m else "sin <title>"
 
 
 async def paso_rest(cli) -> bool:
@@ -410,8 +520,15 @@ def diagnostico(res: Dict[str, Dict[str, Any]], en_rueda: Optional[bool] = None)
     if g("login").get("ok") is False:
         err = (g("login").get("error") or "").lower()
         if "rechazad" in err or "redirect" in err:
-            out.append("El broker rechazó usuario/clave: clave vencida, usuario bloqueado por intentos o "
-                       "credenciales de OTRO broker en secrets.txt. Probar el login en la web del broker.")
+            out.append("El broker recibió el POST y contestó que usuario o clave son INCORRECTOS (302 a "
+                       "login.html?error=true: así lo dice Spring, no manda 401/403). No es red ni proxy. "
+                       "Causas: clave vencida o cambiada, usuario bloqueado por intentos, credenciales de "
+                       "OTRO broker en secrets.txt, o la clave llegó cambiada desde el archivo (ver el paso "
+                       "'credenciales'). Probá entrar con el mismo usuario/clave en la web del broker "
+                       "(login.html) y, si ahí entra, en el interactivo: login(HOST, 'usuario', 'clave tipeada').")
+            if g("credenciales").get("ok") is False:
+                out.append("El paso 'credenciales' marcó avisos: lo más probable es que la clave en uso no "
+                           "sea la que está escrita en secrets.txt.")
         else:
             out.append(f"El login no llegó a completarse: {g('login').get('error')}. Suele ser timeout / "
                        "proxy (los pasos anteriores pasaron, así que es específico del POST).")
@@ -486,6 +603,7 @@ async def correr(host: str = HOST, usuario: str = "", clave: str = "",
     if not paso_tls(host):
         return _cerrar()
     await paso_http(host)
+    paso_credenciales(usuario, clave)
     cli = await paso_login(host, usuario, clave)
     if cli is None:
         return _cerrar()
