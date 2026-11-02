@@ -1,18 +1,28 @@
-{# Swapped by hx-post /yas/recompute. OOB updates the header strip. #}
-<div id="yas-header-strip" hx-swap-oob="true">
-  {% include "partials/yas_header.html" %}
-</div>
+{# Swapped by hx-post /yas/recompute. OOB: la línea de ayuda bajo el campo
+   editable (#yas-value-hint). Estados (rediseño 30/10): vacio / invalido →
+   panel neutro, SIN tarjetas ni rojos (la ficha y el mercado viven fuera de
+   este contenedor y siguen visibles); ok → métricas + ticket + cashflows. #}
+<span id="yas-value-hint" class="field-hint {{ hint.cls if hint else '' }}" hx-swap-oob="true">{{ hint.text if hint else "" }}</span>
+
+{% if estado != "ok" or metrics.get("error") %}
+  {% if estado == "invalido" %}
+    <div class="empty-state">Corregí el valor para ver métricas, ticket y cashflows.</div>
+  {% elif estado == "vacio" %}
+    <div class="empty-state">Ingresá un <b>precio</b>, una <b>TIREA</b>, una <b>TNA</b> o un <b>margen</b> para ver métricas, ticket y cashflows.<br>
+      <span class="muted">Sin cotización de mercado también podés calcular con un valor manual.</span></div>
+  {% else %}
+    <div class="alert alert-error">{{ metrics.error }}</div>
+  {% endif %}
+{% else %}
 
 <div class="yas-grid">
   <aside class="yas-left">
     <div class="card">
       <div class="card-title">
-        <span>Ticket</span>
-        <span class="card-title-aux">{{ meta.codigo }}</span>
+        <span>Ticket · liquidación</span>
+        <span class="card-title-aux">VN {{ ticket.vn_ticket | ar_int }}</span>
       </div>
-      <div class="card-body">
-        {% include "partials/yas_ticket.html" %}
-      </div>
+      {% include "partials/yas_ticket.html" %}
     </div>
 
     {% if position %}
@@ -71,7 +81,7 @@
     <div class="card">
       <div class="card-title">
         <span>Cashflows · CPN / PMT</span>
-        <span class="card-title-aux">post-settlement</span>
+        <span class="card-title-aux">post-settlement{% if metrics.get("cashflows") %} · {{ metrics.cashflows | length }} flujo{{ "s" if metrics.cashflows | length != 1 else "" }}{% endif %}</span>
       </div>
       <div class="card-body">
         {% include "partials/yas_cashflows.html" %}
@@ -95,3 +105,4 @@
     {% endif %}
   </section>
 </div>
+{% endif %}

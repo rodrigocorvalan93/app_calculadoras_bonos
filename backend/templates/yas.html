@@ -4,9 +4,9 @@
 
 {% block content %}
 <section class="yas" x-data="yasForm()">
-  <header class="yas-header">
+  <header class="yas-head">
     <h1>Análisis de Yields</h1>
-    <p class="muted">Ingresá Precio / TIREA / TNA / Margen → métricas, ticket y cashflows del bono.</p>
+    <p class="muted">Precio / TIREA / TNA / Margen → métricas, ticket y cashflows.</p>
   </header>
 
   {% if not codes %}
@@ -41,9 +41,16 @@
         <label><input type="radio" name="mode" value="margen" x-model="mode"> Margen</label>
       </fieldset>
 
+      {# El campo editable: lo que escribís acá es la variable INGRESADA. El
+         input muestra hasta 4 decimales; el crudo del autofill (precisión
+         completa del mercado) viaja en value_raw hasta que lo editás. La
+         línea de ayuda la trae cada recompute por OOB (#yas-value-hint). #}
       <label class="field field-value">
         <span x-text="valueLabel()"></span>
-        <input type="text" inputmode="decimal" name="value" x-model="value" x-ref="valueInput" :placeholder="valuePlaceholder()" autocomplete="off">
+        <input type="text" inputmode="decimal" name="value" x-model="value" x-ref="valueInput"
+               :placeholder="valuePlaceholder()" autocomplete="off" @input="valueRaw = ''">
+        <input type="hidden" name="value_raw" x-model="valueRaw">
+        <span id="yas-value-hint" class="field-hint"></span>
       </label>
 
       <label class="field">
@@ -60,31 +67,31 @@
       </label>
 
       <span id="yas-spinner" class="spinner" aria-hidden="true"></span>
+
+      <div class="toggles">
+        <label class="field-toggle"><input type="checkbox" x-model="useCustomSettle"> Settle custom</label>
+        <label class="field-toggle"><input type="checkbox" x-model="useCustomFx"> TC (A3500) custom</label>
+        <label class="field-toggle"><input type="checkbox" x-model="useCustomBench"> TAMAR/BADLAR custom</label>
+        <label class="field-toggle"><input type="checkbox" x-model="useCustomConv"> Convención custom</label>
+      </div>
     </div>
 
-    <div class="form-row">
-      <label class="field-toggle"><input type="checkbox" x-model="useCustomSettle"> Settle custom</label>
+    <div class="form-row" x-show="useCustomSettle || useCustomFx || useCustomBench || useCustomConv" x-cloak>
       <label class="field" x-show="useCustomSettle">
         <span>Fecha liq. (DD/MM/AAAA)</span>
         <input type="text" name="settle_custom" x-model="settle" :disabled="!useCustomSettle" placeholder="DD/MM/AAAA" autocomplete="off">
       </label>
-
-      <label class="field-toggle"><input type="checkbox" x-model="useCustomFx"> TC (A3500) custom</label>
       <label class="field" x-show="useCustomFx">
         <span>TC aplicable</span>
         <input type="text" inputmode="decimal" name="fx_override" x-model="fx" :disabled="!useCustomFx" autocomplete="off">
       </label>
-
       {# Floaters: TAMAR / BADLAR aplicable a mano (TNA %). Reemplaza la
          proyección plana del cupón desde la última observación y el benchmark
          del margen; en un bono que no es floater no hace nada. #}
-      <label class="field-toggle"><input type="checkbox" x-model="useCustomBench"> TAMAR/BADLAR custom</label>
       <label class="field" x-show="useCustomBench">
         <span>Tasa aplicable (TNA %)</span>
         <input type="text" inputmode="decimal" name="bench_override" x-model="bench" :disabled="!useCustomBench" placeholder="ej 23,50" autocomplete="off">
       </label>
-
-      <label class="field-toggle"><input type="checkbox" x-model="useCustomConv"> Convención custom</label>
       <label class="field" x-show="useCustomConv">
         <span>Freq (días)</span>
         <input type="text" inputmode="numeric" name="freq_override" x-model="freq" :disabled="!useCustomConv" placeholder="ej 90" autocomplete="off">
@@ -96,16 +103,21 @@
     </div>
   </form>
 
-  <div id="yas-header-strip">
-    {% include "partials/yas_header.html" %}
+  {# Ficha del instrumento: estática (bond_meta memoizado), visible haya o no
+     precio. Se vuelve a pedir SÓLO al cambiar de bono o de plazo — no en
+     cada tecleo como el strip viejo (que iba por OOB en cada recompute). #}
+  <div id="yas-ficha" data-skip-same
+       hx-get="/yas/ficha" hx-trigger="change from:(#yas-form select[name=code]), change from:(#yas-form select[name=plazo])"
+       hx-include="[name=code], [name=plazo]" hx-swap="innerHTML">
+    {% include "partials/yas_ficha.html" %}
   </div>
 
   <div
     id="yas-market-card"
     data-flash-scope
     hx-get="/yas/market"
-    hx-trigger="load, md-update from:body, every 15s, change from:#yas-form"
-    hx-include="[name=code], [name=plazo]"
+    hx-trigger="load, md-update from:body, every 15s, change from:#yas-form, keyup changed delay:400ms from:(#yas-form input[name=value])"
+    hx-include="[name=code], [name=plazo], [name=mode], [name=value], [name=value_raw]"
     hx-swap="innerHTML"
   >
     <p class="muted" style="font-size:12px;padding:8px 0">Cargando datos de mercado…</p>
@@ -191,6 +203,7 @@
       code: {{ (selected or "") | tojson }},
       mode: 'precio',
       value: {{ default_value | tojson }},
+      valueRaw: {{ default_raw | tojson }},
       nominales: '1.000.000',
       plazo: {{ plazo | tojson }},
       useCustomSettle: false,
@@ -208,14 +221,24 @@
         this.$watch('code', () => this.autofillLast());
         this.$watch('mode', () => { if (this.mode === 'precio') this.autofillLast(); });
       },
+      // Hasta 4 decimales, sin ceros de más (70.633307 → '70,6333'); el crudo
+      // queda en valueRaw para que el cálculo no pierda precisión.
+      fmtInput(x) {
+        const t = Number(x).toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+        return t.replace('.', ',');
+      },
       async autofillLast() {
         if (this.mode !== 'precio' || !this.code) return;
         try {
           const r = await fetch(`/market/snapshot/${encodeURIComponent(this.code)}?plazo=${encodeURIComponent(this.plazo)}`);
           if (!r.ok) return;
           const j = await r.json();
-          const last = (j && j.snapshot) ? j.snapshot.last : null;
-          this.value = (last === null || last === undefined) ? '' : String(last).replace('.', ',');
+          // last_native = el último convertido al basis de la ficha (AL30 /
+          // GD30 en pesos ÷ FX); el last crudo queda de fallback.
+          let last = (j && j.last_native !== undefined && j.last_native !== null) ? j.last_native
+                   : ((j && j.snapshot) ? j.snapshot.last : null);
+          if (last === null || last === undefined || !isFinite(Number(last))) { this.value = ''; this.valueRaw = ''; }
+          else { this.valueRaw = String(last); this.value = this.fmtInput(last); }
           this.$nextTick(() => {
             const el = this.$refs.valueInput;
             if (el) el.dispatchEvent(new Event('keyup', { bubbles: true }));

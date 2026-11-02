@@ -166,9 +166,19 @@ async def snapshot(code: str, plazo: str = Query("24hs")) -> Dict[str, Any]:
     sym_ci = syms.md_symbol(code, "CI")
     pref = sym_24hs if plazo.lower().startswith("24") else sym_ci
     main = store.get(pref)
+    # `last_native`: el último convertido al basis de la ficha (una especie
+    # pesos de un hard-dollar ÷ FX de pago) — lo que el autofill de YAS tiene
+    # que poner en el input. Antes Alpine usaba el `last` crudo y en AL30 /
+    # GD30 precargaba un precio en pesos sobre una ficha en dólares.
+    try:
+        from backend.services import pricing as _pricing
+        last_native = _pricing.market_last_native(code, "24hs" if plazo.lower().startswith("24") else "CI")
+    except Exception:  # noqa: BLE001
+        last_native = None
     return {
         "code": code,
         "symbol": pref,
+        "last_native": last_native,
         "snapshot": main.to_dict() if main else None,
         "also_known": {
             sym_24hs: store.get(sym_24hs).to_dict() if store.get(sym_24hs) else None,

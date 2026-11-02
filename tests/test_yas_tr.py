@@ -97,10 +97,12 @@ async def test_yas_tr_http() -> None:
                                            "nominales": "1.000.000", "plazo": "24hs"})
         assert r.status_code == 200
         assert "TR período" in r.text and "Interés cobrado" in r.text
-        # valor no numérico → error legible, sin 500
+        # valor no numérico → estado neutro del TR (el aviso va pegado al campo
+        # de la ficha, rediseño 30/10), sin 500 ni rojo
         r = await ac.post("/yas/tr", data={"code": code, "mode": "precio", "value": "abc"})
         assert r.status_code == 200
-        assert "Ingresá un valor" in r.text
+        assert "Se calcula con el valor de la ficha" in r.text and "corregí el valor" in r.text
+        assert "var(--red" not in r.text
         # la página YAS incluye el cuadro
         r = await ac.get("/yas")
         assert r.status_code == 200

@@ -1,9 +1,12 @@
 {# Total return puntual — swapped por hx-post /yas/tr (form del cuadro TR,
-   con hx-include del form YAS: la entrada es SIEMPRE la ficha de arriba). #}
-{% if tr.error %}
+   con hx-include del form YAS: la entrada es SIEMPRE la ficha de arriba).
+   Sin valor en la ficha → estado neutro (no es un error del TR). #}
+{% if tr.vacio %}
+  <p class="muted" style="font-size:12px;padding:6px 0">Se calcula con el valor de la ficha de arriba{% if tr.estado == "invalido" %} (corregí el valor){% endif %}.</p>
+{% elif tr.error %}
   <p class="muted" style="font-size:12px;padding:6px 0;color:var(--red,#ef4444)">{{ tr.error }}</p>
 {% else %}
-  <div class="metrics-grid" style="margin-bottom:10px">
+  <div class="metrics-grid metrics-ctx" style="margin-bottom:10px">
     <div class="metric">
       <span class="metric-label">TR período · {{ tr.dias | ar_int }} días</span>
       <span class="metric-value" style="color:{{ 'var(--green,#22c55e)' if tr.tr >= 0 else 'var(--red,#ef4444)' }}">{{ tr.tr | ar_pct(4) }}</span>
