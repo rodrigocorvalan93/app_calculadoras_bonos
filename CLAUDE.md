@@ -595,6 +595,24 @@ un fixture con la estructura conocida de la página (`tests/test_bna_fx.py`) —
 si el BNA cambia el HTML, `snapshot()["error"]` lo dice y las celdas quedan
 en el último dato guardado.
 
+## Comparador — gráfico de cashflows A vs B (03/11)
+
+`services/comparador_cf.py` (stdlib puro) + `partials/comparador_cashflow.html`
+(SVG server-side, patrón `_bar_chart` / `futuros_charts`, copiable con el ⧉):
+una barra por pago en su fecha hábil sobre un eje de tiempo real desde la
+liquidación, A en rojo y B en verde (los colores de "Ambos en la curva").
+Compara **la plata que entra por el mismo efectivo**: A con el VN de la
+pantalla, B con el VN cash neutral del comparador (`swap["vn_b"]`; sin
+precio de ambos, el mismo VN); monedas distintas → B pasa a la moneda de A
+con el FX implícito del plazo (`fx.normalize_price`, el mismo del cash
+neutral) y sin FX vivo cada uno queda en la suya — el pie lo dice.
+`chart_from_rows(rows_a, rows_b, vn_a, vn_b, settle, conv_b)` es pura
+(filas de `pricing.cashflow_table`; ticks semestrales `MM/AA` hasta 2 años,
+anuales después; paso "lindo" en y); `chart_for` resuelve VN / FX y corre
+en el pool desde `routes/comparador` sólo con los dos pricings sanos (los
+flujos vienen del memo de `_flujos_de` que esos pricings cebaron: µs). CSS
+`.cfc-*`. Regresión: `tests/test_comparador_cashflow.py`.
+
 ## Add-in de Excel — OMS.CASHFLOW (03/11)
 
 `=OMS.CASHFLOW(especie; [tabla]; [alcance]; [plazo_o_fecha]; [formato];

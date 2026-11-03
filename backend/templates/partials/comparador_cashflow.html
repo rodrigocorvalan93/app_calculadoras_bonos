@@ -1,0 +1,36 @@
+{# Comparador · cashflows A vs B (SVG server-side, geometría en
+   services.comparador_cf). Una barra por pago en su fecha hábil, A en rojo y
+   B en verde — los mismos colores que "Ambos en la curva". #}
+{% if cf %}
+<div class="card">
+  <div class="card-title"><span>Cashflows · {{ cf.a }} vs {{ cf.b }}</span>
+    <span class="card-title-aux">por pago, mismo efectivo · <b style="color:#ef4444">■</b> {{ cf.a }} VN {{ cf.vn_a | ar_int }} · <b style="color:#22c55e">■</b> {{ cf.b }} VN {{ cf.vn_b | ar_int }}{% if cf.moneda %} · en {{ cf.moneda }}{% endif %}</span></div>
+  <div class="card-body">
+    <svg class="cfc-chart" viewBox="0 0 {{ cf.w }} {{ cf.h }}" width="100%"
+         preserveAspectRatio="xMidYMid meet" role="img" aria-label="Cashflows de {{ cf.a }} y {{ cf.b }}">
+      {% for t in cf.yticks %}
+        <line class="cfc-grid" x1="{{ cf.x0 }}" y1="{{ t.y }}" x2="{{ cf.x1 }}" y2="{{ t.y }}"/>
+        <text class="cfc-vlabel" x="{{ cf.x0 - 6 }}" y="{{ t.y + 3.5 }}" text-anchor="end">{{ t.v | ar_hum }}</text>
+      {% endfor %}
+      {% for t in cf.xticks %}
+        <line class="cfc-vgrid" x1="{{ t.x }}" y1="{{ cf.y0 }}" x2="{{ t.x }}" y2="{{ cf.y1 }}"/>
+        <text class="cfc-xlabel" x="{{ t.x }}" y="{{ cf.xlabel_y }}" text-anchor="middle">{{ t.label }}</text>
+      {% endfor %}
+      <line class="cfc-zero" x1="{{ cf.x0 }}" y1="{{ cf.y1 }}" x2="{{ cf.x1 }}" y2="{{ cf.y1 }}"/>
+      {% for b in cf.bars_a %}
+        <rect class="cfc-bar cfc-bar-a" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}">
+          <title>{{ cf.a }} · {{ b.fecha | ar_date }} · {{ b.monto | ar_int }} (int {{ b.int | ar_num(4) }} · amort {{ b.amort | ar_num(4) }} · total {{ (b.total * 100) | ar_num(4) }} % VN)</title></rect>
+      {% endfor %}
+      {% for b in cf.bars_b %}
+        <rect class="cfc-bar cfc-bar-b" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}">
+          <title>{{ cf.b }} · {{ b.fecha | ar_date }} · {{ b.monto | ar_int }} (int {{ b.int | ar_num(4) }} · amort {{ b.amort | ar_num(4) }} · total {{ (b.total * 100) | ar_num(4) }} % VN)</title></rect>
+      {% endfor %}
+      <g class="cfc-legend" transform="translate({{ cf.x0 }} {{ cf.legend_y }})">
+        <rect class="cfc-bar cfc-bar-a" x="0" y="-9" width="11" height="11"/><text x="16" y="0">{{ cf.a }} · {{ cf.n_a }} pago{{ "s" if cf.n_a != 1 else "" }} · cobra {{ cf.tot_a | ar_hum }}</text>
+        <rect class="cfc-bar cfc-bar-b" x="250" y="-9" width="11" height="11"/><text x="266" y="0">{{ cf.b }} · {{ cf.n_b }} pago{{ "s" if cf.n_b != 1 else "" }} · cobra {{ cf.tot_b | ar_hum }}</text>
+      </g>
+    </svg>
+    <p class="muted" style="font-size:11px;margin:6px 0 0">Flujos pendientes desde la liquidación ({{ cf.desde | ar_date }}) hasta {{ cf.hasta | ar_date }}, en la fecha hábil de pago; cada barra = interés + amortización con ajuste (CER / UVA / A3500 aplicable) × VN. {{ cf.nota }}.</p>
+  </div>
+</div>
+{% endif %}

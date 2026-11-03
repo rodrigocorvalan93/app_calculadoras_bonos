@@ -156,6 +156,8 @@
 </div>
 {% endif %}
 
+{% include "partials/comparador_cashflow.html" %}
+
 {% if locate_curve and ma and mb and ma.error is none and mb.error is none
       and ma.duration is not none and ma.duration == ma.duration
       and mb.duration is not none and mb.duration == mb.duration

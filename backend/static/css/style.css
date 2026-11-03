@@ -1498,6 +1498,17 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .fut-tables { display: grid; grid-template-columns: 1fr; gap: 0; }
 .fut-tables > .dolar-tbl + .dolar-tbl { border-top: 1px solid var(--border-soft); }
 
+/* ── Comparador — cashflows A vs B (SVG server-side, services.comparador_cf) ── */
+.cfc-chart { display: block; width: 100%; height: auto; font-variant-numeric: tabular-nums; }
+.cfc-chart .cfc-grid { stroke: var(--border-soft); stroke-width: 1; }
+.cfc-chart .cfc-vgrid { stroke: var(--border-soft); stroke-width: 1; stroke-dasharray: 2 3; }
+.cfc-chart .cfc-zero { stroke: var(--border); stroke-width: 1.4; }
+.cfc-chart .cfc-vlabel, .cfc-chart .cfc-xlabel { fill: var(--text-muted); font-size: 11px; }
+.cfc-chart .cfc-bar-a { fill: #ef4444; opacity: 0.85; }
+.cfc-chart .cfc-bar-b { fill: #22c55e; opacity: 0.85; }
+.cfc-chart .cfc-bar:hover { opacity: 1; }
+.cfc-chart .cfc-legend text { fill: var(--text-muted); font-size: 11px; }
+
 /* ── Futuros — curva TNA implícita + sendero de deva (SVG server-side) ── */
 .fut-chart { display: block; width: 100%; height: auto; font-variant-numeric: tabular-nums; }
 .fut-chart .fc-grid { stroke: var(--border-soft); stroke-width: 1; }
