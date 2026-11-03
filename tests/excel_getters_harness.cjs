@@ -144,4 +144,28 @@ out.macro_registrada_streaming = (() => {
     ? true : { got: "registro de MACRO no es streaming" };
 })();
 
+// CASHFLOW (v26): cashflowMatrix arma el spill desde el resultado del server
+// (filas [cpn ISO, pmt ISO, int, amort, ajuste, total]); cpn / pmt elige qué
+// fecha va primero, texto o serial, Monto = total × VN; sin filas → #N/A.
+const cfRes = { codigo: "TX28", alcance: "pendientes", settle: "2026-11-04", n: 2,
+                filas: [["2026-11-09", "2026-11-10", 0.5625, 10, 38.086365, 4.022872],
+                        ["2027-05-09", "2027-05-10", 0.45, 10, 38.040144, 3.975195]] };
+const CF = (tabla, formato, nom) => sandbox.cashflowMatrix(cfRes, tabla, formato, nom);
+out.cf_cpn_encabezado = eq(JSON.stringify(CF("cpn", "", null)[0]),
+                           JSON.stringify(["Fecha cupón", "Fecha pago", "Intereses", "Amortización", "Ajuste", "Total"]));
+out.cf_cpn_fila_texto = eq(JSON.stringify(CF("cpn", "", null)[1]),
+                           JSON.stringify(["09/11/2026", "10/11/2026", 0.5625, 10, 38.086365, 4.022872]));
+out.cf_pmt_fecha_pago_primero = eq(JSON.stringify(CF("pmt", "texto", null)[1].slice(0, 2)),
+                                   JSON.stringify(["10/11/2026", "09/11/2026"]));
+out.cf_pmt_encabezado = eq(CF("pmt", "", null)[0][0], "Fecha pago");
+out.cf_serial = eq(CF("cpn", "fecha", null)[2][0], sandbox.isoToSerial("2027-05-09"));
+out.cf_monto = (() => {
+  const m = CF("cpn", "", 1000000);
+  const ok = m[0][6] === "Monto" && Math.abs(m[1][6] - 4022872) < 1e-6 && m.length === 3 && m[1].length === 7;
+  return ok ? true : { got: m };
+})();
+out.cf_sin_monto_sin_columna = eq(CF("cpn", "", null)[1].length, 6);
+out.cf_sin_filas_es_error = throws(() => sandbox.cashflowMatrix({ codigo: "X", filas: [] }, "cpn", "", null));
+out.cf_registrada = /associate\("CASHFLOW", guard\(cashflowFn\)\)/.test(source) ? true : { got: "CASHFLOW sin registrar" };
+
 process.stdout.write(JSON.stringify(out));

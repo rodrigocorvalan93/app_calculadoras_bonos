@@ -595,6 +595,29 @@ un fixture con la estructura conocida de la página (`tests/test_bna_fx.py`) —
 si el BNA cambia el HTML, `snapshot()["error"]` lo dice y las celdas quedan
 en el último dato guardado.
 
+## Add-in de Excel — OMS.CASHFLOW (03/11)
+
+`=OMS.CASHFLOW(especie; [tabla]; [alcance]; [plazo_o_fecha]; [formato];
+[nominales])` (v26): el cuadro de flujos de la ficha en spill, SIN precio.
+Server: `pricing.cashflow_table(code, settle, alcance)` copia el bono,
+`aplicar_fx_dlk`, `_flujos_de` (memo: µs en hit) y LEE `cashflow_cpn`
+(`pendientes`: cupón > liquidación, lo que queda por cobrar) o
+`cashflow_cpn_full` (`todos`: cronograma completo) — nunca muta los frames
+(compartidos entre copias). Filas = las MISMAS del Cashflows del YAS
+(`_cashflows_from_obj`, sin el tope de 40): fecha de cupón, `FechaPago`
+(hábil, la de `cashflow_pmt`), intereses y amortización por 100 VN, ajuste
+(factor del índice) y total (fracción del VN con ajuste). Item `tipo:
+"cashflow"` del batch `/excel/v1/calc` (`routes/excel._calc_cashflow`,
+alias de alcance en `_CF_ALCANCES`, cache por código / alcance / settle /
+índices / día, errores por item); `functions.js` `cashflowFn` →
+`cashflowMatrix` (pura: `cpn` / `pmt` = qué fecha va primero, texto
+`DD/MM/AAAA` o serial de Excel, columna Monto = total × VN); en
+`OMSCalc.keyOf` entra `alcance` y el tipo no es "live" (se memoiza como
+`meta`). Un CER a una liquidación custom lejana puede caer con `KeyError` de
+la serie (límite de rentafija, igual que el YAS). Regresión:
+`test_excel_api.test_calc_cashflow_pendientes_todos_y_settle`, casos `cf_*`
+de `excel_getters_harness.cjs`, `test_excel_getters.test_cashflow_en_metadata_docs_y_panel`.
+
 ## Add-in de Excel — patas calculadas en minúscula (15/10)
 
 Las fichas calculadas llevan sufijo en MINÚSCULA (`…v` = pata TAMAR de los

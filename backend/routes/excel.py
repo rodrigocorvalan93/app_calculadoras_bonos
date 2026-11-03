@@ -745,6 +745,54 @@ def _calc_meta(code: str) -> Dict[str, Any]:
     return out
 
 
+_CF_ALCANCES = {"": "pendientes", "pendientes": "pendientes", "pendiente": "pendientes",
+                "por pagar": "pendientes", "porpagar": "pendientes", "remanentes": "pendientes",
+                "todos": "todos", "todo": "todos", "total": "todos", "completo": "todos"}
+
+
+def _calc_cashflow(code: str, alcance_raw: object, plazo: str,
+                   settle_custom: Optional[str]) -> Dict[str, Any]:
+    """Cuadro de flujos para =OMS.CASHFLOW (sin precio): `pricing.cashflow_table`
+    con el settle del plazo o el custom. Filas como listas [fecha cupón ISO,
+    fecha pago ISO, intereses, amortización, ajuste, total] — el add-in arma
+    la matriz (orden de fechas según `tabla`, texto o serial, monto por VN).
+    Cacheado como el resto: por código / alcance / settle / índices / día."""
+    from backend.services import pricing
+
+    if not code:
+        return {"error": "Especie vacía"}
+    s = str(alcance_raw or "").strip().lower()
+    alcance = _CF_ALCANCES.get(s)
+    if alcance is None:
+        return {"error": f"Alcance inválido: {alcance_raw!r} (pendientes | todos)"}
+    settle = settle_custom or pricing.settlement_date_str(plazo)
+    key = ("cf", code, alcance, settle or "",
+           pricing._index_fingerprint(pricing._bond_index_kind(code)),
+           pricing.hoy_ba().toordinal())
+
+    def _iso(d: Any) -> Optional[str]:
+        try:
+            return (d.date() if hasattr(d, "date") and callable(d.date) else d).isoformat()[:10]
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _factory() -> Dict[str, Any]:
+        t = pricing.cashflow_table(code, settle=settle, alcance=alcance)
+        if t.get("error"):
+            return {"error": str(t["error"]), "_nocache": True}
+        filas = [[_iso(r["fecha_cpn"]), _iso(r["fecha_pmt"]),
+                  r["intereses"], r["amortizacion"], r["ajuste"], r["total"]]
+                 for r in t["rows"] if _num_ok(r["total"])]
+        return {"codigo": code, "alcance": alcance, "settle": _iso(t.get("settle")),
+                "n": len(filas), "filas": filas}
+
+    res = _calc_cache.get_or_compute(key, _factory)
+    if res.get("_nocache"):
+        _calc_cache.invalidate(key)
+        return {"error": res["error"]}
+    return res
+
+
 # Series macro para =OMS.MACRO: alias (case-insensitive, sin espacios ni
 # guiones bajos) → key del backup BCRA en services.historico. `tamar5` /
 # `badlar5` (o `tamar aplicable`) = promedio de las últimas 5 ruedas: el mismo
@@ -827,8 +875,12 @@ def _calc_batch(items: list) -> list:
             if it.get("tipo") == "macro":              # último dato macro (OMS.MACRO): sin especie ni precio
                 out.append(_calc_macro(str(it.get("serie") or code)))
                 continue
-            modo = str(it.get("modo") or "precio").strip().lower()
             plazo = "CI" if str(it.get("plazo") or "").upper().startswith("CI") else "24hs"
+            if it.get("tipo") == "cashflow":           # cuadro de flujos (OMS.CASHFLOW): sin precio
+                out.append(_calc_cashflow(code, it.get("alcance"), plazo,
+                                          str(it.get("settle") or "").strip() or None))
+                continue
+            modo = str(it.get("modo") or "precio").strip().lower()
             valor_raw = it.get("valor")
             if valor_raw in (None, "") and modo == "precio":
                 px = _px_mercado(code, plazo) if code else None

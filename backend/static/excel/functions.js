@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v25 · 2026-10-01 (OMS.MACRO EN VIVO: la celda se actualiza sola cuando la app refresca el dato del BCRA — a3500 / badlar / tamar / cer / uva / inflamom / tamar5 / badlar5 viajan en la sección 'macro' del snapshot, como OMS.FX('a3500'); ya no hace falta tocar la celda ni Ctrl+Alt+F9; fila MACRO|<serie> en la hoja OMS_DATA del modo cruda. Antes: OMS.TABLA('rofex_min') / ('futuros_min') = futuros minoristas, canal 'minorista'/'mayorista' en OMS.ROFEX; ayuda completa en el panel + botón Recalcular puntuales; OMS.FX('a3500') = A3500 OFICIAL con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
+var OMS_BUILD = "v26 · 2026-11-03 (OMS.CASHFLOW: cuadro de flujos de la ficha en spill — fecha de cupón y de pago hábil, intereses, amortización, ajuste y total; 'cpn' / 'pmt' elige qué fecha va primero, 'pendientes' (por cobrar, default) / 'todos' (cronograma completo), plazo o fecha de liquidación, fechas como texto o serial de Excel, nominales opcionales para la columna Monto. Antes v25: OMS.MACRO EN VIVO: la celda se actualiza sola cuando la app refresca el dato del BCRA — a3500 / badlar / tamar / cer / uva / inflamom / tamar5 / badlar5 viajan en la sección 'macro' del snapshot, como OMS.FX('a3500'); ya no hace falta tocar la celda ni Ctrl+Alt+F9; fila MACRO|<serie> en la hoja OMS_DATA del modo cruda. Antes: OMS.TABLA('rofex_min') / ('futuros_min') = futuros minoristas, canal 'minorista'/'mayorista' en OMS.ROFEX; ayuda completa en el panel + botón Recalcular puntuales; OMS.FX('a3500') = A3500 OFICIAL con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -623,17 +623,18 @@ var OMSCalc = (function () {
     return [it.code, it.modo, (it.valor == null ? "@mercado" : it.valor),
             it.plazo, it.settle || "", it.fx || "", it.nominales || "",
             it.tipo || "", it.tir_salida == null ? "" : it.tir_salida,
-            it.fecha_salida || "", new Date().toDateString()].join("|");
+            it.fecha_salida || "", it.alcance || "", new Date().toDateString()].join("|");
   }
 
   function request(it) {
     var k = keyOf(it);
     // Sin precio explícito el server resuelve el last del MOMENTO: no se
     // memoiza (cada F9 re-pide); el dedup en vuelo del mismo tick sí corre.
-    // La ficha estática (tipo "meta": OMS.VENCIMIENTO) no depende del mercado
-    // y sí se memoiza (con el TTL de siempre). OMS.MACRO ya no pasa por acá:
-    // desde v25 streamea desde la sección `macro` del snapshot (macroGet).
-    var live = (it.valor == null) && it.tipo !== "meta";
+    // La ficha estática (tipo "meta": OMS.VENCIMIENTO) y el cuadro de flujos
+    // (tipo "cashflow": OMS.CASHFLOW) no dependen del mercado y sí se memoizan
+    // (con el TTL de siempre). OMS.MACRO ya no pasa por acá: desde v25
+    // streamea desde la sección `macro` del snapshot (macroGet).
+    var live = (it.valor == null) && it.tipo !== "meta" && it.tipo !== "cashflow";
     if (!live && Object.prototype.hasOwnProperty.call(memo, k)) {
       var m = memo[k];
       if ((Date.now() - m.t) < MEMO_TTL_MS) { return Promise.resolve(m.v); }
@@ -999,6 +1000,76 @@ function ticketFn(especie, precio, nominales, plazo, fx) {
   });
 }
 
+// ── OMS.CASHFLOW: cuadro de flujos de la ficha (spill) ───────────────────────
+// Sin precio: el cronograma sale de la ficha. `tabla` = cpn (fecha de cupón
+// primero, default) | pmt (fecha hábil de pago primero); `alcance` = pendientes
+// (lo que queda por cobrar después de la liquidación, default) | todos (el
+// cronograma completo, pagados incluidos); `plazo` como en TIREA (24hs / CI /
+// fecha); `formato` = texto (DD/MM/AAAA, default) | fecha (serial de Excel);
+// `nominales` agrega la columna Monto = Total × VN. Unidades = las del
+// Cashflows del YAS: Intereses / Amortización por 100 VN, Ajuste = factor del
+// índice, Total = fracción del VN con ajuste.
+var CF_TABLAS = { "": "cpn", "cpn": "cpn", "cupon": "cpn", "cupón": "cpn",
+                  "pmt": "pmt", "pago": "pmt", "pagos": "pmt" };
+var CF_ALCANCES = { "": "pendientes", "pendientes": "pendientes", "pendiente": "pendientes",
+                    "por pagar": "pendientes", "porpagar": "pendientes", "remanentes": "pendientes",
+                    "todos": "todos", "todo": "todos", "total": "todos", "completo": "todos" };
+
+// Matriz de salida a partir del resultado del server ({filas: [[cpn, pmt,
+// int, amort, ajuste, total], …]}). Pura: la prueba el harness en Node.
+function cashflowMatrix(m, tabla, formato, nominales) {
+  var filas = (m && m.filas) || [];
+  if (!filas.length) { throw naError("Sin flujos " + (m && m.alcance === "todos" ? "en la ficha" : "pendientes") + " de " + ((m && m.codigo) || "")); }
+  var serial = (formato === "fecha" || formato === "serial");
+  var fecha = function (iso) {
+    if (!iso) { return ""; }
+    if (serial) { var s = isoToSerial(iso); return s == null ? "" : s; }
+    var t = String(iso);
+    return t.slice(8, 10) + "/" + t.slice(5, 7) + "/" + t.slice(0, 4);
+  };
+  var pmtPrimero = (tabla === "pmt");
+  var head = pmtPrimero ? ["Fecha pago", "Fecha cupón"] : ["Fecha cupón", "Fecha pago"];
+  head = head.concat(["Intereses", "Amortización", "Ajuste", "Total"]);
+  if (nominales != null) { head.push("Monto"); }
+  var out = [head];
+  for (var i = 0; i < filas.length; i++) {
+    var f = filas[i];
+    var row = pmtPrimero ? [fecha(f[1]), fecha(f[0])] : [fecha(f[0]), fecha(f[1])];
+    row = row.concat([f[2], f[3], f[4], f[5]]);
+    if (nominales != null) { row.push(f[5] * nominales); }
+    out.push(row);
+  }
+  return out;
+}
+
+function cashflowFn(especie, tabla, alcance, plazo, formato, nominales) {
+  var code = String(especie == null ? "" : especie).trim().toUpperCase();
+  if (!code) { throw naError("Especie vacía"); }
+  var tb = CF_TABLAS[String(tabla == null ? "" : tabla).trim().toLowerCase()];
+  if (!tb) { throw naError("Tabla inválida: " + tabla + " (cpn | pmt)"); }
+  var al = CF_ALCANCES[String(alcance == null ? "" : alcance).trim().toLowerCase()];
+  if (!al) { throw naError("Alcance inválido: " + alcance + " (pendientes | todos)"); }
+  var fmt = String(formato == null ? "" : formato).trim().toLowerCase();
+  if (fmt && fmt !== "texto" && fmt !== "fecha" && fmt !== "serial") {
+    throw naError("Formato inválido: " + formato + " (texto | fecha)");
+  }
+  var nom = null;
+  if (nominales != null && nominales !== "") {
+    nom = Number(nominales);
+    if (!isFinite(nom) || nom <= 0) { throw naError("Nominales inválidos: " + nominales); }
+  }
+  var it = { code: code, tipo: "cashflow", alcance: al };
+  var p = String(plazo == null ? "" : plazo).trim();
+  var f = settleFromArg(p);
+  if (f) { it.settle = f; it.plazo = "24hs"; }
+  else if (PLAZOS_OK.test(p.toLowerCase())) { it.plazo = normPlazo(p); }
+  else { throw naError("4º argumento inválido: '" + p + "' — usá 24hs | CI | una fecha DD/MM/AAAA o una celda con fecha"); }
+  return OMSCalc.request(it).then(function (m) {
+    if (m.error) { throw naError(m.error); }
+    return cashflowMatrix(m, tb, fmt, nom);
+  });
+}
+
 // ── Diagnóstico (para cazar el #¡VALOR!) ─────────────────────────────────────
 // PING: función SÍNCRONA, sin server, sin async → si esto no devuelve el texto,
 // el problema es de carga/registro del add-in (metadata o JS cacheados), NO del
@@ -1047,6 +1118,7 @@ function registerFunctions() {
   CustomFunctions.associate("TICKET", guard(ticketFn));
   CustomFunctions.associate("CALC", guard(calcFn));
   CustomFunctions.associate("TR", guard(trFn));
+  CustomFunctions.associate("CASHFLOW", guard(cashflowFn));
   // Marca para el watchdog de functions.html + confirmación en el log de QUÉ
   // build registró (si esta línea no aparece, el runtime murió antes).
   try { if (typeof window !== "undefined") { window.OMS_REGISTRADO = true; } } catch (e) { /* noop */ }

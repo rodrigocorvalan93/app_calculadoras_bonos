@@ -843,6 +843,53 @@ def _cashflows_from_obj(obj, limit: int = 40) -> List[Dict[str, Any]]:
     return rows
 
 
+def cashflow_table(code: str, settle: Optional[str] = None,
+                   alcance: str = "pendientes") -> Dict[str, Any]:
+    """Cuadro de flujos de la ficha (add-in `=OMS.CASHFLOW`): las MISMAS filas
+    y unidades que el Cashflows del YAS, sin pricear (no hace falta precio).
+
+    `alcance`: "pendientes" = flujos con fecha de cupón posterior a la
+    liquidación (`cashflow_cpn`, lo que queda por cobrar); "todos" = el
+    cronograma completo, pagados incluidos (`cashflow_cpn_full`). Cada fila
+    trae la fecha de cupón y la fecha hábil de pago (`FechaPago`, la misma
+    fila de `cashflow_pmt`): el add-in elige cuál va primero. Unidades por
+    100 VN: Intereses y Amortización nominales, Ajuste = factor del índice
+    (1,0 sin ajuste; CER/UVA/A3500 aplicable al cupón), Total = (int + amort)
+    × ajuste / 100 = fracción del VN que entra (0,0824 = 8,24 % VN). Flujos
+    memoizados por `_flujos_de` (µs en hit); los frames se LEEN, nunca se
+    mutan (están compartidos entre copias). DLK: mismo FX aplicable que
+    compute_metrics (`aplicar_fx_dlk`)."""
+    out: Dict[str, Any] = {"codigo": code, "error": None, "settle": None, "alcance": alcance, "rows": []}
+    obj = _bond_obj_copy(code)
+    if obj is None:
+        out["error"] = f"Bono '{code}' no encontrado."
+        return out
+    canonical = _safe_settle(settle)
+    if settle and str(settle).strip() and canonical is None:
+        out["error"] = f"Fecha de liquidación inválida: {settle!r}. Usá DD/MM/AAAA."
+        return out
+    if alcance not in ("pendientes", "todos"):
+        out["error"] = f"Alcance inválido: {alcance!r} (pendientes | todos)"
+        return out
+    try:
+        aplicar_fx_dlk(obj, code)
+        if not _flujos_de(obj, code, canonical, memo=True):
+            obj.generate_cashflows(canonical)
+        out["settle"] = getattr(obj, "fecha_settlement", None)      # datetime: el caller formatea
+        cf = obj.cashflow_cpn_full if alcance == "todos" else obj.cashflow_cpn
+        cols = ("Fechas", "FechaPago", "Intereses", "Amortización", "Ajuste", "Total")
+        rows: List[Dict[str, Any]] = []
+        for f_cpn, f_pmt, i, a, aj, t in zip(*(cf[c].tolist() for c in cols)):
+            rows.append({"fecha_cpn": f_cpn, "fecha_pmt": f_pmt,
+                         "intereses": float(i), "amortizacion": float(a),
+                         "ajuste": float(aj), "total": float(t)})
+        out["rows"] = rows
+    except Exception as exc:  # noqa: BLE001 — bono vencido / ficha rara: error visible
+        logger.debug("[pricing] cashflow_table(%s) falló: %s", code, exc)
+        out["error"] = f"{type(exc).__name__}: {exc}"
+    return out
+
+
 # ── Main entry point ─────────────────────────────────────────────────────
 
 

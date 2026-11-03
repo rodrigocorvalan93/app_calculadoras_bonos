@@ -503,6 +503,52 @@
       ]
     },
     {
+      "id": "CASHFLOW",
+      "name": "CASHFLOW",
+      "description": "Cuadro de flujos de la ficha (spill, sin precio): fecha de cupón, fecha hábil de pago, intereses, amortización, ajuste y total por 100 VN — el mismo Cashflows del YAS. tabla cpn (fecha de cupón primero) | pmt (fecha de pago primero); alcance pendientes (por cobrar, default) | todos (cronograma completo). Ej: =OMS.CASHFLOW(\"TX28\") · =OMS.CASHFLOW(\"GD30\";\"pmt\";\"todos\";;\"fecha\";1000000).",
+      "result": {
+        "type": "any",
+        "dimensionality": "matrix"
+      },
+      "parameters": [
+        {
+          "name": "especie",
+          "type": "string",
+          "description": "Ticker"
+        },
+        {
+          "name": "tabla",
+          "type": "string",
+          "description": "cpn (default: fecha de cupón primero) | pmt (fecha hábil de pago primero)",
+          "optional": true
+        },
+        {
+          "name": "alcance",
+          "type": "string",
+          "description": "pendientes (default: flujos por cobrar después de la liquidación) | todos (cronograma completo, pagados incluidos)",
+          "optional": true
+        },
+        {
+          "name": "plazo",
+          "type": "string",
+          "description": "24hs (default) | CI | fecha de liquidación (DD/MM/AAAA o una celda con fecha): define qué flujos son pendientes",
+          "optional": true
+        },
+        {
+          "name": "formato",
+          "type": "string",
+          "description": "texto (default, DD/MM/AAAA) | fecha (número de Excel, formatear como fecha)",
+          "optional": true
+        },
+        {
+          "name": "nominales",
+          "type": "number",
+          "description": "VN (opcional): agrega la columna Monto = Total × VN",
+          "optional": true
+        }
+      ]
+    },
+    {
       "id": "TR",
       "name": "TR",
       "description": "Total return puntual (spill): entrada a un precio, salida a una TIR en una fecha (default flat, settle+90d). TR directo, TEA, TNA, P&L capital/cobrado y montos.",
