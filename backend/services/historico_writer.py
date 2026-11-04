@@ -1618,6 +1618,9 @@ def _leer_base(xlsx_path: str, pd) -> "Any":
             prev = _pd.read_parquet(pq)
             prev["fecha_hoy"] = _pd.to_datetime(prev["fecha_hoy"]).dt.date
         except Exception as exc_pq:  # noqa: BLE001
+            from backend.services import nube as _nube
+            if _nube.ilegible_por_nube(xlsx_path, exc_xlsx) or _nube.ilegible_por_nube(pq, exc_pq):
+                raise RuntimeError(f"No guardo: {_nube.remedio(xlsx_path)}.") from exc_xlsx
             raise RuntimeError(
                 f"La base {xlsx_path} está ilegible ({exc_xlsx}) y el espejo "
                 f"parquet tampoco se pudo leer ({exc_pq}). Recuperación manual: "
@@ -2961,6 +2964,9 @@ def _leer_fx_previo(xlsx: str, pq: str, pd) -> Optional["Any"]:
                            ", ".join(os.path.basename(p) for p, _ in errores), os.path.basename(path))
         return prev
     detalle = "; ".join(f"{os.path.basename(p)}: {e}" for p, e in errores)
+    from backend.services import nube
+    if any(nube.ilegible_por_nube(p, e) for p, e in errores):
+        raise RuntimeError(f"No guardo el historial FX: {nube.remedio(xlsx)}.")
     raise RuntimeError(
         f"El historial FX existe pero no se pudo leer ninguna copia ({detalle}). "
         "NO guardo para no pisarlo: restaurá el xlsx desde el Historial de versiones "

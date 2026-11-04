@@ -186,9 +186,18 @@ def test_fijar_usa_attrib_sobre_la_raiz_y_recursivo(tmp_path) -> None:
     assert not ok and "charmap" in det
     # -U: un archivo que OneDrive ya marcó "sólo en la nube" lleva UNPINNED y
     # ese estado propio le gana al pin de la carpeta; \* porque /S sólo
-    # recorre lo que matchea el patrón
-    assert llamadas[0] == (("attrib", "-U", "+P", str(tmp_path)), None)
-    assert llamadas[1] == (("attrib", "-U", "+P", str(tmp_path / "*"), "/S", "/D"), None)
+    # recorre lo que matchea el patrón. El recursivo va PRIMERO: si lo corta
+    # un timeout / Ctrl+C la raíz queda sin pin y el próximo arranque reintenta.
+    assert llamadas[0] == (("attrib", "-U", "+P", str(tmp_path / "*"), "/S", "/D"), None)
+    assert llamadas[1] == (("attrib", "-U", "+P", str(tmp_path)), None)
+
+    def run_timeout(argv, **kw):
+        if "/S" in argv:
+            raise subprocess.TimeoutExpired(argv, 300)
+        pytest.fail("con el recursivo cortado no se fija la raíz")
+
+    ok, det = onedrive.fijar(tmp_path, run=run_timeout)
+    assert not ok and "300" in det
 
     def run_mal(argv, **kw):
         return subprocess.CompletedProcess(argv, 1, "", "Acceso denegado")
@@ -329,7 +338,15 @@ def _arbol_datos(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     monkeypatch.setenv("DELTA_HISTORICO_DIR", str(bases))
     monkeypatch.setenv("DELTA_BASES_DIR", str(cart))
     monkeypatch.setenv("DELTA_CAFCI_DIR", str(cafci))
-    monkeypatch.setenv("SECRETS_FILE", str(tmp_path / "no-existe.txt"))
+    # un secrets.txt VACÍO y existente: OMSsecrets sólo salta candidatos que
+    # no son archivo, así que con uno inexistente caía al secrets.txt real de
+    # la raíz / CWD de una PC del desk (y sus carpetas entraban al test)
+    vacio = tmp_path / "secrets-vacio.txt"
+    vacio.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SECRETS_FILE", str(vacio))
+    for v in ("DELTA_CAFCI_PATH", "DELTA_ESPECIES_PATH", "DELTA_COMPOSICION_PATH", "DELTA_PN_PATH",
+              "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH", "DELTA_FONDOS_PATH", "DELTA_HISTORICO_PATH"):
+        monkeypatch.delenv(v, raising=False)
     return bases, cart, cafci
 
 

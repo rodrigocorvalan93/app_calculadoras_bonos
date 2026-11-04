@@ -594,9 +594,14 @@ def fijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = s
     # con todo ya bajado. `oem` sólo existe en Windows; `replace` nunca tira.
     texto = dict(capture_output=True, text=True, errors="replace",
                  encoding="oem" if es_windows() else "utf-8")
+    # Primero el recursivo y recién después la raíz: `root_fijado` (el pin de
+    # la raíz) es lo que decide no volver a fijar en el próximo arranque — si
+    # el `/S` vence el timeout o lo corta un Ctrl+C, la raíz queda SIN pin y
+    # se reintenta (revisión 04/11: con la raíz fijada primero, lo que attrib
+    # no alcanzó quedaba sin pin para siempre y `--listar` decía "fijada").
     try:
-        r1 = run(["attrib", "-U", "+P", str(root)], timeout=60, **texto)
         r2 = run(["attrib", "-U", "+P", str(root / "*"), "/S", "/D"], timeout=300, **texto)
+        r1 = run(["attrib", "-U", "+P", str(root)], timeout=60, **texto)
     except Exception as e:  # noqa: BLE001 — paso best-effort: nunca aborta el arranque
         return False, str(e)
     if r1.returncode == 0 and r2.returncode == 0:

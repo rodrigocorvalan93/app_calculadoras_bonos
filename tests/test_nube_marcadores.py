@@ -40,8 +40,16 @@ def test_nube_en_windows_detecta_marcador_y_errores(tmp_path, monkeypatch) -> No
     assert nube.es_error_de_nube(OSError("Could not open Parquet input source 'x': Error reading bytes from file"))
     assert not nube.es_error_de_nube(ValueError("zip"))
     assert not nube.es_error_de_nube(OSError(13, "Permission denied"))
-    assert nube.ilegible_por_nube(str(f), OSError(22, "Invalid argument"))      # por el error, archivo presente
+    # un archivo COMÚN (sin atributos de nube) con EINVAL no es nube: el CRT
+    # mapea a EINVAL también un archivo corrupto, y el writer tiene que poder apartarlo
+    assert not nube.ilegible_por_nube(str(f), OSError(22, "Invalid argument"))
     assert not nube.ilegible_por_nube(str(tmp_path / "no-existe"), OSError(22, "Invalid argument"))
+    # en una carpeta de OneDrive (PINNED) + error con firma de nube → sí (hidratación a medias)
+    monkeypatch.setattr(nube.os, "stat", lambda p: SimpleNamespace(st_file_attributes=nube.FILE_ATTRIBUTE_PINNED | 0x20))
+    assert not nube.es_marcador(str(f)) and nube.en_nube(str(f))
+    assert nube.ilegible_por_nube(str(f), OSError(22, "Invalid argument"))
+    assert not nube.ilegible_por_nube(str(f), ValueError("File is not a zip file"))
+    # marcador: la prueba es el bit, con o sin error
     monkeypatch.setattr(nube.os, "stat", lambda p: SimpleNamespace(st_file_attributes=RECALL))
     assert nube.es_marcador(str(f)) and nube.ilegible_por_nube(str(f))
     assert "Mantener siempre en este dispositivo" in nube.remedio(str(f)) and "a.xlsx" in nube.remedio(str(f))
@@ -106,6 +114,55 @@ def test_leer_fx_previo_con_excel_marcador_no_aparta(tmp_path, monkeypatch) -> N
     assert len(prev) == 1 and not xlsx.exists()
 
 
+def test_ambas_copias_marcador_el_mensaje_dice_onedrive(tmp_path, monkeypatch) -> None:
+    """Excel Y espejo ilegibles por OneDrive: el error que ve el superuser en
+    el banner dice el remedio de OneDrive, no 'restaurar desde el Historial
+    de versiones' (revisión 04/11)."""
+    import pandas as pd
+    from backend.services import historico_writer as hw
+    xlsx = tmp_path / "Delta - historico_byma_px_tasas.xlsx"
+    pq = tmp_path / "Delta - historico_byma_px_tasas.parquet"
+    xlsx.write_bytes(b"m"); pq.write_bytes(b"m")
+    monkeypatch.setattr(nube, "ilegible_por_nube", lambda p, e=None: True)
+    with pytest.raises(RuntimeError, match="No guardo: .*Mantener siempre"):
+        hw._leer_base(str(xlsx), pd)
+    fxx, fxp = tmp_path / "Delta - historico_fx.xlsx", tmp_path / "Delta - historico_fx.parquet"
+    fxx.write_bytes(b"m"); fxp.write_bytes(b"m")
+    with pytest.raises(RuntimeError, match="No guardo el historial FX"):
+        hw._leer_fx_previo(str(fxx), str(fxp), pd)
+    assert xlsx.exists() and pq.exists() and fxx.exists() and fxp.exists()
+    monkeypatch.setattr(nube, "ilegible_por_nube", lambda p, e=None: False)
+    with pytest.raises(RuntimeError, match="Historial de versiones"):
+        hw._leer_base(str(xlsx), pd)
+
+
+def test_espejo_valido_no_memoiza_un_veredicto_tomado_sobre_un_marcador(tmp_path, monkeypatch) -> None:
+    """La key del memo es (stat pq, stat xlsx) y la hidratación de OneDrive no
+    la cambia: un veredicto tomado con el sidecar o el parquet ilegibles NO se
+    guarda (revisión 04/11); uno tomado con todo legible, sí."""
+    from backend.services import espejo
+    pq, xlsx = tmp_path / "b.parquet", tmp_path / "b.xlsx"
+    pq.write_bytes(b"parquet"); xlsx.write_bytes(b"xlsx")
+    assert espejo.marcar_espejo(str(pq), str(xlsx))
+    espejo.reset_memo()
+    # sidecar presente pero ilegible (marcador): veredicto por mtime, sin memo
+    sc = espejo.sidecar_path(str(pq))
+    real_leer = espejo._leer_sidecar
+    monkeypatch.setattr(espejo, "_leer_sidecar", lambda p: None)
+    assert os.path.exists(sc)
+    espejo.espejo_valido(str(pq), str(xlsx))
+    assert (str(pq), str(xlsx)) not in espejo._MEMO
+    # parquet ilegible al calcular el sha: tampoco
+    monkeypatch.setattr(espejo, "_leer_sidecar", real_leer)
+    monkeypatch.setattr(espejo, "_sha256", lambda p: None)
+    assert espejo.espejo_valido(str(pq), str(xlsx)) is False
+    assert (str(pq), str(xlsx)) not in espejo._MEMO
+    # todo legible: se memoiza como siempre
+    monkeypatch.undo()
+    assert espejo.espejo_valido(str(pq), str(xlsx)) is True
+    assert (str(pq), str(xlsx)) in espejo._MEMO
+
+
 def test_append_acciones_con_parquet_marcador_no_aparta_ni_pisa(tmp_path, monkeypatch) -> None:
     import pandas as pd
     from backend.services import historico_writer as hw
@@ -138,8 +195,15 @@ def test_cafci_un_solo_warning_por_lote_ilegible(tmp_path, monkeypatch, caplog) 
     avisos = [r for r in caplog.records if r.name.endswith("cafci")]
     assert len(avisos) == 1 and "3 archivo(s)" in avisos[0].getMessage()
     assert not out["loaded"] and "ninguno tiene las hojas" in out["error"]
-    # en Windows, mismo lote = marcadores de OneDrive: lo dice con el remedio
+    # en Windows, mismo lote = marcadores de OneDrive (bit RECALL en el stat):
+    # lo dice con el remedio. Un EINVAL a secas en un archivo común NO es nube.
     monkeypatch.setattr(nube, "_PLATFORM", "win32")
+    with caplog.at_level(logging.WARNING, logger="backend.services.cafci"):
+        caplog.clear()
+        out = cafci._load()
+    avisos = [r for r in caplog.records if r.name.endswith("cafci")]
+    assert len(avisos) == 1 and "sólo en la nube" not in avisos[0].getMessage()
+    monkeypatch.setattr(nube, "_attrs", lambda p: nube.FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS if p in paths else 0)
     with caplog.at_level(logging.WARNING, logger="backend.services.cafci"):
         caplog.clear()
         out = cafci._load()
@@ -193,14 +257,35 @@ def test_datos_nube_avisa_una_vez_y_recarga_cuando_bajan(tmp_path, monkeypatch, 
     assert "2 archivos de datos" in avisos[0].getMessage() and "Delta Bases: 2 de 3 (1 esenciales)" in avisos[0].getMessage()
     s = datos_nube.status()
     assert s["esenciales sin bajar"] == 1 and "Delta_Composicion.xlsx" in s["error"] and "SIN fijar" in s["carpetas"]
-    # OneDrive bajó la composición (la partición sigue en la nube: no es esencial) → recarga
+    # una carpeta que no se pudo listar: escaneo INCOMPLETO → no cuenta como "todo bajado"
+    real_scandir = os.scandir
+
+    def scandir_roto(p):
+        if str(p).endswith("Carteras"):
+            raise OSError(22, "Invalid argument")
+        return real_scandir(p)
+
+    monkeypatch.setattr(onedrive.os, "scandir", scandir_roto)
+    inc = datos_nube.escanear()
+    assert inc["incompleto"] and inc["errores"] == 1 and inc["esenciales"] == 0
+    assert "no se pudieron listar" in datos_nube.status()["error"]
+    monkeypatch.setattr(onedrive.os, "scandir", real_scandir)
+    # OneDrive bajó la composición (la partición sigue en la nube: no es esencial) → recarga;
+    # un loader que sigue sin cargar (loaded=False) no cuenta como recargado y se reintenta
     llamados: list[str] = []
-    monkeypatch.setattr(datos_nube, "_recargas",
-                        lambda: [(n, lambda n=n: llamados.append(n)) for n in ("posiciones", "especies", "cafci")])
+    intentos = {"n": 0}
+
+    def recargas():
+        intentos["n"] += 1
+        falla = intentos["n"] == 1
+        return [(n, lambda n=n: (llamados.append(n), {"loaded": not falla, "error": "a medias"})[1])
+                for n in ("posiciones", "especies", "cafci")]
+
+    monkeypatch.setattr(datos_nube, "_recargas", recargas)
     monkeypatch.setattr(onedrive, "_atributos", _atributos_fake({"2024-07-04.parquet"}))
     monkeypatch.setattr(datos_nube, "_CADA_S", 0.01)
     datos_nube._vigilar()
-    assert llamados == ["posiciones", "especies", "cafci"] and datos_nube._recargado
+    assert llamados == ["posiciones", "especies", "cafci"] * 2 and datos_nube._recargado
     assert datos_nube.escanear()["esenciales"] == 0
     assert "error" not in datos_nube.status()
     # kill-switch
@@ -213,7 +298,17 @@ def test_datos_nube_recargas_reales_son_llamables() -> None:
     tenía ningún caller)."""
     from backend.services import datos_nube
     nombres = [n for n, fn in datos_nube._recargas() if callable(fn)]
-    assert nombres == ["posiciones", "especies", "cafci", "historico", "fx", "acciones", "writer"]
+    assert nombres == ["memos", "posiciones", "especies", "cafci", "historico", "fx", "acciones"]
+    # "memos" limpia TODO lo cacheado por firma de archivo
+    from backend.services import base_export, espejo
+    from backend.services import historico_writer as hw
+    espejo._MEMO[("x", "y")] = (None, None, True)
+    hw._fechas_cache = (("a", "b"), {})
+    hw._manifest_cache = ("p", "f", {})
+    base_export._frame.update(key=("k",), df=None, error="viejo")
+    dict(datos_nube._recargas())["memos"]()
+    assert not espejo._MEMO and hw._fechas_cache == () and hw._manifest_cache == ()
+    assert base_export._frame["key"] is None and base_export._frame["error"] is None
 
 
 @pytest.mark.asyncio

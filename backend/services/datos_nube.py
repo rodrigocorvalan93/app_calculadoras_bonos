@@ -19,11 +19,14 @@ de datos del lifespan:
   remedio; el detalle queda para /admin · Salud (`status()`).
 - Si faltan esenciales (composición, PN, Especies, bases px/tasas y FX…)
   arranca un thread que re-escanea cada `_CADA_S` y, cuando OneDrive los
-  bajó (ya no tienen el bit RECALL y se puede leer 1 byte), recarga
-  Posiciones / Especies / CAFCI / Históricos / FX / acciones y limpia el
-  cache de ruedas del writer — la hidratación NO cambia mtime ni tamaño, así
-  que los memos por firma no se enteran solos. Un `refresh()` nunca corre
-  con el archivo todavía marcador (reemplazaría un cache por otro fallido).
+  bajó (ya no tienen el bit RECALL), limpia TODO lo cacheado por firma de
+  archivo (memo de `espejo_valido`, resumen de ruedas y manifiesto del
+  writer, frame de Históricos · Base — la hidratación NO cambia mtime ni
+  tamaño, así que esos memos no se enteran solos) y recarga Posiciones /
+  Especies / CAFCI / Históricos / FX / acciones; si un loader sigue sin
+  cargar, lo dice y reintenta en la próxima vuelta. Un `refresh()` nunca
+  corre con el archivo todavía marcador ni sobre un escaneo incompleto (una
+  carpeta que no se pudo listar no cuenta como "todo bajado").
 `DATOS_NUBE=0` lo apaga. Todo failure-silent: el arranque no depende de esto.
 """
 from __future__ import annotations
@@ -78,21 +81,13 @@ def carpetas() -> List[Tuple[str, Path]]:
     return out
 
 
-def _legible(path: Path) -> bool:
-    """1 byte: un marcador que OneDrive ya bajó se lee; uno sin bajar, no."""
-    try:
-        with open(path, "rb") as f:
-            f.read(1)
-        return True
-    except OSError:
-        return False
-
-
 def escanear() -> Dict[str, Any]:
-    """Estado actual (sin abrir archivos salvo para confirmar un esencial que
-    ya no figura como marcador). Nunca tira."""
+    """Estado actual: scandir con los atributos del listado, sin abrir
+    archivos. Nunca tira. `incompleto` = una carpeta no se pudo listar o el
+    escaneo reventó: lo de adentro NO se chequeó — no cuenta como "todo
+    bajado" (el vigilante no recarga sobre un escaneo incompleto)."""
     st: Dict[str, Any] = {"activo": activo(), "pendientes": 0, "esenciales": 0, "bytes": 0,
-                          "carpetas": [], "ts": time.time()}
+                          "carpetas": [], "errores": 0, "incompleto": False, "ts": time.time()}
     if not st["activo"]:
         return st
     try:
@@ -104,14 +99,18 @@ def escanear() -> Dict[str, Any]:
                 "label": label, "nombre": root.name, "total": esc.total,
                 "pendientes": len(esc.pendientes), "esenciales": len(ese),
                 "bytes": sum(a.size for a in esc.pendientes), "fijada": esc.root_fijado, "nube": esc.nube,
-                "esenciales_nombres": [a.path.name for a in ese][:12],
+                "esenciales_nombres": [a.path.name for a in ese][:12], "errores": len(esc.errores),
             })
             st["pendientes"] += len(esc.pendientes)
             st["esenciales"] += len(ese)
             st["bytes"] += sum(a.size for a in esc.pendientes)
+            st["errores"] += len(esc.errores)
+            for d, e in esc.errores:
+                logger.warning("[datos_nube] no pude listar %s: %s (lo de adentro no se chequeó)", d, e)
     except Exception as exc:  # noqa: BLE001 — diagnóstico: nunca voltea el arranque
         logger.warning("[datos_nube] escaneo falló: %s", exc)
         st["error_escaneo"] = str(exc)
+    st["incompleto"] = bool(st["errores"] or st.get("error_escaneo"))
     with _lock:
         _estado.clear()
         _estado.update(st)
@@ -131,9 +130,9 @@ def chequear_arranque() -> Dict[str, Any]:
     st = escanear()
     if not st["activo"]:
         return st
-    if st["pendientes"]:
+    if st["pendientes"] or st["incompleto"]:
         mb = st["bytes"] / (1 << 20)
-        if st["esenciales"]:
+        if st["esenciales"] or st["incompleto"]:
             logger.warning("[datos_nube] %d archivos de datos están 'sólo en la nube' (OneDrive, %.0f MB) — %s. "
                            "Posiciones / Matriz / Históricos van a estar vacíos hasta que OneDrive los baje; "
                            "la app los recarga sola cuando lleguen (o ↻ en la pestaña). %s",
@@ -162,35 +161,59 @@ def _vigilar() -> None:
             continue
         if not st["activo"]:
             return
-        if st["esenciales"] == 0:
-            _recargar()
-            return
+        if st["esenciales"] == 0 and not st["incompleto"]:
+            if _recargar():
+                return                               # todo cargado: listo
+            # algún loader sigue sin cargar (el archivo bajó a medias, permisos…):
+            # seguir vigilando y reintentar en la próxima vuelta
 
 
-def _recargar() -> None:
-    """OneDrive bajó lo esencial: releer lo que cacheó el fallo."""
+def _recargar() -> bool:
+    """OneDrive bajó lo esencial: releer lo que cacheó el fallo. True si todos
+    los loaders que informan `loaded` quedaron cargados."""
     global _recargado
     hechos: List[str] = []
+    fallidos: List[str] = []
     for nombre, fn in _recargas():
         try:
-            fn()
-            hechos.append(nombre)
+            r = fn()
         except Exception as exc:  # noqa: BLE001
             logger.warning("[datos_nube] recarga de %s falló: %s", nombre, exc)
-    _recargado = True
-    logger.info("[datos_nube] OneDrive bajó los archivos esenciales: recargados %s", ", ".join(hechos) or "—")
+            fallidos.append(nombre)
+            continue
+        if isinstance(r, dict) and r.get("loaded") is False:
+            # positions / delta_especies / cafci / historico_byma atrapan su
+            # excepción y la dejan en `error`: no es una recarga lograda
+            logger.warning("[datos_nube] recarga de %s: sigue sin cargar (%s)", nombre, r.get("error") or "?")
+            fallidos.append(nombre)
+            continue
+        hechos.append(nombre)
+    _recargado = not fallidos
+    if fallidos:
+        logger.warning("[datos_nube] OneDrive bajó los archivos esenciales pero no cargaron: %s (recargados %s); "
+                       "se reintenta", ", ".join(fallidos), ", ".join(hechos) or "—")
+    else:
+        logger.info("[datos_nube] OneDrive bajó los archivos esenciales: recargados %s", ", ".join(hechos) or "—")
+    return not fallidos
 
 
 def _recargas() -> List[Tuple[str, Any]]:
-    from backend.services import acciones_hist, cafci, delta_especies, fx_hist, historico_byma, positions
+    from backend.services import acciones_hist, base_export, cafci, delta_especies, espejo, fx_hist, historico_byma, positions
     from backend.services import historico_writer as hw
 
-    def _writer() -> None:
-        hw._fechas_cache = ()               # el resumen de ruedas quedó pegado por (mtime, tamaño)
+    def _memos() -> None:
+        # Todo lo cacheado por FIRMA (mtime + tamaño) del archivo: un marcador
+        # tiene stat normal y la hidratación no lo cambia, así que el veredicto
+        # o el frame tomado sobre el marcador quedaría pegado hasta la próxima
+        # escritura (revisión 04/11).
+        espejo.reset_memo()                 # espejo_valido (¿parquet fiel al Excel?)
+        hw._fechas_cache = ()               # resumen de ruedas de la base
+        hw._manifest_cache = ()             # manifiesto compartido (regresión entre máquinas)
+        base_export.invalidar()             # frame de Históricos · Base
 
-    return [("posiciones", positions.refresh), ("especies", delta_especies.refresh),
+    return [("memos", _memos), ("posiciones", positions.refresh), ("especies", delta_especies.refresh),
             ("cafci", cafci.refresh), ("historico", historico_byma.refresh),
-            ("fx", fx_hist.refresh), ("acciones", acciones_hist.refresh), ("writer", _writer)]
+            ("fx", fx_hist.refresh), ("acciones", acciones_hist.refresh)]
 
 
 def status() -> Dict[str, Any]:
@@ -215,6 +238,9 @@ def status() -> Dict[str, Any]:
         out["error"] = (f"{st['esenciales']} archivo(s) esenciales 'sólo en la nube': "
                         + ", ".join(n for c in st["carpetas"] for n in c.get("esenciales_nombres", [])[:6])
                         + ". " + onedrive_remedio())
+    if st.get("errores"):
+        out["error"] = (f"{st['errores']} carpeta(s) no se pudieron listar (lo de adentro no se chequeó); "
+                        + (out.get("error") or onedrive_remedio()))
     if st.get("error_escaneo"):
         out["error"] = f"escaneo falló: {st['error_escaneo']}"
     return out

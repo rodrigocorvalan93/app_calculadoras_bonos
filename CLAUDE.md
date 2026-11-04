@@ -1596,10 +1596,17 @@ carpetas. Tres piezas:
   historia CAFCI las baja OneDrive por el pin; `cierres` reintenta solo cada
   60 s.
 - **`services/nube.py`** (stdlib): `es_marcador(path)` (bit
-  RECALL_ON_DATA_ACCESS / OFFLINE / RECALL_ON_OPEN, un stat),
+  RECALL_ON_DATA_ACCESS / OFFLINE / RECALL_ON_OPEN, un stat), `en_nube(path)`
+  (además PINNED / UNPINNED: atributos que sólo pone el motor),
   `es_error_de_nube(exc)` (EINVAL o "Error reading bytes from file"),
-  `ilegible_por_nube(path, exc)`, `remedio(path)`. Fuera de Windows todo es
-  False. **El writer nunca aparta un marcador como `.corrupto-`**:
+  `ilegible_por_nube(path, exc)` = marcador, o firma del error Y archivo en
+  carpeta de nube — un EINVAL a secas sobre un archivo común NO es nube (el
+  CRT mapea a EINVAL otros errores de Win32; el writer tiene que poder
+  apartarlo como siempre), `remedio(path)`. Fuera de Windows todo es False.
+  `fijar` (`tools/onedrive.py`) corre el `attrib /S` recursivo ANTES que el
+  de la raíz: el pin de la raíz es lo que decide no volver a fijar en el
+  próximo arranque, así un timeout / Ctrl+C a mitad del recursivo se
+  reintenta. **El writer nunca aparta un marcador como `.corrupto-`**:
   `_apartar_si_corrupto` (`zipfile.is_zipfile` TRAGA el EINVAL y devolvía
   False → `os.replace` de la base COMPARTIDA, que viajaba a SharePoint y a
   todas las PCs) lo salta y sigue del espejo fiel; `_leer_base` (Excel
@@ -1613,14 +1620,22 @@ carpetas. Tres piezas:
   las mismas carpetas (scandir con atributos, decenas de ms, sin abrir
   archivos) y deja UNA línea con cuántos faltan por carpeta, cuántos son
   esenciales y el remedio (`listo en …` lleva `⚠ N archivos de datos sin
-  bajar`); si faltan esenciales, un thread re-escanea cada `_CADA_S` (60 s,
-  hasta 8 h) y cuando ya no hay esenciales pendientes corre `_recargas()`:
-  `positions.refresh`, `delta_especies.refresh` (por fin con un caller),
-  `cafci.refresh`, `historico_byma.refresh`, `fx_hist.refresh`,
-  `acciones_hist.refresh` y vacía `historico_writer._fechas_cache` — la
-  hidratación NO cambia mtime ni tamaño y los memos por firma no se enteran
-  solos. Tarjeta "Archivos de datos (OneDrive)" en /admin · Salud
-  (`status()`, pill roja `error` mientras falte algo esencial). `main.py`
+  bajar`); si faltan esenciales o el escaneo quedó `incompleto` (una carpeta
+  no se pudo listar: lo de adentro NO se chequeó, no cuenta como "todo
+  bajado"), un thread re-escanea cada `_CADA_S` (60 s, hasta 8 h) y cuando
+  ya no hay esenciales pendientes y el escaneo es completo corre
+  `_recargas()`: primero `memos` (`espejo.reset_memo`, `_fechas_cache` y
+  `_manifest_cache` del writer, `base_export.invalidar()` — TODO lo cacheado
+  por firma mtime+tamaño: la hidratación NO cambia ni uno ni otro y esos
+  memos no se enteran solos; `espejo_valido` tampoco memoiza un veredicto
+  tomado sobre un marcador o sin firma), después `positions.refresh`,
+  `delta_especies.refresh` (por fin con un caller), `cafci.refresh`,
+  `historico_byma.refresh`, `fx_hist.refresh`, `acciones_hist.refresh`. Un
+  loader que devuelve `loaded: False` (atrapan su excepción y la dejan en
+  `error`) NO es una recarga lograda: se loguea y el vigilante reintenta en
+  la vuelta siguiente. Tarjeta "Archivos de datos (OneDrive)" en /admin ·
+  Salud (`status()`, pill roja `error` mientras falte algo esencial, una
+  carpeta no se pudo listar o el escaneo falló). `main.py`
   loguea además el `error` de positions / delta_especies cuando no cargan.
   Regresión: `tests/test_nube_marcadores.py` y los casos `--datos` de
   `tests/test_onedrive.py`.

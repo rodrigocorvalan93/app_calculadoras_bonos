@@ -21,8 +21,13 @@ from typing import Any, Optional
 # Los mismos bits que backend/tools/onedrive.py (el pre-flight del .bat).
 FILE_ATTRIBUTE_OFFLINE = 0x00001000
 FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000
+FILE_ATTRIBUTE_PINNED = 0x00080000
+FILE_ATTRIBUTE_UNPINNED = 0x00100000
 FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000
 SIN_CONTENIDO = FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+# Atributos que sólo pone un motor de nube: el archivo vive en una carpeta
+# sincronizada (tenga o no contenido local).
+DE_NUBE = SIN_CONTENIDO | FILE_ATTRIBUTE_PINNED | FILE_ATTRIBUTE_UNPINNED
 
 _PLATFORM = sys.platform          # parcheable en los tests
 
@@ -31,16 +36,27 @@ def es_windows() -> bool:
     return _PLATFORM.startswith("win")
 
 
+def _attrs(path: Optional[str]) -> int:
+    if not path or not es_windows():
+        return 0
+    try:
+        return int(getattr(os.stat(path), "st_file_attributes", 0))
+    except OSError:
+        return 0
+
+
 def es_marcador(path: Optional[str]) -> bool:
     """True si `path` existe sólo como marcador de OneDrive (sin contenido
-    local). Un stat (µs); nunca abre el archivo. Fuera de Windows: False."""
-    if not path or not es_windows():
-        return False
-    try:
-        attrs = int(getattr(os.stat(path), "st_file_attributes", 0))
-    except OSError:
-        return False
-    return bool(attrs & SIN_CONTENIDO)
+    local). Un stat (µs); nunca abre el archivo. Fuera de Windows: False.
+    Es LA prueba (CLAUDE.md 13/10): el bit RECALL_ON_DATA_ACCESS / OFFLINE /
+    RECALL_ON_OPEN, visible aunque Windows disfrace el marcador."""
+    return bool(_attrs(path) & SIN_CONTENIDO)
+
+
+def en_nube(path: Optional[str]) -> bool:
+    """El archivo está en una carpeta sincronizada por OneDrive (lleva algún
+    atributo que sólo pone el motor: RECALL / PINNED / UNPINNED)."""
+    return bool(_attrs(path) & DE_NUBE)
 
 
 def es_error_de_nube(exc: Optional[BaseException]) -> bool:
@@ -56,8 +72,14 @@ def es_error_de_nube(exc: Optional[BaseException]) -> bool:
 
 def ilegible_por_nube(path: Optional[str], exc: Optional[BaseException] = None) -> bool:
     """¿La lectura de `path` falló porque es un marcador de OneDrive sin
-    bajar? Vale el atributo del archivo o la firma del error."""
-    return es_marcador(path) or (es_error_de_nube(exc) and bool(path) and os.path.exists(str(path)))
+    bajar? La prueba es el atributo del archivo; la firma del error (EINVAL /
+    pyarrow) sólo vale si además el archivo vive en una carpeta de nube (una
+    hidratación a medias). Un EINVAL en un archivo común NO es nube: el CRT
+    mapea a EINVAL también otros errores de Win32 (p. ej. archivo corrupto) y
+    el writer debe poder apartarlo como siempre."""
+    if es_marcador(path):
+        return True
+    return es_error_de_nube(exc) and en_nube(path)
 
 
 def remedio(path: Any = "") -> str:

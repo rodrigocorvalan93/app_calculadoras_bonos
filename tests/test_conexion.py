@@ -36,7 +36,8 @@ async def test_conexion_default_lbo_y_form_oob_tras_login_ok(monkeypatch) -> Non
     from backend.routes import conexion
     from backend.services import primary_ws as pws
 
-    assert settings.primary_base_url == "https://api.lbo.xoms.com.ar/"
+    # el DEFAULT de la clase (en una PC del desk PRIMARY_BASE_URL de secrets.txt lo pisa, a propósito)
+    assert type(settings).model_fields["primary_base_url"].default == "https://api.lbo.xoms.com.ar/"
     assert conexion.KNOWN_HOSTS[0][0] == "LBO"
 
     class _Fake(pws.PrimaryWS):
