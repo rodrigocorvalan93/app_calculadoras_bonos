@@ -260,6 +260,8 @@ resultado queda memoizado.
     =OMS.TICKET("GD30";78,5;1000000)     → spill: VN, monto, principal, interés…
     =OMS.CALC("TX26";"duration";105)     → cualquier métrica del YAS
     =OMS.TR("GD30";78,5;0,12;"30/12/2026";1000000)   → total return puntual (spill)
+    =OMS.CASHFLOW("TX28")                → flujos pendientes de la ficha (spill, sin precio)
+    =OMS.CASHFLOW("GD30";"pmt";"todos")  → cronograma completo, fecha de pago primero
 
 En todas, el argumento `plazo` acepta `"24hs"` (default), `"CI"` **o una
 fecha de liquidación custom** (el settle custom del YAS): `"DD/MM/AAAA"`,
@@ -329,6 +331,30 @@ maturity). Devuelve días, TIR entrada/salida, px inicial/final, P&L de
 capital, cobrado (interés + amortización con ajuste), TR directo, TEA, TNA y
 los montos en $ por `nominales` (default 1.000.000). Cupones sin reinversión,
 como el legacy.
+
+### OMS.CASHFLOW(especie; [tabla]; [alcance]; [plazo_o_fecha]; [formato]; [nominales])
+Cuadro de flujos de la **ficha** (spill): no necesita precio. Columnas:
+fecha de cupón, fecha hábil de pago (la misma fila de `cashflow_pmt`: es la
+fecha a la que descuentan la TIR y la duration), intereses, amortización,
+ajuste y total — **las mismas filas y unidades que el Cashflows del YAS**:
+intereses y amortización por 100 VN, ajuste = factor del índice (1,0 sin
+ajuste; CER / UVA / A3500 aplicable al cupón), total = (int + amort) × ajuste
+/ 100 = fracción del VN que entra (`0,0824` = 8,24 % VN).
+
+- `tabla`: `"cpn"` (default) pone la fecha de cupón primero; `"pmt"` pone la
+  fecha hábil de pago primero (la tabla `cashflow_pmt` del legacy).
+- `alcance`: `"pendientes"` (default) = sólo lo que queda por cobrar después
+  de la liquidación; `"todos"` = el cronograma completo, pagados incluidos.
+- `plazo_o_fecha`: como en TIREA (`24hs` default, `CI`, o una fecha / celda
+  con fecha). Define qué flujos cuentan como pendientes.
+- `formato`: `"texto"` (default, `DD/MM/AAAA`) o `"fecha"` (número de Excel:
+  formatear las celdas como fecha para restar, filtrar u ordenar).
+- `nominales`: si se pasa, agrega la columna **Monto** = total × VN (lo que
+  entra en $ por esa tenencia en cada fecha).
+
+    =OMS.CASHFLOW("TX28")                        → pendientes, fecha de cupón primero
+    =OMS.CASHFLOW("GD30";"pmt";"todos";;"fecha") → cronograma completo, fechas de Excel
+    =OMS.CASHFLOW("TX28";;;"15/12/2026";;5000000) → pendientes a esa liquidación, con Monto
 
 ---
 

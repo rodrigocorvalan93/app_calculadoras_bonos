@@ -186,9 +186,18 @@ def test_fijar_usa_attrib_sobre_la_raiz_y_recursivo(tmp_path) -> None:
     assert not ok and "charmap" in det
     # -U: un archivo que OneDrive ya marcó "sólo en la nube" lleva UNPINNED y
     # ese estado propio le gana al pin de la carpeta; \* porque /S sólo
-    # recorre lo que matchea el patrón
-    assert llamadas[0] == (("attrib", "-U", "+P", str(tmp_path)), None)
-    assert llamadas[1] == (("attrib", "-U", "+P", str(tmp_path / "*"), "/S", "/D"), None)
+    # recorre lo que matchea el patrón. El recursivo va PRIMERO: si lo corta
+    # un timeout / Ctrl+C la raíz queda sin pin y el próximo arranque reintenta.
+    assert llamadas[0] == (("attrib", "-U", "+P", str(tmp_path / "*"), "/S", "/D"), None)
+    assert llamadas[1] == (("attrib", "-U", "+P", str(tmp_path)), None)
+
+    def run_timeout(argv, **kw):
+        if "/S" in argv:
+            raise subprocess.TimeoutExpired(argv, 300)
+        pytest.fail("con el recursivo cortado no se fija la raíz")
+
+    ok, det = onedrive.fijar(tmp_path, run=run_timeout)
+    assert not ok and "300" in det
 
     def run_mal(argv, **kw):
         return subprocess.CompletedProcess(argv, 1, "", "Acceso denegado")
@@ -285,11 +294,149 @@ def test_el_bat_corre_el_preflight_antes_de_https_y_explica_el_error() -> None:
     assert i_one < i_https < i_uvi                   # https_local ya importa medio backend
     assert i_one < bat.index("pip install -r")       # y pip lee requirements.txt: tambien puede ser marcador
     # exit 4 (archivos sin bajar) tiene su mensaje; cualquier otro error, el generico
-    assert "if errorlevel 4 if not errorlevel 5 (" in bat[i_one:i_https]
-    assert "if errorlevel 1 (" in bat[i_one:i_https] and "exit /b 4" in bat[i_one:i_https]
-    assert "Errno 22" in bat[i_one:i_https]
-    assert "Mantener siempre en este dispositivo" in bat[i_one:i_https]
+    i_datos = bat.index("backend.tools.onedrive --datos")
+    assert "if errorlevel 4 if not errorlevel 5 (" in bat[i_one:i_datos]
+    assert "if errorlevel 1 (" in bat[i_one:i_datos] and "exit /b 4" in bat[i_one:i_datos]
+    assert "Errno 22" in bat[i_one:i_datos]
+    assert "Mantener siempre en este dispositivo" in bat[i_one:i_datos]
     assert bat.isascii()
+
+
+def test_el_bat_fija_y_baja_las_carpetas_de_datos_sin_cortar_el_arranque() -> None:
+    """04/11: el paso `--datos` (Delta Bases / Carteras / CAFCI) va DESPUÉS del
+    del código y ANTES de pip, y con errorlevel 4 sólo AVISA (la app sabe
+    correr sin bases): nunca `exit /b`. El backfill lo corre también."""
+    bat = (ROOT / "run_backend (CORRER APP).bat").read_text(encoding="utf-8")
+    i_one, i_datos = bat.index("backend.tools.onedrive\n"), bat.index("backend.tools.onedrive --datos")
+    assert i_one < i_datos < bat.index("pip install -r")
+    bloque = bat[i_datos:bat.index("REM --- 3) dependencias")]
+    assert "if errorlevel 4 if not errorlevel 5 (" in bloque and "[AVISO]" in bloque
+    assert "exit /b" not in bloque and "pause" not in bloque
+    bf = (ROOT / "backfill_historico.bat").read_text(encoding="utf-8")
+    assert "backend.tools.onedrive --datos --quiet" in bf and bf.isascii()
+    assert "exit /b" not in bf[bf.index("--datos --quiet"):bf.index(":menu")]
+
+
+def _arbol_datos(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
+    """La biblioteca de OneDrive de una PC nueva: Delta Bases (con Carteras y
+    cierres adentro) y Precios Cafci al lado, todo como marcadores."""
+    lib = tmp_path / "Inversiones - Documentos"
+    bases, cart = lib / "Delta Bases", lib / "Delta Bases" / "Carteras"
+    cierres, cafci = bases / "cierres" / "2024", lib / "Equipo RF" / "Precios Cafci"
+    for d in (cart, cierres, cafci):
+        d.mkdir(parents=True)
+    for n in ("Delta - historico_byma_px_tasas.xlsx", "Delta - historico_byma_px_tasas.parquet",
+              "Delta - historico_byma_px_tasas.parquet.src.json", "Delta - historico_fx.xlsx",
+              "Delta - Especies.xlsx", "bna_fx (1).json", "base_manifest.json"):
+        (bases / n).write_bytes(b"x" * 100)
+    for n in ("Delta_Composicion.xlsx", "Delta_PN.xlsx"):
+        (cart / n).write_bytes(b"c" * 50)
+    for n in ("2024-07-04.parquet", "2024-07-05.parquet"):
+        (cierres / n).write_bytes(b"p" * 10)
+    for n in ("20250901.xlsx", "20250902.xlsx", "20250903.xlsx", "20250904.xlsx"):
+        (cafci / n).write_bytes(b"v" * 20)
+    monkeypatch.setenv("DELTA_HISTORICO_DIR", str(bases))
+    monkeypatch.setenv("DELTA_BASES_DIR", str(cart))
+    monkeypatch.setenv("DELTA_CAFCI_DIR", str(cafci))
+    # un secrets.txt VACÍO y existente: OMSsecrets sólo salta candidatos que
+    # no son archivo, así que con uno inexistente caía al secrets.txt real de
+    # la raíz / CWD de una PC del desk (y sus carpetas entraban al test)
+    vacio = tmp_path / "secrets-vacio.txt"
+    vacio.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SECRETS_FILE", str(vacio))
+    for v in ("DELTA_CAFCI_PATH", "DELTA_ESPECIES_PATH", "DELTA_COMPOSICION_PATH", "DELTA_PN_PATH",
+              "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH", "DELTA_FONDOS_PATH", "DELTA_HISTORICO_PATH"):
+        monkeypatch.delenv(v, raising=False)
+    return bases, cart, cafci
+
+
+_TODOS_DATOS = {"Delta - historico_byma_px_tasas.xlsx", "Delta - historico_byma_px_tasas.parquet",
+                "Delta - historico_byma_px_tasas.parquet.src.json", "Delta - historico_fx.xlsx",
+                "Delta - Especies.xlsx", "bna_fx (1).json", "base_manifest.json", "Delta_Composicion.xlsx",
+                "Delta_PN.xlsx", "2024-07-04.parquet", "2024-07-05.parquet",
+                "20250901.xlsx", "20250902.xlsx", "20250903.xlsx", "20250904.xlsx"}
+_ESENCIALES_ESPERADOS = {"Delta - historico_byma_px_tasas.xlsx", "Delta - historico_byma_px_tasas.parquet",
+                         "Delta - historico_byma_px_tasas.parquet.src.json", "Delta - historico_fx.xlsx",
+                         "Delta - Especies.xlsx", "base_manifest.json", "Delta_Composicion.xlsx", "Delta_PN.xlsx",
+                         "20250904.xlsx", "20250903.xlsx", "20250902.xlsx"}
+
+
+def _modo_datos(monkeypatch, sin_contenido: set[str]) -> tuple[list[str], list[Path]]:
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(sin_contenido))
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG))
+    monkeypatch.setattr(onedrive, "raices_onedrive", lambda: [])
+    monkeypatch.setattr(onedrive, "exponer_marcadores", lambda: False)
+    leidos: list[str] = []
+    fijadas: list[Path] = []
+    monkeypatch.setattr(onedrive, "_leer", lambda p: leidos.append(p.name))
+    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (fijadas.append(root), (True, ""))[1])
+    return leidos, fijadas
+
+
+def test_datos_fija_las_carpetas_y_baja_solo_lo_esencial(tmp_path, monkeypatch, capsys) -> None:
+    """`--datos` (04/11): Delta Bases (Carteras y cierres adentro: UNA carpeta)
+    y Precios Cafci se fijan "Mantener siempre en este dispositivo" y se bajan
+    YA los archivos que el arranque necesita (composición, PN, Especies, bases
+    px/tasas + espejo + firma, FX, manifiesto, los 3 vectores CAFCI más
+    nuevos); las particiones de cierres, la historia CAFCI y un json suelto
+    los baja OneDrive en segundo plano. Nada se clasifica como basura ni se
+    borra: es la biblioteca compartida."""
+    bases, cart, cafci = _arbol_datos(tmp_path, monkeypatch)
+    leidos, fijadas = _modo_datos(monkeypatch, _TODOS_DATOS)
+    assert onedrive.main(["--datos"]) == 0
+    out = capsys.readouterr().out
+    assert set(leidos) == _ESENCIALES_ESPERADOS
+    assert set(fijadas) == {bases.resolve(), cafci.resolve()}          # Carteras va adentro de Delta Bases
+    assert (bases / "bna_fx (1).json").exists()                        # ni basura ni borrado
+    assert "Mantener siempre en este dispositivo" in out and "segundo plano" in out
+    assert "Delta Bases:" in out and "DELTA_CAFCI_DIR:" in out
+
+
+def test_datos_avisa_y_sale_4_sin_cortar_si_onedrive_no_entrega(tmp_path, monkeypatch, capsys) -> None:
+    _arbol_datos(tmp_path, monkeypatch)
+    _leidos, fijadas = _modo_datos(monkeypatch, _TODOS_DATOS)
+
+    def leer(p: Path) -> None:
+        raise OSError(22, "Invalid argument")
+
+    monkeypatch.setattr(onedrive, "_leer", leer)
+    assert onedrive.main(["--datos"]) == onedrive.EXIT_SIN_BAJAR
+    out = capsys.readouterr().out
+    assert fijadas                                                      # el pin igual queda puesto
+    assert "esenciales siguen sin contenido" in out and "La app arranca igual" in out
+
+
+def test_datos_listar_informa_sin_tocar_y_sin_carpetas_calla(tmp_path, monkeypatch, capsys) -> None:
+    _arbol_datos(tmp_path, monkeypatch)
+    leidos, fijadas = _modo_datos(monkeypatch, _TODOS_DATOS)
+    assert onedrive.main(["--datos", "--listar"]) == onedrive.EXIT_SIN_BAJAR
+    out = capsys.readouterr().out
+    assert not leidos and not fijadas
+    assert "esenciales para el arranque" in out and "Delta_Composicion.xlsx" in out and "SIN fijar" in out
+    # todo bajado: sin pendientes, sin pin repetido si ya está fijada
+    leidos, fijadas = _modo_datos(monkeypatch, set())
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    assert onedrive.main(["--datos"]) == 0
+    assert not leidos and not fijadas and "datos completos" in capsys.readouterr().out
+    # sin carpetas de datos en secrets.txt: nada que hacer
+    for v in ("DELTA_HISTORICO_DIR", "DELTA_BASES_DIR", "DELTA_CAFCI_DIR"):
+        monkeypatch.delenv(v)
+    assert onedrive.main(["--datos"]) == 0
+    assert "sin carpetas de datos" in capsys.readouterr().out
+
+
+def test_escanear_sin_clasificar_basura_no_separa_nada(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "Delta Bases"
+    (root / "data").mkdir(parents=True)
+    (root / "bcra_data_backup-PC.json").write_bytes(b"j")
+    (root / "data" / "market_snapshot-PC-1.json").write_bytes(b"s")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
+    monkeypatch.setattr(onedrive, "raices_onedrive", lambda: [])
+    con = onedrive.escanear(root)
+    sin = onedrive.escanear(root, clasificar_basura=False)
+    assert len(con.basura) == 2 and con.total == 0
+    assert not sin.basura and sin.total == 2
 
 
 def test_certs_y_data_entran_al_chequeo(tmp_path, monkeypatch) -> None:

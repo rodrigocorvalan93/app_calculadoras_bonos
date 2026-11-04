@@ -204,12 +204,25 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] bond universe load failed (calculator will return errors)")
 
+    # Archivos de datos 'sólo en la nube' (OneDrive, Windows): UNA línea con
+    # qué falta y el remedio ANTES de la primera lectura, y recarga sola cuando
+    # bajen (04/11: PC nueva con la biblioteca entera sin bajar).
+    datos_nube_st = {}
+    try:
+        from backend.services import datos_nube
+        datos_nube_st = datos_nube.chequear_arranque()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] chequeo de archivos de datos (OneDrive) falló")
+
     # Posiciones Delta: lectura ÚNICA de los Excel al arranque (cache en
-    # memoria). Failure-silent: si faltan los archivos, la pestaña lo avisa.
+    # memoria). Failure-silent: si faltan los archivos, la pestaña lo avisa —
+    # y el motivo va al log (antes `error` quedaba sólo en el dict).
     try:
         from backend.services import positions
         st = positions.ensure_loaded()
         logger.info("[main] positions: loaded=%s holdings=%s", st["loaded"], len(st["holdings"]))
+        if not st["loaded"] and st.get("error"):
+            logger.warning("[main] positions: %s", st["error"])
     except Exception:  # noqa: BLE001
         logger.exception("[main] positions load failed")
 
@@ -218,6 +231,8 @@ async def lifespan(app: FastAPI):
         from backend.services import delta_especies
         de = delta_especies.ensure_loaded()
         logger.info("[main] delta_especies: loaded=%s n=%s", de["loaded"], len(de["by_code"]))
+        if not de["loaded"] and de.get("error"):
+            logger.warning("[main] delta_especies: %s", de["error"])
     except Exception:  # noqa: BLE001
         logger.exception("[main] delta_especies load failed")
 
@@ -471,10 +486,12 @@ async def lifespan(app: FastAPI):
     try:
         n_bonos = len(bond_universe.all_codes())
         tls_p = tls_bridge.active_port()
-        logger.info("[main] listo en %.1f s · %s bonos · %s · add-in %s · autosave del cierre %s",
+        nube_txt = (f" · ⚠ {datos_nube_st['esenciales']} archivos de datos sin bajar de OneDrive"
+                    if datos_nube_st.get("esenciales") else "")
+        logger.info("[main] listo en %.1f s · %s bonos · %s · add-in %s · autosave del cierre %s%s",
                     _time.monotonic() - t0, f"{n_bonos:,}".replace(",", "."), feed_txt,
                     f"https://localhost:{tls_p}" if tls_p else "apagado (sin certs)",
-                    settings.historico_autosave_hhmm if autosave is not None else "off")
+                    settings.historico_autosave_hhmm if autosave is not None else "off", nube_txt)
     except Exception:  # noqa: BLE001
         logger.exception("[main] resumen de arranque falló")
 

@@ -53,8 +53,9 @@ class Settings(BaseSettings):
     primary_user: str = ""
     primary_pass: str = ""
 
-    # Broker
-    primary_base_url: str = "https://api.latinsecurities.matrizoms.com.ar/"
+    # Broker (default LBO desde el 04/11 — pedido del desk; PRIMARY_BASE_URL en
+    # secrets.txt lo pisa; /conexion lo cambia en caliente).
+    primary_base_url: str = "https://api.lbo.xoms.com.ar/"
 
     # Default settlement
     default_plazo: str = "24hs"

@@ -109,7 +109,7 @@
         lo que no viene por el feed (mayorista SIOPEL, cinta MAE, A3500 oficial, series macro) tarda hasta 30 s.</li>
       <li><strong>Puntuales</strong>, no streamean: <code>HIST</code> · <code>TIREA</code> · <code>PRECIO</code> ·
         <code>TNA</code> · <code>MARGEN</code> · <code>DURATION</code> · <code>VENCIMIENTO</code> · <code>TICKET</code> ·
-        <code>CALC</code> · <code>TR</code>. Corren al abrir el libro, al cambiar un argumento o con un recálculo
+        <code>CALC</code> · <code>TR</code> · <code>CASHFLOW</code>. Corren al abrir el libro, al cambiar un argumento o con un recálculo
         completo (<code>Ctrl+Alt+F9</code>). F9 solo <em>no</em> las vuelve a correr si los argumentos no cambiaron.
         Precio vacío en la calculadora = último del mercado en ese momento.</li>
       <li><strong>Series macro</strong> (MACRO / HIST / A3500): la app las trae del BCRA al cambiar el día y, por la
@@ -155,6 +155,7 @@
       <li><code>=OMS.TICKET("GD30";78,5;1000000)</code> — ticket de operación (spill)</li>
       <li><code>=OMS.CALC("TX26";"duration";105)</code> — cualquier métrica YAS; modo <code>;"tir"</code> / <code>"tna"</code> / <code>"margen"</code> para dar tasa en vez de precio</li>
       <li><code>=OMS.TR("GD30";78,5;0,12;"30/12/2026")</code> — total return puntual (spill)</li>
+      <li><code>=OMS.CASHFLOW("TX28")</code> — flujos pendientes de la ficha (spill, sin precio) · <code>;"pmt"</code> fecha de pago primero · <code>;;"todos"</code> cronograma completo · <code>;;;;"fecha"</code> fechas de Excel · último arg = VN para la columna Monto</li>
     </ul>
     <div class="grp">Diagnóstico</div>
     <ul class="muted">

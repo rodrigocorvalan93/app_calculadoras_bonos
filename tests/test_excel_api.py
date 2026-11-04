@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import json
+from datetime import datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -266,6 +267,60 @@ async def test_calc_batch_requiere_token_y_calcula(auth_on):
     assert res[2]["interes"] == pytest.approx(1_000_000 * esperado["intereses_corridos"])
     # item 3: error POR ITEM, sin voltear el batch
     assert "error" in res[3] and "NOEXISTE" in res[3]["error"]
+
+
+async def test_calc_cashflow_pendientes_todos_y_settle(auth_on):
+    """tipo=cashflow (OMS.CASHFLOW): el cuadro de flujos de la ficha sin precio
+    — las mismas filas que el Cashflows del YAS (compute_metrics), fecha de
+    cupón y de pago hábil en ISO, `pendientes` (por cobrar) ⊂ `todos`
+    (cronograma completo), settle custom, alias de alcance y errores por item."""
+    from backend.services import bond_universe, pricing
+
+    bond_universe.ensure_loaded()
+    auth.create_user("mesa_cf", "clave123", "basico")
+    tok = auth.set_excel_access("mesa_cf", True)
+    settle = pricing.settlement_date_str("24hs")
+    yas = pricing.compute_metrics("TX28", "precio", 100.0, settle=settle)
+    body = {"items": [
+        {"tipo": "cashflow", "code": "TX28"},
+        {"tipo": "cashflow", "code": "TX28", "alcance": "todos"},
+        {"tipo": "cashflow", "code": "gd30", "alcance": "por pagar", "settle": "15/01/2027", "plazo": "CI"},
+        {"tipo": "cashflow", "code": "TX28", "alcance": "banana"},
+        {"tipo": "cashflow", "code": "NOEXISTE"},
+        {"tipo": "cashflow", "code": "TX28", "settle": "32/13/2026"},
+        {"tipo": "cashflow", "code": "GD30"},
+    ]}
+    async with _client() as ac:
+        r = await ac.post("/excel/v1/calc", json=body, headers={"X-OMS-Token": tok})
+    assert r.status_code == 200
+    res = r.json()["results"]
+    pend, todos, custom, gd30 = res[0], res[1], res[2], res[6]
+    # pendientes = exactamente las filas del Cashflows del YAS a la misma liquidación
+    assert pend["codigo"] == "TX28" and pend["alcance"] == "pendientes"
+    assert pend["settle"] == datetime.strptime(settle, "%d/%m/%Y").date().isoformat()
+    assert pend["n"] == len(pend["filas"]) == len(yas["cashflows"])
+    for fila, cf in zip(pend["filas"], yas["cashflows"]):
+        assert fila[0] == cf["fecha_cpn"].isoformat() and fila[1] == cf["fecha_pmt"].isoformat()
+        assert fila[2] == pytest.approx(cf["intereses"]) and fila[3] == pytest.approx(cf["amortizacion"])
+        assert fila[4] == pytest.approx(cf["ajuste"]) and fila[5] == pytest.approx(cf["total"])
+    assert all(f[0] > pend["settle"] for f in pend["filas"])           # por cobrar: cupón > liquidación
+    # todos = el cronograma completo: los pendientes son su cola
+    assert todos["alcance"] == "todos" and todos["n"] > pend["n"]
+    assert todos["filas"][-pend["n"]:] == pend["filas"]
+    assert any(f[0] <= pend["settle"] for f in todos["filas"])          # incluye pagados
+    # settle custom (gana al plazo), alias "por pagar", código en minúscula: el
+    # cupón del 09/01/2027 de GD30 ya no está pendiente al 15/01/2027
+    assert custom["codigo"] == "GD30" and custom["settle"] == "2027-01-15" and custom["alcance"] == "pendientes"
+    assert gd30["filas"][0][0] == "2027-01-09" and custom["n"] == gd30["n"] - 1
+    assert custom["filas"] == gd30["filas"][1:] and all(f[0] > "2027-01-15" for f in custom["filas"])
+    # errores por item, sin voltear el batch
+    assert "Alcance inválido" in res[3]["error"]
+    assert "NOEXISTE" in res[4]["error"]
+    assert "liquidación inválida" in res[5]["error"]
+    # el servicio directo: mismas filas, y un bono sin ajuste lleva ajuste 1
+    t = pricing.cashflow_table("GD30", settle=settle)
+    assert t["error"] is None and t["rows"] and all(r["ajuste"] == 1.0 for r in t["rows"])
+    assert t["rows"][0]["fecha_pmt"] >= t["rows"][0]["fecha_cpn"]        # pago hábil ≥ cupón
 
 
 async def test_calc_batch_valida_entrada(auth_on):

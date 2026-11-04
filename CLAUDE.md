@@ -595,6 +595,47 @@ un fixture con la estructura conocida de la página (`tests/test_bna_fx.py`) —
 si el BNA cambia el HTML, `snapshot()["error"]` lo dice y las celdas quedan
 en el último dato guardado.
 
+## Comparador — gráfico de cashflows A vs B (03/11)
+
+`services/comparador_cf.py` (stdlib puro) + `partials/comparador_cashflow.html`
+(SVG server-side, patrón `_bar_chart` / `futuros_charts`, copiable con el ⧉):
+una barra por pago en su fecha hábil sobre un eje de tiempo real desde la
+liquidación, A en rojo y B en verde (los colores de "Ambos en la curva").
+Compara **la plata que entra por el mismo efectivo**: A con el VN de la
+pantalla, B con el VN cash neutral del comparador (`swap["vn_b"]`; sin
+precio de ambos, el mismo VN); monedas distintas → B pasa a la moneda de A
+con el FX implícito del plazo (`fx.normalize_price`, el mismo del cash
+neutral) y sin FX vivo cada uno queda en la suya — el pie lo dice.
+`chart_from_rows(rows_a, rows_b, vn_a, vn_b, settle, conv_b)` es pura
+(filas de `pricing.cashflow_table`; ticks semestrales `MM/AA` hasta 2 años,
+anuales después; paso "lindo" en y); `chart_for` resuelve VN / FX y corre
+en el pool desde `routes/comparador` sólo con los dos pricings sanos (los
+flujos vienen del memo de `_flujos_de` que esos pricings cebaron: µs). CSS
+`.cfc-*`. Regresión: `tests/test_comparador_cashflow.py`.
+
+## Add-in de Excel — OMS.CASHFLOW (03/11)
+
+`=OMS.CASHFLOW(especie; [tabla]; [alcance]; [plazo_o_fecha]; [formato];
+[nominales])` (v26): el cuadro de flujos de la ficha en spill, SIN precio.
+Server: `pricing.cashflow_table(code, settle, alcance)` copia el bono,
+`aplicar_fx_dlk`, `_flujos_de` (memo: µs en hit) y LEE `cashflow_cpn`
+(`pendientes`: cupón > liquidación, lo que queda por cobrar) o
+`cashflow_cpn_full` (`todos`: cronograma completo) — nunca muta los frames
+(compartidos entre copias). Filas = las MISMAS del Cashflows del YAS
+(`_cashflows_from_obj`, sin el tope de 40): fecha de cupón, `FechaPago`
+(hábil, la de `cashflow_pmt`), intereses y amortización por 100 VN, ajuste
+(factor del índice) y total (fracción del VN con ajuste). Item `tipo:
+"cashflow"` del batch `/excel/v1/calc` (`routes/excel._calc_cashflow`,
+alias de alcance en `_CF_ALCANCES`, cache por código / alcance / settle /
+índices / día, errores por item); `functions.js` `cashflowFn` →
+`cashflowMatrix` (pura: `cpn` / `pmt` = qué fecha va primero, texto
+`DD/MM/AAAA` o serial de Excel, columna Monto = total × VN); en
+`OMSCalc.keyOf` entra `alcance` y el tipo no es "live" (se memoiza como
+`meta`). Un CER a una liquidación custom lejana puede caer con `KeyError` de
+la serie (límite de rentafija, igual que el YAS). Regresión:
+`test_excel_api.test_calc_cashflow_pendientes_todos_y_settle`, casos `cf_*`
+de `excel_getters_harness.cjs`, `test_excel_getters.test_cashflow_en_metadata_docs_y_panel`.
+
 ## Add-in de Excel — patas calculadas en minúscula (15/10)
 
 Las fichas calculadas llevan sufijo en MINÚSCULA (`…v` = pata TAMAR de los
@@ -1526,6 +1567,78 @@ requirements.txt) y de https_local; `attrib` se lee con el codec `oem` y
 `--listar` sólo informa, `--sin-pin` baja sin fijar, `--quiet` sólo problemas
 (`backfill_historico.bat` lo corre así). Regresión:
 `tests/test_onedrive.py` (parchea `_atributos` / `_leer` / `_PLATFORM`).
+
+## Windows — carpetas de DATOS "sólo en la nube" (04/11)
+
+La PC nueva de un superuser arrancó con la biblioteca de SharePoint
+"Inversiones - Documentos" (Delta Bases, Carteras, Precios Cafci) entera como
+marcadores de OneDrive: cientos de `cafci no pude leer … [Errno 22]`,
+`cierres partición ilegible … Error reading bytes from file`,
+`historico_byma load falló` y Posiciones / Matriz vacías SIN una línea que
+dijera por qué (`positions` / `delta_especies` guardan el EINVAL en `error` y
+nadie lo logueaba). Un marcador pasa `isfile` / `listdir` / `is_zipfile`
+(tiene nombre, tamaño y mtime reales): el fallo recién aparece en el
+`ReadFile`. El pre-flight del código (`tools/onedrive.py`) no miraba esas
+carpetas. Tres piezas:
+- **`backend.tools.onedrive --datos`** (en los dos .bat, DESPUÉS del paso
+  del código y ANTES de pip; sólo AVISA con errorlevel 4, nunca `exit`: la
+  app sabe correr sin bases): `carpetas_datos()` resuelve las carpetas desde
+  secrets.txt (`OMSsecrets.load` + `deltapaths`, stdlib, import tardío),
+  deduplicadas (Carteras va adentro de Delta Bases), las FIJA "Mantener
+  siempre en este dispositivo" (`fijar`: OneDrive baja todo en segundo plano
+  y lo nuevo que escriba el writer de otra PC llega ya bajado; Storage Sense
+  no las vacía — pedido del desk: "que Delta Bases siempre se baje") y baja
+  YA sólo `esenciales(esc)` = `ESENCIALES_DATOS` (composición / PN / Galileo /
+  Fondos / Especies / px_tasas xlsx + parquet + firma / FX / acciones /
+  manifiesto / huecos) + los `CAFCI_ULTIMOS` (3) vectores `AAAAMMDD.xlsx` más
+  nuevos. `escanear(..., clasificar_basura=False)`: en una carpeta de datos
+  NADA se clasifica como caché ni se borra. Las particiones de cierres y la
+  historia CAFCI las baja OneDrive por el pin; `cierres` reintenta solo cada
+  60 s.
+- **`services/nube.py`** (stdlib): `es_marcador(path)` (bit
+  RECALL_ON_DATA_ACCESS / OFFLINE / RECALL_ON_OPEN, un stat), `en_nube(path)`
+  (además PINNED / UNPINNED: atributos que sólo pone el motor),
+  `es_error_de_nube(exc)` (EINVAL o "Error reading bytes from file"),
+  `ilegible_por_nube(path, exc)` = marcador, o firma del error Y archivo en
+  carpeta de nube — un EINVAL a secas sobre un archivo común NO es nube (el
+  CRT mapea a EINVAL otros errores de Win32; el writer tiene que poder
+  apartarlo como siempre), `remedio(path)`. Fuera de Windows todo es False.
+  `fijar` (`tools/onedrive.py`) corre el `attrib /S` recursivo ANTES que el
+  de la raíz: el pin de la raíz es lo que decide no volver a fijar en el
+  próximo arranque, así un timeout / Ctrl+C a mitad del recursivo se
+  reintenta. **El writer nunca aparta un marcador como `.corrupto-`**:
+  `_apartar_si_corrupto` (`zipfile.is_zipfile` TRAGA el EINVAL y devolvía
+  False → `os.replace` de la base COMPARTIDA, que viajaba a SharePoint y a
+  todas las PCs) lo salta y sigue del espejo fiel; `_leer_base` (Excel
+  marcador + espejo no fiel), `_apartar_fx_ilegible` y `append_acciones`
+  tiran RuntimeError sin tocar nada (el autosave reintenta); `cafci._load`
+  loguea UN warning por lote ilegible (antes uno por archivo, saturaba el
+  ring de /admin) y, si todos son marcadores, el error de la pestaña lo dice
+  con el remedio.
+- **`services/datos_nube.py`** (Windows; `DATOS_NUBE=0` apaga): en el
+  lifespan ANTES de leer posiciones / especies, `chequear_arranque()` escanea
+  las mismas carpetas (scandir con atributos, decenas de ms, sin abrir
+  archivos) y deja UNA línea con cuántos faltan por carpeta, cuántos son
+  esenciales y el remedio (`listo en …` lleva `⚠ N archivos de datos sin
+  bajar`); si faltan esenciales o el escaneo quedó `incompleto` (una carpeta
+  no se pudo listar: lo de adentro NO se chequeó, no cuenta como "todo
+  bajado"), un thread re-escanea cada `_CADA_S` (60 s, hasta 8 h) y cuando
+  ya no hay esenciales pendientes y el escaneo es completo corre
+  `_recargas()`: primero `memos` (`espejo.reset_memo`, `_fechas_cache` y
+  `_manifest_cache` del writer, `base_export.invalidar()` — TODO lo cacheado
+  por firma mtime+tamaño: la hidratación NO cambia ni uno ni otro y esos
+  memos no se enteran solos; `espejo_valido` tampoco memoiza un veredicto
+  tomado sobre un marcador o sin firma), después `positions.refresh`,
+  `delta_especies.refresh` (por fin con un caller), `cafci.refresh`,
+  `historico_byma.refresh`, `fx_hist.refresh`, `acciones_hist.refresh`. Un
+  loader que devuelve `loaded: False` (atrapan su excepción y la dejan en
+  `error`) NO es una recarga lograda: se loguea y el vigilante reintenta en
+  la vuelta siguiente. Tarjeta "Archivos de datos (OneDrive)" en /admin ·
+  Salud (`status()`, pill roja `error` mientras falte algo esencial, una
+  carpeta no se pudo listar o el escaneo falló). `main.py`
+  loguea además el `error` de positions / delta_especies cuando no cargan.
+  Regresión: `tests/test_nube_marcadores.py` y los casos `--datos` de
+  `tests/test_onedrive.py`.
 
 ## Estado por máquina fuera de OneDrive (15/10)
 

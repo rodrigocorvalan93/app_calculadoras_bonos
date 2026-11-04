@@ -2,22 +2,28 @@
 ajuste=0 sin índice, y endpoints. Núcleo = rentafija.calcula_total_return."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from backend.services import bond_universe, curves, pricing, total_return as tr
 
 
 def _setup_dates():
+    """Liquidación CI y terminal a ~4 meses, RELATIVOS a hoy: el 31/10/2026
+    fijo quedó en el pasado (03/11 la suite daba ajuste < 0) y TX26 vence el
+    09/11/2026 — el CER de referencia es TX28."""
     bond_universe.ensure_loaded()
-    pricing.compute_metrics("TX26", mode="precio", value=1000.0, include_cashflows=False)
+    pricing.compute_metrics("TX28", mode="precio", value=1000.0, include_cashflows=False)
     settle = pricing.settlement_date_str("CI")
-    terminal = "31/10/2026"
-    return settle, terminal, tr._parse_d(settle), tr._parse_d(terminal)
+    sd = tr._parse_d(settle)
+    terminal = (sd + timedelta(days=120)).strftime("%d/%m/%Y")
+    return settle, terminal, sd, tr._parse_d(terminal)
 
 
 def test_decomposicion_aditiva_cer() -> None:
     settle, terminal, sd, td = _setup_dates()
-    r = tr._bond_tr("TX26", 0.008, 0.03, terminal, settle, sd, td, 0.4)
+    r = tr._bond_tr("TX28", 0.008, 0.03, terminal, settle, sd, td, 0.4)
     assert r is not None
     # carry + compresión + ajuste == TR total (telescoping exacto)
     assert abs((r["carry"] + r["compresion"] + r["ajuste"]) - r["tr_total"]) < 1e-9
@@ -33,7 +39,7 @@ def test_ajuste_cero_sin_indice() -> None:
     code = None
     for c in curves.build_curve_codes().get("lecap", []):
         o = bond_universe.get(c)
-        if o is not None and str(getattr(o, "vencimiento", "")) > "2026-11-01":
+        if o is not None and str(getattr(o, "vencimiento", ""))[:10] > td.strftime("%Y-%m-%d"):
             code = c
             break
     if code is None:

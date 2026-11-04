@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from backend.services import auth as auth_svc, curves as curves_svc, bond_universe, delta_especies, fx as fx_svc, positions, pricing
+from backend.services import auth as auth_svc, comparador_cf, curves as curves_svc, bond_universe, delta_especies, fx as fx_svc, positions, pricing
 
 router = APIRouter(tags=["comparador"])
 
@@ -218,10 +218,20 @@ async def comparador_result(
 
         fwd = _forward_implicit(ma, mb)
 
+    # Cashflows A vs B (barras por pago, mismo efectivo): flujos del memo de
+    # `_flujos_de` que los dos pricings acaban de cebar (µs), pero en el pool
+    # igual — un miss (bono sin pricear) arma el cronograma con pandas.
+    cf = None
+    if ma and mb and not ma.get("error") and not mb.get("error"):
+        cf = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: comparador_cf.chart_for(
+                (a or "").strip(), (b or "").strip(), settle, vn, swap, plazo,
+                ma.get("moneda"), mb.get("moneda")))
+
     return _render(
         request,
         "partials/comparador_result.html",
-        ma=ma, mb=mb, deltas=deltas, swap=swap, fwd=fwd,
+        ma=ma, mb=mb, deltas=deltas, swap=swap, fwd=fwd, cf=cf,
         locate_curve=(lambda ca, cb: ca if (ca and ca == cb) else None)(
             curves_svc.curve_key_for((a or "").strip()), curves_svc.curve_key_for((b or "").strip())),
         locate_label=(lambda k: curves_svc.curve_def(k).label if k and curves_svc.curve_def(k) else None)(

@@ -28,6 +28,20 @@ def test_getters_js_en_node() -> None:
     assert not malos, malos
 
 
+def test_cashflow_en_metadata_docs_y_panel() -> None:
+    """OMS.CASHFLOW (v26): registrada en functions.json como matriz con sus 6
+    argumentos, documentada en FORMULAS.md y en la ayuda del panel."""
+    ex = ROOT / "backend/static/excel"
+    fj = json.loads((ex / "functions.json").read_text(encoding="utf-8"))
+    cf = next(f for f in fj["functions"] if f["id"] == "CASHFLOW")
+    assert cf["result"]["dimensionality"] == "matrix"
+    assert [p["name"] for p in cf["parameters"]] == ["especie", "tabla", "alcance", "plazo", "formato", "nominales"]
+    assert all(p.get("optional") for p in cf["parameters"][1:])
+    assert "### OMS.CASHFLOW(" in (ex / "FORMULAS.md").read_text(encoding="utf-8")
+    assert "=OMS.CASHFLOW(" in (ex / "taskpane.html").read_text(encoding="utf-8")
+    assert 'tipo: "cashflow"' in (ex / "functions.js").read_text(encoding="utf-8")
+
+
 def test_docs_y_panel_mencionan_rofex_min() -> None:
     ex = ROOT / "backend/static/excel"
     fj = json.loads((ex / "functions.json").read_text(encoding="utf-8"))

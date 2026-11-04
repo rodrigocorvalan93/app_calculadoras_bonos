@@ -103,6 +103,12 @@ def espejo_valido(pq_path: str, xlsx_path: Optional[str]) -> bool:
         if ent is not None and ent[0] == k_pq and ent[1] == k_x:
             return ent[2]
     sc = _leer_sidecar(pq_path)
+    # Veredicto tomado sobre un archivo que NO se pudo leer (marcador de
+    # OneDrive sin bajar, 04/11: el sidecar existe pero no se lee, o el
+    # parquet no deja calcular el sha): no se memoiza — la hidratación no
+    # cambia mtime ni tamaño y el veredicto quedaría pegado hasta la próxima
+    # escritura (y un parquet ajeno pasaría por fiel sin el chequeo de sha).
+    inseguro = sc is None and os.path.exists(sidecar_path(pq_path))
     if sc is not None and "xlsx_mtime_ns" in sc:
         try:
             ok = (int(sc.get("xlsx_mtime_ns")) == k_x[0] and int(sc.get("xlsx_size")) == k_x[1])
@@ -117,13 +123,17 @@ def espejo_valido(pq_path: str, xlsx_path: Optional[str]) -> bool:
             # Se calcula acá nomás (memo frío = algún stat cambió), no por
             # request; una firma vieja sin hash cae a la regla de tamaño.
             if ok and sc.get("pq_sha256"):
-                ok = (_sha256(pq_path) == sc.get("pq_sha256"))
+                digest = _sha256(pq_path)
+                inseguro = inseguro or digest is None
+                ok = (digest == sc.get("pq_sha256"))
         except (TypeError, ValueError):
             ok = False
     else:
         # Espejo sin firma (versión anterior / bymaapi viejo): estricto, sin
         # los 2 s de gracia de antes.
         ok = k_pq[0] >= k_x[0]
+    if inseguro:
+        return ok
     with _lock:
         if len(_MEMO) >= _MEMO_MAX:
             _MEMO.clear()
