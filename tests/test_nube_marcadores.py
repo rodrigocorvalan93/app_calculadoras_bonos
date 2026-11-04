@@ -23,7 +23,8 @@ RECALL = nube.FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | 0x20
 
 
 # ── nube ─────────────────────────────────────────────────────────────────────
-def test_nube_fuera_de_windows_todo_false(tmp_path) -> None:
+def test_nube_fuera_de_windows_todo_false(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(nube, "_PLATFORM", "linux")           # el runner de CI puede ser Windows de verdad
     f = tmp_path / "a.xlsx"
     f.write_bytes(b"x")
     assert nube.es_marcador(str(f)) is False
@@ -130,12 +131,13 @@ def test_cafci_un_solo_warning_por_lote_ilegible(tmp_path, monkeypatch, caplog) 
         raise OSError(22, "Invalid argument")
 
     monkeypatch.setattr(cafci, "_parse_cafci", rompe)
+    monkeypatch.setattr(nube, "_PLATFORM", "linux")           # fuera de Windows: mensaje genérico
     with caplog.at_level(logging.WARNING, logger="backend.services.cafci"):
         caplog.clear()
         out = cafci._load()
     avisos = [r for r in caplog.records if r.name.endswith("cafci")]
     assert len(avisos) == 1 and "3 archivo(s)" in avisos[0].getMessage()
-    assert not out["loaded"] and "ninguno tiene las hojas" in out["error"]      # fuera de Windows: genérico
+    assert not out["loaded"] and "ninguno tiene las hojas" in out["error"]
     # en Windows, mismo lote = marcadores de OneDrive: lo dice con el remedio
     monkeypatch.setattr(nube, "_PLATFORM", "win32")
     with caplog.at_level(logging.WARNING, logger="backend.services.cafci"):
@@ -156,8 +158,9 @@ def _atributos_fake(sin_contenido: set[str]):
     return f
 
 
-def test_datos_nube_fuera_de_windows_inactivo() -> None:
+def test_datos_nube_fuera_de_windows_inactivo(monkeypatch) -> None:
     from backend.services import datos_nube
+    monkeypatch.setattr(onedrive, "_PLATFORM", "darwin")
     assert datos_nube.escanear()["activo"] is False
     assert datos_nube.status()["activo"] is False and "error" not in datos_nube.status()
 
