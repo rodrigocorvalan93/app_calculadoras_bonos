@@ -36,6 +36,13 @@ if errorlevel 1 (
   pause
   exit /b 4
 )
+REM Las carpetas de DATOS (Delta Bases / Carteras / CAFCI): fijarlas y bajar lo
+REM esencial. Solo avisa (el backfill lee la base: si falta, lo va a decir).
+"%PY%" -m backend.tools.onedrive --datos --quiet
+if errorlevel 4 if not errorlevel 5 (
+  echo [AVISO] OneDrive todavia no bajo archivos de las bases a esta PC: el backfill
+  echo         puede fallar al leerlas. Abri OneDrive y espera a que sincronice.
+)
 
 :menu
 echo Que queres hacer?

@@ -442,6 +442,12 @@ async def admin_salud(request: Request) -> HTMLResponse:
                 pass
             return {"live": oms.is_live(), "kill": oms.kill_switch(), "audit_KB": kb}
 
+        def _datos_nube():
+            # Marcadores de OneDrive en Delta Bases / Carteras / CAFCI: pill roja
+            # mientras falte algo esencial, con el remedio (04/11).
+            from backend.services import datos_nube
+            return datos_nube.status()
+
         def _news():
             # Qué medio responde y cuál no (y por qué): el desk veía sólo dos
             # fuentes en la marquesina y no había dónde mirarlo.
@@ -463,6 +469,7 @@ async def admin_salud(request: Request) -> HTMLResponse:
             ("CAFCI API", _sec(cafci_api.status)),
             ("Macro BCRA", _sec(_bcra)),
             ("Base histórica px/tasas", _sec(historico_writer.estado)),
+            ("Archivos de datos (OneDrive)", _sec(_datos_nube)),
             ("Universo + warmup", _sec(lambda: {"bonos": len(bond_universe.all_codes()),
                                                 **(get_daemon().stats() or {})})),
             ("OMS", _sec(_oms)),

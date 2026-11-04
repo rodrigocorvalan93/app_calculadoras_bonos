@@ -60,6 +60,10 @@ no existen los marcadores): sale 0 al instante.
     python -m backend.tools.onedrive            # bajar + fijar (lo que corre el .bat)
     python -m backend.tools.onedrive --listar   # sólo informar, no toca nada
     python -m backend.tools.onedrive --sin-pin  # bajar sin fijar la carpeta
+    python -m backend.tools.onedrive --carpeta "C:\\otra\\carpeta"   # otra raíz
+    python -m backend.tools.onedrive --datos    # las carpetas de DATOS de secrets.txt
+                                                # (Delta Bases / Carteras / CAFCI): fijar
+                                                # + bajar lo esencial (ver ESENCIALES_DATOS)
 """
 from __future__ import annotations
 
@@ -392,14 +396,18 @@ def _es_dir(entry: "os.DirEntry[str]") -> bool:
 
 
 def escanear(root: Path, excluir: Iterable[str] = EXCLUIR,
-             raices: Optional[Iterable[str]] = None, ahora: Optional[float] = None) -> Escaneo:
+             raices: Optional[Iterable[str]] = None, ahora: Optional[float] = None,
+             clasificar_basura: bool = True) -> Escaneo:
     """Recorre `root` (sin las carpetas de `excluir`, por nombre, a cualquier
     nivel) y junta los archivos sin contenido local. `nube` = tag de nube o
     atributo de nube en alguna entrada, o `root` bajo una raíz de OneDrive
     (`raices`; default `raices_onedrive()`). Un listado que falla (permisos,
     OneDrive a medio sincronizar) queda en `errores` y se sigue. Los restos
     de cachés por máquina (`basura_de`, sólo en la raíz y en `data/`) van a
-    `basura` — ni a `pendientes` ni a `total` — tengan contenido o no."""
+    `basura` — ni a `pendientes` ni a `total` — tengan contenido o no;
+    `clasificar_basura=False` (carpetas de DATOS: Delta Bases, Carteras,
+    CAFCI) no clasifica nada como basura — ahí no hay cachés de la app y un
+    archivo de la biblioteca compartida jamás se borra."""
     excl = frozenset(excluir)
     ahora = time.time() if ahora is None else ahora
     esc = Escaneo(root=root)
@@ -417,7 +425,7 @@ def escanear(root: Path, excluir: Iterable[str] = EXCLUIR,
             continue
         # carpeta relativa a la raíz, sólo para la raíz y sus hijas directas
         rel = "" if d == root else (d.name if d.parent == root else None)
-        rel = rel if rel in _CARPETAS_CACHE else None
+        rel = rel if (clasificar_basura and rel in _CARPETAS_CACHE) else None
         for entry in entradas:
             if entry.name in excl:
                 if entry.name in CACHES_PY and _es_dir(entry):
@@ -626,6 +634,142 @@ def default_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+# ── Carpetas de DATOS (Delta Bases / Carteras / CAFCI), 04/11 ────────────────
+# La PC nueva de un superuser arrancó con la biblioteca "Inversiones -
+# Documentos" entera como marcadores: cientos de "no pude leer … [Errno 22]",
+# particiones de cierres "Error reading bytes from file", y Posiciones /
+# Matriz sin composición (positions / delta_especies guardan el EINVAL en
+# `error` sin loguearlo). El pre-flight del código no las miraba. Este modo
+# (`--datos`) resuelve las carpetas desde secrets.txt (OMSsecrets + deltapaths,
+# stdlib los dos; import tardío: el camino del código sigue sin depender de
+# nada), las deja "Mantener siempre en este dispositivo" (lo nuevo que escriba
+# el writer de otra PC llega ya bajado y Storage Sense no las vacía) y baja
+# AHORA sólo lo que la app necesita al arrancar (`ESENCIALES_DATOS` + los
+# últimos vectores CAFCI): el resto (cientos de particiones de cierres, la
+# historia CAFCI) lo baja OneDrive en segundo plano gracias al pin, y
+# `cierres` reintenta solo cada 60 s. Nunca corta el arranque: la app sabe
+# correr sin bases; el .bat sólo avisa.
+ESENCIALES_DATOS = frozenset({
+    # Carteras → Posiciones / Matriz (services.positions, services.delta_especies)
+    "delta_composicion.xlsx", "delta_pn.xlsx", "galileo_composicion.xlsx", "galileo_pn.xlsx",
+    "delta_fondos.txt", "delta - especies.xlsx",
+    # Delta Bases → Históricos y el writer (historico_byma / fx_hist / acciones_hist / historico_writer)
+    "delta - historico_byma_px_tasas.xlsx", "delta - historico_byma_px_tasas.parquet",
+    "delta - historico_byma_px_tasas.parquet.src.json",
+    "delta - historico_fx.xlsx", "delta - historico_fx.parquet", "delta - historico_fx.parquet.src.json",
+    "delta - historico_acciones.parquet", "base_manifest.json", "huecos_ignorados.json",
+})
+CAFCI_ULTIMOS = 3            # vectores CAFCI (AAAAMMDD.xlsx) más nuevos que se bajan ya
+_VARS_CARPETAS = ("DELTA_HISTORICO_DIR", "DELTA_BASES_DIR", "DELTA_CAFCI_DIR")
+_VARS_ARCHIVOS = ("DELTA_CAFCI_PATH", "DELTA_ESPECIES_PATH", "DELTA_COMPOSICION_PATH", "DELTA_PN_PATH",
+                  "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH", "DELTA_FONDOS_PATH", "DELTA_HISTORICO_PATH")
+
+
+def carpetas_datos() -> List[Tuple[str, Path]]:
+    """[(etiqueta, carpeta)] de datos que la app lee, resueltas desde
+    secrets.txt como lo hace la app (`OMSsecrets.load` + `deltapaths`), sin
+    duplicados ni carpetas contenidas en otra de la lista (Carteras vive
+    adentro de Delta Bases: se recorre una vez). Sólo las que existen."""
+    raiz = default_root()
+    if str(raiz) not in sys.path:
+        sys.path.insert(0, str(raiz))
+    try:
+        import OMSsecrets                                   # noqa: WPS433 — raíz del repo, stdlib
+        OMSsecrets.load()
+        from backend.services import deltapaths            # stdlib puro
+    except Exception as e:  # noqa: BLE001 — sin secrets.txt / sin backend: no hay carpetas
+        _say(f"[onedrive] ! no pude resolver las carpetas de datos ({type(e).__name__}: {e})")
+        return []
+    cand: List[Tuple[str, str]] = []
+    hist = deltapaths.historico_dir()
+    if hist:
+        cand.append(("Delta Bases", hist))
+    for var in _VARS_CARPETAS:
+        d = deltapaths.expand(os.getenv(var), want="dir")
+        if d and os.path.isdir(d):
+            cand.append((var, d))
+    for var in _VARS_ARCHIVOS:
+        f = deltapaths.expand(os.getenv(var), want="file")
+        if f and os.path.isfile(f):
+            cand.append((var, os.path.dirname(f)))
+    out: List[Tuple[str, Path]] = []
+    for label, d in cand:
+        p = Path(d).resolve()
+        if any(p == q or q in p.parents for _l, q in out):
+            continue                                        # ya cubierta por una carpeta padre
+        out = [(l, q) for l, q in out if not (p in q.parents)] + [(label, p)]
+    return out
+
+
+def esenciales(esc: Escaneo) -> List[Archivo]:
+    """Los pendientes que el arranque necesita YA: `ESENCIALES_DATOS` por
+    nombre (sin distinguir mayúsculas) y los `CAFCI_ULTIMOS` vectores CAFCI
+    (AAAAMMDD.xlsx) más nuevos. El resto lo baja OneDrive por el pin."""
+    out = [a for a in esc.pendientes if a.path.name.lower() in ESENCIALES_DATOS]
+    cafci = sorted((a for a in esc.pendientes
+                    if a.path.suffix.lower() == ".xlsx" and a.path.stem.isdigit() and len(a.path.stem) == 8),
+                   key=lambda a: a.path.stem, reverse=True)
+    out.extend(cafci[:CAFCI_ULTIMOS])
+    return out
+
+
+def _datos(args) -> int:
+    """`--datos`: por cada carpeta de datos, fijar (pin) + bajar lo esencial.
+    0 = todo lo esencial está (o no hay carpetas de nube); EXIT_SIN_BAJAR =
+    algo esencial sigue sin contenido (el .bat avisa y la app arranca igual)."""
+    carpetas = carpetas_datos()
+    say = (lambda m: None) if args.quiet else _say   # noqa: E731
+    if not carpetas:
+        say("[onedrive] sin carpetas de datos configuradas en secrets.txt: nada que bajar")
+        return 0
+    exponer_marcadores()
+    salida = 0
+    for label, root in carpetas:
+        esc = escanear(root, excluir=(), clasificar_basura=False)
+        if not esc.nube and not esc.pendientes:
+            say(f"[onedrive] {label}: carpeta común ({_n(esc.total)} archivos)")
+            continue
+        for d, e in esc.errores:
+            _say(f"[onedrive] ! no pude listar {d}: {e}")
+        ese = esenciales(esc)
+        total_b = sum(a.size for a in esc.pendientes)
+        if args.listar:
+            _say(f"[onedrive] {label} ({root}): {_n(len(esc.pendientes))} de {_n(esc.total)} archivos 'sólo en la "
+                 f"nube' ({_tam(total_b)}), {_n(len(ese))} esenciales para el arranque"
+                 f"{'; carpeta fijada' if esc.root_fijado else '; carpeta SIN fijar'}")
+            for a in ese:
+                _say(f"[onedrive]   {a.path} ({_kb(a.size)})")
+            if esc.pendientes:
+                salida = EXIT_SIN_BAJAR
+            continue
+        # 1) pin: OneDrive empieza a bajar TODO en segundo plano y lo nuevo llega bajado
+        if esc.nube and not esc.root_fijado and not args.sin_pin:
+            ok, det = fijar(root)
+            if ok:
+                say(f"[onedrive] {label}: carpeta marcada \"Mantener siempre en este dispositivo\" — "
+                    "OneDrive baja el resto en segundo plano y lo nuevo llega ya bajado")
+            else:
+                _say(f"[onedrive] ! {label}: no pude fijar la carpeta con attrib ({det}); a mano: botón "
+                     f"derecho sobre {root.name} > \"Mantener siempre en este dispositivo\"")
+        # 2) lo esencial, ahora
+        if not esc.pendientes:
+            say(f"[onedrive] {label}: datos completos en esta PC ({_n(esc.total)} archivos)")
+            continue
+        _say(f"[onedrive] {label}: {_n(len(esc.pendientes))} de {_n(esc.total)} archivos están 'sólo en la nube' "
+             f"({_tam(total_b)}); bajando ahora los {_n(len(ese))} que la app necesita al arrancar…")
+        fallos = hidratar(ese, avisar=lambda m: _say(f"[onedrive] {m}") if m.startswith("x ") else say(f"[onedrive] {m}"))
+        if fallos:
+            salida = EXIT_SIN_BAJAR
+            _say(f"[onedrive] ! {label}: {len(fallos)} archivo(s) esenciales siguen sin contenido — OneDrive no "
+                 "los entregó (cerrado, pausado, sin sesión o sin red). La app arranca igual, pero Posiciones / "
+                 "Matriz / Históricos van a estar vacíos hasta que OneDrive los baje (después: ↻ en la pestaña).")
+        resto = len(esc.pendientes) - len(ese)
+        if resto > 0:
+            say(f"[onedrive] {label}: los otros {_n(resto)} (cierres, historia CAFCI…) los baja OneDrive en "
+                "segundo plano; Históricos los toma solo cuando llegan")
+    return salida
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Lo que corre el .bat. Un Ctrl+C a mitad de la bajada o del borrado
     (15/10: el desk lo cortó con miles de copias bajando) sale sin
@@ -647,11 +791,16 @@ def _main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--sin-pin", action="store_true", help="bajar sin marcar la carpeta "
                                                            "'Mantener siempre en este dispositivo'")
     ap.add_argument("--carpeta", default="", help="carpeta a revisar (default: la raíz del proyecto)")
+    ap.add_argument("--datos", action="store_true",
+                    help="las carpetas de DATOS de secrets.txt (Delta Bases / Carteras / CAFCI): fijarlas "
+                         "y bajar lo esencial para el arranque; nunca corta la app")
     ap.add_argument("--quiet", action="store_true", help="sólo problemas")
     args = ap.parse_args(argv)
 
     if not es_windows():
         return 0                                     # sin marcadores fuera de Windows
+    if args.datos:
+        return _datos(args)
 
     root = Path(args.carpeta).resolve() if args.carpeta else default_root()
     exponer_marcadores()                             # ver tags y reparse points sin disfraz

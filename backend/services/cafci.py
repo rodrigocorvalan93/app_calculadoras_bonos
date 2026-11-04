@@ -291,20 +291,46 @@ def _load() -> Dict[str, Any]:
                       "(carpeta) o DELTA_CAFCI_PATH (archivo) en secrets.txt.")
     resolved = cands[0]
     tried: List[str] = []
+    # Los que no se pudieron leer se juntan y se loguean UNA vez (antes: una
+    # línea por archivo — la PC nueva con la carpeta CAFCI entera 'sólo en la
+    # nube' escribía cientos de "no pude leer … [Errno 22]" en cada arranque y
+    # saturaba el ring de errores de /admin). Si TODOS fallan por OneDrive,
+    # el mensaje lo dice con el remedio, no "ninguno tiene las hojas CAFCI".
+    from backend.services import nube
+    ilegibles: List[Tuple[str, BaseException]] = []
+
+    def _aviso_ilegibles() -> None:
+        if not ilegibles:
+            return
+        p0, e0 = ilegibles[0]
+        if any(nube.ilegible_por_nube(p, e) for p, e in ilegibles):
+            logger.warning("[cafci] %d archivo(s) 'sólo en la nube' sin bajar (p. ej. %s: %s) — %s",
+                           len(ilegibles), os.path.basename(p0), e0, nube.remedio(os.path.dirname(p0)))
+        else:
+            logger.warning("[cafci] no pude leer %d archivo(s) (p. ej. %s: %s)",
+                           len(ilegibles), os.path.basename(p0), e0)
+
     for path in cands:
         try:
             parsed = _parse_cafci(path)
-        except Exception as exc:  # noqa: BLE001  — archivo corrupto / bloqueado
-            logger.warning("[cafci] no pude leer %s: %s", os.path.basename(path), exc)
+        except Exception as exc:  # noqa: BLE001  — archivo corrupto / bloqueado / marcador de OneDrive
+            ilegibles.append((path, exc))
             tried.append(os.path.basename(path))
             continue
         if parsed is not None:
             parsed["resolved"] = resolved
+            _aviso_ilegibles()
             logger.info("[cafci] %s · %d fx · %d filas", os.path.basename(path), len(parsed["fx"]), parsed["n"])
             return parsed
         tried.append(os.path.basename(path))            # tenía fecha pero no es el vector
-    out = _empty("Encontré archivos en la carpeta pero ninguno tiene las hojas CAFCI "
-                 "(fx… / vector…): " + ", ".join(tried[:6]) + ". ¿Es la carpeta correcta?")
+    _aviso_ilegibles()
+    if ilegibles and len(ilegibles) == len(cands) and any(nube.ilegible_por_nube(p, e) for p, e in ilegibles):
+        out = _empty(f"Los {len(cands)} archivos de la carpeta CAFCI están 'sólo en la nube' (OneDrive, "
+                     "Archivos a petición) y no se pudieron bajar: " + nube.remedio(os.path.dirname(cands[0]))
+                     + ". Después, ↻ en esta pestaña.")
+    else:
+        out = _empty("Encontré archivos en la carpeta pero ninguno tiene las hojas CAFCI "
+                     "(fx… / vector…): " + ", ".join(tried[:6]) + ". ¿Es la carpeta correcta?")
     out["resolved"] = resolved
     return out
 

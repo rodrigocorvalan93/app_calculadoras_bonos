@@ -1555,10 +1555,18 @@ def _apartar_si_corrupto(xlsx_path: str) -> None:
     guardando): se aparta como .corrupto-<fecha> (evidencia, nunca se borra) y
     el write de salida regenera uno limpio. Chequeo de ms, sin abrir el libro."""
     import zipfile
+    from backend.services import nube
     try:
         if not os.path.isfile(xlsx_path) or zipfile.is_zipfile(xlsx_path):
             return
     except OSError:
+        return
+    # Un marcador de OneDrive sin bajar NO es un zip (is_zipfile traga el
+    # EINVAL y devuelve False) pero tampoco está corrupto: no se aparta. El
+    # espejo es copia fiel (por eso estamos acá) y el write de salida lo
+    # regenera igual. 04/11: PC nueva con la base entera 'sólo en la nube'.
+    if nube.es_marcador(xlsx_path):
+        logger.warning("[historico_writer] %s: no se aparta (se regenera desde el espejo)", nube.remedio(xlsx_path))
         return
     marca = _now().strftime("%Y%m%d-%H%M%S")
     respaldo = f"{xlsx_path}.corrupto-{marca}"
@@ -1615,6 +1623,13 @@ def _leer_base(xlsx_path: str, pd) -> "Any":
                 f"parquet tampoco se pudo leer ({exc_pq}). Recuperación manual: "
                 "restaurar el xlsx desde el Historial de versiones de OneDrive."
             ) from exc_xlsx
+        # El Excel es un marcador de OneDrive sin bajar (no corrupto): acá el
+        # espejo NO es fiel (si lo fuera habríamos salido arriba), así que
+        # seguir desde el parquet perdería lo que el Excel tiene de más. Ni se
+        # aparta ni se guarda: el autosave reintenta solo.
+        from backend.services import nube
+        if nube.ilegible_por_nube(xlsx_path, exc_xlsx):
+            raise RuntimeError(f"No guardo: {nube.remedio(xlsx_path)}.") from exc_xlsx
         marca = _now().strftime("%Y%m%d-%H%M%S")
         respaldo = f"{xlsx_path}.corrupto-{marca}"
         try:
@@ -2898,7 +2913,11 @@ def _merge_fila_fx(vieja: Optional[Dict[str, Any]], nueva: Dict[str, Any]) -> Di
 def _apartar_fx_ilegible(path: str, exc: BaseException) -> None:
     """Copia ilegible del historial FX: se aparta como .corrupto-<fecha>
     (evidencia, nunca se borra) para que el write de salida regenere una
-    limpia sin pisar lo que hubiera adentro."""
+    limpia sin pisar lo que hubiera adentro. Un marcador de OneDrive sin
+    bajar no está corrupto: no se aparta ni se guarda (RuntimeError)."""
+    from backend.services import nube
+    if nube.ilegible_por_nube(path, exc):
+        raise RuntimeError(f"No guardo el historial FX: {nube.remedio(path)}.") from exc
     marca = _now().strftime("%Y%m%d-%H%M%S")
     respaldo = f"{path}.corrupto-{marca}"
     try:
@@ -3091,6 +3110,11 @@ def append_acciones(df: "Any", pq: str, *, gana_previo: bool = False) -> Dict[st
             try:
                 prev = pd.read_parquet(pq)
             except Exception as exc:  # noqa: BLE001
+                from backend.services import nube
+                if nube.ilegible_por_nube(pq, exc):
+                    # marcador de OneDrive sin bajar: ni se aparta ni se pisa
+                    # la historia con las filas de hoy; el autosave reintenta
+                    raise RuntimeError(f"No guardo las acciones: {nube.remedio(pq)}.") from exc
                 marca = _now().strftime("%Y%m%d-%H%M%S")
                 try:
                     os.replace(pq, f"{pq}.corrupto-{marca}")

@@ -109,6 +109,24 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM --- Carpetas de DATOS sincronizadas por OneDrive (Delta Bases / Carteras / CAFCI) ---
+REM En una PC nueva la biblioteca "Inversiones - Documentos" llega entera como
+REM marcadores "solo en la nube": la app arrancaba con cientos de "[Errno 22]"
+REM y Posiciones / Matriz vacias (04/11). Esto deja esas carpetas "Mantener
+REM siempre en este dispositivo" (lo nuevo llega ya bajado, Storage Sense no
+REM las vacia) y baja AHORA lo que la app necesita al arrancar; el resto lo
+REM baja OneDrive en segundo plano. Nunca corta el arranque: solo avisa.
+"%PY%" -m backend.tools.onedrive --datos
+if errorlevel 4 if not errorlevel 5 (
+  echo.
+  echo [AVISO] Hay archivos de las bases ^(Delta Bases / Carteras / CAFCI^) que OneDrive
+  echo         todavia no bajo a esta PC. La app arranca igual, pero Posiciones, Matriz e
+  echo         Historicos van a estar vacios hasta que OneDrive termine de bajarlos
+  echo         ^(icono de la nube sin pausa, con sesion iniciada^). Despues: boton
+  echo         "actualizar" en la pestana, o volver a abrir este .bat.
+  echo.
+)
+
 REM --- 3) dependencias: instalar solo si backend\requirements.txt cambio ---
 fc /b "backend\requirements.txt" "%VENVDIR%\requirements.instalado" >nul 2>&1
 if errorlevel 1 (

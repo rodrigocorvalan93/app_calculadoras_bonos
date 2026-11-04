@@ -1568,6 +1568,63 @@ requirements.txt) y de https_local; `attrib` se lee con el codec `oem` y
 (`backfill_historico.bat` lo corre así). Regresión:
 `tests/test_onedrive.py` (parchea `_atributos` / `_leer` / `_PLATFORM`).
 
+## Windows — carpetas de DATOS "sólo en la nube" (04/11)
+
+La PC nueva de un superuser arrancó con la biblioteca de SharePoint
+"Inversiones - Documentos" (Delta Bases, Carteras, Precios Cafci) entera como
+marcadores de OneDrive: cientos de `cafci no pude leer … [Errno 22]`,
+`cierres partición ilegible … Error reading bytes from file`,
+`historico_byma load falló` y Posiciones / Matriz vacías SIN una línea que
+dijera por qué (`positions` / `delta_especies` guardan el EINVAL en `error` y
+nadie lo logueaba). Un marcador pasa `isfile` / `listdir` / `is_zipfile`
+(tiene nombre, tamaño y mtime reales): el fallo recién aparece en el
+`ReadFile`. El pre-flight del código (`tools/onedrive.py`) no miraba esas
+carpetas. Tres piezas:
+- **`backend.tools.onedrive --datos`** (en los dos .bat, DESPUÉS del paso
+  del código y ANTES de pip; sólo AVISA con errorlevel 4, nunca `exit`: la
+  app sabe correr sin bases): `carpetas_datos()` resuelve las carpetas desde
+  secrets.txt (`OMSsecrets.load` + `deltapaths`, stdlib, import tardío),
+  deduplicadas (Carteras va adentro de Delta Bases), las FIJA "Mantener
+  siempre en este dispositivo" (`fijar`: OneDrive baja todo en segundo plano
+  y lo nuevo que escriba el writer de otra PC llega ya bajado; Storage Sense
+  no las vacía — pedido del desk: "que Delta Bases siempre se baje") y baja
+  YA sólo `esenciales(esc)` = `ESENCIALES_DATOS` (composición / PN / Galileo /
+  Fondos / Especies / px_tasas xlsx + parquet + firma / FX / acciones /
+  manifiesto / huecos) + los `CAFCI_ULTIMOS` (3) vectores `AAAAMMDD.xlsx` más
+  nuevos. `escanear(..., clasificar_basura=False)`: en una carpeta de datos
+  NADA se clasifica como caché ni se borra. Las particiones de cierres y la
+  historia CAFCI las baja OneDrive por el pin; `cierres` reintenta solo cada
+  60 s.
+- **`services/nube.py`** (stdlib): `es_marcador(path)` (bit
+  RECALL_ON_DATA_ACCESS / OFFLINE / RECALL_ON_OPEN, un stat),
+  `es_error_de_nube(exc)` (EINVAL o "Error reading bytes from file"),
+  `ilegible_por_nube(path, exc)`, `remedio(path)`. Fuera de Windows todo es
+  False. **El writer nunca aparta un marcador como `.corrupto-`**:
+  `_apartar_si_corrupto` (`zipfile.is_zipfile` TRAGA el EINVAL y devolvía
+  False → `os.replace` de la base COMPARTIDA, que viajaba a SharePoint y a
+  todas las PCs) lo salta y sigue del espejo fiel; `_leer_base` (Excel
+  marcador + espejo no fiel), `_apartar_fx_ilegible` y `append_acciones`
+  tiran RuntimeError sin tocar nada (el autosave reintenta); `cafci._load`
+  loguea UN warning por lote ilegible (antes uno por archivo, saturaba el
+  ring de /admin) y, si todos son marcadores, el error de la pestaña lo dice
+  con el remedio.
+- **`services/datos_nube.py`** (Windows; `DATOS_NUBE=0` apaga): en el
+  lifespan ANTES de leer posiciones / especies, `chequear_arranque()` escanea
+  las mismas carpetas (scandir con atributos, decenas de ms, sin abrir
+  archivos) y deja UNA línea con cuántos faltan por carpeta, cuántos son
+  esenciales y el remedio (`listo en …` lleva `⚠ N archivos de datos sin
+  bajar`); si faltan esenciales, un thread re-escanea cada `_CADA_S` (60 s,
+  hasta 8 h) y cuando ya no hay esenciales pendientes corre `_recargas()`:
+  `positions.refresh`, `delta_especies.refresh` (por fin con un caller),
+  `cafci.refresh`, `historico_byma.refresh`, `fx_hist.refresh`,
+  `acciones_hist.refresh` y vacía `historico_writer._fechas_cache` — la
+  hidratación NO cambia mtime ni tamaño y los memos por firma no se enteran
+  solos. Tarjeta "Archivos de datos (OneDrive)" en /admin · Salud
+  (`status()`, pill roja `error` mientras falte algo esencial). `main.py`
+  loguea además el `error` de positions / delta_especies cuando no cargan.
+  Regresión: `tests/test_nube_marcadores.py` y los casos `--datos` de
+  `tests/test_onedrive.py`.
+
 ## Estado por máquina fuera de OneDrive (15/10)
 
 El desk vio `data/` con ~6 GB y el chequeo de arranque bajando 6.522 de 8.449
