@@ -1,0 +1,70 @@
+{# Formulario de conexión al broker. Lo incluye la página (/conexion) y, con
+   `oob` = true, la respuesta de un login OK como swap fuera de banda: el form
+   se reemplaza ENTERO (el input de clave viejo sale del DOM) y recién ahí
+   Chrome / Edge / Firefox ofrecen guardar usuario y clave — con htmx el submit
+   no navega y, si el campo de clave sigue en pantalla, el navegador no da por
+   enviado el formulario (pedido del desk, 04/11). Los autocomplete
+   `username` / `current-password` son los que el gestor de claves busca.
+   La clave de secrets NUNCA se imprime: vacío ⇒ usa la de secrets.txt. #}
+{% if es_su %}
+<form id="conn-form" {% if oob %}hx-swap-oob="outerHTML"{% endif %}
+      hx-post="/conexion/login" hx-target="#conn-status" hx-swap="innerHTML"
+      hx-indicator="#conn-spin" autocomplete="on">
+  <div class="form-row">
+    <label class="field" style="min-width:200px">
+      <span>Broker</span>
+      <select @change="url = $event.target.value">
+        {% for label, u in hosts %}
+          <option value="{{ u }}" {% if u == current_url %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field" style="flex:1;min-width:320px">
+      <span>URL del endpoint <small class="muted">(editable)</small></span>
+      <input type="text" name="url" x-model="url" autocomplete="off" spellcheck="false">
+    </label>
+  </div>
+  <div class="form-row">
+    <label class="field">
+      <span>Usuario</span>
+      <input type="text" name="username" id="conn-username" value="{{ current_user }}" autocomplete="username">
+    </label>
+    <label class="field">
+      <span>Clave</span>
+      <input type="password" name="password" id="conn-password" autocomplete="current-password"
+             placeholder="{% if has_secret_pass %}(vacío = la de secrets.txt){% else %}requerida{% endif %}">
+    </label>
+    <button type="submit" class="btn-primary" style="align-self:flex-end">🔌 Conectar</button>
+    <span id="conn-spin" class="htmx-indicator muted" style="align-self:flex-end">conectando…</span>
+  </div>
+</form>
+{% else %}
+{# No-superuser: usuario/clave propios pero sólo brokers conocidos — sin URL
+   libre (el server re-valida la URL; este form es la UI, no el control). #}
+<form id="conn-form" {% if oob %}hx-swap-oob="outerHTML"{% endif %}
+      hx-post="/conexion/login" hx-target="#conn-status" hx-swap="innerHTML"
+      hx-indicator="#conn-spin" autocomplete="on">
+  <div class="form-row">
+    <label class="field" style="min-width:240px">
+      <span>Broker</span>
+      <select name="url">
+        {% for label, u in hosts %}
+          <option value="{{ u }}" {% if u == current_url %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span>Usuario <small class="muted">(opcional)</small></span>
+      <input type="text" name="username" id="conn-username" autocomplete="username"
+             placeholder="(vacío = el de la casa)">
+    </label>
+    <label class="field">
+      <span>Clave <small class="muted">(opcional)</small></span>
+      <input type="password" name="password" id="conn-password" autocomplete="current-password"
+             placeholder="(vacío = la de la casa)">
+    </label>
+    <button type="submit" class="btn-primary" style="align-self:flex-end">🔌 Reconectar</button>
+    <span id="conn-spin" class="htmx-indicator muted" style="align-self:flex-end">conectando…</span>
+  </div>
+</form>
+{% endif %}

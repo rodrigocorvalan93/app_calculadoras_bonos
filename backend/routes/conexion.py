@@ -40,10 +40,12 @@ logger = logging.getLogger("backend.conexion")
 
 router = APIRouter(tags=["conexion"])
 
-# Hosts conocidos del feed XOMS (el primero es el default de la casa).
+# Hosts conocidos del feed XOMS (el primero es el default de la casa: LBO
+# desde el 04/11 — pedido del desk; `settings.primary_base_url` lleva el
+# mismo default y PRIMARY_BASE_URL en secrets.txt lo pisa).
 KNOWN_HOSTS = [
-    ("Latin Securities", "https://api.latinsecurities.matrizoms.com.ar/"),
     ("LBO", "https://api.lbo.xoms.com.ar/"),
+    ("Latin Securities", "https://api.latinsecurities.matrizoms.com.ar/"),
     ("Cocos", "https://api.cocos.xoms.com.ar/"),
 ]
 
@@ -97,19 +99,23 @@ def _status_ctx(result: str | None = None, ok: bool | None = None) -> Dict[str, 
     }
 
 
+def _form_ctx(request: Request) -> Dict[str, Any]:
+    """Contexto del formulario (página y re-render fuera de banda tras un
+    login OK). El usuario del feed sólo se precarga al superuser; la clave
+    nunca viaja al HTML."""
+    es_su = _es_su(request)
+    return {
+        "hosts": KNOWN_HOSTS,
+        "es_su": es_su,
+        "current_url": settings.primary_base_url,
+        "current_user": settings.primary_user if es_su else "",
+        "has_secret_pass": bool(settings.primary_pass),
+    }
+
+
 @router.get("/conexion", response_class=HTMLResponse)
 async def conexion_page(request: Request) -> HTMLResponse:
-    es_su = _es_su(request)
-    return _render(
-        request, "conexion.html",
-        hosts=KNOWN_HOSTS,
-        es_su=es_su,
-        current_url=settings.primary_base_url,
-        # el usuario del feed sólo se muestra (prefill) al superuser
-        current_user=settings.primary_user if es_su else "",
-        has_secret_pass=bool(settings.primary_pass),
-        **_status_ctx(),
-    )
+    return _render(request, "conexion.html", **_form_ctx(request), **_status_ctx())
 
 
 @router.post("/conexion/login", response_class=HTMLResponse)
@@ -187,7 +193,13 @@ async def conexion_login(
         except Exception as exc:  # noqa: BLE001
             msg = f"Login OK pero el WS no arrancó: {exc}"
             return _render(request, "partials/conexion_status.html", **_status_ctx(msg, False))
-    return _render(request, "partials/conexion_status.html", **_status_ctx(msg, True))
+    # Login OK: además del estado, el form vuelve ENTERO fuera de banda
+    # (usuario nuevo precargado, clave vacía): recién cuando el input de clave
+    # viejo sale del DOM el navegador ofrece guardar usuario y clave (con htmx
+    # no hay navegación y, con el campo todavía en pantalla, Chrome / Edge /
+    # Firefox no dan por enviado el formulario). Pedido del desk, 04/11.
+    return _render(request, "partials/conexion_status.html", form_oob=True,
+                   **_form_ctx(request), **_status_ctx(msg, True))
 
 
 _ESPERA_CONEXION_S = 3.0

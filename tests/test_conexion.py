@@ -22,6 +22,66 @@ async def test_conexion_page() -> None:
 
 
 @pytest.mark.asyncio
+async def test_conexion_default_lbo_y_form_oob_tras_login_ok(monkeypatch) -> None:
+    """04/11 (desk): LBO es el broker por defecto (settings y primera opción
+    del selector) y, tras un login OK, la respuesta trae el form entero fuera
+    de banda (`hx-swap-oob`) con el usuario precargado y la clave vacía — así
+    el navegador ofrece guardar usuario y clave (con el campo de clave viejo
+    en pantalla, Chrome no da por enviado el form). Un login fallido NO
+    re-manda el form (lo tipeado se conserva)."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.config import settings
+    from backend.main import app
+    from backend.routes import conexion
+    from backend.services import primary_ws as pws
+
+    assert settings.primary_base_url == "https://api.lbo.xoms.com.ar/"
+    assert conexion.KNOWN_HOSTS[0][0] == "LBO"
+
+    class _Fake(pws.PrimaryWS):
+        acepta = True
+
+        async def login(self, username, password):                      # sin red
+            self._username, self._password = username, password
+            if self.acepta:
+                self._cookies = __import__("httpx").Cookies()
+            return self.acepta
+
+        async def start(self, symbols=()):
+            self._connected = True
+
+        async def stop(self):
+            self._connected = False
+
+    viejo = pws.get_ws_client()
+    base, user, pwd = settings.primary_base_url, settings.primary_user, settings.primary_pass
+    monkeypatch.setattr(conexion.primary_ws, "PrimaryWS", _Fake)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+            page = await ac.get("/conexion")
+            ok = await ac.post("/conexion/login", data={
+                "url": "https://api.lbo.xoms.com.ar/", "username": "mesa", "password": "clave-x"})
+            _Fake.acepta = False
+            mal = await ac.post("/conexion/login", data={
+                "url": "https://api.lbo.xoms.com.ar/", "username": "mesa", "password": "otra"})
+    finally:
+        pws.set_ws_client(viejo)
+        settings.primary_base_url, settings.primary_user, settings.primary_pass = base, user, pwd
+    # página: el selector arranca en LBO, el form tiene id y autocomplete para el gestor de claves
+    t = page.text
+    assert t.index('value="https://api.lbo.xoms.com.ar/"') < t.index('value="https://api.latinsecurities')
+    assert 'id="conn-form"' in t and 'autocomplete="username"' in t and 'autocomplete="current-password"' in t
+    assert "hx-swap-oob" not in t
+    # login OK: estado + form fuera de banda, usuario precargado, clave nunca
+    assert ok.status_code == 200 and "Conectado a https://api.lbo.xoms.com.ar/" in ok.text
+    assert '<form id="conn-form" hx-swap-oob="outerHTML"' in ok.text
+    assert 'value="mesa"' in ok.text and "clave-x" not in ok.text and 'name="password" value=' not in ok.text
+    # login fallido: mensaje, sin form (lo tipeado queda en pantalla)
+    assert mal.status_code == 200 and "rechazó usuario/clave" in mal.text and "hx-swap-oob" not in mal.text
+
+
+@pytest.mark.asyncio
 async def test_conexion_login_fallido_es_manejado() -> None:
     """Sin red al broker (sandbox) el POST devuelve 200 con mensaje claro,
     nunca un 500."""

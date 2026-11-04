@@ -3,6 +3,12 @@
     {{ "✅" if ok else "⚠️" }} {{ result }}
   </div>
 {% endif %}
+{% if form_oob %}
+  {# Login OK: el form se reemplaza entero fuera de banda (usuario nuevo
+     precargado, clave vacía) — así el navegador ofrece guardar las credenciales. #}
+  {% set oob = true %}
+  {% include "partials/conexion_form.html" %}
+{% endif %}
 <div class="card">
   <div class="card-title">
     <span>Estado del feed</span>

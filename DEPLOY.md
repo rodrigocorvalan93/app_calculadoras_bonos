@@ -39,7 +39,7 @@ Si algún día hiciera falta más capacidad: máquina más grande, no más proce
 | SO | Windows Server / Windows 10-11, o Linux (ambos probados; scripts para los dos) |
 | Python | 3.12+ recomendado (desarrollado en 3.11–3.14) |
 | Git | para clonar y actualizar |
-| Red saliente | `api.latinsecurities.matrizoms.com.ar` (REST+WSS), `api.bcra.gob.ar`; opcionales: MAE, CAFCI, SMTP (587), RSS |
+| Red saliente | el broker XOMS elegido — `api.lbo.xoms.com.ar` (default), `api.latinsecurities.matrizoms.com.ar` o `api.cocos.xoms.com.ar` (REST+WSS) —, `api.bcra.gob.ar`; opcionales: MAE, CAFCI, SMTP (587), RSS |
 | Red entrante | 8000/tcp (app) y 8443/tcp (add-in Excel) **sólo desde la red interna/VPN** — nunca expuesto a internet |
 | Disco | < 2 GB (repo + venv + datos) |
 
