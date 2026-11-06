@@ -1,11 +1,14 @@
 {% if not rows %}
   <div class="alert">{% if fondo %}Sin tenencias en {{ nombre }}.{% else %}Elegí un fondo (o no hay posiciones cargadas).{% endif %}</div>
 {% else %}
-  {% include "partials/composicion_resumen.html" %}
+  {# Orden (desk 06/11): primero la tabla de tenencias, después la composición. #}
   <div class="card">
     <div class="card-title">
       <span>{{ nombre }} · tenencias</span>
       <span class="card-title-aux">
+        {# Frescura: la tabla NO se refresca sola (el Last es editable); la hora
+           es la del render y app.js mueve el "hace N min" (stale a los 15). #}
+        <span class="pos-fresh" data-ts="{{ render_ts }}" title="Hora (BA) en que se valuó la tabla. No se refresca sola: ↻ Precios BYMA para actualizar.">precios {{ render_hora }}<span class="pos-fresh-ago"></span></span> ·
         <button type="button" class="lnk" data-csv-of="#pos-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · 
         {{ rows | length }} especies · Valor {{ total_valor | ar_int }}{% if pn %} · {{ (total_valor / pn * 100) | ar_pct_pp(1) }} del PN{% endif %}{% if n_sin_regla %} · <span class="muted" title="Tenencias cuya Categoría es la Clase de Activo cruda del Excel: sin ficha en especies.py, sin Ajuste/Tasa en Delta - Especies y sin una descripción reconocida (plazo fijo, caución, cheque, pagaré, fideicomiso, FCI). Pasá el mouse por la columna Categoría para ver de dónde salió cada una.">{{ n_sin_regla }} sin regla fina</span>{% endif %}
         · <span id="pos-day-ret" class="pos-day-ret" title="Σ (peso por valor × retorno Last vs Px val). Editá un Last para simular.">Ret. día —</span>
@@ -112,4 +115,5 @@
       </div>
     </div>
   </div>
+  {% include "partials/composicion_resumen.html" %}
 {% endif %}

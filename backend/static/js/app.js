@@ -1256,6 +1256,65 @@ window.lsSet = function (k, v) {
   else applyCollapse();
 })();
 
+// Composición por categoría: tocar una fila abre la dona de esa dimensión con
+// la porción resaltada (segundo toque la cierra); tocar una porción de
+// "Categoría" lleva al grupo en la tabla de tenencias (lo despliega si estaba
+// plegado y lo destella). Todo client-side: la dona viene en el HTML.
+(function () {
+  function select(dim, i, toggle) {
+    var rows = dim.querySelectorAll('tr.comp-row'), svg = dim.querySelector('.comp-svg');
+    var row = dim.querySelector('tr.comp-row[data-i="' + i + '"]');
+    var was = dim.classList.contains('open') && row && row.classList.contains('sel');
+    Array.prototype.forEach.call(rows, function (r) { r.classList.remove('sel'); });
+    Array.prototype.forEach.call(dim.querySelectorAll('.comp-slice, .comp-lg'), function (n) { n.classList.remove('sel'); });
+    if (toggle && was) { dim.classList.remove('open'); if (svg) svg.classList.remove('has-sel'); return; }
+    dim.classList.add('open');
+    if (row) row.classList.add('sel');
+    if (svg) svg.classList.add('has-sel');
+    Array.prototype.forEach.call(dim.querySelectorAll('.comp-slice[data-i="' + i + '"], .comp-lg[data-i="' + i + '"]'), function (n) { n.classList.add('sel'); });
+  }
+  function irAlGrupo(cat) {
+    var tbl = document.getElementById('pos-tbl');
+    if (!tbl) return;
+    var grp = null;
+    Array.prototype.forEach.call(tbl.querySelectorAll('tr.pos-grp'), function (tr) { if (!grp && tr.getAttribute('data-grp') === cat) grp = tr; });
+    if (!grp) return;
+    var caret = grp.querySelector('.grp-caret');
+    if (caret && caret.textContent === '▸') grp.click();     // plegado: desplegar (misma lógica del collapse)
+    grp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    grp.classList.remove('pos-grp-flash'); void grp.offsetWidth; grp.classList.add('pos-grp-flash');
+  }
+  document.body.addEventListener('click', function (e) {
+    var row = e.target.closest && e.target.closest('tr.comp-row');
+    if (row) { var dim = row.closest('.comp-dim'); if (dim) select(dim, row.getAttribute('data-i'), true); return; }
+    var sl = e.target.closest && e.target.closest('.comp-slice, .comp-lg');
+    if (sl) {
+      var d2 = sl.closest('.comp-dim');
+      if (!d2) return;
+      select(d2, sl.getAttribute('data-i'), false);
+      var cat = sl.getAttribute('data-cat') || (d2.querySelector('tr.comp-row[data-i="' + sl.getAttribute('data-i') + '"]') || {}).getAttribute && d2.querySelector('tr.comp-row[data-i="' + sl.getAttribute('data-i') + '"]').getAttribute('data-cat');
+      if (d2.getAttribute('data-dim') === 'Categoría' && cat) irAlGrupo(cat);
+    }
+  });
+})();
+
+// Frescura de la tabla de tenencias: "precios 13:52 · hace 4 min" (la tabla
+// no se refresca sola); a los 15 min se marca stale (ámbar).
+(function () {
+  function tick() {
+    Array.prototype.forEach.call(document.querySelectorAll('.pos-fresh[data-ts]'), function (el) {
+      var ts = parseFloat(el.getAttribute('data-ts')) || 0, ago = el.querySelector('.pos-fresh-ago');
+      if (!ts || !ago) return;
+      var min = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+      ago.textContent = min < 1 ? ' · recién' : (min < 60 ? ' · hace ' + min + ' min' : ' · hace ' + Math.floor(min / 60) + ' h ' + (min % 60) + ' min');
+      el.classList.toggle('stale', min >= 15);
+    });
+  }
+  setInterval(tick, 30000);
+  document.body.addEventListener('htmx:afterSwap', tick);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick); else tick();
+})();
+
 // ── Ctrl+K: búsqueda global (bonos → YAS · pestañas por nombre) ────────────
 // Overlay client-side puro: el universo se baja UNA vez (/market/codes, cache
 // en memoria) y las pestañas se leen del nav ya renderizado (respeta el rol).

@@ -513,14 +513,31 @@ def _load() -> Dict[str, Any]:
     except Exception:  # noqa: BLE001
         logger.exception("[positions] carga Galileo falló — sigo sólo con Delta")
         gal = {"holdings": [], "pn": {}, "nombres": {}, "paths": {}}
+    out["fondos"] = _fondo_names()
+    # Guardia (06/11): el desk unificó las bases EN LOS ARCHIVOS (los fondos
+    # Galileo pasaron a Delta_Composicion.xlsx). Si el archivo Galileo sigue en
+    # Delta Bases, un fondo que ya está en Delta con el mismo nombre NO se
+    # carga dos veces; queda listado en `galileo_ignorados` (/admin lo muestra).
+    cods_delta = {h["cod_fondo"] for h in holdings}
+    nombres_delta = {_nombre_norm(n) for cod, n in out["fondos"].items() if cod in cods_delta}
+    ignorados: List[Dict[str, Any]] = []
+    for cod, nom in list(gal["nombres"].items()):
+        if _nombre_norm(nom) in nombres_delta:
+            ignorados.append({"cod": cod, "nombre": nom})
+    if ignorados:
+        dup = {d["cod"] for d in ignorados}
+        gal["holdings"] = [h for h in gal["holdings"] if h["cod_fondo"] not in dup]
+        gal["pn"] = {k: v for k, v in gal["pn"].items() if k not in dup}
+        logger.info("[positions] Galileo: %d fondo(s) ya están en Delta_Composicion con el mismo nombre — ignorados: %s",
+                    len(ignorados), ", ".join(d["nombre"] for d in ignorados))
     holdings.extend(gal["holdings"])
     pn.update(gal["pn"])
     out["paths"]["galileo"] = gal["paths"]
     out["galileo_nombres"] = gal["nombres"]
+    out["galileo_ignorados"] = ignorados
 
     out["holdings"] = holdings
     out["pn"] = pn
-    out["fondos"] = _fondo_names()
     # Índice por Cod_Delta → posición agregada (O(1) en position_for).
     by_code: Dict[str, Dict[str, Any]] = {}
     for h in holdings:
@@ -577,12 +594,42 @@ def refresh() -> Dict[str, Any]:
         return nuevo
 
 
+def _nombre_norm(s: Any) -> str:
+    """Nombre de fondo normalizado para comparar entre archivos: mayúsculas,
+    sin acentos ni puntuación, espacios colapsados ("Galileo Ahorro" ==
+    "GALILEO  AHORRO")."""
+    import re
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode()
+    return " ".join(re.sub(r"[^A-Za-z0-9 ]+", " ", t).upper().split())
+
+
 def status() -> Dict[str, Any]:
     c = ensure_loaded()
     n_gal = len({h["cod_fondo"] for h in c["holdings"] if es_galileo(h["cod_fondo"])})
     return {"loaded": c["loaded"], "error": c["error"], "paths": c["paths"],
             "n_holdings": len(c["holdings"]), "n_fondos_pn": len(c["pn"]),
-            "n_fondos_galileo": n_gal, "asof": c.get("asof")}
+            "n_fondos_galileo": n_gal, "asof": c.get("asof"),
+            "galileo_ignorados": list(c.get("galileo_ignorados") or [])}
+
+
+def fuentes() -> List[Dict[str, Any]]:
+    """De qué archivo salió cada fondo (diagnóstico de /admin tras la
+    unificación de las bases): código, nombre, archivo, tenencias, PN. Los
+    Galileo ignorados por estar ya en Delta van al final, marcados."""
+    c = ensure_loaded()
+    if not c["loaded"]:
+        return []
+    conteo: Dict[int, int] = {}
+    for h in c["holdings"]:
+        conteo[h["cod_fondo"]] = conteo.get(h["cod_fondo"], 0) + 1
+    out = [{"cod": cod, "nombre": fondo_label(cod), "n": n, "pn": c["pn"].get(cod),
+            "archivo": _GALILEO_COMP_FILE if es_galileo(cod) else _COMPOSICION_FILE, "ignorado": False}
+           for cod, n in sorted(conteo.items())]
+    for d in c.get("galileo_ignorados") or []:
+        out.append({"cod": d["cod"], "nombre": f"G{d['cod'] - GALILEO_OFFSET} — {d['nombre']}", "n": 0, "pn": None,
+                    "archivo": _GALILEO_COMP_FILE, "ignorado": True})
+    return out
 
 
 def fondo_label(cod: int) -> str:

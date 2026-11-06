@@ -74,6 +74,7 @@ def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = Non
          # is_loaded(): sólo si el cache YA está (el warmup lo puebla al boot)
          # — nunca leer Excel acá adentro, que esto corre en el event loop.
          "fondos_all": positions.fondos() if positions.is_loaded() else [],
+         "fondos_fuentes": positions.fuentes() if positions.is_loaded() else [],
          "excel_bases": _excel_bases(request),
          "msg": msg, "error": error},
     )

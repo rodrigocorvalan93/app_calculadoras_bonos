@@ -114,6 +114,25 @@
           fondos nuevos). Con una selección, ve <strong>sólo</strong> los tildados — un fondo nuevo no se
           muestra hasta tildarlo. Aplica a Posiciones, Matriz y los desplegables de tenencia
           (YAS / Comparador / Curvas).</p>
+        {% if fondos_fuentes %}
+        {# De qué archivo salió cada fondo: con las bases unificadas en
+           Delta_Composicion, un Galileo repetido se ignora y acá se ve. #}
+        <details class="fondos-fuentes">
+          <summary class="muted" style="cursor:pointer;font-size:11px">Fuentes: {{ fondos_fuentes | selectattr('ignorado', 'equalto', false) | list | length }} fondos cargados{% set ign = fondos_fuentes | selectattr('ignorado') | list %}{% if ign %} · <span class="var-up">{{ ign | length }} Galileo ignorado{{ 's' if ign | length != 1 }} (ya en Delta_Composicion)</span>{% endif %}</summary>
+          <table class="cashflows admin-tabs" style="margin:6px 0 10px">
+            <thead><tr><th style="text-align:left">Fondo</th><th style="text-align:left">Archivo</th><th>Tenencias</th><th>PN</th></tr></thead>
+            <tbody>
+              {% for f in fondos_fuentes %}
+              <tr{% if f.ignorado %} class="muted"{% endif %}>
+                <td style="text-align:left">{{ f.nombre }}{% if f.ignorado %} <span class="tag">ignorado: ya está en Delta_Composicion</span>{% endif %}</td>
+                <td style="text-align:left;font-size:11px">{{ f.archivo }}</td>
+                <td>{{ f.n }}</td><td>{{ f.pn | ar_int if f.pn is not none else "—" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+        {% endif %}
         <table class="cashflows admin-tabs">
           <thead><tr><th style="text-align:left">Usuario</th><th style="text-align:left">Fondos</th><th></th></tr></thead>
           <tbody>

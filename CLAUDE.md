@@ -692,6 +692,32 @@ Manual para el desk (orden de decisión, tokens, qué cargar en la base):
 `backend/docs/posiciones_clasificacion.md` (el `.gitignore` es una allowlist:
 `docs/` en la raíz queda afuera) — si cambia una regla, cambia el manual.
 
+**Posiciones · orden, torta y frescura (06/11, glow-up)**: en
+`partials/posiciones_fondo.html` va PRIMERO la tabla "N — FONDO · tenencias"
+y después `composicion_resumen.html` (pedido del desk). Cada dimensión de la
+composición (`.comp-dim`) trae su dona en SVG armada en el server
+(`svg_charts.donut`: geometría pura; `_fondo_ctx` → `donas[label]`, mismos
+datos que la tabla) oculta: tocar una fila (`tr.comp-row`) la abre con esa
+porción resaltada, el segundo toque la cierra; tocar una porción o una línea
+de la leyenda de **Categoría** lleva al grupo de la tabla (`irAlGrupo` en
+app.js: lo despliega si estaba plegado y lo destella `pos-grp-flash`). Todo
+client-side, cero requests; 8 tonos cíclicos `comp-c0..7` compartidos por
+swatch, porción y leyenda. La dona NO lleva `role="img"` (150 px: el ⧉ de
+`injectSvg` tapaba el centro). El título de la tabla dice `precios HH:MM ·
+hace N min` (`render_ts` / `render_hora` BA del ctx; app.js lo mueve cada 30
+s y lo marca `stale` a los 15 min): la tabla no se refresca sola a propósito
+(el Last es editable). **Delta/Galileo**: el desk unificó las bases en los
+ARCHIVOS (los Galileo pasaron a `Delta_Composicion.xlsx`); el código sigue
+leyendo `Galileo_Composicion.xlsx` best-effort, pero un fondo Galileo con el
+MISMO nombre normalizado (`_nombre_norm`) que uno de Delta se ignora (no se
+carga dos veces; `status()["galileo_ignorados"]`), y `positions.fuentes()`
+dice de qué archivo salió cada fondo (tarjeta "Fondos visibles" de /admin,
+`<details>` Fuentes). Sacar el loader Galileo del todo queda para cuando el
+desk confirme que el archivo ya no está en Delta Bases. Medido warm
+(`/posiciones/table`, cartera sintética de 9 tenencias): p50 4,6 · p95 6,2
+ms. Regresión: `test_posiciones_galileo.test_http_posiciones_tenencias_primero_y_torta`,
+`test_galileo_ya_unificado_en_delta_no_se_carga_dos_veces`, `test_donut_geometria`.
+
 **Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las rutas de pestaña
 llevan `@_pestana_resiliente(...)` — una excepción responde 200 con
 `partials/historico_tab_error.html` (qué falló + Reintentar) en vez de un 500

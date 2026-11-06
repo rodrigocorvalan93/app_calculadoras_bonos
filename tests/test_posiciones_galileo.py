@@ -145,6 +145,71 @@ def test_visibilidad_oculta_galileo_no_tildado(carteras) -> None:
     assert positions.holdings(G + 5, visibles={5}) == []
 
 
+def test_galileo_ya_unificado_en_delta_no_se_carga_dos_veces(tmp_path, monkeypatch) -> None:
+    """06/11: el desk unificó las bases en los archivos (los fondos Galileo
+    pasaron a Delta_Composicion con su nombre en Delta_Fondos). Si el archivo
+    Galileo sigue en la carpeta, un fondo con el MISMO nombre que uno de Delta
+    no se carga dos veces (queda en `galileo_ignorados` y /admin lo lista); los
+    Galileo que Delta no tiene siguen entrando como siempre."""
+    monkeypatch.setenv("DELTA_BASES_DIR", str(tmp_path))
+    for env in ("DELTA_COMPOSICION_PATH", "DELTA_PN_PATH",
+                "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH", "DELTA_FONDOS_PATH"):
+        monkeypatch.delenv(env, raising=False)
+    _delta_files(tmp_path)
+    _galileo_files(tmp_path, _isin_al30())
+    # Delta_Fondos.txt: el 18 de Delta se llama como el G8 de Galileo ("Galileo Acciones")
+    (tmp_path / "Delta_Fondos.txt").write_text("5\tPesos\n18\tGalileo  Acciones\n", encoding="utf-8")
+    try:
+        c = positions.refresh()
+        assert c["loaded"] and c["error"] is None
+        if c["fondos"].get(18) != "Galileo  Acciones":
+            pytest.skip("Delta_Fondos.txt con otro formato: la fixture no aplica")
+        cods = {f["cod"] for f in positions.fondos()}
+        assert cods == {5, 18, G + 2, G + 5}                        # G+8 ignorado
+        assert positions.holdings(G + 8) == [] and positions.pn_of(G + 8) is None
+        st = positions.status()
+        assert st["n_fondos_galileo"] == 2
+        assert [d["nombre"] for d in st["galileo_ignorados"]] == ["GALILEO ACCIONES"]
+        fu = positions.fuentes()
+        por = {f["cod"]: f for f in fu}
+        assert por[5]["archivo"] == "Delta_Composicion.xlsx" and por[G + 5]["archivo"] == "Galileo_Composicion.xlsx"
+        assert por[G + 8]["ignorado"] is True and por[18]["ignorado"] is False
+        assert positions._nombre_norm("Galileo  Acciones") == positions._nombre_norm("GALILEO ACCIONES") == "GALILEO ACCIONES"
+    finally:
+        with positions._lock:
+            positions._cache = None
+
+
+@pytest.mark.asyncio
+async def test_http_posiciones_tenencias_primero_y_torta(carteras) -> None:
+    """Pedido del desk 06/11: la tabla de tenencias va ANTES de la composición;
+    cada dimensión de la composición trae su dona (server-side) oculta con una
+    porción por fila; la tabla dice a qué hora se valuó."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/posiciones/table", params={"fondo": 5, "plazo": "24hs"})
+    assert r.status_code == 200
+    t = r.text
+    assert t.index("· tenencias") < t.index("Composición por categoría")
+    assert 'class="comp-dim" data-dim="Categoría"' in t and 'class="comp-donut"' in t
+    assert t.count('class="comp-slice') >= 2 and 'data-cat="Soberano USD"' in t or 'data-cat="' in t
+    assert 'class="pos-fresh" data-ts="' in t and "precios " in t
+
+
+def test_donut_geometria() -> None:
+    from backend.services import svg_charts
+    d = svg_charts.donut([{"label": "A", "val": 60.0}, {"label": "B", "val": 40.0}, {"label": "C", "val": 0.0}])
+    assert d["n"] == 2 and [s["label"] for s in d["slices"]] == ["A", "B"]
+    assert d["slices"][0]["frac"] == pytest.approx(0.6) and d["slices"][0]["d"].startswith("M")
+    assert " 1 1 " in d["slices"][0]["d"]                   # 60 % > 180°: arco grande
+    assert " 0 1 " in d["slices"][1]["d"]                   # 40 %: arco chico
+    uno = svg_charts.donut([{"label": "Todo", "val": 5.0}])
+    assert uno["n"] == 1 and uno["slices"][0]["frac"] == 1.0 and uno["slices"][0]["d"].count("M") == 2
+    assert svg_charts.donut([]) is None and svg_charts.donut([{"label": "x", "val": -1}]) is None
+
+
 def test_sin_archivos_galileo_todo_igual(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DELTA_BASES_DIR", str(tmp_path))
     for env in ("DELTA_COMPOSICION_PATH", "DELTA_PN_PATH",

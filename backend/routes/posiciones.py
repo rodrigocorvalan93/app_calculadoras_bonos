@@ -9,14 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from datetime import date
+import time
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _row_for_code
-from backend.services import auth, bond_universe, clasificacion, delta_especies, positions, pricing
+from backend.services import auth, bond_universe, clasificacion, delta_especies, positions, pricing, svg_charts
+
+_TZ_BA = ZoneInfo("America/Argentina/Buenos_Aires")
 
 router = APIRouter(tags=["posiciones"])
 
@@ -554,10 +558,20 @@ def _fondo_ctx(selected: Optional[int], plazo: str,
     nombre = positions.fondo_label(selected)
     # Cuadro "Activos infra" SOLO para el fondo de infraestructura (Crecimiento
     # — el del KPI regulatorio del legacy): para el resto ni se computa.
+    summary = _composicion_summary(hs, pn, infra="CRECIMIENTO" in nombre.upper())
     return {
         "rows": rows,
         "grupos": _agrupar_tenencias(rows),
-        "summary": _composicion_summary(hs, pn, infra="CRECIMIENTO" in nombre.upper()),
+        "summary": summary,
+        # Una dona por dimensión de la composición (torta al tocar una fila;
+        # svg_charts.donut es geometría pura, µs): misma data que la tabla.
+        "donas": {label: svg_charts.donut([{"label": r["cat"], "val": r["monto"], "pct": r["pct"], "monto": r["monto"]}
+                                           for r in filas], size=150, r_in=44.0, r_out=71.0)
+                  for label, filas in summary.items()},
+        # Hora BA del render = hora de los precios de la tabla (no se refresca
+        # sola): el título dice "precios HH:MM · hace N min" (app.js lo mueve).
+        "render_ts": time.time(),
+        "render_hora": datetime.now(_TZ_BA).strftime("%H:%M"),
         "pn": pn,
         "total_valor": sum((r.get("valor") or 0.0) for r in rows),
         "nombre": nombre,
