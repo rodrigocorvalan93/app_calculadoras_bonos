@@ -38,15 +38,17 @@ def test_ars_fx_cero_y_columnas_neto():
     """ARS puro: fx=0 ⇒ TR_pesos = TR nativo; neto-fondeo y neto-FX
     multiplicativos (réplica de la aritmética del Excel)."""
     settle, terminal, sd, td = _dates()
-    cat = esc.CAT_BY_KEY["cer_corto"]
-    rows = [{"code": "TX26", "tirea": 0.01, "duration": 0.38, "px_calc": 700.0}]
+    # TX28 (vence 11/2028): TX26 venció el 09/11/2026 y desde esa semana el
+    # test caía por el calendario, no por el código.
+    cat = esc.CAT_BY_KEY["cer_largo"]
+    rows = [{"code": "TX28", "tirea": 0.01, "duration": 1.8, "px_calc": 1475.0}]
     cauc, ccl = 0.081, 0.085
-    res = esc.compute_category(cat, rows, {"TX26": 0.03}, fx_proy=0.0, ccl_proy=ccl,
+    res = esc.compute_category(cat, rows, {"TX28": 0.03}, fx_proy=0.0, ccl_proy=ccl,
                                cauc=cauc, terminal=terminal, settle=settle)
     assert res["n"] == 1
     r = res["rows"][0]
     assert abs((r["carry"] + r["capital"]) - r["total"]) < 1e-12          # additivo
-    native = tr._bond_tr("TX26", 0.01, 0.03, terminal, settle, sd, td, 0.38)
+    native = tr._bond_tr("TX28", 0.01, 0.03, terminal, settle, sd, td, 1.8)
     assert abs(r["total"] - native["tr_total"]) < 1e-9                    # fx=0
     assert abs(r["neto_fondeo"] - ((1 + r["total"]) / (1 + cauc) - 1)) < 1e-12
     assert abs(r["neto_fx"] - ((1 + r["total"]) / (1 + ccl) - 1)) < 1e-12
@@ -158,8 +160,8 @@ def test_bond_tr_want_duration_skips_durf_same_math():
     """El comparador llama `_bond_tr(..., want_duration=False)`: ahorra el 3er
     cálculo (dur_f, que no usa) sin cambiar la matemática de TR."""
     settle, terminal, sd, td = _dates()
-    full = tr._bond_tr("TX26", 0.01, 0.03, terminal, settle, sd, td, 0.4, want_duration=True)
-    fast = tr._bond_tr("TX26", 0.01, 0.03, terminal, settle, sd, td, 0.4, want_duration=False)
+    full = tr._bond_tr("TX28", 0.01, 0.03, terminal, settle, sd, td, 1.8, want_duration=True)
+    fast = tr._bond_tr("TX28", 0.01, 0.03, terminal, settle, sd, td, 1.8, want_duration=False)
     assert full and fast
     assert fast["dur_f"] is None                              # saltea el calc de duration final
     assert abs(full["tr_total"] - fast["tr_total"]) < 1e-12   # TR idéntico

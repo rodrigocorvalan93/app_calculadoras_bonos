@@ -1748,6 +1748,26 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .hc-svg.hc-dim text.hc-lbl.hc-on { opacity: .95; }
 .hc-svg circle.hc-pt.hc-off, .hc-svg text.hc-lbl.hc-off { opacity: .08 !important; }
 .hc-svg .hc-hover text { font-variant-numeric: tabular-nums; pointer-events: none; }
+/* Panel Δ bps por bono (debajo del scatter): barras rojo = amplió, verde =
+   comprimió, proy (j) huecas; el hover y el apagado de la leyenda comparten
+   las clases hc-on / hc-off / hc-dim con el scatter. */
+.hc-delta-title { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin: 14px 0 2px; font-size: 12px; font-weight: 600; }
+.hc-delta-title .muted { font-weight: 400; font-size: 11px; }
+.hc-delta-title .hc-up { color: var(--down-strong); }
+.hc-delta-title .hc-dn { color: var(--up-strong); }
+.hc-delta .hc-dbar { opacity: .85; }
+.hc-delta .hc-dbar.hc-up { fill: var(--down-strong); }
+.hc-delta .hc-dbar.hc-dn { fill: var(--up-strong); }
+.hc-delta .hc-dbar.hc-flat { fill: var(--text-muted); }
+.hc-delta .hc-dproy .hc-dbar { fill: none; stroke-width: 1.4; }
+.hc-delta .hc-dproy .hc-dbar.hc-up { stroke: var(--down-strong); }
+.hc-delta .hc-dproy .hc-dbar.hc-dn { stroke: var(--up-strong); }
+.hc-delta .hc-dproy .hc-dbar.hc-flat { stroke: var(--text-muted); }
+.hc-delta .hc-dgrp { transition: opacity .15s ease; cursor: default; }
+.hc-delta .hc-dgrp text { font-variant-numeric: tabular-nums; pointer-events: none; }
+.hc-delta.hc-dim .hc-dgrp:not(.hc-on) { opacity: .3; }
+.hc-delta.hc-dim .hc-dgrp.hc-on { opacity: 1; }
+.hc-delta .hc-dgrp.hc-off { opacity: .08 !important; }
 .hc-legend { margin-top: 8px; align-items: center; }
 .hc-chip { cursor: pointer; user-select: none; }
 .hc-chip.hc-chip-off { opacity: .38; text-decoration: line-through; }

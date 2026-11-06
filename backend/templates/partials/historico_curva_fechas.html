@@ -61,8 +61,11 @@
   {% if scatter and scatter.n %}
   <div class="card hc-wrap" style="margin-top:12px" data-curve="{{ curve_sel }}">
     <div class="card-title"><span>📐 {{ scatter.curve_label }} — {{ scatter.metric }} vs Duration</span>
-      <span class="card-title-aux">{% for s in scatter.series %}<span style="color:{{ s.color }}">● {{ s.fecha }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% if scatter.mixto %} · <span class="muted">○ proy (fit punteado)</span>{% endif %}
-        · <label class="hc-toggle" title="Etiquetas de los bonos en la fecha más reciente"><input type="checkbox" class="hc-labels-toggle" checked> etiquetas</label></span></div>
+      <span class="card-title-aux">{% for s in scatter.series %}<span style="color:{{ s.color }}">● {{ s.fecha }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% if scatter.mixto %} · <span class="muted" title="Con Tipo = Todos cada fecha lleva DOS curvas: la base (línea llena, puntos llenos) y los proyectados 'j' (línea punteada, puntos huecos) — son dos poblaciones distintas. Tipo = Base deja una curva por fecha.">● base llena · ○ proy (j) punteada → {{ scatter.series | length * 2 }} curvas; Tipo = Base para {{ scatter.series | length }}</span>{% endif %}
+        · <label class="hc-toggle" title="Etiquetas de los bonos en la fecha más reciente"><input type="checkbox" class="hc-labels-toggle" checked> etiquetas</label>
+        {# Proyectados (j) a un click: el mismo selector Tipo del form (Todos ↔
+           Base), re-pide la foto — sin estado oculto, sin huecos en las barras. #}
+        · <label class="hc-toggle" title="Mostrar los proyectados 'j' (Tipo = Todos) o sacarlos de la foto y del panel Δ (Tipo = Base)"><input type="checkbox" class="hc-proy-toggle"{% if proy != 'base' %} checked{% endif %}> proy (j)</label></span></div>
     <div class="card-body table-scroll">
       <svg class="hc-svg" viewBox="0 0 {{ scatter.width }} {{ scatter.height }}" style="width:100%;max-width:{{ scatter.width }}px" role="img"
            data-x0="{{ scatter.x0 }}" data-x1="{{ scatter.x1 }}" data-y0="{{ scatter.y0 }}" data-y1="{{ scatter.y1 }}" data-metric="{{ scatter.metric }}">
@@ -102,6 +105,35 @@
         {% endfor %}
         <g class="hc-hover"></g>
       </svg>
+      {% if scatter.delta %}
+      {# Panel "change" (Graph Curves de Bloomberg): una barra por bono con el Δ
+         en bps entre la primera y la última fecha en que aparece — el mismo Δ
+         del hover. Rojo = amplió, verde = comprimió. Hover en una barra =
+         el mismo hover del scatter (charts.js); apagar un bono en la leyenda
+         también atenúa su barra. #}
+      {% set d = scatter.delta %}
+      <div class="hc-delta-title">
+        <span>📊 Δ {{ scatter.metric }} por bono · {{ d.f1 | ar_date }} → {{ d.f2 | ar_date }} · en bps</span>
+        <span class="muted">promedio {{ d.prom_txt }} bps · {{ d.n }} bono{{ 's' if d.n != 1 else '' }}{% if d.mixto %} · hueco = proy (j){% endif %} · <span class="hc-dn">▮</span> comprimió · <span class="hc-up">▮</span> amplió</span>
+      </div>
+      <svg class="hc-delta" viewBox="0 0 {{ d.width }} {{ d.height }}" style="width:100%;max-width:{{ d.width }}px" role="img">
+        {% for t in d.ticks %}
+          <line x1="{{ d.x0 }}" x2="{{ d.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}" stroke="var(--border)" stroke-width="1" opacity="0.55"/>
+          <text x="{{ d.x0 - 8 }}" y="{{ t.y + 4 }}" text-anchor="end" font-size="11" fill="var(--text-muted)">{{ t.v }}</text>
+        {% endfor %}
+        <line x1="{{ d.x0 }}" x2="{{ d.x1 }}" y1="{{ d.y_zero }}" y2="{{ d.y_zero }}" stroke="var(--text-muted)" stroke-width="1" opacity="0.8"/>
+        {% for b in d.bars %}
+        <g class="hc-dgrp{{ ' hc-dproy' if b.proy else '' }}" data-code="{{ b.code }}">
+          <title>{{ b.code }} · {{ b.f1 | ar_date }} → {{ b.f2 | ar_date }} · {{ 'amplió' if b.bps > 0.5 else ('comprimió' if b.bps < -0.5 else 'sin cambio') }} {{ b.txt }} bps · {{ b.v1 | ar_num(2) }}% → {{ b.v2 | ar_num(2) }}%</title>
+          <rect class="hc-dbar {{ 'hc-up' if b.bps > 0.5 else ('hc-dn' if b.bps < -0.5 else 'hc-flat') }}" data-code="{{ b.code }}"
+                x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h if b.h > 0 else 1 }}"/>
+          <text class="hc-dval" data-code="{{ b.code }}" x="{{ b.cx }}" y="{{ b.vy }}" text-anchor="middle" font-size="9" fill="var(--text-muted)">{{ b.txt }}</text>
+          <text class="hc-dcode" data-code="{{ b.code }}" x="{{ b.cx }}" y="{{ d.y1 + 8 }}" text-anchor="end" font-size="9.5" fill="var(--text-muted)"
+                transform="rotate(-55 {{ b.cx }} {{ d.y1 + 8 }})">{{ b.code }}</text>
+        </g>
+        {% endfor %}
+      </svg>
+      {% endif %}
       {# Leyenda de bonos (ordenada por duration a la última fecha): click =
          apagar/prender sin recalcular (recordado por curva); × = excluir del
          fit (viaja en "Excluir bonos" y re-arma la foto en el server). #}

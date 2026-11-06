@@ -119,6 +119,7 @@ def test_inyeccion_de_especies_no_cuenta_como_a3500_de_hoy(monkeypatch) -> None:
     valuaban todo el día contra ese número. Manda lo que publicó el BCRA
     (historico), no la serie de rentafija."""
     ayer = hoy_ba() - timedelta(days=1)
+    monkeypatch.setattr(pricing, "_es_rueda_hoy", lambda: True)    # la regla, no el calendario (06/11 = Día del bancario)
     monkeypatch.setattr(pricing, "_a3500_bcra", lambda: (ayer, 1474.7))
     _serie_rentafija(monkeypatch, hoy_ba(), 1474.7)                 # cierre de ayer relabelado HOY
     monkeypatch.setattr(dolares, "oficial_intradia_hoy",
@@ -283,6 +284,7 @@ def test_a3500_de_hoy_publicado_manda(monkeypatch) -> None:
 
 
 def test_serie_de_ayer_usa_intradia(monkeypatch) -> None:
+    monkeypatch.setattr(pricing, "_es_rueda_hoy", lambda: True)    # la regla, no el calendario
     _con_serie(monkeypatch, datetime.combine(hoy_ba() - timedelta(days=1),
                                              datetime.min.time()))   # serie de AYER (BA)
     monkeypatch.setattr(dolares, "oficial_intradia_hoy",

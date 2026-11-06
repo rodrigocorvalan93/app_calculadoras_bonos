@@ -228,9 +228,23 @@ _PRECIOS_MUESTRA = {"GD30C": 62.0, "AL30D": 58.0, "TX26": 750.0, "TTM26": 100.0,
 
 
 def _codigos_muestra():
-    from backend.services import bond_universe
+    """Los de la muestra que están en el universo Y siguen vivos a la
+    liquidación 24hs de hoy (TX26 vence el 09/11/2026: desde esa semana una
+    valuación daba 'ya venció' y el test caía por el calendario, no por la app)."""
+    from datetime import datetime
+
+    from backend.services import bond_universe, pricing
     codes = bond_universe.all_codes()
-    return [c for c in _PRECIOS_MUESTRA if c in codes][:4]
+    settle = datetime.strptime(pricing.settlement_date_str("24hs"), "%d/%m/%Y").date()   # es-AR
+    vivos = []
+    for c in _PRECIOS_MUESTRA:
+        if c not in codes:
+            continue
+        v = getattr(bond_universe.get(c), "vencimiento", None)
+        vd = v.date() if hasattr(v, "date") else v
+        if vd is None or vd > settle:
+            vivos.append(c)
+    return vivos[:4]
 
 
 def test_e07_una_valuacion_genera_los_flujos_una_vez_y_da_lo_mismo(monkeypatch) -> None:

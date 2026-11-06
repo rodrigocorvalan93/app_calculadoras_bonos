@@ -290,6 +290,66 @@ def test_scatter_chart_linea_es_curva_nss_no_serrucho() -> None:
     assert g2["fit"] is False and g2["path"].count(" L ") == 2
 
 
+def test_scatter_delta_bps_por_bono_es_el_mismo_del_hover() -> None:
+    """Panel Δ bps (estilo Graph Curves de Bloomberg) debajo del scatter: una
+    barra por bono con (última − primera fecha del bono) × 100 en bps — el
+    MISMO Δ del hover —, ordenadas por duration, proy 'j' marcadas, amplió > 0
+    / comprimió < 0, línea de cero y promedio. Con una sola fecha o sin bono
+    presente en dos, no hay panel."""
+    from backend.routes.historico import _bps_txt, _nice_step, _scatter_chart
+
+    puntos = [{"code": c, "dur": d, "v": v} for c, d, v in
+              [("A1", 0.2, 0.30), ("B2", 0.5, 0.27), ("C3j", 0.9, 0.24), ("D4", 1.6, 0.20), ("E5", 2.4, 0.17)]]
+    hoy = [dict(p, v=p["v"] + dv) for p, dv in zip(puntos[:-1], (0.0023, -0.0085, 0.0, 0.0001))]
+    sc = {"loaded": True, "metric": "TIREA", "curve_label": "CER",
+          "series": [{"fecha": "2026-11-05", "points": hoy},          # desordenadas a propósito
+                     {"fecha": "2026-10-29", "points": puntos}]}
+    d = _scatter_chart(sc)["delta"]
+    assert [b["code"] for b in d["bars"]] == ["A1", "B2", "C3j", "D4"]      # E5 sólo en una fecha: sin barra
+    bps = {b["code"]: b["bps"] for b in d["bars"]}
+    assert bps["A1"] == pytest.approx(23.0) and bps["B2"] == pytest.approx(-85.0)
+    assert bps["C3j"] == pytest.approx(0.0) and bps["D4"] == pytest.approx(1.0)
+    assert [b["txt"] for b in d["bars"]] == ["+23", "−85", "0", "+1"]
+    assert d["f1"] == "2026-10-29" and d["f2"] == "2026-11-05" and d["n"] == 4
+    assert d["prom"] == pytest.approx((23 - 85 + 0 + 1) / 4) and d["mixto"] is True
+    assert next(b for b in d["bars"] if b["code"] == "C3j")["proy"] is True
+    # geometría: amplió arriba de la línea de cero, comprimió abajo, alto = |Δ|
+    a1, b2 = d["bars"][0], d["bars"][1]
+    assert a1["y"] < d["y_zero"] and a1["y"] + a1["h"] == pytest.approx(d["y_zero"], abs=0.2)
+    assert b2["y"] == pytest.approx(d["y_zero"], abs=0.2) and b2["h"] > a1["h"]
+    assert d["x0"] == 62                                             # mismo margen izquierdo que el scatter
+    assert any(t["v"] == "0" for t in d["ticks"])
+    # una sola fecha → nada que comparar
+    assert _scatter_chart({**sc, "series": sc["series"][:1]})["delta"] is None
+    assert _bps_txt(-0.4) == "0" and _bps_txt(1234) == "+1234" and _bps_txt(-85) == "−85"
+    assert _nice_step(300) == 100 and _nice_step(47) == 20 and _nice_step(1500) == 500
+
+
+@pytest.mark.asyncio
+async def test_http_curva_fechas_trae_el_panel_delta(base_sintetica) -> None:
+    from backend.main import app
+    c1 = base_sintetica["c1"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/historicos/curva-fechas", params={
+            "curve": "lecap", "metric": "TIREA", "f1": _HOY.isoformat(), "f2": _PREV.isoformat()})
+        assert r.status_code == 200
+        assert 'class="hc-delta"' in r.text and "Δ TIREA por bono" in r.text
+        assert f'class="hc-dgrp" data-code="{c1}"' in r.text                  # barra por bono
+        assert "−400" in r.text and "hc-dbar hc-dn" in r.text                 # 34% → 30%: comprimió 400 bps
+        assert f"{_PREV.strftime('%d/%m/%Y')} → {_HOY.strftime('%d/%m/%Y')}" in r.text
+        # checkbox "proy (j)" del título: prendido con Tipo = Todos, apagado con Base
+        assert 'class="hc-proy-toggle" checked' in r.text
+        rb = await ac.get("/historicos/curva-fechas", params={
+            "curve": "lecap", "metric": "TIREA", "f1": _HOY.isoformat(), "f2": _PREV.isoformat(), "proy": "base"})
+        assert rb.status_code == 200 and 'class="hc-proy-toggle">' in rb.text and 'hc-proy-toggle" checked' not in rb.text
+        # una sola fecha con datos (la 2ª cae lejos de toda rueda y no entra a la
+        # foto; vacía el server la completa con el preset "1 mes"): scatter sí, panel Δ no
+        r1 = await ac.get("/historicos/curva-fechas", params={
+            "curve": "lecap", "metric": "TIREA", "f1": _HOY.isoformat(),
+            "f2": (_PREV - timedelta(days=20)).isoformat()})
+        assert r1.status_code == 200 and 'class="hc-pt"' in r1.text and 'class="hc-delta"' not in r1.text
+
+
 def test_scatter_fit_por_grupo_real_y_proy() -> None:
     """El caso de la captura del usuario: con Tipo=Todos, los reales (TEM
     ~0,3-0,8%) y los proyectados 'j' (~2,1-2,5%) son DOS nubes — una sola NSS

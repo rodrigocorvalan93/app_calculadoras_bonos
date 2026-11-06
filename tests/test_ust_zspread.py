@@ -122,9 +122,10 @@ def test_metrics_global_trae_spreads() -> None:
 
 
 def test_metrics_cer_sin_spreads() -> None:
-    if "TX26" not in bond_universe.all_codes():
-        pytest.skip("TX26 not present in especies.py")
-    m = pricing.compute_metrics("TX26", "precio", 735.4)
+    # TX28 (vence 11/2028) por TIR: TX26 venció el 09/11/2026 y el test caía por calendario
+    if "TX28" not in bond_universe.all_codes():
+        pytest.skip("TX28 not present in especies.py")
+    m = pricing.compute_metrics("TX28", "tir", 0.05)
     assert m.get("error") is None, m.get("error")
     assert math.isnan(m["g_spread_bps"]) and math.isnan(m["z_spread_bps"])
 
@@ -151,11 +152,12 @@ async def test_yas_recompute_cer_no_muestra_zspread() -> None:
     from httpx import ASGITransport, AsyncClient
     from backend.main import app
 
-    if "TX26" not in bond_universe.all_codes():
-        pytest.skip("TX26 not present in especies.py")
+    if "TX28" not in bond_universe.all_codes():
+        pytest.skip("TX28 not present in especies.py")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        r = await ac.post("/yas/recompute", data={"code": "TX26", "mode": "precio", "value": "735,4"})
+        r = await ac.post("/yas/recompute", data={"code": "TX28", "mode": "tir", "value": "5"})
     assert r.status_code == 200
+    assert "empty-state" not in r.text and "alert-error" not in r.text      # calculó de verdad
     assert "Z-spread" not in r.text
 
 
