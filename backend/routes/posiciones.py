@@ -514,7 +514,7 @@ async def posiciones_page(
     # de Jinja en el loop frenaban /market/seq de todos mientras tanto.
     return await loop.run_in_executor(None, lambda: _render(
         request, "posiciones.html",
-        fondos=fs, selected=selected, plazo=plazo, status=positions.status(),
+        fondos=fs, selected=selected, plazo=plazo, status=positions.status(), pos_status=positions.status(),
         **ctx,
     ))
 
@@ -604,7 +604,7 @@ async def posiciones_table(request: Request, fondo: Optional[str] = None, plazo:
         # Jinja por fila (~4-6 ms con 100-150 tenencias) que corrían en el
         # event loop después del ctx.
         ctx = _fondo_ctx(fp, plazo, vis)
-        return _render(request, "partials/posiciones_fondo.html", plazo=plazo, **ctx)
+        return _render(request, "partials/posiciones_fondo.html", plazo=plazo, pos_status=positions.status(), **ctx)
 
     return await asyncio.get_running_loop().run_in_executor(None, _build)
 
@@ -800,7 +800,7 @@ def _matriz_table_bytes(request: Request, visibles: Optional[frozenset],
     if body is not None:
         return body
     bond_universe.ensure_loaded()
-    resp = _render(request, "partials/matriz_table.html", view=view,
+    resp = _render(request, "partials/matriz_table.html", view=view, status=positions.status(),
                    **_matriz_ctx(visibles, familia, view))
     body = bytes(resp.body)
     if _MATRIZ_CACHE and next(iter(_MATRIZ_CACHE))[0] != gen:

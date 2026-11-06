@@ -1976,3 +1976,105 @@ a:focus-visible, button:focus-visible, summary:focus-visible, [tabindex]:focus-v
 /* Subtítulo de sección dentro de una tarjeta de bonos (TAMAR → duales pata v) */
 .ini-bonos tr.ini-sub td { text-align: left; color: var(--text-muted); font-size: 10.5px; font-weight: 600;
   text-transform: uppercase; letter-spacing: .03em; background: var(--panel-2); padding: 5px 8px; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Sistema de componentes (glow-up 06/11)
+   Un solo idioma para botón / pestaña secundaria / estado vacío / esqueleto
+   de carga / página de error / iconos SVG, con tokens. Las clases `u-*` son
+   utilidades para reemplazar los `style="…"` repetidos de los templates.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root { --radius-btn: 7px; }
+
+/* Iconos SVG (sprite en partials/_icons.html): heredan el color del texto */
+.ico { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2;
+       stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.15em; flex: 0 0 auto; }
+.rail-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+               min-width: 28px; height: 26px; padding: 0 7px; text-decoration: none; }
+.rail-toggle .ico { width: 15px; height: 15px; }
+.rail-toggle:hover { text-decoration: none; }
+
+/* Botones: UNA base + variantes, UN radio. `.btn` solo = secundario. */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+       font-family: inherit; font-size: 12.5px; font-weight: 600; line-height: 1.2;
+       padding: 7px 14px; border-radius: var(--radius-btn); border: 1px solid var(--border);
+       background: var(--panel-2); color: var(--text-soft); cursor: pointer; text-decoration: none;
+       white-space: nowrap; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+.btn:hover { border-color: var(--accent); color: var(--text); text-decoration: none; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.btn .ico { width: 14px; height: 14px; }
+.btn-primary, .btn-ghost, .btn-mini { border-radius: var(--radius-btn); }
+.btn.btn-primary { background: var(--accent); color: #0a0a0a; border-color: transparent; padding: 8px 16px; }
+.btn.btn-primary:hover { background: var(--accent-strong); color: #0a0a0a; }
+[data-theme="delta"] .btn.btn-primary, [data-theme="light"] .btn.btn-primary { color: #fff; }
+.btn.btn-ghost { background: transparent; }
+.btn.btn-mini { padding: 3px 8px; font-size: 12px; font-weight: 500; }
+.btn.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn.btn-danger:hover { border-color: var(--red); color: var(--red); }
+a.btn-primary { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+
+/* Pestañas secundarias (Históricos; reutilizable) */
+.sub-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+.sub-tab { display: inline-flex; align-items: center; gap: 6px; background: none; border: none;
+           border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 9px 14px; cursor: pointer;
+           font: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted);
+           transition: color .12s ease, border-color .12s ease; }
+.sub-tab:hover { color: var(--text); }
+.sub-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.sub-tab .ico { width: 14px; height: 14px; opacity: .85; }
+
+/* Estado vacío con causa y acción (partials/_estados.html → empty()) */
+.empty-state { display: flex; gap: 12px; align-items: flex-start; text-align: left; }
+.empty-state:not(.es-neutro):not(.es-warn):not(.es-error) { display: block; text-align: center; }  /* uso viejo (YAS: texto suelto) */
+.empty-state .es-icon { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+                        background: var(--panel-2); color: var(--text-muted); }
+.empty-state.es-warn .es-icon { color: var(--yellow); background: rgba(250, 204, 21, 0.10); }
+.empty-state.es-error .es-icon { color: var(--red); background: rgba(239, 68, 68, 0.10); }
+.empty-state .es-title { font-weight: 650; color: var(--text); font-size: 13.5px; }
+.empty-state .es-cause { color: var(--text-muted); font-size: 12.5px; margin-top: 2px; line-height: 1.5; }
+.empty-state .es-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 9px; }
+
+/* Esqueleto de carga (lazy tabs / paneles por picker) */
+.skel { padding: 10px 12px; }
+.skel-row { height: 12px; border-radius: 6px; margin: 9px 0; width: var(--w, 80%);
+            background: linear-gradient(90deg, var(--panel-2) 25%, var(--panel-3) 50%, var(--panel-2) 75%);
+            background-size: 200% 100%; animation: skel-shimmer 1.2s linear infinite; }
+.skel-txt { font-size: 11px; margin-top: 4px; }
+@keyframes skel-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skel-row { animation: none; } }
+
+/* Barra de progreso global (app.js: sólo requests disparados por el usuario,
+   nunca los polls live) */
+#hx-progress { position: fixed; top: 0; left: 0; height: 2px; width: 0; background: var(--accent);
+               z-index: 1200; opacity: 0; transition: width .35s ease, opacity .35s ease; pointer-events: none; }
+#hx-progress.on { opacity: 1; width: 72%; }
+#hx-progress.done { width: 100%; opacity: 0; }
+
+/* Página de error 403 / 404 / 500 con la plantilla de la app */
+.error-page { max-width: 560px; margin: 56px auto; text-align: center; padding: 0 16px; }
+.error-code { font-size: 58px; font-weight: 800; color: var(--accent); letter-spacing: -0.02em; line-height: 1; }
+.error-title { font-size: 20px; margin: 10px 0 6px; }
+.error-text { color: var(--text-muted); margin: 0; }
+.error-actions { display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+
+/* Alert informativo (los otros dos ya existían) */
+.alert-info { background: var(--cyan-soft); border-color: var(--cyan); }
+
+/* Utilidades (reemplazan style="…" repetidos) */
+.u-left { text-align: left !important; }
+.u-right { text-align: right !important; }
+.u-center { text-align: center !important; }
+.u-sm { font-size: 11px; }
+.u-xs { font-size: 10.5px; }
+.u-note { font-size: 11px; color: var(--text-muted); }
+.u-m0 { margin: 0 !important; }
+.u-mt0 { margin-top: 0 !important; }
+.u-mt8 { margin-top: 8px; }
+.u-mt12 { margin-top: 12px; }
+.u-nowrap { white-space: nowrap; }
+.u-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.u-hide { display: none !important; }
+.field-end { align-self: flex-end; }
+.u-grow { flex: 1 1 auto; }
+.u-gap { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.auth-brand { align-items: baseline; }
+.auth-tagline { color: var(--text-muted); font-weight: 500; font-size: 12px; margin-left: 2px; }

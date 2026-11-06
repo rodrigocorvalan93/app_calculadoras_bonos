@@ -327,6 +327,32 @@ window.lsSet = function (k, v) {
   // un md-update (un tick que entró en la carrera con el visibilitychange);
   // load / change / click siguen igual. Al volver, el md-update del primer
   // seq refresca los paneles live y cada `every` sigue con su intervalo.
+  // Barra de progreso global (2 px, arriba): sólo los requests que dispara el
+  // USUARIO (change / click / submit / search / reveal / tecleo); los polls
+  // live y los `every` no la mueven. Una sola barra por página.
+  (function () {
+    var bar = document.getElementById('hx-progress');
+    if (!bar) { bar = document.createElement('div'); bar.id = 'hx-progress'; document.body.appendChild(bar); }
+    var vivos = 0, timer = null;
+    var TIPOS = { change: 1, click: 1, submit: 1, search: 1, reveal: 1, keyup: 1, input: 1 };
+    function deUsuario(e) {
+      var cfg = e.detail && e.detail.requestConfig, ev = cfg && cfg.triggeringEvent;
+      return !!(ev && TIPOS[ev.type]);
+    }
+    document.body.addEventListener('htmx:beforeRequest', function (e) {
+      if (!deUsuario(e) || !e.detail.xhr) return;
+      e.detail.xhr._pbar = true; vivos++;
+      clearTimeout(timer); bar.classList.remove('done'); bar.classList.add('on');
+    });
+    document.body.addEventListener('htmx:afterRequest', function (e) {
+      if (!(e.detail && e.detail.xhr && e.detail.xhr._pbar)) return;
+      vivos = Math.max(0, vivos - 1);
+      if (vivos) return;
+      bar.classList.remove('on'); bar.classList.add('done');
+      timer = setTimeout(function () { bar.classList.remove('done'); }, 450);
+    });
+  })();
+
   document.addEventListener('htmx:beforeRequest', function (e) {
     if (!document.hidden) return;
     var d = e.detail || {}, cfg = d.requestConfig || {};

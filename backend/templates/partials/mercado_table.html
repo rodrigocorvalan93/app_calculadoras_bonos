@@ -1,8 +1,9 @@
 {% from "partials/mercado_row.html" import fila %}
+{% from "partials/_estados.html" import empty %}
 {% if not selected_def %}
-  <div class="alert">Curva no encontrada.</div>
+  {{ empty("Curva no encontrada", "Elegí una curva del selector.", icono="warning", tipo="warn") }}
 {% elif not rows %}
-  <div class="alert">Sin instrumentos con cotización en <strong>{{ selected_def.label }}</strong>.</div>
+  {{ empty("Sin cotizaciones en " ~ selected_def.label, "Ningún instrumento de este panel tiene precio todavía. Si el feed está conectado (punto verde arriba), llegan solos; si no, reconectá desde Conexión.", '<a class="btn btn-sm" href="/conexion">Conexión del feed</a>', icono="inbox") }}
 {% else %}
 <div class="card">
   <div class="card-title">

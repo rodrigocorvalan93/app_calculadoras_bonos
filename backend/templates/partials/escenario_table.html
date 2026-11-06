@@ -1,6 +1,7 @@
 {% set has = cats | selectattr('n') | list %}
+{% from "partials/_estados.html" import empty %}
 {% if not has %}
-  <div class="alert">Sin bonos calculables para ese horizonte (¿precios cargados? ¿fecha terminal válida? ¿bonos vencidos antes del terminal?).</div>
+  {{ empty("Sin bonos calculables para ese horizonte", "Revisá que haya precios cargados, que la fecha terminal sea válida y posterior a la liquidación, y que los bonos no venzan antes del terminal.", icono="warning", tipo="warn") }}
 {% else %}
 
 {% with chart_title='Retorno esperado en pesos · Escenario base al ' ~ terminal,

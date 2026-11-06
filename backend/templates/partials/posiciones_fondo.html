@@ -1,5 +1,8 @@
+{% from "partials/_estados.html" import empty %}
 {% if not rows %}
-  <div class="alert">{% if fondo %}Sin tenencias en {{ nombre }}.{% else %}Elegí un fondo (o no hay posiciones cargadas).{% endif %}</div>
+  {% if pos_status and pos_status.error %}{{ empty("No se cargaron las posiciones", pos_status.error, '<a class="btn btn-sm" href="/posiciones?refresh=1">↻ Releer carteras</a>', icono="warning", tipo="error") }}
+  {% elif fondo %}{{ empty("Sin tenencias en " ~ nombre, "La cartera no tiene filas para este fondo (o no es visible para tu usuario).", icono="inbox") }}
+  {% else %}{{ empty("Elegí un fondo", "Arriba, en el selector. Si la lista está vacía, la composición de carteras no se cargó todavía.", icono="inbox") }}{% endif %}
 {% else %}
   {# Orden (desk 06/11): primero la tabla de tenencias, después la composición. #}
   <div class="card">

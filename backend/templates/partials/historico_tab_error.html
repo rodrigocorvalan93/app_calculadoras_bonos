@@ -1,8 +1,10 @@
+{% from "partials/_estados.html" import empty %}
 {# Pestaña lazy de Históricos que falló (ver routes.historico._pestana_resiliente):
-   en vez de un "Cargando…" eterno, el error a la vista y un botón que vuelve a
-   disparar el 'reveal' del contenedor (re-pide el partial). #}
-<div class="alert hist-tab-error">
-  <strong>{{ titulo }}.</strong> <code>{{ detalle }}</code>
-  <div class="muted" style="font-size:11px;margin-top:4px">El detalle completo (traceback) quedó en la terminal donde corre la app.</div>
-  <button type="button" class="btn" style="margin-top:8px" onclick="htmx.trigger(this.closest('[hx-trigger]'), 'reveal')">↻ Reintentar</button>
+   200 con este partial en vez de un 500 que htmx no swapea ("Cargando…"
+   eterno). Estado de error con causa + Reintentar (vuelve a disparar el
+   'reveal' del contenedor). El traceback queda en el log / ring de Salud. #}
+<div class="hist-tab-error">
+{{ empty(titulo ~ ".", "<code>" ~ (detalle or "") ~ "</code> · El detalle completo quedó registrado" ~ (" en /admin · Salud." if request.state.is_superuser else " para el superuser."),
+         '<button type="button" class="btn btn-sm" onclick="htmx.trigger(this.closest(\'[hx-trigger]\'), \'reveal\')">↻ Reintentar</button>',
+         icono="warning", tipo="error") }}
 </div>

@@ -713,6 +713,47 @@ def create_app() -> FastAPI:
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
 
+    def _pagina_error(request: Request, codigo: int, titulo: str, detalle: str) -> Response:
+        """403 / 404 / 500 con la plantilla de la app (antes un `<h1>403</h1>`
+        pelado). Un request de htmx recibe un alert corto que el panel puede
+        swapear; el add-in / JSON siguen con JSON."""
+        if request.headers.get("hx-request"):
+            return HTMLResponse(f'<div class="alert alert-error"><b>{codigo} · {titulo}.</b> {detalle}</div>',
+                                status_code=codigo)
+        if request.url.path.startswith(("/excel/", "/api/")) or "application/json" in (request.headers.get("accept") or ""):
+            return JSONResponse({"error": f"{codigo} {titulo}", "detalle": detalle}, status_code=codigo)
+        try:
+            return app.state.templates.TemplateResponse(
+                request, "error.html", {"codigo": codigo, "titulo": titulo, "detalle": detalle},
+                status_code=codigo)
+        except Exception:  # noqa: BLE001 — la página de error nunca puede fallar
+            return HTMLResponse(f"<h1>{codigo}</h1><p>{titulo}. {detalle}</p>", status_code=codigo)
+
+    app.state.pagina_error = _pagina_error
+
+    from starlette.exceptions import HTTPException as _StarletteHTTPException
+
+    @app.exception_handler(_StarletteHTTPException)
+    async def _http_exc(request: Request, exc: _StarletteHTTPException):
+        textos = {403: ("Sin acceso", "No tenés permiso para esta sección."),
+                  404: ("No existe", "La página que pediste no está (o cambió de lugar)."),
+                  405: ("Método no permitido", "Esa acción no se puede hacer así.")}
+        if exc.status_code in textos and not request.url.path.startswith("/static/"):
+            titulo, detalle = textos[exc.status_code]
+            if exc.detail and isinstance(exc.detail, str) and exc.detail not in ("Not Found", "Forbidden", "Method Not Allowed"):
+                detalle = exc.detail
+            return _pagina_error(request, exc.status_code, titulo, detalle)
+        from fastapi.exception_handlers import http_exception_handler
+        return await http_exception_handler(request, exc)
+
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception):
+        # El detalle va al log (y al ring de /admin · Salud); al usuario una
+        # página de la app con qué pasó, sin traceback. Starlette re-lanza
+        # igual después de responder, así uvicorn lo registra como siempre.
+        logging.getLogger("backend.main").exception("500 en %s %s: %s", request.method, request.url.path, exc)
+        return _pagina_error(request, 500, "Algo falló", f"{type(exc).__name__}: {str(exc)[:200]}")
+
     def _needs_login(request: Request) -> Response:
         # htmx (partial/polling): 401 + HX-Redirect para que el cliente navegue
         # a /login sin inyectar la página de login dentro de un panel.
@@ -807,15 +848,12 @@ def create_app() -> FastAPI:
         auth_svc.marcar_visto(username)
 
         if any(path == p or path.startswith(p + "/") for p in _SUPERUSER_ONLY) and role != "superuser":
-            return HTMLResponse("<h1>403</h1><p>Sección reservada al superuser.</p>", status_code=403)
+            return _pagina_error(request, 403, "Sin acceso", "Sección reservada al superuser.")
         for p, feat in _FEATURE_PATHS:
             if (path == p or path.startswith(p + "/")) and feat not in request.state.features:
-                return HTMLResponse("<h1>403</h1><p>Panel no habilitado para tu rol.</p>",
-                                    status_code=403)
+                return _pagina_error(request, 403, "Sin acceso", "Panel no habilitado para tu rol.")
         if not auth_svc.can_access_path(role, path):
-            return HTMLResponse(
-                "<h1>403</h1><p>No tenés acceso a esta sección. "
-                "<a href='/inicio'>Volver</a></p>", status_code=403)
+            return _pagina_error(request, 403, "Sin acceso", "No tenés acceso a esta sección.")
         return await call_next(request)
 
     # SessionMiddleware se agrega DESPUÉS del guard → queda MÁS AFUERA (Starlette

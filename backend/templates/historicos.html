@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
+{% from "partials/_estados.html" import empty %}
 {% block title %}Históricos{% endblock %}
 {% block tab_historicos %}active{% endblock %}
 
@@ -21,34 +23,21 @@
     {% endif %}
   </header>
 
-  <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)">
-    <button @click="tab='macro'"
-            :style="tab==='macro' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📊 Macro (BCRA)</button>
-    <button @click="tab='curvas'; if(!curvaLoaded){curvaLoaded=true; $nextTick(()=>htmx.trigger('#hist-curva','reveal'))}"
-            :style="tab==='curvas' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Tasas por curva</button>
-    <button @click="tab='fechas'; if(!fechasLoaded){fechasLoaded=true; $nextTick(()=>htmx.trigger('#hist-fechas','reveal'))}"
-            :style="tab==='fechas' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📐 Curva por fecha + TR</button>
-    <button @click="tab='series'; if(!seriesLoaded){seriesLoaded=true; $nextTick(()=>htmx.trigger('#hist-series','reveal'))}"
-            :style="tab==='series' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">💾 Series diarias (FX + caución)</button>
-    <button @click="tab='acciones'; if(!accionesLoaded){accionesLoaded=true; $nextTick(()=>htmx.trigger('#hist-acciones','reveal'))}"
-            :style="tab==='acciones' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Acciones (price action)</button>
-    <button @click="tab='comp'; if(!compLoaded){compLoaded=true; $nextTick(()=>htmx.trigger('#hist-comp','reveal'))}"
-            :style="tab==='comp' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">⚖ Comparar (COMP)</button>
-    <button @click="tab='base'; if(!baseLoaded){baseLoaded=true; $nextTick(()=>htmx.trigger('#hist-base','reveal'))}"
-            :style="tab==='base' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">🗄 Base (ver / bajar)</button>
+  {# Pestañas secundarias: componente .sub-tabs (antes 7 botones con estilo inline) #}
+  <div class="sub-tabs" role="tablist">
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='macro' }" :aria-selected="tab==='macro'" @click="tab='macro'">{{ icon("chart-bar") }} Macro (BCRA)</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='curvas' }" :aria-selected="tab==='curvas'" @click="tab='curvas'; if(!curvaLoaded){curvaLoaded=true; $nextTick(()=>htmx.trigger('#hist-curva','reveal'))}">{{ icon("chart-line") }} Tasas por curva</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='fechas' }" :aria-selected="tab==='fechas'" @click="tab='fechas'; if(!fechasLoaded){fechasLoaded=true; $nextTick(()=>htmx.trigger('#hist-fechas','reveal'))}">{{ icon("ruler") }} Curva por fecha + TR</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='series' }" :aria-selected="tab==='series'" @click="tab='series'; if(!seriesLoaded){seriesLoaded=true; $nextTick(()=>htmx.trigger('#hist-series','reveal'))}">{{ icon("save") }} Series diarias (FX + caución)</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='acciones' }" :aria-selected="tab==='acciones'" @click="tab='acciones'; if(!accionesLoaded){accionesLoaded=true; $nextTick(()=>htmx.trigger('#hist-acciones','reveal'))}">{{ icon("chart-line") }} Acciones (price action)</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='comp' }" :aria-selected="tab==='comp'" @click="tab='comp'; if(!compLoaded){compLoaded=true; $nextTick(()=>htmx.trigger('#hist-comp','reveal'))}">{{ icon("scale") }} Comparar (COMP)</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='base' }" :aria-selected="tab==='base'" @click="tab='base'; if(!baseLoaded){baseLoaded=true; $nextTick(()=>htmx.trigger('#hist-base','reveal'))}">{{ icon("database") }} Base (ver / bajar)</button>
   </div>
 
   {# ── Macro (BCRA) ── #}
   <div x-show="tab==='macro'">
     {% if status and not status.loaded %}
-      <div class="alert">No se cargaron las series: {{ status.error }}</div>
+      {{ empty("No se cargaron las series macro", status.error, icono="warning", tipo="error") }}
     {% endif %}
     <div id="hm-ctrls" class="curve-picker card">
       <div class="card-body">

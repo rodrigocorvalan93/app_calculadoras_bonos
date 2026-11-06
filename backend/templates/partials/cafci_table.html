@@ -7,8 +7,9 @@
   <span class="muted">· {{ status.n }} activos · fuente {{ 'API CAFCI' if status.fuente == 'api' else 'Excel bot' }}</span>
 </div>
 
+{% from "partials/_estados.html" import empty %}
 {% if not rows %}
-  <div class="alert">{% if q %}Sin resultados para "{{ q }}".{% else %}Sin activos CAFCI cargados.{% endif %}</div>
+  {% if q %}{{ empty('Sin resultados para "' ~ q ~ '"', "Probá con otro texto o borrá el filtro.", icono="search") }}{% else %}{{ empty("Sin activos CAFCI cargados", "Los vectores AAAAMMDD.xlsx de la carpeta CAFCI no se pudieron leer o la carpeta está vacía.", icono="inbox", tipo="warn") }}{% endif %}
 {% else %}
 <div class="card">
   <div class="card-title">

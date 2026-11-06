@@ -1,5 +1,6 @@
+{% from "partials/_estados.html" import empty %}
 {% if not rows %}
-  <div class="alert">No hay posiciones para armar la matriz.</div>
+  {{ empty("Sin posiciones para armar la matriz", (status.error if status and status.error else "La composición de carteras no tiene tenencias (o ningún fondo es visible para tu usuario)."), '<a class="btn btn-sm" href="/matriz?refresh=1">↻ Releer carteras</a>', icono=("warning" if status and status.error else "inbox"), tipo=("error" if status and status.error else "neutro")) }}
 {% else %}
 {# Markup COMPACTO a propósito: ~340 filas × ~50 fondos = ~17k celdas y el
    costo está en el BROWSER (style + layout ≈ 15 µs por celda), no en el

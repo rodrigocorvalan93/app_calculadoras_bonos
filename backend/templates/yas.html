@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_estados.html" import empty %}
 {% block title %}YAS · {{ selected or "Análisis de Yields" }}{% endblock %}
 {% block tab_yas %}active{% endblock %}
 
@@ -10,10 +11,7 @@
   </header>
 
   {% if not codes %}
-    <div class="alert">
-      No hay bonos cargados. Verificá que <code>especies.py</code> esté disponible y que
-      <code>indices.main()</code> haya podido leer el backup BCRA.
-    </div>
+    {{ empty("No hay bonos cargados", "Verificá que <code>especies.py</code> esté disponible y que <code>indices.main()</code> haya podido leer el backup BCRA.", icono="warning", tipo="error") }}
   {% else %}
   <form
     id="yas-form"

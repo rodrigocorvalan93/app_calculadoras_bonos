@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "partials/_estados.html" import empty %}
+
 {% block title %}Posiciones{% endblock %}
 {% block tab_posiciones %}active{% endblock %}
 
@@ -12,9 +14,7 @@
     {% endif %}
   </header>
 
-  {% if status and not status.loaded %}
-    <div class="alert">No se cargaron las posiciones: {{ status.error or "archivo no encontrado" }}</div>
-  {% endif %}
+  {# el error de carga lo muestra el partial #pos-fondo (con causa y ↻), una sola vez #}
 
   {# El fondo/plazo ELEGIDOS viven en Alpine: el link "↻ Cartera" se arma con
      lo que está seleccionado AHORA. Antes el href salía del server con el

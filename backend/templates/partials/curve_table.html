@@ -1,7 +1,8 @@
+{% from "partials/_estados.html" import empty %}
 {% if not selected_def %}
-  <div class="alert">Curva no encontrada.</div>
+  {{ empty("Curva no encontrada", "Elegí una curva del selector.", icono="warning", tipo="warn") }}
 {% elif not rows %}
-  <div class="alert">No hay bonos en <strong>{{ selected_def.label }}</strong>.</div>
+  {{ empty("Sin bonos en " ~ selected_def.label, "La curva no tiene bonos con cotización para este plazo. Probá otro plazo o esperá al feed (el punto de arriba dice si está conectado).", icono="inbox") }}
 {% else %}
 <div class="card">
   <div class="card-title">
