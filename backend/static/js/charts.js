@@ -989,10 +989,22 @@
     });
     Object.keys(byCode).forEach(function (c) { byCode[c].sort(function (a, b) { return a.fecha < b.fecha ? -1 : (a.fecha > b.fecha ? 1 : 0); }); });
 
+    // Panel Δ bps (barras, debajo del scatter): hover en una barra = el mismo
+    // hover del scatter; el hover del scatter resalta su barra; apagar un bono
+    // en la leyenda también la atenúa. Puro agregado: el hover de los puntos
+    // (línea punteada + Δ) no cambia.
+    var delta = wrap.querySelector("svg.hc-delta");
+    function deltaGroup(code) {
+      return delta ? delta.querySelector('.hc-dgrp[data-code="' + code.replace(/"/g, "") + '"]') : null;
+    }
     function clearHover() {
       while (hover.firstChild) hover.removeChild(hover.firstChild);
       svg.classList.remove("hc-dim");
       Array.prototype.forEach.call(svg.querySelectorAll(".hc-on"), function (n) { n.classList.remove("hc-on"); });
+      if (delta) {
+        delta.classList.remove("hc-dim");
+        Array.prototype.forEach.call(delta.querySelectorAll(".hc-on"), function (n) { n.classList.remove("hc-on"); });
+      }
     }
     function el(tag, attrs, text) {
       var n = document.createElementNS(NS, tag);
@@ -1006,6 +1018,8 @@
       if (!pts || !pts.length) return;
       svg.classList.add("hc-dim");
       pts.forEach(function (p) { p.el.classList.add("hc-on"); });
+      var dg = deltaGroup(code);
+      if (dg) { delta.classList.add("hc-dim"); dg.classList.add("hc-on"); }
       Array.prototype.forEach.call(svg.querySelectorAll('.hc-lbl[data-code="' + code.replace(/"/g, "") + '"]'), function (n) { n.classList.add("hc-on"); });
       if (pts.length > 1) {
         hover.appendChild(el("polyline", {
@@ -1040,6 +1054,14 @@
       showHover(code, at);
     });
     svg.addEventListener("mouseleave", clearHover);
+    if (delta) {
+      delta.addEventListener("mouseover", function (e) {
+        var g = e.target && e.target.closest ? e.target.closest(".hc-dgrp") : null;
+        var code = g ? g.getAttribute("data-code") : null;
+        if (code && byCode[code]) showHover(code, null);
+      });
+      delta.addEventListener("mouseleave", clearHover);
+    }
 
     // Leyenda: apagar/prender (client-side, recordado por curva) y excluir del fit.
     var storeKey = "hc_off:" + curve, off = {};
@@ -1051,6 +1073,8 @@
         Array.prototype.forEach.call(svg.querySelectorAll('.hc-lbl[data-code="' + c.replace(/"/g, "") + '"]'), function (n) { n.classList.toggle("hc-off", !on); });
         var chip = wrap.querySelector('.hc-chip[data-code="' + c.replace(/"/g, "") + '"]');
         if (chip) chip.classList.toggle("hc-chip-off", !on);
+        var dg = deltaGroup(c);
+        if (dg) dg.classList.toggle("hc-off", !on);
       });
       try { localStorage.setItem(storeKey, JSON.stringify(Object.keys(off).filter(function (c) { return byCode[c]; }))); } catch (e) { /* noop */ }
     }
@@ -1099,6 +1123,18 @@
       tog.checked = (l0 !== "0");
       applyLabels(tog.checked);
       tog.addEventListener("change", function () { applyLabels(tog.checked); });
+    }
+    // Proyectados (j): el checkbox del título mueve el selector Tipo del form
+    // (Todos ↔ Base) y re-pide la foto — el server saca los 'j' de los puntos,
+    // del fit y del panel Δ. Sin estado aparte: el form es la verdad.
+    var ptog = wrap.querySelector(".hc-proy-toggle");
+    if (ptog && form) {
+      ptog.addEventListener("change", function () {
+        var sel = form.querySelector("select[name=proy]");
+        if (!sel) return;
+        sel.value = ptog.checked ? "todos" : "base";
+        if (window.htmx) window.htmx.trigger(form, "submit");
+      });
     }
   }
 

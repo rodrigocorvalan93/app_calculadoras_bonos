@@ -39,23 +39,27 @@ def test_parse_path():
 
 # ── el sendero mueve el TR; equivalencia con el plano viejo ───────────────────
 def _dates():
-    terminal = "30/10/2026"
+    """Terminal RELATIVO al settle (+180 días) y un CER que vence en 2028:
+    el terminal fijo 30/10/2026 quedó en el pasado y TX26 venció el 09/11/2026
+    — el test caía por el calendario, no por el código."""
+    from datetime import timedelta
     settle = tr.settle_str("24hs")
-    sd, td = tr._parse_d(settle), tr._parse_d(terminal)
-    return terminal, settle, sd, td
+    sd = tr._parse_d(settle)
+    td = sd + timedelta(days=180)
+    return td.strftime("%d/%m/%Y"), settle, sd, td
 
 
 def test_infl_path_equivale_al_plano_y_mueve():
     terminal, settle, sd, td = _dates()
-    base = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5, want_duration=False)
-    plano = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5,
+    base = tr._bond_tr("TX28", 0.05, 0.05, terminal, settle, sd, td, 1.8, want_duration=False)
+    plano = tr._bond_tr("TX28", 0.05, 0.05, terminal, settle, sd, td, 1.8,
                         want_duration=False, infl_monthly=0.04)
-    sendero1 = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5,
+    sendero1 = tr._bond_tr("TX28", 0.05, 0.05, terminal, settle, sd, td, 1.8,
                            want_duration=False, infl_path=(0.04,))
     # plano == sendero de un elemento (compat exacta)
     assert sendero1["tr_total"] == pytest.approx(plano["tr_total"])
     # un sendero ascendente alto sube el ajuste de un bono CER vs el base proyectado
-    alto = tr._bond_tr("TX26", 0.05, 0.05, terminal, settle, sd, td, 0.5,
+    alto = tr._bond_tr("TX28", 0.05, 0.05, terminal, settle, sd, td, 1.8,
                        want_duration=False, infl_path=(0.06, 0.06, 0.06, 0.06))
     assert alto["ajuste"] > base["ajuste"]
 
@@ -142,7 +146,7 @@ def test_tamar_sendero_NO_toca_singleton_ni_yas():
 
 def test_tamar_baseline_sin_sendero_identico():
     """Sin sendero TAMAR, el TR es byte-idéntico al de hoy (no regresión)."""
-    code = _pure_tamar_floater() or "TX26"
+    code = _pure_tamar_floater() or "TX28"
     terminal = "30/04/2027"; settle = tr.settle_str("24hs")
     sd, td = tr._parse_d(settle), tr._parse_d(terminal)
     a = tr._bond_tr(code, 0.30, 0.32, terminal, settle, sd, td, 1.0, want_duration=False)

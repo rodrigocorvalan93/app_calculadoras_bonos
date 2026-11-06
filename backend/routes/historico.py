@@ -447,11 +447,109 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480,
             dur_por_code[str(p["code"])] = p["dur"]
     codes = [{"code": c, "dur": d} for c, d in sorted(dur_por_code.items(), key=lambda kv: (kv[1], kv[0]))]
     return {"loaded": True, "n": len(out), "series": out, "mixto": mixto,
+            "n_curvas": sum(len(s["grupos"]) for s in out),   # curvas dibujadas de verdad (una fecha puede no tener proy)
             "metric": sc.get("metric"), "curve_label": sc.get("curve_label"),
             "yticks": yticks, "xticks": xticks, "ultima": ultima,
             "codes": codes, "excluded": excluded, "dmin": dmin, "dmax": dmax,
             "fuera_tramo": fuera_tramo, "tramo_txt": tramo_txt, "vacio": None,
+            "delta": _delta_bars(series, width=width, ml=ml, mr=mr),
             "width": width, "height": height, "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph}
+
+
+def _nice_step(span: float, n: int = 4) -> float:
+    """Paso 'lindo' (1 / 2 / 5 × 10^k) para ~n divisiones de `span`."""
+    import math
+    if span <= 0:
+        return 1.0
+    raw = span / n
+    k = 10 ** math.floor(math.log10(raw))
+    for m in (1, 2, 5, 10):
+        if m * k >= raw:
+            return m * k
+    return 10 * k
+
+
+def _delta_bars(series: List[Dict[str, Any]], width: int = 980, height: int = 230,
+                ml: int = 62, mr: int = 16) -> Optional[Dict[str, Any]]:
+    """Panel 'change' estilo Graph Curves de Bloomberg: UNA barra por bono con
+    cuánto amplió (+, rojo) o comprimió (−, verde) la métrica entre la PRIMERA
+    y la ÚLTIMA fecha en que ese bono aparece en la foto, en bps — el MISMO Δ
+    que muestra el hover del scatter (primer punto → último punto del bono).
+    Barras ordenadas por duration a la última fecha (como la leyenda y el eje
+    X). Proyectados 'j' van huecos, como sus puntos. None con una sola fecha o
+    sin ningún bono presente en dos fechas (nada que comparar)."""
+    por_code: Dict[str, List[Dict[str, Any]]] = {}
+    for s in sorted(series, key=lambda s: s["fecha"]):
+        for p in s["points"]:
+            por_code.setdefault(str(p["code"]), []).append(
+                {"fecha": s["fecha"], "v": p["v"] * 100.0, "dur": p["dur"]})
+    bars = []
+    for code, pts in por_code.items():
+        if len(pts) < 2:
+            continue
+        a, b = pts[0], pts[-1]
+        bars.append({"code": code, "bps": (b["v"] - a["v"]) * 100.0, "dur": b["dur"],
+                     "f1": a["fecha"], "f2": b["fecha"], "v1": a["v"], "v2": b["v"],
+                     "proy": code.endswith("j")})
+    if not bars:
+        return None
+    bars.sort(key=lambda b: (b["dur"], b["code"]))
+    vals = [b["bps"] for b in bars]
+    # Eje: al menos ±5 bps de rango (una semana quieta con Δ de ±0,4 bps
+    # dejaba cuatro gridlines y todas las barras rotuladas "0") y paso ≥ 1 bps.
+    lo, hi = min(-5.0, min(vals)), max(5.0, max(vals))
+    step = max(1.0, _nice_step(hi - lo))
+    pad = (hi - lo) * 0.12
+    lo, hi = lo - pad, hi + pad
+    mt, mb = 20, 60                                   # arriba: valor de la barra; abajo: código rotado
+    pw, ph = width - ml - mr, height - mt - mb
+
+    def sy(v: float) -> float:
+        return round(mt + (1 - (v - lo) / (hi - lo)) * ph, 1)
+
+    n = len(bars)
+    slot = pw / n
+    bw = round(min(slot * 0.72, 28.0), 1)
+    # Con muchas barras (CER con proy = 40, corp_hdmep = 170+) los rótulos se
+    # pisan: el valor sólo si entra ("−1234" a 9 px ≈ 24 px) y el código cada
+    # k barras (pitch ⟂ del texto rotado −55° ≈ 11 px); el <title> y el hover
+    # siguen dando el dato de cada barra.
+    import math
+    val_ok = slot >= 24.0
+    code_cada = max(1, math.ceil(11.0 / slot))
+    y_zero = sy(0.0)
+    for i, b in enumerate(bars):
+        x = round(ml + slot * i + (slot - bw) / 2, 1)
+        y_top = sy(max(b["bps"], 0.0))
+        h = round(abs(sy(b["bps"]) - y_zero), 1)
+        b.update({"x": x, "y": y_top, "w": bw, "h": max(h, 0.0), "cx": round(x + bw / 2, 1),
+                  "vy": round(y_top - 4, 1) if b["bps"] >= 0 else round(y_top + h + 10, 1),
+                  "txt": _bps_txt(b["bps"]), "val_lbl": val_ok, "code_lbl": i % code_cada == 0})
+    ticks = []
+    t = math.ceil(lo / step) * step
+    while t <= hi + 1e-9:
+        ticks.append({"y": sy(t), "v": _bps_txt(t, signo=False)})
+        t += step
+    prom = sum(vals) / n
+    return {"bars": bars, "n": n, "width": width, "height": height,
+            "x0": ml, "x1": ml + pw, "y0": mt, "y1": mt + ph, "y_zero": y_zero,
+            "ticks": ticks, "prom": prom, "prom_txt": _bps_txt(prom),
+            "f1": min(b["f1"] for b in bars), "f2": max(b["f2"] for b in bars),
+            "mixto": any(b["proy"] for b in bars) and any(not b["proy"] for b in bars)}
+
+
+def _bps_txt(v: float, signo: bool = True) -> str:
+    """'+123' / '−85' / '0' (entero, signo tipográfico; sin separador de miles
+    hasta 9.999: un Δ de curva no pasa de ahí). Medio bps redondea LEJOS de
+    cero, como el `toFixed(0)` del hover en charts.js — con `round()` de
+    Python (al par) 12,5 daba '+12' en la barra y '13 bps' en el hover."""
+    import math
+    r = int(math.floor(abs(v) + 0.5)) * (1 if v >= 0 else -1)
+    if r == 0:
+        return "0"
+    if r < 0:
+        return f"−{-r}"
+    return f"+{r}" if signo else str(r)
 
 
 def _tramo_txt(dmin: Optional[float], dmax: Optional[float]) -> str:

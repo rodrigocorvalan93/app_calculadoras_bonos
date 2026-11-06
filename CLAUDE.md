@@ -717,6 +717,32 @@ formatea en UTC (`utcTz` / `utcDia`, opción `tzDate`) — con el reloj local
 Buenos Aires (UTC-3) etiquetaba un día antes. Regresión:
 `tests/test_historico_comp.py`.
 
+**Curva por fecha + TR · panel Δ bps (06/11)**: debajo del scatter
+(`_scatter_chart` → `scatter["delta"]`, `routes/historico._delta_bars`) va un
+panel "change" estilo Graph Curves de Bloomberg: UNA barra por bono con el Δ
+de la métrica en bps entre la PRIMERA y la ÚLTIMA fecha en que ese bono está
+en la foto — el MISMO número del hover (último punto − primero del bono) —,
+ordenadas por duration a la última fecha (como la leyenda), rojo = amplió,
+verde = comprimió, proy "j" huecas, línea de cero, ticks "lindos"
+(`_nice_step`, rango mínimo ±5 bps y paso ≥ 1: una semana quieta no deja
+cuatro gridlines "0"), promedio en el título; sin panel con una sola fecha o
+sin bono presente en dos. Se calcula sobre la serie YA filtrada (tramo /
+excluir). `_bps_txt` redondea medio bps LEJOS de cero como el `toFixed(0)`
+del hover (con `round()` al par la barra decía +12 y el hover 13). Con
+muchas barras (`val_lbl` / `code_lbl`: slot < 24 px sin valor, código cada
+k barras) los rótulos no se pisan; el `<title>` y el hover dan el dato igual.
+Checkbox "proy (j)" en el título = el selector Tipo (Todos ↔ Base) y
+re-pide la foto. `charts.js initHistFechas`: hover en una barra = el mismo
+`showHover` del scatter, el hover de un punto resalta su barra, apagar un
+bono en la leyenda la atenúa (`hc-dgrp` + `hc-on` / `hc-off` / `hc-dim`,
+CSS `.hc-delta*`) — el hover de los puntos (línea punteada entre fechas +
+"amplió/comprimió N bps · px") NO cambió, es lo que el desk quiere
+conservar. Con Tipo = Todos cada fecha lleva DOS curvas (base llena + proy
+j punteada: 2 fechas = 4 curvas) y la leyenda ahora lo dice; Tipo = Base
+deja una por fecha. Medido warm (CER sintética, 28 barras): p50 7,6 · p95
+9,8 ms. Regresión: `test_historico_fechas_tr.test_scatter_delta_bps_por_bono_es_el_mismo_del_hover`,
+`test_http_curva_fechas_trae_el_panel_delta`.
+
 **Qué pasó (30/09)**: los segmentos son las categorías de Escenario SIN los
 duales que entraron ahí para el multi-activo, más los seis `DUAL_CATEGORIES`
 juntos al final (sumar las dos listas a secas mostraba Dual TAMAR/CER, Dual
