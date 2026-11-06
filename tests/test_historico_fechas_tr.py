@@ -315,6 +315,10 @@ def test_scatter_delta_bps_por_bono_es_el_mismo_del_hover() -> None:
     assert [b["txt"] for b in d["bars"]] == ["−85", "+23", "0", "+1"]
     assert d["f1"] == "2026-10-29" and d["f2"] == "2026-11-05" and d["n"] == 4
     assert d["prom"] == pytest.approx((23 - 85 + 0 + 1) / 4) and d["mixto"] is True
+    assert _scatter_chart(sc)["n_curvas"] == 4                       # 2 fechas × (base + proy)
+    # una fecha sin proy: 3 curvas, no "2 × fechas"
+    sin_j = {**sc, "series": [sc["series"][0], {"fecha": "2026-10-29", "points": [p for p in puntos if not p["code"].endswith("j")]}]}
+    assert _scatter_chart(sin_j)["n_curvas"] == 3
     assert next(b for b in d["bars"] if b["code"] == "C3j")["proy"] is True
     # geometría: amplió arriba de la línea de cero, comprimió abajo, alto = |Δ|
     mb, za = d["bars"][0], d["bars"][1]

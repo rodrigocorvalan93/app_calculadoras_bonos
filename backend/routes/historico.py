@@ -447,6 +447,7 @@ def _scatter_chart(sc: Dict[str, Any], width: int = 980, height: int = 480,
             dur_por_code[str(p["code"])] = p["dur"]
     codes = [{"code": c, "dur": d} for c, d in sorted(dur_por_code.items(), key=lambda kv: (kv[1], kv[0]))]
     return {"loaded": True, "n": len(out), "series": out, "mixto": mixto,
+            "n_curvas": sum(len(s["grupos"]) for s in out),   # curvas dibujadas de verdad (una fecha puede no tener proy)
             "metric": sc.get("metric"), "curve_label": sc.get("curve_label"),
             "yticks": yticks, "xticks": xticks, "ultima": ultima,
             "codes": codes, "excluded": excluded, "dmin": dmin, "dmax": dmax,

@@ -1766,7 +1766,7 @@ tr.depth-ask { background: linear-gradient(90deg,  color-mix(in srgb, var(--red)
 .hc-delta .hc-dgrp { transition: opacity .15s ease; cursor: default; }
 .hc-delta .hc-dgrp text { font-variant-numeric: tabular-nums; pointer-events: none; }
 .hc-delta.hc-dim .hc-dgrp:not(.hc-on) { opacity: .3; }
-.hc-delta.hc-dim .hc-dgrp.hc-on { opacity: 1; }
+.hc-delta.hc-dim .hc-dgrp.hc-on { opacity: 1 !important; }   /* como el punto del scatter: el hover gana al apagado */
 .hc-delta .hc-dgrp.hc-off { opacity: .08 !important; }
 .hc-legend { margin-top: 8px; align-items: center; }
 .hc-chip { cursor: pointer; user-select: none; }
