@@ -494,10 +494,10 @@ def _delta_bars(series: List[Dict[str, Any]], width: int = 980, height: int = 23
         return None
     bars.sort(key=lambda b: (b["dur"], b["code"]))
     vals = [b["bps"] for b in bars]
-    lo, hi = min(0.0, min(vals)), max(0.0, max(vals))
-    if hi - lo < 1e-9:
-        lo, hi = -10.0, 10.0
-    step = _nice_step(hi - lo)
+    # Eje: al menos ±5 bps de rango (una semana quieta con Δ de ±0,4 bps
+    # dejaba cuatro gridlines y todas las barras rotuladas "0") y paso ≥ 1 bps.
+    lo, hi = min(-5.0, min(vals)), max(5.0, max(vals))
+    step = max(1.0, _nice_step(hi - lo))
     pad = (hi - lo) * 0.12
     lo, hi = lo - pad, hi + pad
     mt, mb = 20, 60                                   # arriba: valor de la barra; abajo: código rotado
@@ -509,6 +509,13 @@ def _delta_bars(series: List[Dict[str, Any]], width: int = 980, height: int = 23
     n = len(bars)
     slot = pw / n
     bw = round(min(slot * 0.72, 28.0), 1)
+    # Con muchas barras (CER con proy = 40, corp_hdmep = 170+) los rótulos se
+    # pisan: el valor sólo si entra ("−1234" a 9 px ≈ 24 px) y el código cada
+    # k barras (pitch ⟂ del texto rotado −55° ≈ 11 px); el <title> y el hover
+    # siguen dando el dato de cada barra.
+    import math
+    val_ok = slot >= 24.0
+    code_cada = max(1, math.ceil(11.0 / slot))
     y_zero = sy(0.0)
     for i, b in enumerate(bars):
         x = round(ml + slot * i + (slot - bw) / 2, 1)
@@ -516,8 +523,7 @@ def _delta_bars(series: List[Dict[str, Any]], width: int = 980, height: int = 23
         h = round(abs(sy(b["bps"]) - y_zero), 1)
         b.update({"x": x, "y": y_top, "w": bw, "h": max(h, 0.0), "cx": round(x + bw / 2, 1),
                   "vy": round(y_top - 4, 1) if b["bps"] >= 0 else round(y_top + h + 10, 1),
-                  "txt": _bps_txt(b["bps"])})
-    import math
+                  "txt": _bps_txt(b["bps"]), "val_lbl": val_ok, "code_lbl": i % code_cada == 0})
     ticks = []
     t = math.ceil(lo / step) * step
     while t <= hi + 1e-9:
@@ -533,8 +539,11 @@ def _delta_bars(series: List[Dict[str, Any]], width: int = 980, height: int = 23
 
 def _bps_txt(v: float, signo: bool = True) -> str:
     """'+123' / '−85' / '0' (entero, signo tipográfico; sin separador de miles
-    hasta 9.999: un Δ de curva no pasa de ahí)."""
-    r = int(round(v))
+    hasta 9.999: un Δ de curva no pasa de ahí). Medio bps redondea LEJOS de
+    cero, como el `toFixed(0)` del hover en charts.js — con `round()` de
+    Python (al par) 12,5 daba '+12' en la barra y '13 bps' en el hover."""
+    import math
+    r = int(math.floor(abs(v) + 0.5)) * (1 if v >= 0 else -1)
     if r == 0:
         return "0"
     if r < 0:

@@ -724,9 +724,15 @@ de la métrica en bps entre la PRIMERA y la ÚLTIMA fecha en que ese bono está
 en la foto — el MISMO número del hover (último punto − primero del bono) —,
 ordenadas por duration a la última fecha (como la leyenda), rojo = amplió,
 verde = comprimió, proy "j" huecas, línea de cero, ticks "lindos"
-(`_nice_step`), promedio en el título; sin panel con una sola fecha o sin
-bono presente en dos. Se calcula sobre la serie YA filtrada (tramo /
-excluir). `charts.js initHistFechas`: hover en una barra = el mismo
+(`_nice_step`, rango mínimo ±5 bps y paso ≥ 1: una semana quieta no deja
+cuatro gridlines "0"), promedio en el título; sin panel con una sola fecha o
+sin bono presente en dos. Se calcula sobre la serie YA filtrada (tramo /
+excluir). `_bps_txt` redondea medio bps LEJOS de cero como el `toFixed(0)`
+del hover (con `round()` al par la barra decía +12 y el hover 13). Con
+muchas barras (`val_lbl` / `code_lbl`: slot < 24 px sin valor, código cada
+k barras) los rótulos no se pisan; el `<title>` y el hover dan el dato igual.
+Checkbox "proy (j)" en el título = el selector Tipo (Todos ↔ Base) y
+re-pide la foto. `charts.js initHistFechas`: hover en una barra = el mismo
 `showHover` del scatter, el hover de un punto resalta su barra, apagar un
 bono en la leyenda la atenúa (`hc-dgrp` + `hc-on` / `hc-off` / `hc-dim`,
 CSS `.hc-delta*`) — el hover de los puntos (línea punteada entre fechas +

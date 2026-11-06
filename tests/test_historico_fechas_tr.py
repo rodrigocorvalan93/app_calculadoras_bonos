@@ -298,31 +298,51 @@ def test_scatter_delta_bps_por_bono_es_el_mismo_del_hover() -> None:
     presente en dos, no hay panel."""
     from backend.routes.historico import _bps_txt, _nice_step, _scatter_chart
 
+    # códigos en orden NO alfabético y con la duration de la última fecha
+    # distinta de la primera: el orden tiene que salir de la dur a la última fecha
     puntos = [{"code": c, "dur": d, "v": v} for c, d, v in
-              [("A1", 0.2, 0.30), ("B2", 0.5, 0.27), ("C3j", 0.9, 0.24), ("D4", 1.6, 0.20), ("E5", 2.4, 0.17)]]
-    hoy = [dict(p, v=p["v"] + dv) for p, dv in zip(puntos[:-1], (0.0023, -0.0085, 0.0, 0.0001))]
+              [("ZA", 0.2, 0.30), ("MB", 0.5, 0.27), ("C3j", 0.9, 0.24), ("AD", 1.6, 0.20), ("E5", 2.4, 0.17)]]
+    hoy = [dict(p, v=p["v"] + dv, dur=nd) for p, dv, nd in
+           zip(puntos[:-1], (0.0023, -0.0085, 0.0, 0.0001), (0.8, 0.3, 1.2, 1.5))]   # MB pasa a ser la más corta
     sc = {"loaded": True, "metric": "TIREA", "curve_label": "CER",
           "series": [{"fecha": "2026-11-05", "points": hoy},          # desordenadas a propósito
                      {"fecha": "2026-10-29", "points": puntos}]}
     d = _scatter_chart(sc)["delta"]
-    assert [b["code"] for b in d["bars"]] == ["A1", "B2", "C3j", "D4"]      # E5 sólo en una fecha: sin barra
+    assert [b["code"] for b in d["bars"]] == ["MB", "ZA", "C3j", "AD"]      # E5 sólo en una fecha: sin barra
     bps = {b["code"]: b["bps"] for b in d["bars"]}
-    assert bps["A1"] == pytest.approx(23.0) and bps["B2"] == pytest.approx(-85.0)
-    assert bps["C3j"] == pytest.approx(0.0) and bps["D4"] == pytest.approx(1.0)
-    assert [b["txt"] for b in d["bars"]] == ["+23", "−85", "0", "+1"]
+    assert bps["ZA"] == pytest.approx(23.0) and bps["MB"] == pytest.approx(-85.0)
+    assert bps["C3j"] == pytest.approx(0.0) and bps["AD"] == pytest.approx(1.0)
+    assert [b["txt"] for b in d["bars"]] == ["−85", "+23", "0", "+1"]
     assert d["f1"] == "2026-10-29" and d["f2"] == "2026-11-05" and d["n"] == 4
     assert d["prom"] == pytest.approx((23 - 85 + 0 + 1) / 4) and d["mixto"] is True
     assert next(b for b in d["bars"] if b["code"] == "C3j")["proy"] is True
     # geometría: amplió arriba de la línea de cero, comprimió abajo, alto = |Δ|
-    a1, b2 = d["bars"][0], d["bars"][1]
-    assert a1["y"] < d["y_zero"] and a1["y"] + a1["h"] == pytest.approx(d["y_zero"], abs=0.2)
-    assert b2["y"] == pytest.approx(d["y_zero"], abs=0.2) and b2["h"] > a1["h"]
+    mb, za = d["bars"][0], d["bars"][1]
+    assert za["y"] < d["y_zero"] and za["y"] + za["h"] == pytest.approx(d["y_zero"], abs=0.2)
+    assert mb["y"] == pytest.approx(d["y_zero"], abs=0.2) and mb["h"] > za["h"]
     assert d["x0"] == 62                                             # mismo margen izquierdo que el scatter
     assert any(t["v"] == "0" for t in d["ticks"])
-    # una sola fecha → nada que comparar
+    assert all(b["val_lbl"] and b["code_lbl"] for b in d["bars"])    # 4 barras: todos los rótulos entran
+    # una sola fecha, o dos fechas sin ningún bono en común → nada que comparar
     assert _scatter_chart({**sc, "series": sc["series"][:1]})["delta"] is None
+    disjuntas = {**sc, "series": [{"fecha": "2026-11-05", "points": puntos[:2]},
+                                  {"fecha": "2026-10-29", "points": puntos[2:]}]}
+    assert _scatter_chart(disjuntas)["delta"] is None
+    # medio bps redondea lejos de cero, como el toFixed(0) del hover (12,5 → 13, no 12)
     assert _bps_txt(-0.4) == "0" and _bps_txt(1234) == "+1234" and _bps_txt(-85) == "−85"
+    assert _bps_txt(12.5) == "+13" and _bps_txt(-12.5) == "−13" and _bps_txt(0.5) == "+1" and _bps_txt(2.5) == "+3"
     assert _nice_step(300) == 100 and _nice_step(47) == 20 and _nice_step(1500) == 500
+    # semana quieta (Δ de ±0,4 bps): el eje no colapsa a cuatro "0" — rango mínimo ±5, paso ≥ 1
+    quieta = {**sc, "series": [{"fecha": "2026-10-29", "points": puntos[:2]},
+                               {"fecha": "2026-11-05", "points": [dict(puntos[0], v=0.30003), dict(puntos[1], v=0.26996)]}]}
+    dq = _scatter_chart(quieta)["delta"]
+    assert len({t["v"] for t in dq["ticks"]}) == len(dq["ticks"]) and {"−5", "0", "5"} <= {t["v"] for t in dq["ticks"]}
+    # muchas barras (corp_hdmep tiene 170+): sin rótulo de valor y un código cada k barras
+    muchos = [{"code": f"B{i:03d}", "dur": 0.1 + i * 0.05, "v": 0.10} for i in range(174)]
+    dm = _scatter_chart({**sc, "series": [{"fecha": "2026-10-29", "points": muchos},
+                                          {"fecha": "2026-11-05", "points": [dict(p, v=0.101) for p in muchos]}]})["delta"]
+    assert dm["n"] == 174 and not any(b["val_lbl"] for b in dm["bars"])
+    assert 1 < sum(b["code_lbl"] for b in dm["bars"]) < 174 and dm["bars"][0]["code_lbl"]
 
 
 @pytest.mark.asyncio

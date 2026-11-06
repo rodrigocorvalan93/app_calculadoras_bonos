@@ -127,9 +127,9 @@
           <title>{{ b.code }} · {{ b.f1 | ar_date }} → {{ b.f2 | ar_date }} · {{ 'amplió' if b.bps > 0.5 else ('comprimió' if b.bps < -0.5 else 'sin cambio') }} {{ b.txt }} bps · {{ b.v1 | ar_num(2) }}% → {{ b.v2 | ar_num(2) }}%</title>
           <rect class="hc-dbar {{ 'hc-up' if b.bps > 0.5 else ('hc-dn' if b.bps < -0.5 else 'hc-flat') }}" data-code="{{ b.code }}"
                 x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h if b.h > 0 else 1 }}"/>
-          <text class="hc-dval" data-code="{{ b.code }}" x="{{ b.cx }}" y="{{ b.vy }}" text-anchor="middle" font-size="9" fill="var(--text-muted)">{{ b.txt }}</text>
-          <text class="hc-dcode" data-code="{{ b.code }}" x="{{ b.cx }}" y="{{ d.y1 + 8 }}" text-anchor="end" font-size="9.5" fill="var(--text-muted)"
-                transform="rotate(-55 {{ b.cx }} {{ d.y1 + 8 }})">{{ b.code }}</text>
+          {% if b.val_lbl %}<text class="hc-dval" data-code="{{ b.code }}" x="{{ b.cx }}" y="{{ b.vy }}" text-anchor="middle" font-size="9" fill="var(--text-muted)">{{ b.txt }}</text>{% endif %}
+          {% if b.code_lbl %}<text class="hc-dcode" data-code="{{ b.code }}" x="{{ b.cx }}" y="{{ d.y1 + 8 }}" text-anchor="end" font-size="9.5" fill="var(--text-muted)"
+                transform="rotate(-55 {{ b.cx }} {{ d.y1 + 8 }})">{{ b.code }}</text>{% endif %}
         </g>
         {% endfor %}
       </svg>
