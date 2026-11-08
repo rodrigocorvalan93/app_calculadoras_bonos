@@ -110,6 +110,10 @@ async def test_novedades_desde_el_git_log(auth_on, monkeypatch) -> None:
     lineas = ["abc1234\x1f2026-11-06\x1fYAS: layout compacto (#260)",
               "def5678\x1f2026-11-06\x1fTests sin PR",
               "0123abc\x1f2026-11-04\x1fExcel =OMS.CASHFLOW (#261)"]
+    # estado del módulo restaurado al salir (los commits falsos no se quedan)
+    monkeypatch.setattr(novedades, "_items", [])
+    monkeypatch.setattr(novedades, "_version", "")
+    monkeypatch.setattr(novedades, "_estado", dict(novedades._estado))
     monkeypatch.setattr(novedades, "_leer_git", lambda n=60: list(lineas))
     novedades.cargar()
     assert novedades.estado()["cargado"] and novedades.estado()["n"] == 3

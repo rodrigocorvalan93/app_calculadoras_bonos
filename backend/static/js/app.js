@@ -1382,11 +1382,18 @@ window.lsSet = function (k, v) {
     box.addEventListener("click", function (e) { if (e.target === box) close(); });
     inp.addEventListener("input", render);
     inp.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowDown") { sel = Math.min(sel + 1, items.length - 1); paint(); e.preventDefault(); }
-      else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); paint(); e.preventDefault(); }
+      if (e.key === "ArrowDown") { mover(1); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { mover(-1); e.preventDefault(); }
       else if (e.key === "Enter") { go(); e.preventDefault(); }
       else if (e.key === "Escape") { close(); }
+      else if (e.key === "?" && !inp.value) { close(); if (window.yvShortcuts) window.yvShortcuts(); e.preventDefault(); }
     });
+  }
+  // Mueve la selección saltando los encabezados de sección (no son elegibles).
+  function mover(d) {
+    var i = sel;
+    do { i += d; } while (items[i] && items[i].kind === "hdr");
+    if (i >= 0 && i < items.length) { sel = i; paint(); }
   }
   function tabs() {
     var out = [];
@@ -1494,10 +1501,22 @@ window.lsSet = function (k, v) {
     var it = items[sel];
     if (!it || it.kind === "hdr") return;
     if (it.kind === "piz") {
+      // El server responde 200 con la pizarra re-renderizada aunque falle
+      // (duplicado, tope, código inválido): el error viaja en X-Pizarra-Error
+      // y el texto en el alert del partial → toast, sin navegar.
       var fd = new FormData(); fd.append("code", it.code); fd.append("tipo", "cotizacion"); fd.append("plazo", "24hs");
       fetch("/inicio/pizarra/agregar", { method: "POST", body: fd, credentials: "same-origin" })
-        .then(function (r) { window.location.href = "/inicio" + (r.ok ? "" : "?piz_error=1"); })
-        .catch(function () { window.location.href = "/inicio"; });
+        .then(function (r) {
+          if (!r.ok || r.headers.get("X-Pizarra-Error")) {
+            return r.text().then(function (html) {
+              var m = /<div class="alert[^"]*">([\s\S]*?)<\/div>/.exec(html || "");
+              var msg = m ? m[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim() : "";
+              if (window.yvToast) window.yvToast("No se agregó " + it.code + (msg ? ": " + msg : " a la pizarra"));
+            });
+          }
+          window.location.href = "/inicio";
+        })
+        .catch(function () { if (window.yvToast) window.yvToast("No se pudo agregar " + it.code + " (sin respuesta del server)"); });
       close();
       return;
     }
@@ -1562,7 +1581,7 @@ window.lsSet = function (k, v) {
   function ocultar() { if (leg) leg.style.display = "none"; }
   window.yvShortcuts = mostrar;
   document.addEventListener("keydown", function (e) {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;      // auto-repeat de `g` sostenida: no es un acorde
     if (e.key === "Escape") { ocultar(); return; }
     if (enCampo(e) || (window.ckIsOpen && window.ckIsOpen())) return;
     if (e.key === "?") { e.preventDefault(); (leg && leg.style.display === "flex") ? ocultar() : mostrar(); return; }
@@ -1605,19 +1624,23 @@ window.lsSet = function (k, v) {
     var out = null;
     KEYS.forEach(function (k) {
       var v = get(k);
-      if (v !== visto[k]) { out = out || {}; out[k] = v; visto[k] = v; }
+      if (v !== visto[k]) { out = out || {}; out[k] = v; }
     });
     return out;
   }
+  // `visto` se actualiza recién cuando el server aceptó: un POST fallido (red,
+  // 503 del archivo) se reintenta en la próxima vuelta con el mismo diff.
   function push(beacon) {
     if (!listo) return;
     var d = diff();
     if (!d) return;
     var body = JSON.stringify(d);
+    function ok() { Object.keys(d).forEach(function (k) { visto[k] = d[k]; }); }
     if (beacon && navigator.sendBeacon) {
-      try { navigator.sendBeacon("/prefs", new Blob([body], { type: "application/json" })); return; } catch (e) {}
+      try { if (navigator.sendBeacon("/prefs", new Blob([body], { type: "application/json" }))) { ok(); return; } } catch (e) {}
     }
-    fetch("/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: body, credentials: "same-origin" }).catch(function () {});
+    fetch("/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: body, credentials: "same-origin" })
+      .then(function (r) { if (r.ok) ok(); }).catch(function () {});
   }
   fetch("/prefs", { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) { aplicar((d && d.prefs) || {}); push(false); })
@@ -2313,9 +2336,9 @@ window.lsSet = function (k, v) {
 // motor live con el dot y "⚠ Feed caído"). Click para cerrar.
 (function () {
   var lastAt = 0, box = null, hideT = null;
-  function show(msg) {
+  function show(msg, force) {
     var now = Date.now();
-    if (now - lastAt < 20000) return;
+    if (!force && now - lastAt < 20000) return;
     lastAt = now;
     if (!box) {
       box = document.createElement('div');
@@ -2329,6 +2352,8 @@ window.lsSet = function (k, v) {
     clearTimeout(hideT);
     hideT = setTimeout(function () { box.classList.remove('show'); }, 7000);
   }
+  // Toast a pedido (sin throttle): lo usan Ctrl+K y otros avisos de acción.
+  window.yvToast = function (m) { show(m, true); };
   function skip(path) {
     return !path || path.indexOf('/market/seq') === 0 || path.indexOf('/mercado/rows') === 0;
   }

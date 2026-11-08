@@ -908,10 +908,21 @@ compartidos en `partials/_estados.html`: `empty(titulo, causa, acciones,
 icono, tipo)` (`tipo` = neutro | warn | error; `causa` / `acciones` son HTML
 armado por el template — NUNCA texto del usuario, que va en `titulo`) y
 `skeleton(filas, texto)`; reemplazan al cartel amarillo genérico: un vacío
-dice la CAUSA y ofrece la ACCIÓN. **Páginas de error** con la plantilla de la
-app (`error.html` vía `main._pagina_error`: 403 / 404 / 405 / 500; un request
-de htmx recibe un `alert-error` corto, `/excel/*`, `/api/*` y `Accept:
-application/json` reciben JSON, `/static/*` sigue con el 404 corto).
+dice la CAUSA y ofrece la ACCIÓN. **`causa` se ESCAPA** (revisión 08/11: con
+`| safe` el error de una pestaña de Históricos repetía la fecha tipeada en el
+request sin escapar → XSS reflejado); un template que quiera HTML en la causa
+marca `| safe` SÓLO el literal y escapa la variable (`("<code>" | safe) ~
+(detalle | e) ~ ("</code>" | safe)`, como `historico_tab_error.html`);
+`acciones` sigue siendo HTML literal del template. **Páginas de error** con la
+plantilla de la app (`error.html` vía `main._pagina_error`: 403 / 404 / 405 /
+500; un request de htmx recibe un `alert-error` corto, `/excel/*`, `/api/*` y
+`Accept: application/json` reciben JSON, `/static/*` sigue con el 404 corto);
+título y detalle van escapados y la respuesta lleva `_SEC_HEADERS` a mano
+(el handler de `Exception` corre en ServerErrorMiddleware, FUERA de
+`_SecurityMiddleware`). El detalle del 500 (mensaje de la excepción: rutas
+con el usuario de Windows, URLs del broker) sólo lo ve el superuser; el
+resto recibe "Error interno…". `/salud` también oculta rutas absolutas a un
+no-superuser (`routes/salud._sin_rutas`). Regresión: `tests/test_revision_0811.py`.
 **Pestañas secundarias** = `.sub-tabs` / `.sub-tab` (Históricos). **Barra de
 progreso** global `#hx-progress` (app.js): sólo requests disparados por el
 usuario (`deUsuario`), nunca los polls live. **CSS de componentes** al final de

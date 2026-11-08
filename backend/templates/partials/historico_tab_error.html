@@ -4,7 +4,10 @@
    eterno). Estado de error con causa + Reintentar (vuelve a disparar el
    'reveal' del contenedor). El traceback queda en el log / ring de Salud. #}
 <div class="hist-tab-error">
-{{ empty(titulo ~ ".", "<code>" ~ (detalle or "") ~ "</code> · El detalle completo quedó registrado" ~ (" en /admin · Salud." if request.state.is_superuser else " para el superuser."),
+{# `detalle` lleva el mensaje de la excepción (puede incluir texto del
+   request: la fecha inválida que tipeó alguien): va ESCAPADO; sólo las
+   etiquetas <code> del template son HTML. #}
+{{ empty(titulo ~ ".", ("<code>" | safe) ~ ((detalle or "") | e) ~ (("</code> · El detalle completo quedó registrado" ~ (" en /admin · Salud." if request.state.is_superuser else " para el superuser.")) | safe),
          '<button type="button" class="btn btn-sm" onclick="htmx.trigger(this.closest(\'[hx-trigger]\'), \'reveal\')">↻ Reintentar</button>',
          icono="warning", tipo="error") }}
 </div>

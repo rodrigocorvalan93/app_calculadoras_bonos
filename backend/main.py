@@ -731,18 +731,28 @@ def create_app() -> FastAPI:
     def _pagina_error(request: Request, codigo: int, titulo: str, detalle: str) -> Response:
         """403 / 404 / 500 con la plantilla de la app (antes un `<h1>403</h1>`
         pelado). Un request de htmx recibe un alert corto que el panel puede
-        swapear; el add-in / JSON siguen con JSON."""
+        swapear; el add-in / JSON siguen con JSON. `titulo` / `detalle` se
+        escapan (el detalle de un 500 es el mensaje de una excepción, que puede
+        repetir texto del request) y la respuesta lleva los headers de
+        seguridad: el handler de Exception corre en ServerErrorMiddleware, FUERA
+        de _SecurityMiddleware (revisión 08/11)."""
+        import html as _html
+        t, d = _html.escape(str(titulo)), _html.escape(str(detalle))
         if request.headers.get("hx-request"):
-            return HTMLResponse(f'<div class="alert alert-error"><b>{codigo} · {titulo}.</b> {detalle}</div>',
-                                status_code=codigo)
-        if request.url.path.startswith(("/excel/", "/api/")) or "application/json" in (request.headers.get("accept") or ""):
-            return JSONResponse({"error": f"{codigo} {titulo}", "detalle": detalle}, status_code=codigo)
-        try:
-            return app.state.templates.TemplateResponse(
-                request, "error.html", {"codigo": codigo, "titulo": titulo, "detalle": detalle},
-                status_code=codigo)
-        except Exception:  # noqa: BLE001 — la página de error nunca puede fallar
-            return HTMLResponse(f"<h1>{codigo}</h1><p>{titulo}. {detalle}</p>", status_code=codigo)
+            resp: Response = HTMLResponse(f'<div class="alert alert-error"><b>{codigo} · {t}.</b> {d}</div>',
+                                          status_code=codigo)
+        elif request.url.path.startswith(("/excel/", "/api/")) or "application/json" in (request.headers.get("accept") or ""):
+            resp = JSONResponse({"error": f"{codigo} {titulo}", "detalle": detalle}, status_code=codigo)
+        else:
+            try:
+                resp = app.state.templates.TemplateResponse(
+                    request, "error.html", {"codigo": codigo, "titulo": titulo, "detalle": detalle},
+                    status_code=codigo)
+            except Exception:  # noqa: BLE001 — la página de error nunca puede fallar
+                resp = HTMLResponse(f"<h1>{codigo}</h1><p>{t}. {d}</p>", status_code=codigo)
+        for k, v in _SEC_HEADERS:
+            resp.headers.setdefault(k.decode("latin-1"), v.decode("latin-1"))
+        return resp
 
     app.state.pagina_error = _pagina_error
 
@@ -767,7 +777,13 @@ def create_app() -> FastAPI:
         # página de la app con qué pasó, sin traceback. Starlette re-lanza
         # igual después de responder, así uvicorn lo registra como siempre.
         logging.getLogger("backend.main").exception("500 en %s %s: %s", request.method, request.url.path, exc)
-        return _pagina_error(request, 500, "Algo falló", f"{type(exc).__name__}: {str(exc)[:200]}")
+        # El mensaje de la excepción (rutas absolutas con el usuario de Windows,
+        # URLs del broker…) sólo lo ve el superuser; el resto, qué hacer.
+        if getattr(request.state, "is_superuser", False):
+            detalle = f"{type(exc).__name__}: {str(exc)[:200]}"
+        else:
+            detalle = "Error interno. Quedó registrado para el superuser (/admin · Salud); probá de nuevo en un momento."
+        return _pagina_error(request, 500, "Algo falló", detalle)
 
     def _needs_login(request: Request) -> Response:
         # htmx (partial/polling): 401 + HX-Redirect para que el cliente navegue

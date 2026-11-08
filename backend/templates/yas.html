@@ -11,7 +11,7 @@
   </header>
 
   {% if not codes %}
-    {{ empty("No hay bonos cargados", "Verificá que <code>especies.py</code> esté disponible y que <code>indices.main()</code> haya podido leer el backup BCRA.", icono="warning", tipo="error") }}
+    {{ empty("No hay bonos cargados", ("Verificá que <code>especies.py</code> esté disponible y que <code>indices.main()</code> haya podido leer el backup BCRA." | safe), icono="warning", tipo="error") }}
   {% else %}
   <form
     id="yas-form"

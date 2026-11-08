@@ -223,7 +223,12 @@ async def _mutar(request: Request, fn, *args: Any) -> HTMLResponse:
     except OSError as exc:
         logger.exception("[pizarra] no pude guardar")
         error = f"No pude guardar la pizarra: {exc}"
-    return await _pizarra_response(request, error=error)
+    resp = await _pizarra_response(request, error=error)
+    if error:
+        # Para quien no mira el partial (Ctrl+K «+BONO»): el 200 trae el aviso
+        # adentro, el header dice que NO se agregó.
+        resp.headers["X-Pizarra-Error"] = "1"
+    return resp
 
 
 @router.post("/inicio/pizarra/agregar", response_class=HTMLResponse)

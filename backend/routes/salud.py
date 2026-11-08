@@ -5,6 +5,7 @@ que el rol puede abrir (un básico sin Posiciones no ve "Releer carteras")."""
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 from itertools import groupby
 from typing import Any, Dict, List, Optional
@@ -29,9 +30,21 @@ def _rol(request: Request) -> Optional[str]:
     return u.get("role") if isinstance(u, dict) else getattr(u, "role", None)
 
 
+# Rutas absolutas (Windows con el usuario de la PC, OneDrive, /home/…) que
+# traen los mensajes de error de los loaders: un básico ve el NOMBRE del
+# archivo, no dónde vive (revisión 08/11).
+_RE_RUTA = re.compile(r"(?:[A-Za-z]:\\|\\\\|/(?:home|Users|tmp|mnt|var|opt|srv)/)[^\s'\"()]*[\\/]([^\s'\"()\\/]+)")
+
+
+def _sin_rutas(texto: str) -> str:
+    return _RE_RUTA.sub(lambda m: m.group(1), texto or "")
+
+
 def _filtrar_acciones(request: Request, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rol = _rol(request)
     for it in items:
+        if rol != "superuser":
+            it["texto"], it["detalle"] = _sin_rutas(it.get("texto", "")), _sin_rutas(it.get("detalle", ""))
         acc, tab = it.get("accion"), it.get("tab")
         if not acc or not tab:
             continue
