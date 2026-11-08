@@ -11,8 +11,8 @@ Covers:
   - `rail_pick(calendario=False)` (hist_row) keeps the volume heuristic among
     1D–4D (what actually traded), falling back to the shortest with a tasa.
   - `tira_rows`: 1D–7D always (placeholders "hoy no hay"), >7D only if traded.
-  - The /dolares/rail partial renders the "📊 Tasa" block with the picked
-    caución above the "💵 Dólar" header; /tasas/table renders the strip.
+  - The /dolares/rail partial renders the "Tasa</span>" block with the picked
+    caución above the "Dólar</span>" header; /tasas/table renders the strip.
 """
 from __future__ import annotations
 
@@ -261,7 +261,7 @@ async def test_rail_renders_caucion_block(overnight) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         r = await ac.get("/dolares/rail")
     assert r.status_code == 200
-    for tok in ("📊 Tasa", "Caución ARS 1D", "23,50%", "Caución USD 1D", "💵 Dólar"):
+    for tok in ("Tasa</span>", "Caución ARS 1D", "23,50%", "Caución USD 1D", "Dólar</span>"):
         assert tok in r.text, tok
     # ARS aparece antes que USD en el riel.
     assert r.text.index("Caución ARS") < r.text.index("Caución USD")
@@ -279,9 +279,9 @@ async def test_rail_renders_close_fallback(overnight) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         r = await ac.get("/dolares/rail")
     assert r.status_code == 200
-    for tok in ("📊 Tasa", "Caución ARS 1D", "23,00%", "cierre previo"):
+    for tok in ("Tasa</span>", "Caución ARS 1D", "23,00%", "cierre previo"):
         assert tok in r.text, tok
-    assert "vs cierre</span>" not in r.text.split("💵 Dólar")[0]  # sin flecha/var en el bloque caución
+    assert "vs cierre</span>" not in r.text.split("Dólar</span>")[0]  # sin flecha/var en el bloque caución
 
 
 @pytest.mark.asyncio
@@ -299,7 +299,7 @@ async def test_rail_renders_sin_dato(overnight) -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             r = await ac.get("/dolares/rail")
         assert r.status_code == 200
-        bloque = r.text.split("💵 Dólar")[0]
+        bloque = r.text.split("Dólar</span>")[0]
         assert "Caución ARS 4D" in bloque and "sin operaciones aún" in bloque
         assert "3D" not in bloque and "20,00" not in bloque
     finally:

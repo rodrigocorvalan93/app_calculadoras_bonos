@@ -8,7 +8,7 @@
     </span>
   </div>
   <div class="card-body">
-    <div><div class="muted" style="font-size:11px">Margen TNA estimado</div>
+    <div><div class="muted u-sm">Margen TNA estimado</div>
       <div style="font-weight:600;color:var(--accent);font-size:19px">{{ est.value | ar_num(2) }} pp</div></div>
   </div>
 </div>
@@ -23,15 +23,15 @@
   </div>
   <div class="card-body">
     <div style="display:flex;flex-wrap:wrap;gap:22px">
-      <div><div class="muted" style="font-size:11px">TIR (TIREA)</div>
+      <div><div class="muted u-sm">TIR (TIREA)</div>
         <div style="font-weight:600;color:var(--accent);font-size:19px">{{ est.tirea | ar_pct(2) }}</div></div>
-      <div><div class="muted" style="font-size:11px">TEM</div>
+      <div><div class="muted u-sm">TEM</div>
         <div style="font-weight:600;font-size:19px">{{ est.tem | ar_pct(2) }}</div></div>
-      <div><div class="muted" style="font-size:11px">TNA del plazo <small>(días/365)</small></div>
+      <div><div class="muted u-sm">TNA del plazo <small>(días/365)</small></div>
         <div style="font-weight:600;font-size:19px">{{ est.tna_plazo | ar_pct(2) }}</div></div>
     </div>
-    <div style="margin-top:12px">
-      <div class="muted" style="font-size:11px;margin-bottom:4px">TNA por capitalización</div>
+    <div class="u-mt12">
+      <div class="muted u-sm" style="margin-bottom:4px">TNA por capitalización</div>
       <table class="cashflows curve-table mercado-table" style="max-width:440px">
         <thead><tr><th>TNA 30/365</th><th>TNA 90/365</th><th>TNA 180/365</th><th>TNA 365</th></tr></thead>
         <tbody><tr>

@@ -110,6 +110,14 @@ window.lsSet = function (k, v) {
   }
 
   var advances = [];   // timestamps de avances (ventana 60s) → ticks/min
+  // El dot + texto son un link (#live-link): /salud normalmente; con el feed
+  // caído o precios viejos apunta a /conexion para reconectar ahí mismo.
+  function liveLink(href, title) {
+    var a = document.getElementById('live-link');
+    if (!a) return;
+    if (a.getAttribute('href') !== href) a.setAttribute('href', href);
+    if (a.title !== title) a.title = title;
+  }
   function meta(rtt) {
     var el = document.getElementById('live-meta');
     if (!el) return;
@@ -118,6 +126,7 @@ window.lsSet = function (k, v) {
     if (feedDown) {
       el.textContent = '⚠ Feed caído';
       el.classList.add('feed-down-txt');
+      liveLink('/conexion', 'Feed caído — click para reconectar o cambiar de broker');
       return;
     }
     // Conectado pero sin market data (broker que autentica y no streamea):
@@ -126,9 +135,11 @@ window.lsSet = function (k, v) {
     if (staleWarn) {
       el.textContent = '⚠ Precios viejos';
       el.classList.add('feed-down-txt');
+      liveLink('/conexion', 'Precios posiblemente viejos — click para reconectar o cambiar de broker');
       return;
     }
     el.classList.remove('feed-down-txt');
+    liveLink('/salud', 'Estado del feed y de los datos — click para ver la salud de la app');
     var now = Date.now();
     while (advances.length && now - advances[0] > 60000) advances.shift();
     // rtt sólo aplica al fallback de polling; con SSE (push) no hay RTT que medir.
@@ -332,7 +343,10 @@ window.lsSet = function (k, v) {
   // live y los `every` no la mueven. Una sola barra por página.
   (function () {
     var bar = document.getElementById('hx-progress');
-    if (!bar) { bar = document.createElement('div'); bar.id = 'hx-progress'; document.body.appendChild(bar); }
+    if (!bar) {
+      if (!document.createElement || !document.body || !document.body.appendChild) return;   // DOM mínimo (harness)
+      bar = document.createElement('div'); bar.id = 'hx-progress'; document.body.appendChild(bar);
+    }
     var vivos = 0, timer = null;
     var TIPOS = { change: 1, click: 1, submit: 1, search: 1, reveal: 1, keyup: 1, input: 1 };
     function deUsuario(e) {
@@ -1341,20 +1355,27 @@ window.lsSet = function (k, v) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick); else tick();
 })();
 
-// ── Ctrl+K: búsqueda global (bonos → YAS · pestañas por nombre) ────────────
+// ── Ctrl+K: búsqueda global (bonos → YAS · pestañas · acciones · recientes) ─
 // Overlay client-side puro: el universo se baja UNA vez (/market/codes, cache
 // en memoria) y las pestañas se leen del nav ya renderizado (respeta el rol).
 // Cero costo por request: filtrar es un loop en JS sobre ~550 códigos.
+// Glow-up D (06/11): además ACCIONES (salud, novedades, reconectar, tema,
+// riel, atajos), "+CODE" = agregar el bono a mi pizarra sin ir a Inicio, y
+// RECIENTES (lo último elegido, en localStorage `ck_recent`, sincronizado al
+// server con las prefs) arriba de todo cuando el campo está vacío. Iconos
+// del sprite SVG de la página (#i-…), no emojis.
 (function () {
   var codes = null, box = null, inp = null, list = null, sel = 0, items = [];
+  var RECENT_KEY = "ck_recent", RECENT_MAX = 8;
 
+  function ico(name) { return '<svg class="ico ck-ico" aria-hidden="true"><use href="#i-' + name + '"/></svg>'; }
   function ensureBox() {
     if (box) return;
     box = document.createElement("div");
     box.id = "ck-overlay";
     box.innerHTML = '<div id="ck-panel"><input id="ck-input" type="text" ' +
-      'placeholder="Bono (T15E7, GD30C…) o pestaña (curvas, escenario…)" autocomplete="off">' +
-      '<ul id="ck-list"></ul><div id="ck-hint" class="muted">↑↓ moverse · Enter abrir · Esc cerrar</div></div>';
+      'placeholder="Bono, pestaña o acción · +BONO = a mi pizarra" autocomplete="off">' +
+      '<ul id="ck-list"></ul><div id="ck-hint" class="muted">↑↓ moverse · Enter abrir · Esc cerrar · ? atajos</div></div>';
     document.body.appendChild(box);
     inp = box.querySelector("#ck-input");
     list = box.querySelector("#ck-list");
@@ -1371,9 +1392,42 @@ window.lsSet = function (k, v) {
     var out = [];
     document.querySelectorAll(".topbar nav a[href]").forEach(function (a) {
       var label = (a.textContent || "").trim();
-      if (label) out.push({ kind: "tab", label: label, href: a.getAttribute("href") });
+      if (label) out.push({ kind: "tab", label: label, href: a.getAttribute("href"), ico: "table" });
     });
     return out;
+  }
+  function setTheme(name) {
+    document.documentElement.setAttribute("data-theme", name);
+    try { localStorage.setItem("yas_theme", name); } catch (e) {}
+    var b = document.querySelector('.theme-switch button[title^="' + (name === "dark" ? "Dark" : name === "light" ? "Light" : "Delta") + '"]');
+    if (b) b.click();                                   // Alpine queda sincronizado
+  }
+  function actions() {
+    var out = [
+      { kind: "act", label: "Salud de la app", sub: "feed, cierre, archivos, carteras", href: "/salud", ico: "info" },
+      { kind: "act", label: "Qué hay de nuevo", sub: "últimos cambios", href: "/novedades", ico: "news" },
+      { kind: "act", label: "Reconectar el feed", sub: "elegir broker / reconectar", href: "/conexion", ico: "plug" },
+      { kind: "act", label: "Tema oscuro", sub: "Bloomberg", run: function () { setTheme("dark"); }, ico: "settings" },
+      { kind: "act", label: "Tema claro", sub: "light", run: function () { setTheme("light"); }, ico: "settings" },
+      { kind: "act", label: "Tema Delta", sub: "delta", run: function () { setTheme("delta"); }, ico: "settings" },
+      { kind: "act", label: "Mostrar / ocultar el riel de dólar", sub: "panel izquierdo", ico: "dollar",
+        run: function () { var b = document.querySelector('.rail-toggle[title^="Mostrar/ocultar"]'); if (b) b.click(); } },
+      { kind: "act", label: "Atajos de teclado", sub: "tecla ?", run: function () { if (window.yvShortcuts) window.yvShortcuts(); }, ico: "keyboard" }
+    ];
+    if (document.querySelector('.topbar nav a[href="/posiciones"]')) {
+      out.push({ kind: "act", label: "Releer carteras", sub: "Posiciones / Matriz", href: "/posiciones?refresh=1", ico: "refresh" });
+    }
+    return out;
+  }
+  function recents() {
+    try { var r = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); return Array.isArray(r) ? r.filter(function (x) { return x && x.href && x.label; }) : []; }
+    catch (e) { return []; }
+  }
+  function remember(it) {
+    if (!it || !it.href) return;
+    var r = recents().filter(function (x) { return x.href !== it.href; });
+    r.unshift({ kind: it.kind, label: it.label, sub: it.sub || "", href: it.href, ico: it.ico || "" });
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(r.slice(0, RECENT_MAX))); } catch (e) {}
   }
   function open() {
     ensureBox();
@@ -1387,43 +1441,69 @@ window.lsSet = function (k, v) {
     inp.focus();
   }
   function close() { if (box) box.style.display = "none"; }
+  function bondItem(b, add) {
+    if (add) return { kind: "piz", label: "Agregar " + b.c + " a mi pizarra", sub: "vto " + b.v, code: b.c, ico: "pie" };
+    return { kind: "bond", label: b.c, sub: b.v, href: "/yas?code=" + encodeURIComponent(b.c), ico: "chart-line" };
+  }
   function render() {
-    var q = (inp.value || "").trim().toUpperCase();
+    var raw = (inp.value || "").trim(), add = raw.charAt(0) === "+";
+    var q = (add ? raw.slice(1) : raw).trim().toUpperCase();
     items = [];
     if (q) {
-      tabs().forEach(function (t) {
-        if (t.label.toUpperCase().indexOf(q) >= 0) items.push(t);
-      });
+      if (!add) {
+        tabs().forEach(function (t) { if (t.label.toUpperCase().indexOf(q) >= 0) items.push(t); });
+        actions().forEach(function (a) { if ((a.label + " " + (a.sub || "")).toUpperCase().indexOf(q) >= 0) items.push(a); });
+      }
       (codes || []).forEach(function (b) {
         if (items.length >= 12) return;
-        if (b.c.toUpperCase().indexOf(q) === 0) items.push({ kind: "bond", label: b.c, sub: b.v, href: "/yas?code=" + encodeURIComponent(b.c) });
+        if (b.c.toUpperCase().indexOf(q) === 0) items.push(bondItem(b, add));
       });
       if (items.length < 12) (codes || []).forEach(function (b) {
         if (items.length >= 12) return;
-        if (b.c.toUpperCase().indexOf(q) > 0) items.push({ kind: "bond", label: b.c, sub: b.v, href: "/yas?code=" + encodeURIComponent(b.c) });
+        if (b.c.toUpperCase().indexOf(q) > 0) items.push(bondItem(b, add));
       });
     } else {
-      items = tabs().slice(0, 12);
+      var r = recents();
+      if (r.length) { items.push({ kind: "hdr", label: "Recientes" }); items = items.concat(r); }
+      items.push({ kind: "hdr", label: "Pestañas" });
+      items = items.concat(tabs().slice(0, 10));
+      items.push({ kind: "hdr", label: "Acciones" });
+      items = items.concat(actions());
     }
     sel = 0;
+    while (items[sel] && items[sel].kind === "hdr") sel++;
     paint();
   }
   function paint() {
     list.innerHTML = "";
     items.forEach(function (it, i) {
       var li = document.createElement("li");
+      if (it.kind === "hdr") { li.className = "ck-hdr"; li.textContent = it.label; list.appendChild(li); return; }
       li.className = i === sel ? "ck-sel" : "";
-      li.innerHTML = (it.kind === "bond" ? "📈 " : "🗂 ") + "<b></b>" +
+      li.innerHTML = ico(it.ico || (it.kind === "bond" ? "chart-line" : "table")) + "<b></b>" +
         (it.sub ? ' <span class="muted"></span>' : "");
       li.querySelector("b").textContent = it.label;
-      if (it.sub) li.querySelector("span").textContent = "vto " + it.sub;
+      if (it.sub) li.querySelector("span").textContent = (it.kind === "bond" ? "vto " : "") + it.sub;
       li.addEventListener("click", function () { sel = i; go(); });
       list.appendChild(li);
     });
+    var cur = list.children[sel];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
   }
   function go() {
     var it = items[sel];
-    if (it && it.href) window.location.href = it.href;
+    if (!it || it.kind === "hdr") return;
+    if (it.kind === "piz") {
+      var fd = new FormData(); fd.append("code", it.code); fd.append("tipo", "cotizacion"); fd.append("plazo", "24hs");
+      fetch("/inicio/pizarra/agregar", { method: "POST", body: fd, credentials: "same-origin" })
+        .then(function (r) { window.location.href = "/inicio" + (r.ok ? "" : "?piz_error=1"); })
+        .catch(function () { window.location.href = "/inicio"; });
+      close();
+      return;
+    }
+    remember(it);
+    if (it.run) { close(); it.run(); return; }
+    if (it.href) window.location.href = it.href;
   }
   document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
@@ -1434,6 +1514,118 @@ window.lsSet = function (k, v) {
   // Entrada visible (botón 🔍 de la topbar) — además es la ÚNICA entrada en
   // el celu, donde no hay Ctrl+K.
   window.ckOpen = open;
+  window.ckIsOpen = function () { return !!(box && box.style.display === "flex"); };
+})();
+
+// ── Atajos de teclado con leyenda (glow-up D) ────────────────────────────────
+// `?` abre la leyenda; `g` + letra navega (g i Inicio · g m Mercado · g c
+// Curvas · g y YAS · g f Futuros · g d Dólares · g h Históricos · g g
+// Gráficos · g p Posiciones · g t Matriz · g s Salud · g n Novedades · g o
+// Conexión); sólo a pestañas que el nav muestra (respeta el rol). Nunca con el
+// foco en un input / textarea / select ni con el overlay de Ctrl+K abierto.
+(function () {
+  var CHORD = { i: "/inicio", m: "/mercado", c: "/curves", y: "/yas", f: "/futuros", d: "/dolares",
+                h: "/historicos", g: "/graficos", p: "/posiciones", t: "/matriz",
+                s: "/salud", n: "/novedades", o: "/conexion" };
+  var SIEMPRE = { "/salud": 1, "/novedades": 1, "/conexion": 1, "/inicio": 1 };
+  var pendiente = 0, leg = null;
+  function enCampo(e) {
+    var t = e.target;
+    if (!t || !t.tagName) return false;
+    var tag = t.tagName.toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !!t.isContentEditable;
+  }
+  function permitida(path) {
+    if (SIEMPRE[path]) return true;
+    return !!document.querySelector('.topbar nav a[href="' + path + '"], .tab-menu a[href="' + path + '"]');
+  }
+  function filas() {
+    var out = [["Ctrl / Cmd + K", "Buscar: bono, pestaña, acción · +BONO = a mi pizarra"], ["?", "Esta leyenda"], ["Esc", "Cerrar"]];
+    var nombres = { i: "Inicio", m: "Mercado", c: "Curvas", y: "YAS", f: "Futuros", d: "Dólares", h: "Históricos",
+                    g: "Gráficos", p: "Posiciones", t: "Matriz", s: "Salud", n: "Qué hay de nuevo", o: "Conexión" };
+    Object.keys(CHORD).forEach(function (k) { if (permitida(CHORD[k])) out.push(["g " + k, "Ir a " + nombres[k]]); });
+    return out;
+  }
+  function mostrar() {
+    if (!leg) {
+      leg = document.createElement("div");
+      leg.id = "kb-overlay";
+      leg.addEventListener("click", function (e) { if (e.target === leg) ocultar(); });
+      document.body.appendChild(leg);
+    }
+    var h = '<div id="kb-panel"><div class="kb-title">Atajos de teclado</div><table class="kb-table"><tbody>';
+    filas().forEach(function (f) { h += "<tr><td><kbd>" + f[0] + "</kbd></td><td>" + f[1] + "</td></tr>"; });
+    h += '</tbody></table><div class="muted u-note">Las letras de "g" se tipean una después de la otra (no juntas).</div></div>';
+    leg.innerHTML = h;
+    leg.style.display = "flex";
+  }
+  function ocultar() { if (leg) leg.style.display = "none"; }
+  window.yvShortcuts = mostrar;
+  document.addEventListener("keydown", function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Escape") { ocultar(); return; }
+    if (enCampo(e) || (window.ckIsOpen && window.ckIsOpen())) return;
+    if (e.key === "?") { e.preventDefault(); (leg && leg.style.display === "flex") ? ocultar() : mostrar(); return; }
+    var now = Date.now();
+    if (pendiente && now - pendiente < 900) {
+      pendiente = 0;
+      var path = CHORD[(e.key || "").toLowerCase()];
+      if (path && permitida(path)) { e.preventDefault(); window.location.href = path; }
+      return;
+    }
+    if (e.key === "g" || e.key === "G") pendiente = now;
+  });
+})();
+
+// ── Prefs por usuario en el server (glow-up D) ───────────────────────────────
+// Las preferencias chicas que viven en localStorage (tema, riel, métrica del
+// libro, fondo de Posiciones, recientes de Ctrl+K, …) se sincronizan con
+// /prefs: al cargar, las del server completan las que ESTE navegador no tiene
+// (PC nueva = misma app que en la otra); después, cada 30 s y al ocultar la
+// pestaña, se mandan sólo las que cambiaron. Un GET + POSTs chicos y raros.
+(function () {
+  if (typeof fetch !== "function" || !document.body) return;
+  var KEYS = ["yas_theme", "fx_rail", "book-y", "pos_fondo", "graf_tabla_open", "graf_emis", "graf_emis_open",
+              "graf_emis_ref", "hc_labels", "curvas_combos", "ck_recent", "qp_excl"];
+  var visto = {}, listo = false;
+  function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function aplicar(prefs) {
+    KEYS.forEach(function (k) {
+      var local = get(k), remoto = prefs[k];
+      if (local === null && typeof remoto === "string") {
+        set(k, remoto);
+        if (k === "yas_theme") document.documentElement.setAttribute("data-theme", remoto);
+      }
+      visto[k] = get(k);
+    });
+    listo = true;
+  }
+  function diff() {
+    var out = null;
+    KEYS.forEach(function (k) {
+      var v = get(k);
+      if (v !== visto[k]) { out = out || {}; out[k] = v; visto[k] = v; }
+    });
+    return out;
+  }
+  function push(beacon) {
+    if (!listo) return;
+    var d = diff();
+    if (!d) return;
+    var body = JSON.stringify(d);
+    if (beacon && navigator.sendBeacon) {
+      try { navigator.sendBeacon("/prefs", new Blob([body], { type: "application/json" })); return; } catch (e) {}
+    }
+    fetch("/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: body, credentials: "same-origin" }).catch(function () {});
+  }
+  fetch("/prefs", { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) { aplicar((d && d.prefs) || {}); push(false); })
+    .catch(function () { aplicar({}); });
+  setInterval(function () { push(false); }, 30000);
+  document.addEventListener("visibilitychange", function () { if (document.hidden) push(true); });
+  window.addEventListener("pagehide", function () { push(true); });
+  window.yvPrefsPush = function () { push(false); };
 })();
 
 // ── Campana de alertas (topbar, sólo superuser) ────────────────────────────

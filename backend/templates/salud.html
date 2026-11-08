@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Salud{% endblock %}
+
+{% block content %}
+<section class="curves salud-page">
+  <header class="yas-header">
+    <h1>Salud de la app</h1>
+    <p class="muted">Qué anda y qué no, en una pantalla: feed del broker, cierre histórico,
+    archivos de datos, carteras, índices y pollers. Se actualiza sola cada 30 s.
+    {% if request.state.is_superuser %}El detalle técnico (stats del WS, errores con sus mensajes)
+    sigue en <a href="/admin">/admin · Salud</a>.{% endif %}</p>
+  </header>
+
+  <div id="salud-body" hx-get="/salud/body" hx-trigger="every 30s" hx-swap="innerHTML" data-skip-same>
+    {% include "partials/salud_body.html" %}
+  </div>
+
+  <p class="muted u-note u-mt12">
+    ¿Algo que no entendés o que no se arregla con el botón? Avisale al superuser con la hora y el
+    ítem en rojo. <a href="/novedades">Qué hay de nuevo</a> en la app.
+  </p>
+</section>
+{% endblock %}

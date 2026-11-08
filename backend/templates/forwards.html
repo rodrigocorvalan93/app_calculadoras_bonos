@@ -45,7 +45,7 @@
             <option value="ARS"    {% if leg == "ARS"    %}selected{% endif %}>ARS (pesos)</option>
           </select>
         </label>
-        <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+        <label class="field-toggle field-end" style="padding-bottom:6px">
           {# hidden 'false' + [name=only_quoting] en el include: sin esto, desmarcar
              no enviaba nada y el filtro no se podía apagar (ver curves.html). #}
           <input type="hidden" name="only_quoting" value="false">

@@ -53,20 +53,20 @@
               <option value="1" {% if comparar %}selected{% endif %}>Sí</option>
               <option value="0" {% if not comparar %}selected{% endif %}>No</option>
             </select></label>
-          <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
+          <button type="submit" class="btn-primary field-end">Actualizar</button>
         </div>
       </form>
       {# Cuánta historia hay guardada, a la vista (no en letra chica): la
          pestaña arrancó de cero con el autosave y varios análisis piden ≥ 10
          ruedas comunes (β / correlación) o una ventana con ≥ 2 ruedas. #}
-      <p class="pa-guardado" style="font-size:12px;margin-top:8px">
+      <p class="pa-guardado u-mt8" style="font-size:12px">
         <b>Guardado:</b>
         {% if archivo.loaded %}acciones <b>{{ archivo.n_dias }}</b> ruedas ({{ archivo.dmin | ar_date }} → {{ archivo.dmax | ar_date }}) · <b>{{ archivo.n_tickers }}</b> especies{% if not archivo.merval %} · sin Merval todavía{% endif %}{% else %}acciones: <b>0</b> ruedas{% endif %}
         · {% if cierres.loaded %}bonos <b>{{ cierres.n_particiones }}</b> ruedas ({{ cierres.dmin | ar_date }} → {{ cierres.dmax | ar_date }}) · {{ cierres.n_simbolos }} símbolos{% else %}bonos: sólo base px/tasas{% endif %}.
         {% if not archivo.loaded or archivo.n_dias < 20 %}<span class="muted">Pocas ruedas todavía (β/correlación piden 10 comunes): para arrancar con 2 años de historia corré desde tu PC
           <code>python -m backend.tools.backfill_acciones --byma --desde 2024-09-01</code> (BYMA Open Data) o <code>--csv cierres.csv</code>.</span>{% endif %}
       </p>
-      <p class="muted" style="font-size:11px;margin-top:6px">
+      <p class="muted u-note u-mt8">
         Desde/Hasta tienen prioridad sobre la ventana.
         ÷ A3500 / CCL / MEP divide el precio por el FX del mismo día (series diarias del cierre; A3500 del BCRA); no aplica a la TIR.
         Canal = regresión lineal de la ventana ± 1σ / 2σ de los residuos; z = distancia del último a la media (y al canal) en desvíos.
@@ -77,7 +77,7 @@
   {% if pa and pa.ok %}
   {% set st = pa.nivel %}{% set rt = pa.retornos %}{% set g = pa.geom %}{% set gh = pa.geom_hist %}{% set h = pa.hist %}
   {% set un = pa.u_nivel %}{% set ud = pa.u_delta %}
-  <div class="metrics-grid pa-metrics" style="margin-top:12px">
+  <div class="metrics-grid pa-metrics u-mt12">
     <div class="metric metric-highlight">
       <div class="metric-label">{{ pa.ticker }} · {{ 'TIR' if pa.es_tir else 'último' }} {{ pa.hasta }}{% if pa.base != "ars" %} <span class="conv">{{ pa.base_label }}</span>{% endif %}{% if pa.fuente == "base" %} <span class="conv" title="serie de la base px/tasas">base</span>{% endif %}</div>
       <div class="metric-value">{{ con(st.ultimo, dec, un) }}</div>
@@ -153,7 +153,7 @@
           {% for xl in g.xlabels %}<text class="fc-xlabel" x="{{ xl.x }}" y="{{ g.xlabel_y }}" text-anchor="middle">{{ xl.txt }}</text>{% endfor %}
         </svg>
         {% endif %}
-        <p class="muted" style="font-size:11px;margin:6px 0 0">
+        <p class="muted u-note" style="margin:6px 0 0">
           {% if pa.modo == "precio" %}
             Último a {{ nv(st.z_tend, 2) }}σ del canal ({{ con(st.tend_ultimo, dec, un) }} en la tendencia, σ {{ con(st.sigma_tend, dec, ud if pa.es_tir else '') }}) ·
             {{ (st.pos_rango * 100) | ar_num(0) if st.pos_rango is not none else "—" }}% del rango mín→máx ·
@@ -185,13 +185,13 @@
           — <span style="color:var(--green)">│</span> último · <span style="color:var(--yellow)">—</span> normal
         </p>
         {% else %}
-        <p class="muted" style="font-size:12px">Con menos de 3 ruedas no hay distribución.</p>
+        <p class="muted u-note">Con menos de 3 ruedas no hay distribución.</p>
         {% endif %}
       </div>
     </div>
   </div>
 
-  <details class="card pa-tabla" style="margin-top:12px">
+  <details class="card pa-tabla u-mt12">
     <summary class="card-title" style="cursor:pointer;list-style:none">
       <span>🗒 Tabla histórica (HP)</span>
       <span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#pa-tbl" title="Descargar la tabla como se ve (CSV es-AR)">⤓ CSV</button> · {{ rows_fmt | length }} ruedas · más reciente primero ▾</span>
@@ -199,19 +199,19 @@
     <div class="card-body table-scroll">
       <table class="cashflows curve-table mercado-table" data-sortable id="pa-tbl">
         <thead><tr>
-          <th style="text-align:left" data-sort>Fecha</th>
+          <th class="u-left" data-sort>Fecha</th>
           <th data-sort>{{ 'TIR' if pa.es_tir else 'Cierre' }}{% if pa.base != "ars" %} {{ pa.base_label }}{% endif %}</th>
           <th data-sort>Δ{{ ' (pp)' if pa.es_tir else '' }}</th><th data-sort>Δ%</th><th data-sort>Volumen $</th>
         </tr></thead>
         <tbody>
           {% for r in rows_fmt %}
-          <tr><td style="text-align:left;color:var(--accent);font-weight:600">{{ r.fecha }}</td><td style="font-weight:600">{{ r.valor_s }}{{ un }}</td><td class="{{ r.var_cls }}">{{ r.var_s }}</td><td class="{{ r.pct_cls }}">{{ r.pct_s }}</td><td>{{ r.vol_s }}</td></tr>
+          <tr><td class="u-left" style="color:var(--accent);font-weight:600">{{ r.fecha }}</td><td style="font-weight:600">{{ r.valor_s }}{{ un }}</td><td class="{{ r.var_cls }}">{{ r.var_s }}</td><td class="{{ r.pct_cls }}">{{ r.pct_s }}</td><td>{{ r.vol_s }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </details>
   {% elif pa %}
-  <div class="alert" style="margin-top:12px">{{ pa.motivo }}</div>
+  <div class="alert">{{ pa.motivo }}</div>
   {% endif %}
 {% endif %}

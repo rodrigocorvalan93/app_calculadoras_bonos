@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
 {% block title %}Administración{% endblock %}
 
 {% block content %}
@@ -26,7 +27,7 @@
               <select name="role">
                 {% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == 'basico' else '' }}>{{ role_labels[r] }}</option>{% endfor %}
               </select></label>
-            <button class="btn-primary" type="submit" style="align-self:flex-end">Crear</button>
+            <button class="btn-primary field-end" type="submit">Crear</button>
           </div>
         </form>
       </div>
@@ -37,13 +38,13 @@
       <div class="card-title"><span>Usuarios</span><span class="card-title-aux">{{ users | length }}</span></div>
       <div class="card-body" style="padding:0">
         <table class="cashflows admin-users">
-          <thead><tr><th style="text-align:left">Usuario</th><th style="text-align:left">Email</th>
+          <thead><tr><th class="u-left">Usuario</th><th class="u-left">Email</th>
             <th>Categoría</th><th>Contraseña</th><th>Excel</th><th></th></tr></thead>
           <tbody>
             {% for u in users %}
             <tr>
-              <td style="text-align:left"><b>{{ u.username }}</b></td>
-              <td style="text-align:left" class="muted">{{ u.email or '—' }}</td>
+              <td class="u-left"><b>{{ u.username }}</b></td>
+              <td class="u-left muted">{{ u.email or '—' }}</td>
               <td>
                 <form method="post" action="/admin/users/role" style="display:inline-flex;gap:4px;align-items:center">
                   <input type="hidden" name="username" value="{{ u.username }}">
@@ -59,7 +60,7 @@
                   <button type="submit" class="btn-mini">↻</button>
                 </form>
               </td>
-              <td style="white-space:nowrap">
+              <td class="u-nowrap">
                 {% if u.excel_enabled %}
                 <input readonly value="{{ u.excel_token }}" style="width:130px" title="Token del add-in — click = copiar"
                        onclick="this.select();navigator.clipboard&&navigator.clipboard.writeText(this.value)">
@@ -107,7 +108,7 @@
         <span class="card-title-aux">tenencias — el superuser ve todos</span></div>
       <div class="card-body">
         {% if not fondos_all %}
-        <p class="muted" style="margin:0">Sin carteras cargadas: cuando la app tenga la composición
+        <p class="muted u-m0">Sin carteras cargadas: cuando la app tenga la composición
           (Delta_Composicion.xlsx + Galileo_Composicion.xlsx — los Galileo aparecen como "G&lt;n&gt;"), acá se elige qué fondos ve cada usuario.</p>
         {% else %}
         <p class="muted" style="margin:0 0 8px">“Todos” = ve todas las carteras (default, incluye
@@ -118,14 +119,14 @@
         {# De qué archivo salió cada fondo: con las bases unificadas en
            Delta_Composicion, un Galileo repetido se ignora y acá se ve. #}
         <details class="fondos-fuentes">
-          <summary class="muted" style="cursor:pointer;font-size:11px">Fuentes: {{ fondos_fuentes | selectattr('ignorado', 'equalto', false) | list | length }} fondos cargados{% set ign = fondos_fuentes | selectattr('ignorado') | list %}{% if ign %} · <span class="var-up">{{ ign | length }} Galileo ignorado{{ 's' if ign | length != 1 }} (ya en Delta_Composicion)</span>{% endif %}</summary>
+          <summary class="muted u-sm" style="cursor:pointer">Fuentes: {{ fondos_fuentes | selectattr('ignorado', 'equalto', false) | list | length }} fondos cargados{% set ign = fondos_fuentes | selectattr('ignorado') | list %}{% if ign %} · <span class="var-up">{{ ign | length }} Galileo ignorado{{ 's' if ign | length != 1 }} (ya en Delta_Composicion)</span>{% endif %}</summary>
           <table class="cashflows admin-tabs" style="margin:6px 0 10px">
-            <thead><tr><th style="text-align:left">Fondo</th><th style="text-align:left">Archivo</th><th>Tenencias</th><th>PN</th></tr></thead>
+            <thead><tr><th class="u-left">Fondo</th><th class="u-left">Archivo</th><th>Tenencias</th><th>PN</th></tr></thead>
             <tbody>
               {% for f in fondos_fuentes %}
               <tr{% if f.ignorado %} class="muted"{% endif %}>
-                <td style="text-align:left">{{ f.nombre }}{% if f.ignorado %} <span class="tag">ignorado: ya está en Delta_Composicion</span>{% endif %}</td>
-                <td style="text-align:left;font-size:11px">{{ f.archivo }}</td>
+                <td class="u-left">{{ f.nombre }}{% if f.ignorado %} <span class="tag">ignorado: ya está en Delta_Composicion</span>{% endif %}</td>
+                <td class="u-left u-sm">{{ f.archivo }}</td>
                 <td>{{ f.n }}</td><td>{{ f.pn | ar_int if f.pn is not none else "—" }}</td>
               </tr>
               {% endfor %}
@@ -134,22 +135,22 @@
         </details>
         {% endif %}
         <table class="cashflows admin-tabs">
-          <thead><tr><th style="text-align:left">Usuario</th><th style="text-align:left">Fondos</th><th></th></tr></thead>
+          <thead><tr><th class="u-left">Usuario</th><th class="u-left">Fondos</th><th></th></tr></thead>
           <tbody>
             {% for u in users if u.role != 'superuser' %}
             <tr>
-              <td style="text-align:left;vertical-align:top"><b>{{ u.username }}</b>
-                <div class="muted" style="font-size:11px">{{ role_labels[u.role] }}</div></td>
-              <td style="text-align:left">
+              <td class="u-left" style="vertical-align:top"><b>{{ u.username }}</b>
+                <div class="muted u-sm">{{ role_labels[u.role] }}</div></td>
+              <td class="u-left">
                 <form method="post" action="/admin/users/fondos" id="fondos-{{ u.username }}"
                       style="display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center">
                   <input type="hidden" name="username" value="{{ u.username }}">
-                  <label style="white-space:nowrap"><input type="checkbox" name="todos" value="1"
+                  <label class="u-nowrap"><input type="checkbox" name="todos" value="1"
                          {{ 'checked' if u.fondos is none else '' }}
                          onchange="this.form.querySelectorAll('input[name=cod]').forEach(c=>c.disabled=this.checked)">
                     <b>todos</b></label>
                   {% for f in fondos_all %}
-                  <label style="white-space:nowrap" title="{{ f.nombre }}"><input type="checkbox" name="cod" value="{{ f.cod }}"
+                  <label class="u-nowrap" title="{{ f.nombre }}"><input type="checkbox" name="cod" value="{{ f.cod }}"
                          {{ 'checked' if u.fondos is not none and f.cod in u.fondos else '' }}
                          {{ 'disabled' if u.fondos is none else '' }}> {{ f.nombre }}</label>
                   {% endfor %}
@@ -173,18 +174,18 @@
       <div class="card-body">
         <form method="post" action="/admin/tabs">
           <table class="cashflows admin-tabs">
-            <thead><tr><th style="text-align:left">Pestaña</th><th>Premium</th><th>Básico</th></tr></thead>
+            <thead><tr><th class="u-left">Pestaña</th><th>Premium</th><th>Básico</th></tr></thead>
             <tbody>
               {% for t in tabs %}
               <tr>
-                <td style="text-align:left">{{ t.label }}</td>
+                <td class="u-left">{{ t.label }}</td>
                 <td><input type="checkbox" name="tab_premium_{{ t.key }}" {{ 'checked' if t.key in role_tabs.premium else '' }}></td>
                 <td><input type="checkbox" name="tab_basico_{{ t.key }}" {{ 'checked' if t.key in role_tabs.basico else '' }}></td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
-          <div style="margin-top:10px"><button class="btn-primary" type="submit">Guardar permisos</button></div>
+          <div class="u-mt12"><button class="btn-primary" type="submit">Guardar permisos</button></div>
         </form>
       </div>
     </div>
@@ -196,63 +197,63 @@
       <div class="card-body">
         <form method="post" action="/admin/features">
           <table class="cashflows admin-tabs">
-            <thead><tr><th style="text-align:left">Feature</th><th>Premium</th><th>Básico</th></tr></thead>
+            <thead><tr><th class="u-left">Feature</th><th>Premium</th><th>Básico</th></tr></thead>
             <tbody>
               {% for f in features %}
               <tr>
-                <td style="text-align:left">{{ f.label }}</td>
+                <td class="u-left">{{ f.label }}</td>
                 <td><input type="checkbox" name="feat_premium_{{ f.key }}" {{ 'checked' if f.key in role_features.premium else '' }}></td>
                 <td><input type="checkbox" name="feat_basico_{{ f.key }}" {{ 'checked' if f.key in role_features.basico else '' }}></td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
-          <div style="margin-top:10px"><button class="btn-primary" type="submit">Guardar features</button></div>
+          <div class="u-mt12"><button class="btn-primary" type="submit">Guardar features</button></div>
         </form>
-        <p class="muted" style="font-size:11px;margin-top:8px">La base histórica compartida (autosave 17:01, reconstrucción, cierres) la escribe sólo una instancia que usó hoy un <b>superuser</b>; las de premium y básico sólo guardan su journal local. No es una feature configurable.</p>
+        <p class="muted u-sm u-mt8">La base histórica compartida (autosave 17:01, reconstrucción, cierres) la escribe sólo una instancia que usó hoy un <b>superuser</b>; las de premium y básico sólo guardan su journal local. No es una feature configurable.</p>
       </div>
     </div>
 
     {# ── Salud de datos + errores recientes (on-demand, no toca el hot path) ── #}
     <div class="card">
-      <div class="card-title"><span>🩺 Salud de datos</span>
+      <div class="card-title"><span>{{ icon("info") }} Salud de datos</span>
         <span class="card-title-aux">feed · store · caches · pollers · errores del proceso</span></div>
       <div class="card-body">
         <div id="admin-salud" hx-get="/admin/salud" hx-trigger="load, every 60s" hx-swap="innerHTML">
-          <p class="muted" style="font-size:12px">Cargando…</p>
+          <p class="muted u-note">Cargando…</p>
         </div>
       </div>
     </div>
 
     {# ── Especies faltantes en la base (Delta + Galileo) — on-demand ── #}
     <div class="card">
-      <div class="card-title"><span>🧩 Especies faltantes · qué pulir en la base</span>
+      <div class="card-title"><span>{{ icon("database") }} Especies faltantes · qué pulir en la base</span>
         <span class="card-title-aux">carteras vs base de especies · Galileo sin normalizar</span></div>
       <div class="card-body">
         <div id="admin-especies" hx-get="/admin/especies-faltantes" hx-trigger="load" hx-swap="innerHTML">
-          <p class="muted" style="font-size:12px">Cargando…</p>
+          <p class="muted u-note">Cargando…</p>
         </div>
       </div>
     </div>
 
     {# ── Copias en conflicto / archivos viejos (OneDrive -HOST, .corrupto, .bak, .tmp) — on-demand ── #}
     <div class="card">
-      <div class="card-title"><span>🗂 Copias en conflicto y archivos viejos</span>
+      <div class="card-title"><span>{{ icon("copy") }} Copias en conflicto y archivos viejos</span>
         <span class="card-title-aux">carpeta de la app · Delta Bases · cierres · carteras · journal</span></div>
       <div class="card-body">
         <div id="admin-copias" hx-get="/admin/copias" hx-trigger="load" hx-swap="innerHTML">
-          <p class="muted" style="font-size:12px">Cargando…</p>
+          <p class="muted u-note">Cargando…</p>
         </div>
       </div>
     </div>
 
     {# ── Auditoría del OMS: visor + export CSV ── #}
     <div class="card">
-      <div class="card-title"><span>🧾 Auditoría OMS</span>
+      <div class="card-title"><span>{{ icon("table") }} Auditoría OMS</span>
         <span class="card-title-aux">oms_audit.jsonl — quién, qué, cuándo</span></div>
       <div class="card-body">
         <form hx-get="/admin/auditoria" hx-target="#admin-aud" hx-swap="innerHTML"
-              style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+              class="u-gap" style="margin-bottom:8px">
           <input type="text" name="q" placeholder="filtrar (especie, usuario, texto…)"
                  autocomplete="off" style="width:220px">
           <select name="evento">
@@ -270,11 +271,11 @@
             <option value="5000">últimos 5.000</option>
           </select>
           <button type="submit" class="btn-primary" style="font-size:12px">Filtrar</button>
-          <a href="/admin/auditoria.csv" target="_blank" class="lnk" style="font-size:12px"
+          <a href="/admin/auditoria.csv" target="_blank" class="lnk"
              onclick="this.href='/admin/auditoria.csv?'+new URLSearchParams(new FormData(this.closest('form'))).toString()">⤓ CSV</a>
         </form>
         <div id="admin-aud" hx-get="/admin/auditoria" hx-trigger="load" hx-swap="innerHTML">
-          <p class="muted" style="font-size:12px">Cargando…</p>
+          <p class="muted u-note">Cargando…</p>
         </div>
       </div>
     </div>
@@ -305,7 +306,7 @@
           <li>En el taskpane, pegar el token del usuario de <strong>esa</strong> instancia
             (su /admin) → Guardar y conectar → Probar.</li>
         </ol>
-        <p class="muted" style="margin:0">Alternativa sólo para un server centralizado (una máquina que
+        <p class="muted u-m0">Alternativa sólo para un server centralizado (una máquina que
           sirve a todos): bajar el manifest apuntado a la IP fija de ese server{% if excel_bases.ip %}
           (<a href="/excel/manifest.xml?base={{ excel_bases.ip | urlencode }}">⬇ manifest con {{ excel_bases.ip }}</a>){% endif %}
           — nunca al nombre NetBIOS de una notebook, que no siempre resuelve entre compus.</p>

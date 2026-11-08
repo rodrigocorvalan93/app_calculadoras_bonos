@@ -118,7 +118,7 @@
     hx-include="[name=code], [name=plazo], [name=mode], [name=value], [name=value_raw]"
     hx-swap="innerHTML"
   >
-    <p class="muted" style="font-size:12px;padding:8px 0">Cargando datos de mercado…</p>
+    <p class="muted u-note" style="padding:8px 0">Cargando datos de mercado…</p>
   </div>
 
   <div id="yas-result" aria-live="polite">
@@ -128,7 +128,7 @@
   {# Total return puntual: entrada = la ficha de arriba (hx-include del form
      YAS); salida = tasa/fecha de este mini-form. Sigue al bono (change del
      form principal) y recalcula al tocar tasa/fecha. #}
-  <div class="card" id="yas-tr-card" style="margin-top:14px">
+  <div class="card u-mt12" id="yas-tr-card">
     <div class="card-title">
       <span>Total return puntual</span>
       <span class="card-title-aux">salida a tasa · fecha</span>
@@ -151,10 +151,10 @@
           <span>Fecha salida (DD/MM/AAAA)</span>
           <input type="text" name="fecha_salida" placeholder="vacío = settle + 90 días" autocomplete="off">
         </label>
-        <button type="submit" class="btn-primary" style="align-self:end">Calcular</button>
+        <button type="submit" class="btn-primary field-end">Calcular</button>
       </form>
       <div id="yas-tr-body">
-        <p class="muted" style="font-size:12px;padding:6px 0">Calculando total return…</p>
+        <p class="muted u-note" style="padding:6px 0">Calculando total return…</p>
       </div>
     </div>
   </div>

@@ -1,3 +1,4 @@
+{% from "partials/_icons.html" import icon %}
 {% import "partials/_fx_macros.html" as fx %}
 {# ── Inicio: resumen del mercado (lo swapea entero el motor live) ────────────
    Tres tipos de tarjeta: KPI (label · valor · var · var %), bonos por segmento
@@ -81,22 +82,22 @@
     <a href="/curves?curve={{ main.curva }}">ver la curva →</a></div>
   {% endif %}
   {% else %}
-  <div class="card-body muted" style="font-size:12px">Sin bonos con cotización en este segmento.</div>
+  <div class="card-body muted u-note">Sin bonos con cotización en este segmento.</div>
   {% endif %}
 </div>
 {% endmacro %}
 
 <div class="ini-grid">
   <div class="card ini-card">
-    <div class="card-title"><span>💵 Tipos de cambio</span><span class="card-title-aux">plazo {{ plazo }} · <a href="/dolares">monitor →</a></span></div>
+    <div class="card-title"><span>{{ icon("dollar") }} Tipos de cambio</span><span class="card-title-aux">plazo {{ plazo }} · <a href="/dolares">monitor →</a></span></div>
     {{ kpi_table(tc) }}
   </div>
   <div class="card ini-card">
-    <div class="card-title"><span>📊 Tasas</span><span class="card-title-aux">TNA · <a href="/tasas">monitor →</a></span></div>
+    <div class="card-title"><span>{{ icon("chart-bar") }} Tasas</span><span class="card-title-aux">TNA · <a href="/tasas">monitor →</a></span></div>
     {{ kpi_table(tasas) }}
   </div>
   <div class="card ini-card">
-    <div class="card-title"><span>📈 Mercado</span><span class="card-title-aux">MSCI Merval · riesgo país · CEDEARs</span></div>
+    <div class="card-title"><span>{{ icon("chart-line") }} Mercado</span><span class="card-title-aux">MSCI Merval · riesgo país · CEDEARs</span></div>
     {{ kpi_table(mercado) }}
   </div>
 </div>
@@ -123,7 +124,7 @@
       </table>
     </div>
     {% else %}
-    <div class="card-body muted" style="font-size:12px">Sin acciones en el store todavía.</div>
+    <div class="card-body muted u-note">Sin acciones en el store todavía.</div>
     {% endif %}
   </div>
   {{ bonos_card(bonos['cer']) }}
@@ -154,7 +155,7 @@
       </table>
     </div>
     {% else %}
-    <div class="card-body muted" style="font-size:12px">Sin futuros con precio en el store.</div>
+    <div class="card-body muted u-note">Sin futuros con precio en el store.</div>
     {% endif %}
   </div>
 </div>

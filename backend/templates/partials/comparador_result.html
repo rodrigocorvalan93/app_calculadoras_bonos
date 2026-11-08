@@ -1,3 +1,4 @@
+{% from "partials/_icons.html" import icon %}
 {% if not ma and not mb %}
   <div class="alert">
     Elegí dos bonos y tocá <strong>Comparar</strong>.
@@ -16,59 +17,59 @@
     <table class="cashflows comp-table">
       <thead>
         <tr>
-          <th style="text-align:left">Métrica</th>
+          <th>Métrica</th>
           <th>{{ a or "A" }}</th>
           <th>{{ b or "B" }}</th>
           <th>Δ (B−A)</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td style="text-align:left">Nombre</td>
-            <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ ma.nombre if ma else "—" }}</td>
-            <td style="text-align:left;font-size:11px;color:var(--text-muted)">{{ mb.nombre if mb else "—" }}</td>
+        <tr><td>Nombre</td>
+            <td class="u-left u-sm" style="color:var(--text-muted)">{{ ma.nombre if ma else "—" }}</td>
+            <td class="u-left u-sm" style="color:var(--text-muted)">{{ mb.nombre if mb else "—" }}</td>
             <td>—</td></tr>
-        <tr><td style="text-align:left">Moneda</td>
+        <tr><td>Moneda</td>
             <td>{{ ma.moneda if ma else "—" }}</td>
             <td>{{ mb.moneda if mb else "—" }}</td><td>—</td></tr>
-        <tr><td style="text-align:left">Vto.</td>
+        <tr><td>Vto.</td>
             <td>{{ ma.vencimiento | ar_date if ma else "—" }}</td>
             <td>{{ mb.vencimiento | ar_date if mb else "—" }}</td><td>—</td></tr>
-        <tr><td style="text-align:left">Precio (% VN)</td>
+        <tr><td>Precio (% VN)</td>
             <td>{{ ma.precio_pct | ar_num(4) if ma else "—" }}</td>
             <td>{{ mb.precio_pct | ar_num(4) if mb else "—" }}</td><td>—</td></tr>
-        <tr><td style="text-align:left">Precio clean</td>
+        <tr><td>Precio clean</td>
             <td>{{ ma.precio_clean_pct | ar_num(4) if ma else "—" }}</td>
             <td>{{ mb.precio_clean_pct | ar_num(4) if mb else "—" }}</td><td>—</td></tr>
         <tr {% if mode == 'tir' %}style="background:rgba(0,180,200,.06)"{% endif %}>
-            <td style="text-align:left;font-weight:600">TIREA</td>
-            <td style="color:var(--accent);font-weight:600">{{ ma.tirea | ar_pct(2) if ma else "—" }}</td>
-            <td style="color:var(--accent);font-weight:600">{{ mb.tirea | ar_pct(2) if mb else "—" }}</td>
+            <td style="font-weight:600">TIREA</td>
+            <td class="cf-total">{{ ma.tirea | ar_pct(2) if ma else "—" }}</td>
+            <td class="cf-total">{{ mb.tirea | ar_pct(2) if mb else "—" }}</td>
             <td>{{ deltas.tirea | ar_pct(2) if 'tirea' in deltas else "—" }}</td></tr>
-        <tr><td style="text-align:left">TNA</td>
+        <tr><td>TNA</td>
             <td>{{ ma.tna | ar_pct(2) if ma else "—" }}{% if ma and ma.tna_convention_label and ma.tirea == ma.tirea %}<span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ ma.tna_convention_label }}</span>{% endif %}</td>
             <td>{{ mb.tna | ar_pct(2) if mb else "—" }}{% if mb and mb.tna_convention_label and mb.tirea == mb.tirea %}<span class="conv" style="color:var(--cyan);font-size:9.5px"> {{ mb.tna_convention_label }}</span>{% endif %}</td>
             <td>{{ deltas.tna | ar_pct(2) if 'tna' in deltas else "—" }}</td></tr>
-        <tr><td style="text-align:left">TEM</td>
+        <tr><td>TEM</td>
             <td>{{ ma.tem | ar_pct(2) if ma else "—" }}</td>
             <td>{{ mb.tem | ar_pct(2) if mb else "—" }}</td>
             <td>{{ deltas.tem | ar_pct(2) if 'tem' in deltas else "—" }}</td></tr>
-        <tr><td style="text-align:left">Duration</td>
+        <tr><td>Duration</td>
             <td>{{ ma.duration | ar_num(2) if ma else "—" }}</td>
             <td>{{ mb.duration | ar_num(2) if mb else "—" }}</td>
             <td>{{ deltas.duration | ar_num(2) if 'duration' in deltas else "—" }}</td></tr>
-        <tr><td style="text-align:left">Paridad</td>
+        <tr><td>Paridad</td>
             <td>{{ (ma.paridad * 100) | ar_pct_pp(1) if (ma and ma.paridad is number) else "—" }}</td>
             <td>{{ (mb.paridad * 100) | ar_pct_pp(1) if (mb and mb.paridad is number) else "—" }}</td>
             <td>{{ (deltas.paridad * 100) | ar_pct_pp(1) if 'paridad' in deltas else "—" }}</td></tr>
         <tr {% if mode == 'margen' %}style="background:rgba(0,180,200,.06)"{% endif %}>
-            <td style="text-align:left{% if mode == 'margen' %};font-weight:600{% endif %}">Margen TNA</td>
+            <td {% if mode == 'margen' %}style="font-weight:600"{% endif %}>Margen TNA</td>
             <td>{% if ma and ma.margen_na %}<span class="muted">no aplica</span>{% else %}{{ ma.margen_tna | ar_pct(2) if ma else "—" }}{% endif %}</td>
             <td>{% if mb and mb.margen_na %}<span class="muted">no aplica</span>{% else %}{{ mb.margen_tna | ar_pct(2) if mb else "—" }}{% endif %}</td>
             <td>{{ deltas.margen_tna | ar_pct(2) if 'margen_tna' in deltas else "—" }}</td></tr>
-        <tr><td style="text-align:left">Int. corridos</td>
+        <tr><td>Int. corridos</td>
             <td>{{ ma.intereses_corridos | ar_num(4) if ma else "—" }}</td>
             <td>{{ mb.intereses_corridos | ar_num(4) if mb else "—" }}</td><td>—</td></tr>
-        <tr><td style="text-align:left">Días rem.</td>
+        <tr><td>Días rem.</td>
             <td>{{ ma.dias_remanentes | ar_int if ma else "—" }}</td>
             <td>{{ mb.dias_remanentes | ar_int if mb else "—" }}</td><td>—</td></tr>
       </tbody>
@@ -76,18 +77,18 @@
   </div>
   {% if esp_a or esp_b %}
   <div style="padding:8px 14px;border-top:1px solid var(--border)">
-    <div class="resumen-h" style="margin-bottom:4px">Ficha Delta</div>
+    <div class="resumen-h">Ficha Delta</div>
     <table class="cashflows">
-      <thead><tr><th style="text-align:left">Campo</th><th style="text-align:left">{{ a }}</th><th style="text-align:left">{{ b }}</th></tr></thead>
+      <thead><tr><th>Campo</th><th class="u-left">{{ a }}</th><th class="u-left">{{ b }}</th></tr></thead>
       <tbody>
         {% for k in ["Emisor / Sponsor", "Sector", "Industria", "Ajuste", "Tasa", "Califica_Local", "Calificadora", "Legislación", "Clase de Activo"] %}
           {% set va = esp_a[k] if (esp_a and k in esp_a) else None %}
           {% set vb = esp_b[k] if (esp_b and k in esp_b) else None %}
           {% if va is not none or vb is not none %}
           <tr>
-            <td style="text-align:left;color:var(--text-muted);font-size:11px">{{ k }}</td>
-            <td style="text-align:left;font-size:11.5px">{{ va if va is not none else "—" }}</td>
-            <td style="text-align:left;font-size:11.5px">{{ vb if vb is not none else "—" }}</td>
+            <td class="u-sm" style="color:var(--text-muted)">{{ k }}</td>
+            <td class="u-left u-sm">{{ va if va is not none else "—" }}</td>
+            <td class="u-left u-sm">{{ vb if vb is not none else "—" }}</td>
           </tr>
           {% endif %}
         {% endfor %}
@@ -115,7 +116,7 @@
   {% endif %}
   {% if pos_a or pos_b %}
   <div style="padding:11px 14px;border-top:1px solid var(--border)">
-    <div class="resumen-h" style="margin-bottom:6px">Mi posición</div>
+    <div class="resumen-h">Mi posición</div>
     <div class="pos-grid">
       {% for tag, pos in [(a, pos_a), (b, pos_b)] if tag %}
       <div class="pos-col">
@@ -129,11 +130,11 @@
         </div>
         {% if pos %}
         <table class="cashflows pos-table">
-          <thead><tr><th style="text-align:left">Fondo</th><th>VN</th><th>Valor</th><th>% PN</th></tr></thead>
+          <thead><tr><th>Fondo</th><th>VN</th><th>Valor</th><th>% PN</th></tr></thead>
           <tbody>
             {% for f in pos.funds %}
             <tr>
-              <td style="text-align:left;font-size:11px">{{ f.nombre }}</td>
+              <td class="u-sm">{{ f.nombre }}</td>
               <td>{{ f.cantidad | ar_int }}</td>
               <td>{{ f.valor | ar_int }}</td>
               <td>{{ f.pct_pn | ar_pct(2) if f.pct_pn is not none else "—" }}</td>
@@ -166,8 +167,8 @@
 {# Sólo si AMBOS bonos pertenecen a la MISMA curva (cer vs cer, dual vs dual):
    scatter + NSS con los dos bonos resaltados en colores distintos. #}
 <div class="card locate-card">
-  <div class="card-title"><span>📍 Ambos en la curva · {{ locate_label or locate_curve }}</span>
-    <span class="card-title-aux"><b style="color:#ef4444">●</b> {{ ma.codigo }} · <b style="color:#22c55e">●</b> {{ mb.codigo }}<select class="locate-fuente" title="Fuente de la curva: precios BYMA o vector CAFCI (corporativos poco operados)" style="font-size:11px;margin-left:8px"><option value="byma">BYMA</option><option value="cafci">CAFCI</option></select></span></div>
+  <div class="card-title"><span>{{ icon("info") }} Ambos en la curva · {{ locate_label or locate_curve }}</span>
+    <span class="card-title-aux"><b style="color:#ef4444">●</b> {{ ma.codigo }} · <b style="color:#22c55e">●</b> {{ mb.codigo }}<select class="locate-fuente u-sm" title="Fuente de la curva: precios BYMA o vector CAFCI (corporativos poco operados)" style="margin-left:8px"><option value="byma">BYMA</option><option value="cafci">CAFCI</option></select></span></div>
   <div class="card-body">
     <div class="locate-box" data-locate data-curve="{{ locate_curve }}" data-plazo="{{ plazo }}"
          data-pts='[{"c":"{{ ma.codigo }}","d":{{ ma.duration }},"t":{{ ma.tirea * 100 }}},{"c":"{{ mb.codigo }}","d":{{ mb.duration }},"t":{{ mb.tirea * 100 }}}]'></div>

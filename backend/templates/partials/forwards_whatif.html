@@ -12,11 +12,11 @@
     <div class="wi-layout">
       <div class="wi-editor">
         <table class="cashflows wi-table" id="wi-prices">
-          <thead><tr><th style="text-align:left">Bono</th><th>Precio</th><th>TIR</th><th>Dur</th></tr></thead>
+          <thead><tr><th class="u-left">Bono</th><th>Precio</th><th>TIR</th><th>Dur</th></tr></thead>
           <tbody>
             {% for o in wi_rows %}
             <tr {% if o.edited %}class="wi-edited"{% endif %}>
-              <td style="text-align:left;color:var(--accent);font-weight:600">{{ o.code }}</td>
+              <td class="u-left" style="color:var(--accent);font-weight:600">{{ o.code }}</td>
               <td><input type="text" inputmode="decimal" class="wi-px" name="price_{{ o.code }}"
                          value="{% if o.price is not none %}{{ o.price | ar_num(2) }}{% endif %}"
                          placeholder="{% if o.market is not none %}{{ o.market | ar_num(2) }}{% else %}—{% endif %}"
@@ -31,7 +31,7 @@
             {% endfor %}
           </tbody>
         </table>
-        <div class="muted" style="font-size:11px;margin-top:6px">Precio en moneda nativa del bono (% VN). Vacío = precio de mercado.</div>
+        <div class="muted u-sm" style="margin-top:6px">Precio en moneda nativa del bono (% VN). Vacío = precio de mercado.</div>
       </div>
       <div class="wi-matrix">
         {% if wi_fwd.n < 2 %}

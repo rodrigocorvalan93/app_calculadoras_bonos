@@ -1,16 +1,17 @@
 {# Cuerpo del COMP (lo que swapea el form): avisos, gráfico (uPlot desde el
    JSON embebido) y cuadro del rango por activo. `res` = comp.comparar(...). #}
+{% from "partials/_icons.html" import icon %}
 {% set r = res %}
 {% if r.faltantes %}
-  <div class="alert" style="margin-top:10px">Sin historia guardada para <b>{{ r.faltantes | join(', ') }}</b>: bonos por código de calc, acciones / CEDEARs por ticker (la historia arranca con el autosave del cierre o con el backfill).</div>
+  <div class="alert">Sin historia guardada para <b>{{ r.faltantes | join(', ') }}</b>: bonos por código de calc, acciones / CEDEARs por ticker (la historia arranca con el autosave del cierre o con el backfill).</div>
 {% endif %}
 {% if r.sin_rango %}
-  <div class="alert" style="margin-top:10px">Sin datos en el rango elegido para <b>{{ r.sin_rango | join(', ') }}</b>.</div>
+  <div class="alert">Sin datos en el rango elegido para <b>{{ r.sin_rango | join(', ') }}</b>.</div>
 {% endif %}
 {% if r.ok %}
-<div class="card" style="margin-top:12px">
+<div class="card u-mt12">
   <div class="card-title">
-    <span>⚖ {{ r.modo_label }}{% if r.campo == 'tir' %} · TIR{% endif %}{% if r.base != 'ars' %} · {{ r.base_label }}{% endif %}</span>
+    <span>{{ icon("scale") }} {{ r.modo_label }}{% if r.campo == 'tir' %} · TIR{% endif %}{% if r.base != 'ars' %} · {{ r.base_label }}{% endif %}</span>
     <span class="card-title-aux">{{ r.series | length }} activos · {{ r.n }} ruedas · {{ r.desde | ar_date }} → {{ r.hasta | ar_date }}</span>
   </div>
   <div class="card-body" style="padding:6px 6px 0">
@@ -18,15 +19,15 @@
     <script type="application/json" id="hist-comp-data">{{ payload | safe }}</script>
   </div>
 </div>
-<div class="card" style="margin-top:12px">
+<div class="card u-mt12">
   <div class="card-title">
-    <span>🗒 Resumen del rango</span>
+    <span>{{ icon("table") }} Resumen del rango</span>
     <span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#comp-tbl" title="Descargar el cuadro (CSV es-AR)">⤓ CSV</button>{% if r.campo != 'tir' %} · Desde máx = caída desde el máximo del rango · Vol anual = desvío de los retornos diarios × √252{% else %} · Δ en puntos porcentuales de TIR{% endif %}</span>
   </div>
   <div class="card-body table-scroll" style="padding:0">
     <table id="comp-tbl" class="cashflows curve-table mercado-table" data-sortable>
       <thead><tr>
-        <th style="text-align:left" data-sort>Activo</th><th data-sort>Fuente</th><th data-sort>Desde</th><th data-sort>Hasta</th>
+        <th class="u-left" data-sort>Activo</th><th data-sort>Fuente</th><th data-sort>Desde</th><th data-sort>Hasta</th>
         <th data-sort>Inicio</th><th data-sort>Fin</th>
         <th data-sort title="{{ 'Diferencia de TIR fin − inicio, en puntos porcentuales' if r.campo == 'tir' else 'Variación fin / inicio · la barra mide |var| sobre ±20 %' }}">{{ 'Δ pp' if r.campo == 'tir' else 'Var %' }}</th>
         <th data-sort>Máx</th><th data-sort>Mín</th>
@@ -36,8 +37,8 @@
       <tbody>
       {% for s in r.series %}{% set st = s.stats %}
         <tr>
-          <td style="text-align:left;font-weight:600"><span class="comp-dot" style="background:{{ s.color }}"></span>{{ s.ticker }}</td>
-          <td style="color:var(--text-muted)">{{ s.fuente_label }}</td>
+          <td class="u-left" style="font-weight:600"><span class="comp-dot" style="background:{{ s.color }}"></span>{{ s.ticker }}</td>
+          <td class="muted">{{ s.fuente_label }}</td>
           <td>{{ st.desde | ar_date }}</td><td>{{ st.hasta | ar_date }}</td>
           <td>{{ st.inicio | ar_num(2) }}</td><td style="font-weight:600">{{ st.fin | ar_num(2) }}</td>
           {% if r.campo == 'tir' %}
@@ -59,5 +60,5 @@
   </div>
 </div>
 {% elif not r.faltantes and not r.sin_rango %}
-  <div class="alert" style="margin-top:10px">Elegí al menos un activo con historia guardada.</div>
+  <div class="alert">Elegí al menos un activo con historia guardada.</div>
 {% endif %}

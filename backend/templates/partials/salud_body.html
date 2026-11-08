@@ -1,0 +1,22 @@
+{# Cuerpo de /salud (se re-pide cada 30 s). `items` de services/salud.resumen
+   con las acciones ya filtradas por rol; `titular` = peor estado + conteo. #}
+<div class="salud-resumen sl-{{ titular.estado }}">
+  <span class="sl-dot" aria-hidden="true"></span>
+  <b>{{ titular.texto }}</b>
+  <span class="muted u-sm">· {{ hora }}</span>
+</div>
+<div class="salud-list">
+  {% for it in items %}
+  <div class="sl-item sl-{{ it.estado }}" data-key="{{ it.key }}">
+    <span class="sl-dot" aria-hidden="true"></span>
+    <div class="sl-main">
+      <div class="sl-head">
+        <span class="sl-titulo">{{ it.titulo }}</span>
+        <span class="sl-texto">{{ it.texto }}</span>
+      </div>
+      {% if it.detalle %}<div class="sl-detalle">{{ it.detalle }}</div>{% endif %}
+    </div>
+    {% if it.accion %}<a class="btn btn-sm sl-accion" href="{{ it.accion.href }}">{{ it.accion.label }}</a>{% endif %}
+  </div>
+  {% endfor %}
+</div>

@@ -1,3 +1,4 @@
+{% from "partials/_icons.html" import icon %}
 {# Formulario de conexión al broker. Lo incluye la página (/conexion) y, con
    `oob` = true, la respuesta de un login OK como swap fuera de banda: el form
    se reemplaza ENTERO (el input de clave viejo sale del DOM) y recién ahí
@@ -34,8 +35,8 @@
       <input type="password" name="password" id="conn-password" autocomplete="current-password"
              placeholder="{% if has_secret_pass %}(vacío = la de secrets.txt){% else %}requerida{% endif %}">
     </label>
-    <button type="submit" class="btn-primary" style="align-self:flex-end">🔌 Conectar</button>
-    <span id="conn-spin" class="htmx-indicator muted" style="align-self:flex-end">conectando…</span>
+    <button type="submit" class="btn-primary field-end">{{ icon("plug", 14) }} Conectar</button>
+    <span id="conn-spin" class="htmx-indicator muted field-end">conectando…</span>
   </div>
 </form>
 {% else %}
@@ -63,8 +64,8 @@
       <input type="password" name="password" id="conn-password" autocomplete="current-password"
              placeholder="(vacío = la de la casa)">
     </label>
-    <button type="submit" class="btn-primary" style="align-self:flex-end">🔌 Reconectar</button>
-    <span id="conn-spin" class="htmx-indicator muted" style="align-self:flex-end">conectando…</span>
+    <button type="submit" class="btn-primary field-end">{{ icon("plug", 14) }} Reconectar</button>
+    <span id="conn-spin" class="htmx-indicator muted field-end">conectando…</span>
   </div>
 </form>
 {% endif %}

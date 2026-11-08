@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
 {% block title %}Escenario{% endblock %}
 {% block tab_escenario %}active{% endblock %}
 
@@ -45,13 +46,13 @@
           <span>
             {# Presets nombrados: "base", "estrés deva", … — biblioteca de
                escenarios sobre las prefs persistidas. #}
-            <select x-model="presetSel" style="font-size:11px;max-width:130px" title="Presets guardados">
+            <select x-model="presetSel" class="u-sm" style="max-width:130px" title="Presets guardados">
               <option value="">— preset —</option>
               {% for p in presets %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
             </select>
             <button type="button" class="lnk" @click="presetApply()" title="Cargar el preset elegido como escenario activo">cargar</button>
-            <button type="button" class="lnk" @click="presetSaveAs()" title="Guardar el escenario actual (senderos fijos + tildes) con un nombre">💾 guardar como…</button>
-            <button type="button" class="lnk" @click="presetDelete()" title="Borrar el preset elegido">🗑</button>
+            <button type="button" class="lnk" @click="presetSaveAs()" title="Guardar el escenario actual (senderos fijos + tildes) con un nombre">{{ icon("save", 14) }} guardar como…</button>
+            <button type="button" class="lnk" @click="presetDelete()" title="Borrar el preset elegido">{{ icon("x", 14) }}</button>
             ·
             <button type="button" class="lnk" @click="resetDefaults()" title="Borrar lo fijado y volver a los defaults vivos (economista / ROFEX / TAMAR actual). Los presets guardados no se tocan.">↺ defaults</button>
             ·
@@ -61,7 +62,7 @@
         <div class="table-scroll">
           <table class="cashflows sendero-tbl">
             <thead><tr>
-              <th style="text-align:left">Driver</th>
+              <th class="u-left">Driver</th>
               {# Meses reales en vez de M1/M2 (tooltip: nº de tramo + fechas exactas) #}
               <template x-for="m in nMonths" :key="m">
                 <th x-text="(slots[m-1]||{}).mes || ('M'+m)"
@@ -72,7 +73,7 @@
             <tbody>
               <template x-for="d in drivers" :key="d.key">
                 <tr>
-                  <td style="text-align:left"><b x-text="d.label"></b> <i class="muted" x-text="d.unit"></i></td>
+                  <td class="u-left"><b x-text="d.label"></b> <i class="muted" x-text="d.unit"></i></td>
                   <template x-for="i in nMonths" :key="i">
                     <td><input type="text" class="sendero-in" inputmode="decimal" autocomplete="off"
                                :placeholder="d.ph" x-model="cells[d.key][i-1]"
@@ -97,7 +98,7 @@
         <input type="hidden" name="mep_path"   :value="ser('mep_path')">
         <input type="hidden" name="tamar_path" :value="ser('tamar_path')">
         <input type="hidden" name="cats_off"   :value="catsOff.join(',')">
-        <p class="muted" style="font-size:11px;margin:6px 2px 0">Implícitos hoy:
+        <p class="muted u-sm" style="margin:6px 2px 0">Implícitos hoy:
           inflación ≈ <b>{{ infl_pct | ar_num(2) if infl_pct is not none else '—' }}%</b>/mes ·
           deva A3500 ≈ <b>{{ deva_mens_pct | ar_num(2) }}%</b>/mes ·
           TAMAR ≈ <b>{{ tamar_now | ar_num(2) if tamar_now is not none else '—' }}%</b> TNA.
@@ -126,7 +127,7 @@
         </div>
         {% endfor %}
       </div>
-      <p class="muted" style="font-size:11.5px;margin:6px 0 0">El Exit YTM viene precargado con la TIREA
+      <p class="muted u-sm" style="margin:6px 0 0">El Exit YTM viene precargado con la TIREA
         actual de cada categoría (escenario sin cambio de tasas = carry puro). Editá para imaginar
         compresión/ampliación; la pendiente tilta la salida por duration.</p>
 

@@ -30,7 +30,7 @@
         <rect class="cfc-bar cfc-bar-b" x="250" y="-9" width="11" height="11"/><text x="266" y="0">{{ cf.b }} · {{ cf.n_b }} pago{{ "s" if cf.n_b != 1 else "" }} · cobra {{ cf.tot_b | ar_hum }}</text>
       </g>
     </svg>
-    <p class="muted" style="font-size:11px;margin:6px 0 0">Flujos pendientes desde la liquidación ({{ cf.desde | ar_date }}) hasta {{ cf.hasta | ar_date }}, en la fecha hábil de pago; cada barra = interés + amortización con ajuste (CER / UVA / A3500 aplicable) × VN. {{ cf.nota }}.</p>
+    <p class="muted u-note" style="margin:6px 0 0">Flujos pendientes desde la liquidación ({{ cf.desde | ar_date }}) hasta {{ cf.hasta | ar_date }}, en la fecha hábil de pago; cada barra = interés + amortización con ajuste (CER / UVA / A3500 aplicable) × VN. {{ cf.nota }}.</p>
   </div>
 </div>
 {% endif %}

@@ -10,7 +10,7 @@
     <h1>Posiciones</h1>
     <p class="muted">Tenencias por fondo (Delta). La tabla <strong>no se refresca sola</strong> (para no pisar el <em>Last</em> que tipeás): tocá <strong>↻ Precios BYMA</strong> para traer precios, o <strong>↻ Cartera</strong> para releer las posiciones del Delta.</p>
     {% if status and status.asof %}
-      <p class="muted" style="font-size:11px;opacity:.7;margin-top:-6px">Última cartera: {{ status.asof }}</p>
+      <p class="muted u-sm" style="opacity:.7;margin-top:-6px">Última cartera: {{ status.asof }}</p>
     {% endif %}
   </header>
 
@@ -42,11 +42,11 @@
             <option value="CI"   {% if plazo == "CI"   %}selected{% endif %}>CI</option>
           </select>
         </label>
-        <button type="button" class="btn-primary" style="align-self:flex-end"
+        <button type="button" class="btn-primary field-end"
                 hx-get="/posiciones/table" hx-target="#pos-fondo" hx-swap="innerHTML"
                 hx-include="[name=fondo], [name=plazo]"
                 title="Trae los últimos precios BYMA a la tabla. La tabla NO se refresca sola para no pisar lo que tipeás en la columna Last.">↻ Precios BYMA</button>
-        <a class="btn-primary" style="align-self:flex-end"
+        <a class="btn-primary field-end"
            href="/posiciones?refresh=1{% if selected is not none %}&fondo={{ selected }}{% endif %}&plazo={{ plazo }}"
            :href="'/posiciones?refresh=1' + (fondo ? '&fondo=' + encodeURIComponent(fondo) : '') + '&plazo=' + encodeURIComponent(plazo)"
            title="Re-lee la cartera del Delta desde el archivo (lectura completa). Conserva el fondo y el plazo elegidos.">↻ Cartera</a>
@@ -58,11 +58,11 @@
      mismo componente que Curvas/Mercado. Vive FUERA del swap → persiste. #}
   <div class="tbl-filters" data-table-filters="#pos-tbl">
     <input type="text" data-f-text placeholder="filtrar especie / emisor / categoría…" autocomplete="off">
-    <span class="muted" style="font-size:11px">·</span>
+    <span class="muted u-sm">·</span>
     <select data-f-col title="columna"></select>
     <select data-f-op title="operador"><option value=">=">≥</option><option value="<=">≤</option></select>
     <input type="text" data-f-val placeholder="valor (ej 1M, 60)" autocomplete="off" style="width:96px">
-    <button type="button" class="btn-primary" data-f-add style="font-size:11px">+ filtro</button>
+    <button type="button" class="btn btn-primary btn-sm" data-f-add>+ filtro</button>
     <span data-f-chips></span>
   </div>
 

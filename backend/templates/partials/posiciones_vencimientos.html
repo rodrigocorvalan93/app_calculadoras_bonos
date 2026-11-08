@@ -56,7 +56,7 @@
 {% elif fondo is not none and otros_ars %}
 <div class="card venc-chart">
   <div class="card-title"><span>Perfil de vencimientos · {{ nombre }}</span></div>
-  <div class="card-body muted" style="font-size:12px">Sin flujos proyectables: el fondo no tiene
+  <div class="card-body muted u-note">Sin flujos proyectables: el fondo no tiene
     bonos con ficha (acciones / CEDEARs / FCI / liquidez
     {%- if otros_pct is not none %} = {{ (otros_pct * 100) | ar_pct_pp(1) }} del fondo{% endif %}).</div>
 </div>

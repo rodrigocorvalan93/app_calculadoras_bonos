@@ -16,7 +16,7 @@
     <table id="eq-tbl" class="cashflows curve-table mercado-table" data-sortable>
       <thead>
         <tr>
-          <th data-sort style="text-align:left">Código</th>
+          <th data-sort class="u-left">Código</th>
           {% if panel == "todas" %}<th data-sort title="Panel BYMA: Líder / General · I = índice">Panel</th>{% endif %}
           <th data-sort class="col-oclh grp">Open</th>
           <th data-sort class="col-oclh">Close</th>
@@ -41,12 +41,12 @@
           {% set vcls = 'var-up' if (r.var_pct is not none and r.var_pct >= 0) else ('var-down' if r.var_pct is not none else '') %}
           {% if r.indice %}
           <tr class="row-indice" data-pin title="Índice MSCI Merval (MMSCI) · nivel y variación del día (sin libro)">
-            <td style="text-align:left;font-weight:650">{{ r.code }} <span class="pill" style="font-size:10px;margin-left:4px">índice</span></td>
+            <td class="u-left" style="font-weight:650">{{ r.code }} <span class="pill" style="font-size:10px;margin-left:4px">índice</span></td>
           {% else %}
-          <tr style="cursor:pointer"
+          <tr class="u-pointer"
               hx-get="/mercado/book/{{ r.code }}?plazo={{ plazo }}" hx-target="#mercado-book" hx-swap="innerHTML"
               title="Ver libro de {{ r.code }}">
-            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
+            <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.code }}</td>
           {% endif %}
             {% if panel == "todas" %}<td><span class="pill" style="font-size:10px;{{ 'border-color:rgba(34,197,94,.5)' if r.panel == 'L' else '' }}">{{ r.panel }}</span></td>{% endif %}
             <td class="col-oclh grp">{{ r.open | ar_num(2) }}</td>
@@ -56,15 +56,15 @@
             <td class="col-oclh">{% if r.range_pos is not none %}<div class="rango"><i style="left:{{ (r.range_pos*100)|round(1) }}%"></i></div>{% else %}<span class="muted">·</span>{% endif %}</td>
             <td class="grp var-cell {{ r.var_pct | var_cls }}" style="--vw:{{ r.var_pct | var_w(5) }}%">{{ r.var_pct | ar_pct_pp(2) }}</td>
             <td class="{{ vcls }}">{{ r.var_px | ar_num(2) }}</td>
-            <td class="grp" style="color:var(--text-muted)">{{ r.bid_size | ar_int }}</td>
+            <td class="grp muted">{{ r.bid_size | ar_int }}</td>
             <td>{{ r.bid | ar_num(2) }}</td>
             <td class="grp" style="font-weight:650">{{ r.last | ar_num(2) }}</td>
             <td>{{ r.vwap | ar_num(2) }}</td>
             <td class="grp">{{ r.offer | ar_num(2) }}</td>
-            <td style="color:var(--text-muted)">{{ r.offer_size | ar_int }}</td>
+            <td class="muted">{{ r.offer_size | ar_int }}</td>
             <td class="grp vol-cell" style="--vf:{{ ((r.volume_frac or 0)*100)|round(0)|int }}%">{{ r.volume | ar_hum }}</td>
-            <td style="color:var(--text-muted)">{{ r.nominal | ar_hum }}</td>
-            <td class="grp" style="font-size:10.5px;color:var(--text-muted)">{{ r.last_ts | ar_ts }}</td>
+            <td class="muted">{{ r.nominal | ar_hum }}</td>
+            <td class="grp u-xs muted">{{ r.last_ts | ar_ts }}</td>
           </tr>
         {% endfor %}
       </tbody>

@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
 {% block title %}Dólares{% endblock %}
 {% block tab_dolares %}active{% endblock %}
 
 {% block content %}
 <section class="curves">
   <header class="yas-header">
-    <h1>💵 Monitor de Dólares</h1>
+    <h1>{{ icon("dollar") }} Monitor de Dólares</h1>
     <p class="muted">
       USD = vía Cable (ticker …C) · USB = vía MEP/Bolsa (ticker …D).
       Bid implícito = ARS bid / pata-USD offer · Offer = ARS offer / pata-USD bid ·
@@ -44,7 +45,7 @@
 
   {# ── 3. Calculadora de operación FX ──────────────────────────────── #}
   <div class="card">
-    <div class="card-title"><span>🧮 Calculadora de operación FX</span>
+    <div class="card-title"><span>{{ icon("table") }} Calculadora de operación FX</span>
       <span class="card-title-aux">comprar/vender USD cruzando el bono contra su pata dólar</span>
     </div>
     <div class="card-body">
@@ -91,7 +92,7 @@
 
   {# ── 4. Calculadora de canje (USB ⇄ USD) ─────────────────────────── #}
   <div class="card">
-    <div class="card-title"><span>🔁 Calculadora de canje</span>
+    <div class="card-title"><span>{{ icon("refresh") }} Calculadora de canje</span>
       <span class="card-title-aux">USB ⇄ USD por profundidad: mejor bono, nominales y precios promedio</span>
     </div>
     <div class="card-body">
@@ -116,7 +117,7 @@
         </div>
       </form>
       <div id="canje-res" style="margin-top:10px">
-        <p class="muted" style="font-size:12px;margin:4px 0 0">Ingresá un monto en la moneda de origen (USB · MEP) y te digo bono, nominales y precios por profundidad.</p>
+        <p class="muted u-note" style="margin:4px 0 0">Ingresá un monto en la moneda de origen (USB · MEP) y te digo bono, nominales y precios por profundidad.</p>
       </div>
     </div>
   </div>

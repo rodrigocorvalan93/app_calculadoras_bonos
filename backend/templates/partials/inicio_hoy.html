@@ -1,0 +1,21 @@
+{# Línea «hoy» de Inicio (glow-up E): día · rueda · liquidaciones · próximo
+   feriado · cierre histórico. La arma services/hoy.linea_hoy; se refresca
+   cada 5 min (/inicio/hoy) y con data-skip-same no re-pinta si no cambió. #}
+{% from "partials/_icons.html" import icon %}
+<div class="ini-hoy" data-hoy="{{ hoy.fecha }}">
+  <span class="ih-item ih-dia">{{ icon("clock", 14) }} <b>{{ hoy.dia_txt }}</b></span>
+  <span class="ih-item ih-{{ hoy.rueda_estado }}" title="Horario de rueda BYMA {{ hoy.horario }} (hora BA)">
+    <i class="ih-dot" aria-hidden="true"></i> Rueda {{ hoy.rueda_txt }}
+  </span>
+  {% if hoy.feriado_hoy %}<span class="ih-item ih-warn">{{ icon("warning", 14) }} Feriado: {{ hoy.feriado_hoy }}</span>{% endif %}
+  <span class="ih-item" title="A qué fecha liquida una operación de hoy">Liquida CI {{ hoy.liq_ci }} · 24 hs {{ hoy.liq_24 }}</span>
+  {% if hoy.prox_feriado %}
+  <span class="ih-item" title="Próximo feriado entre semana del calendario argentino (el de rentafija)">
+    Próximo feriado: {{ hoy.prox_feriado.dia }} {{ hoy.prox_feriado.fecha_fmt }} · {{ hoy.prox_feriado.nombre }}
+    <span class="muted">(en {{ hoy.prox_feriado.en_dias }} día{{ "s" if hoy.prox_feriado.en_dias != 1 }})</span>
+  </span>
+  {% endif %}
+  <a class="ih-item ih-{{ hoy.cierre_cls }}" href="/salud" title="Estado de la base histórica (click: salud de la app)">
+    <i class="ih-dot" aria-hidden="true"></i> Cierre histórico: {{ hoy.cierre_txt }}
+  </a>
+</div>

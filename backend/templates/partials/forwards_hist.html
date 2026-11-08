@@ -1,8 +1,8 @@
 {# Histórico del forward corto→largo: métricas + serie SVG (estilo fc-*). #}
 {% if st is none or not hb_ok %}
-  <p class="muted" style="font-size:12px">Sin base histórica cargada (se arma con el autoguardado diario de Históricos).</p>
+  <p class="muted u-note">Sin base histórica cargada (se arma con el autoguardado diario de Históricos).</p>
 {% elif st.n == 0 %}
-  <p class="muted" style="font-size:12px">Sin ruedas con dato simultáneo de {{ corto }} y {{ largo }} en la base (¿bonos nuevos o par invertido?).</p>
+  <p class="muted u-note">Sin ruedas con dato simultáneo de {{ corto }} y {{ largo }} en la base (¿bonos nuevos o par invertido?).</p>
 {% else %}
 <div class="metrics-grid metrics-margen">
   <div class="metric metric-highlight">

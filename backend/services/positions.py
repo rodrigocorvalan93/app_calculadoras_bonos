@@ -465,7 +465,12 @@ def _load() -> Dict[str, Any]:
     try:
         dfc = pd.read_excel(comp_path, sheet_name="Sheet1")
     except Exception as exc:  # noqa: BLE001
-        out["error"] = f"Error leyendo composición: {exc}"
+        # Marcador de OneDrive sin bajar (Windows, [Errno 22]): que Posiciones
+        # y Matriz digan la CAUSA y el remedio, no el errno (glow-up C, 06/11).
+        # El vigilante de datos_nube recarga solo cuando el archivo baja.
+        from backend.services import nube
+        out["error"] = (nube.remedio(comp_path) if nube.ilegible_por_nube(comp_path, exc)
+                        else f"Error leyendo composición: {exc}")
         return out
 
     if "CodFondo" not in dfc.columns:
@@ -505,7 +510,9 @@ def _load() -> Dict[str, Any]:
             for _, r in dfp.dropna(subset=["CodFondo", "PN"]).iterrows():
                 pn[int(r["CodFondo"])] = float(r["PN"])
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[positions] PN load failed: %s", exc)
+            from backend.services import nube
+            logger.warning("[positions] PN load failed: %s",
+                           nube.remedio(pn_path) if nube.ilegible_por_nube(pn_path, exc) else exc)
 
     # Fondos Galileo (best-effort): jamás voltean la carga de Delta.
     try:

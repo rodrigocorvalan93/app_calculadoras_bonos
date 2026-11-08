@@ -5,11 +5,11 @@
 <div id="admin-copias-body" hx-request='{"timeout":600000}'>
   {% if msg %}<div class="alert alert-ok" style="margin-bottom:8px">{{ msg }}</div>{% endif %}
   {% if error %}<div class="alert alert-error" style="margin-bottom:8px">{{ error }}</div>{% endif %}
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+  <div class="u-gap" style="margin-bottom:8px">
     <button class="btn-primary" style="font-size:12px" hx-post="/admin/copias/revisar"
             hx-target="#admin-copias-body" hx-swap="outerHTML" hx-indicator="#copias-ind"
             title="Lee cada copia (filas, ruedas, última) y la compara con su principal: cuál es más reciente, cuál tiene más datos y qué ruedas aporta">Revisar copias</button>
-    <span id="copias-ind" class="htmx-indicator muted" style="font-size:12px">Revisando… (una copia Excel grande tarda unos segundos)</span>
+    <span id="copias-ind" class="htmx-indicator muted u-note">Revisando… (una copia Excel grande tarda unos segundos)</span>
     {% if analizado and n_inutiles %}
     <button class="btn-ghost btn-danger" hx-post="/admin/copias/borrar-inutiles"
             hx-target="#admin-copias-body" hx-swap="outerHTML"
@@ -20,33 +20,33 @@
       {{ carpetas | length }} carpetas{% if n_copias and not analizado %} · sin revisar{% endif %}</span>
   </div>
   {% if not grupos %}
-  <p class="muted" style="font-size:12px;margin:0">No hay copias en conflicto ni archivos viejos en:
+  <p class="muted u-note u-m0">No hay copias en conflicto ni archivos viejos en:
     {% for c in carpetas %}<code title="{{ c.path }}">{{ c.label }}</code>{{ ' · ' if not loop.last else '' }}{% endfor %}.</p>
   {% else %}
   <div class="table-scroll">
     <table class="cashflows copias-table" style="font-size:11.5px">
-      <thead><tr><th style="text-align:left">archivo</th><th>tipo</th><th>tamaño</th><th>modificado</th>
-        <th>filas</th><th>ruedas</th><th style="text-align:left">veredicto</th><th></th></tr></thead>
+      <thead><tr><th class="u-left">archivo</th><th>tipo</th><th>tamaño</th><th>modificado</th>
+        <th>filas</th><th>ruedas</th><th class="u-left">veredicto</th><th></th></tr></thead>
       <tbody>
         {% for g in grupos %}
-        <tr class="copias-grupo"><td colspan="8" style="text-align:left">
+        <tr class="copias-grupo"><td colspan="8" class="u-left">
           <b>{{ g.carpeta }}</b> · {% if g.principal_nombre %}principal <code>{{ g.principal_nombre }}</code>{% else %}sin principal al lado{% endif %}
           {% if g.principal_stats and not g.principal_stats.error %}<span class="muted">({{ g.principal_stats.filas }} filas{% if g.principal_stats.ruedas is defined %} · {{ g.principal_stats.ruedas }} ruedas{% if g.principal_stats.hasta %} hasta {{ g.principal_stats.hasta }}{% endif %}{% endif %})</span>
           {% elif g.principal_stats and g.principal_stats.error %}<span style="color:var(--red)">principal ilegible: {{ g.principal_stats.error }}</span>{% endif %}
           <span class="muted" title="{{ g.carpeta_path }}">· {{ g.carpeta_path }}</span></td></tr>
         {% for e in g.copias %}
         <tr>
-          <td style="text-align:left" title="{{ e.path }}">{{ e.nombre }}{% if e.local %} <span class="muted">(local)</span>{% endif %}</td>
+          <td class="u-left" title="{{ e.path }}">{{ e.nombre }}{% if e.local %} <span class="muted">(local)</span>{% endif %}</td>
           <td><span class="pill">{{ e.tipo_label }}</span></td>
-          <td style="white-space:nowrap">{{ e.tam }}</td>
-          <td style="white-space:nowrap">{{ e.mtime }} <span class="muted">· {{ e.edad_dias }} d</span>{% if e.mas_reciente %} <span title="más reciente que la principal">⬆</span>{% endif %}</td>
+          <td class="u-nowrap">{{ e.tam }}</td>
+          <td class="u-nowrap">{{ e.mtime }} <span class="muted">· {{ e.edad_dias }} d</span>{% if e.mas_reciente %} <span title="más reciente que la principal">⬆</span>{% endif %}</td>
           <td>{% if e.stats and e.stats.filas is defined %}{{ e.stats.filas }}{% elif e.stats and e.stats.entradas is defined %}{{ e.stats.entradas }} <span class="muted">entr.</span>{% else %}—{% endif %}</td>
-          <td style="white-space:nowrap">{% if e.stats and e.stats.ruedas is defined %}{{ e.stats.ruedas }} <span class="muted">{{ e.stats.desde }} → {{ e.stats.hasta }}</span>{% else %}—{% endif %}</td>
-          <td style="text-align:left">
+          <td class="u-nowrap">{% if e.stats and e.stats.ruedas is defined %}{{ e.stats.ruedas }} <span class="muted">{{ e.stats.desde }} → {{ e.stats.hasta }}</span>{% else %}—{% endif %}</td>
+          <td class="u-left">
             {% if e.veredicto %}<span class="{{ 'copias-aporta' if e.aporta else ('copias-inutil' if e.aporta is false else '') }}">{{ e.veredicto }}</span>
             {% else %}<span class="muted">sin revisar</span>{% endif %}
           </td>
-          <td style="white-space:nowrap">
+          <td class="u-nowrap">
             {% if e.incorporable %}
             <form hx-post="/admin/copias/incorporar" hx-target="#admin-copias-body" hx-swap="outerHTML" style="display:inline"
                   hx-confirm="¿Incorporar a {{ e.principal_nombre }} las ruedas {{ e.ruedas_extra_fmt }} que sólo están en {{ e.nombre }}? La copia queda como está (borrarla es otro click).">

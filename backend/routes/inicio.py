@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse
 
 from backend.cache_seq import seq_cached
 from backend.routes.curves import _row_for_code, _row_pool, _rows_en_seq, book_context
-from backend.services import auth as auth_svc, bond_universe, inicio as inicio_svc, marketdata_store, pizarra as piz_svc, pricing
+from backend.services import auth as auth_svc, bond_universe, hoy as hoy_svc, inicio as inicio_svc, marketdata_store, pizarra as piz_svc, pricing
 
 logger = logging.getLogger("backend.inicio.routes")
 
@@ -89,8 +89,17 @@ async def inicio_page(request: Request) -> HTMLResponse:
     ctx = await _contexto()
     prefs = await _prefs(request)
     piz = await _pizarra_ctx(request, prefs)
+    hoy = await asyncio.get_running_loop().run_in_executor(None, hoy_svc.linea_hoy)
     return _render(request, "inicio.html", piz_codes=bond_universe.all_codes(), piz_y=prefs["y"],
-                   piz_n=len(prefs["cuadros"]), **piz, **ctx)
+                   piz_n=len(prefs["cuadros"]), hoy=hoy, **piz, **ctx)
+
+
+@router.get("/inicio/hoy", response_class=HTMLResponse)
+async def inicio_hoy(request: Request) -> HTMLResponse:
+    """La línea «hoy» (día, rueda, liquidaciones, próximo feriado, cierre):
+    se refresca cada 5 min — cambia con la hora, no con el feed."""
+    hoy = await asyncio.get_running_loop().run_in_executor(None, hoy_svc.linea_hoy)
+    return _render(request, "partials/inicio_hoy.html", hoy=hoy)
 
 
 @router.get("/inicio/body", response_class=HTMLResponse)

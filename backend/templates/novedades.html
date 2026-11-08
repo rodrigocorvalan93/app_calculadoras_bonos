@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Qué hay de nuevo{% endblock %}
+
+{% block content %}
+<section class="curves salud-page">
+  <header class="yas-header">
+    <h1>Qué hay de nuevo</h1>
+    <p class="muted">Los últimos cambios de la app, del más nuevo al más viejo.
+    {% if version %}Esta instancia corre <code>{{ version }}</code>.{% endif %}</p>
+  </header>
+
+  {% if grupos %}
+  <div class="card">
+    <div class="card-body">
+      {% for fecha, items in grupos %}
+      <div class="nv-fecha">{{ fecha }}</div>
+      <ul class="nv-list">
+        {% for it in items %}
+        <li><span class="nv-sha" title="commit {{ it.sha }}">{{ it.sha }}</span> {{ it.titulo }}{% if it.pr %}
+          <a class="nv-pr" href="{{ repo_url }}/pull/{{ it.pr }}" target="_blank" rel="noopener" title="Ver el cambio en GitHub">#{{ it.pr }}</a>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% endfor %}
+      <p class="muted u-note u-m0">{{ n }} cambios listados.</p>
+    </div>
+  </div>
+  {% else %}
+  {% from "partials/_estados.html" import empty %}
+  {{ empty("Sin historial para mostrar",
+           ("No se pudo leer el historial de git en esta máquina" ~ (": " ~ estado.motivo if estado.motivo else "") ~ ". La app funciona igual; el historial está en GitHub."),
+           '<a class="btn btn-sm" href="' ~ repo_url ~ '/commits/main" target="_blank" rel="noopener">Ver en GitHub</a>',
+           icono="info", tipo="neutro") }}
+  {% endif %}
+</section>
+{% endblock %}

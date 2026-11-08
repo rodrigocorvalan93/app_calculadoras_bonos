@@ -75,8 +75,13 @@
       {% endif %}
       <button type="button" class="rail-toggle" onclick="if (window.ckOpen) window.ckOpen()"
               title="Búsqueda global — Ctrl+K / Cmd+K (bonos y pestañas)" aria-label="Buscar (Ctrl+K)">{{ icon("search") }}</button>
-      <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
-      <span id="live-meta" class="live-meta muted"></span>
+      {# Dot + texto del feed son un link: /salud (qué anda y qué no, para
+         todos) o, con el feed caído / precios viejos, /conexion para
+         reconectar ahí mismo (app.js meta() cambia el href). #}
+      <a id="live-link" class="live-link" href="/salud" title="Estado del feed y de los datos — click para ver la salud de la app">
+        <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
+        <span id="live-meta" class="live-meta muted"></span>
+      </a>
       {% if request.state.user %}
       {% if request.state.user.role == 'superuser' %}
       <a class="rail-toggle" href="/admin" title="Panel de administración (usuarios y permisos)" aria-label="Administración">{{ icon("user") }}</a>
@@ -163,6 +168,8 @@
        lo manda (HX-Trigger) el botón Ignorar del banner: refresco a los 2,5 s
        en vez de esperar el minuto. #}
     <span id="cierre-chip" class="cierre-slot" hx-get="/cierre/chip" hx-trigger="load, every 60s, cierre-refresh from:body delay:2500ms" hx-swap="innerHTML"></span>
+    {# Versión que corre → «Qué hay de nuevo» (git log, leído al arrancar). #}
+    <a class="footer-ver" href="/novedades" title="Qué hay de nuevo en la app">{{ app_version() or "novedades" }}</a>
     {% endif %}
   </footer>
 

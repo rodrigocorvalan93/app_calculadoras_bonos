@@ -893,6 +893,93 @@ everywhere; numbers use `tabular-nums` instead of monospace. Dark
 default with `[data-theme="light"]` available. No frameworks (no
 Tailwind / Bootstrap / Google Fonts / JS libs beyond htmx + Alpine).
 
+**Sistema de componentes (glow-up B, 06/11)**: marca ÚNICA «ΔYieldVertex»
+(`<title>{{ title }} · ΔYieldVertex</title>` en `base.html` / `auth_base.html`;
+el login lleva la tagline "Calculadora de bonos"; el pie ya no habla de
+"FastAPI rewrite"). **Iconos SVG** en vez de emojis: sprite
+`partials/_icons.html` (`{{ sprite() }}` una vez en `base.html`, macro
+`icon(nombre, size=16, cls="")` → `<svg class="ico"><use href="#i-…"/></svg>`;
+nombres: home bell search user plug logout dollar chart-bar chart-line ruler
+save scale database more copy download refresh warning info check x clock
+table pie settings keyboard news lock inbox). Un emoji DECORATIVO (título de
+card, botón, encabezado) va a `icon(...)`; un glyph FUNCIONAL (↻ ⤓ ⧉ ▾ ●
+flechas de variación) y un emoji dentro de una oración se quedan. **Estados**
+compartidos en `partials/_estados.html`: `empty(titulo, causa, acciones,
+icono, tipo)` (`tipo` = neutro | warn | error; `causa` / `acciones` son HTML
+armado por el template — NUNCA texto del usuario, que va en `titulo`) y
+`skeleton(filas, texto)`; reemplazan al cartel amarillo genérico: un vacío
+dice la CAUSA y ofrece la ACCIÓN. **Páginas de error** con la plantilla de la
+app (`error.html` vía `main._pagina_error`: 403 / 404 / 405 / 500; un request
+de htmx recibe un `alert-error` corto, `/excel/*`, `/api/*` y `Accept:
+application/json` reciben JSON, `/static/*` sigue con el 404 corto).
+**Pestañas secundarias** = `.sub-tabs` / `.sub-tab` (Históricos). **Barra de
+progreso** global `#hx-progress` (app.js): sólo requests disparados por el
+usuario (`deUsuario`), nunca los polls live. **CSS de componentes** al final de
+`style.css` ("Sistema de componentes"): `.btn` base + variantes, utilidades
+`.u-left .u-right .u-center .u-sm .u-xs .u-note .u-m0 .u-mt0 .u-mt8 .u-mt12
+.u-mb6 .u-mb8 .u-mb12 .u-nowrap .u-ellipsis .u-hide .u-inline .u-pointer
+.u-mono .u-grow .u-gap .field-end`; los templates usan ESO en vez de
+`style="…"` (quedan inline sólo los dinámicos `{{ }}`, los layouts con varias
+propiedades y lo que ninguna clase cubre). Dentro de `.cashflows` un `td` con
+`.muted` sí se ve gris (`.cashflows td.muted`). Regresión:
+`tests/test_glowup_estados.py`.
+
+**Autonomía visible (glow-up C, 06/11)**: el dot + texto del feed de la topbar
+es un LINK (`#live-link`): a `/salud` normalmente y, con «⚠ Feed caído» / «⚠
+Precios viejos», a `/conexion` para reconectar ahí mismo (`app.js liveLink`).
+**`/salud`** (`routes/salud.py`, `services/salud.py`, `salud.html` +
+`partials/salud_body.html`, cada 30 s): salud en lenguaje llano para TODOS los
+roles — feed del broker, cierre histórico (`estado_cierre`), archivos de
+OneDrive (`datos_nube.status`, sólo en Windows), carteras, índices BCRA, MAE,
+CAFCI, noticias y avisos de la última hora (`errores.ultimos`, campo `t`
+epoch) — cada ítem con `estado` ok | warn | err | off, texto, detalle y una
+ACCIÓN filtrada por rol (`auth.can_access_path`; `/admin` sólo superuser).
+Un lector que tira no voltea la página (ítem `err` con el motivo); `/admin ·
+Salud` sigue siendo el detalle técnico del superuser. **`/novedades`**
+(`services/novedades.py`): «qué hay de nuevo» desde el `git log` del clon
+(los títulos de los PRs mergeados ya son el changelog), leído UNA vez en un
+thread al arrancar (`consola._git_disponible` evita el stub de Apple), link
+en el pie con la versión (`app_version()`); sin git la página lo dice y
+linkea a GitHub. **Causa de OneDrive en Posiciones / Matriz**:
+`positions._load` convierte un marcador sin bajar (`nube.ilegible_por_nube`)
+en `nube.remedio(path)` — el vacío dice "sólo en la nube" y qué hacer, no el
+`[Errno 22]`. Medido warm: `/salud/body` p95 3,0 ms · `/salud` 3,6 ·
+`/novedades` 2,9. Regresión: `tests/test_glowup_salud.py`.
+
+**Productividad (glow-up D, 06/11)**: **Ctrl+K** (`app.js`) suma ACCIONES
+(salud, novedades, reconectar, tema oscuro/claro/Delta, riel, atajos, releer
+carteras si el rol ve Posiciones), `+BONO` = agregar el bono a mi pizarra
+(POST `/inicio/pizarra/agregar` desde el overlay, cotización 24 hs, y va a
+Inicio) y RECIENTES arriba de todo con el campo vacío (`localStorage
+ck_recent`, tope 8, con secciones `.ck-hdr`); iconos del sprite (`ck-ico`), no
+emojis. **Atajos**: `?` abre la leyenda (`#kb-overlay`, `window.yvShortcuts`),
+`g` + letra navega (i m c y f d h g p t s n o) SÓLO a pestañas que el nav
+muestra (respeta el rol; `/salud`, `/novedades`, `/conexion`, `/inicio`
+siempre); nunca con el foco en un campo ni con Ctrl+K abierto. **Prefs por
+usuario en el server** (`services/prefs.py`, `routes/prefs.py`: GET/POST
+`/prefs` JSON, bucket = username o `_local`, `data/prefs.json` compartido a
+propósito como la pizarra, `PREFS_PATH` override — la suite lo apunta a un
+tmp): allowlist `prefs.CLAVES` (las claves de localStorage: tema, riel,
+`book-y`, `pos_fondo`, Gráficos, `curvas_combos`, `ck_recent`, `qp_excl`),
+valores string ≤ 4000, `null` borra. `app.js` sincroniza: al cargar, las del
+server completan las que ESTE navegador no tiene (PC nueva = misma app) y
+aplica el tema; después manda sólo las que cambiaron (cada 30 s, al ocultar
+la pestaña y en `pagehide` con `sendBeacon`). **Impresión** (`@media print`):
+sin topbar / riel / tape / noticias / botones, fondo blanco, tablas enteras.
+**Topbar compacta** ≤ 1100 px (sin relojes ni rol) y ≤ 820 px (sin selector
+de tema —queda en Ctrl+K— ni texto del feed). Medido warm: `/prefs` GET p95
+1,6 ms · POST 3,6 · `/inicio` (con la línea «hoy») p50 7,5 · p95 12,1 ·
+`/inicio/hoy` p95 3,7. Regresión: `tests/test_glowup_productividad.py`.
+
+**Inicio · línea «hoy» (glow-up E, 06/11)**: `services/hoy.linea_hoy(ahora,
+cierre)` (pura; calendario de `dias_habiles` con los feriados a mano, horario
+de rueda de `watchdog._rueda`, `estado_cierre`) → `partials/inicio_hoy.html`
+(`#inicio-hoy`, `/inicio/hoy` cada 5 min con `data-skip-same`): día, rueda
+(abre a las / abierta hasta / cerrada / sin rueda), feriado de hoy, a qué
+fecha liquida CI y 24 hs, próximo feriado entre semana (`proximo_feriado`,
+180 días) y el estado del cierre histórico con link a `/salud`. La próxima
+LICITACIÓN del Tesoro no tiene fuente dentro de la app y no se inventa.
+
 ## Live engine (paneles de mercado)
 
 `static/js/app.js` sondea `/market/seq` (entero plano, ~0,5 ms) cada 1 s y

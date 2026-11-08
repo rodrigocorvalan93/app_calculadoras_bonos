@@ -1,7 +1,8 @@
+{% from "partials/_icons.html" import icon %}
 {% import "partials/_fx_macros.html" as fx %}
 <div class="card">
   <div class="card-title">
-    <span>🏛️ Oficial · {{ oficial.source }}</span>
+    <span>{{ icon("database") }} Oficial · {{ oficial.source }}</span>
     <span class="card-title-aux">
       {% if oficial.source == "SIOPEL" %}MAE — UST$T Mayorista (en vivo)
       {% elif oficial.source == "A3500" %}A3500 mayorista · al {{ oficial.date }}
@@ -47,7 +48,7 @@
         <table class="cashflows curve-table mercado-table">
           <thead>
             <tr>
-              <th style="text-align:left">Ticker</th><th style="text-align:left">Segmento</th>
+              <th class="u-left">Ticker</th><th class="u-left">Segmento</th>
               <th>Plazo</th><th>Mon.</th><th>Último</th><th>Cierre ant.</th>
               <th>Var %</th><th>Mín</th><th>Máx</th><th>Volumen</th><th>Hora</th>
             </tr>
@@ -62,24 +63,24 @@
               {% set v = r.get('variacion') %}
               {% set vf = (v / 100.0) if (v is number) else none %}
               <tr>
-                <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.get('ticker') }}</td>
-                <td style="text-align:left">{{ r.get('segmento') }}</td>
+                <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.get('ticker') }}</td>
+                <td class="u-left">{{ r.get('segmento') }}</td>
                 <td>{{ r.get('plazo') }}</td>
                 <td>{{ r.get('moneda') }}</td>
                 <td style="font-weight:600">{{ r.get('precioUltimo') | ar_num(4) }}</td>
-                <td style="color:var(--text-muted)">{{ r.get('precioCierreAnterior') | ar_num(4) }}</td>
+                <td class="muted">{{ r.get('precioCierreAnterior') | ar_num(4) }}</td>
                 <td class="{{ fx.vcls(vf) }}">{{ fx.arrow(vf) }} {{ vf | ar_pct(2) }}</td>
                 <td>{{ r.get('precioMinimo') | ar_num(4) }}</td>
                 <td>{{ r.get('precioMaximo') | ar_num(4) }}</td>
-                <td style="color:var(--text-muted)">{{ (r.get('volumenOperado') or r.get('volumenAcumulado')) | ar_hum }}</td>
-                <td style="color:var(--text-muted);font-size:11px">{{ r.get('horaUltima') }}</td>
+                <td class="muted">{{ (r.get('volumenOperado') or r.get('volumenAcumulado')) | ar_hum }}</td>
+                <td class="u-note">{{ r.get('horaUltima') }}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     {% elif oficial.source != "SIOPEL" %}
-      <p class="muted" style="margin:8px 0 0;font-size:12px">
+      <p class="muted u-note" style="margin:8px 0 0">
         SIOPEL en vivo no disponible (sin <code>MAE_API_KEY</code> o API caída).
         Se usa el A3500 mayorista de la serie macro; la variación es día/día
         del último dato publicado.

@@ -15,12 +15,12 @@
   <div class="card-body" style="padding:0">
     <table class="cashflows tgt-tbl">
       <thead><tr>
-        <th style="text-align:left">Categoría</th><th>Target</th><th>Actual</th><th>Desvío</th>
+        <th class="u-left">Categoría</th><th>Target</th><th>Actual</th><th>Desvío</th>
       </tr></thead>
       <tbody>
         <template x-for="r in rows" :key="r.cat">
           <tr>
-            <td style="text-align:left" x-text="r.cat"></td>
+            <td class="u-left" x-text="r.cat"></td>
             <td class="tgt-cell"><input type="text" class="tgt-in" x-model="r.target"
                    @input.debounce.350ms="save()" inputmode="decimal" placeholder="—"
                    autocomplete="off"><span class="tgt-pct">%</span></td>
@@ -33,6 +33,6 @@
   </div>
 </div>
 {% elif fondo is not none %}
-<div class="card"><div class="card-body muted" style="font-size:12px;padding:10px 14px">
+<div class="card"><div class="card-body muted u-note" style="padding:10px 14px">
   Sin composición por categoría para este fondo.</div></div>
 {% endif %}

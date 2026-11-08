@@ -16,11 +16,11 @@
       <div class="comp-dim" data-dim="{{ label }}">
         <div class="resumen-h">{{ label }}</div>
         <table class="cashflows comp-tbl">
-          <thead><tr><th style="text-align:left">Categoría</th><th>Monto</th><th>% PN</th></tr></thead>
+          <thead><tr><th class="u-left">Categoría</th><th>Monto</th><th>% PN</th></tr></thead>
           <tbody>
             {% for r in summary[label] %}
             <tr class="comp-row" data-i="{{ loop.index0 }}" data-cat="{{ r.cat }}" title="Ver la torta">
-              <td style="text-align:left"><span class="comp-sw comp-c{{ loop.index0 % 8 }}"></span>{{ r.cat }}</td>
+              <td class="u-left"><span class="comp-sw comp-c{{ loop.index0 % 8 }}"></span>{{ r.cat }}</td>
               <td>{{ r.monto | ar_int }}</td>
               <td>{{ (r.pct * 100) | ar_pct_pp(2) if r.pct is not none else "—" }}</td>
             </tr>

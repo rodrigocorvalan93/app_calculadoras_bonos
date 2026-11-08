@@ -1,4 +1,5 @@
 {% import "partials/_fx_macros.html" as fx %}
+{% from "partials/_icons.html" import icon %}
 {% if not hist_meta or not hist_meta.loaded %}
   <div class="alert"><strong>Histórico BYMA no disponible.</strong> Configurá
     <code>DELTA_HISTORICO_DIR</code> / <code>DELTA_BASES_DIR</code> en <code>secrets.txt</code>.</div>
@@ -47,10 +48,10 @@
             <input type="text" id="hc-exclude" name="exclude" value="{{ exclude or '' }}" placeholder="ej. TZXM7 T30J6" autocomplete="off"></label>
           <label class="field"><span>TR desde</span><input type="date" name="trd1" value="{{ trd1 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
           <label class="field"><span>TR hasta</span><input type="date" name="trd2" value="{{ trd2 }}" min="{{ hist_meta.dmin }}" max="{{ hist_meta.dmax }}"></label>
-          <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
+          <button type="submit" class="btn-primary field-end">Actualizar</button>
         </div>
       </form>
-      <p class="muted" style="font-size:11px;margin-top:6px">
+      <p class="muted u-note u-mt8">
         Foto de la curva ({{ scatter.metric if scatter else metric }} vs Duration) en cada fecha elegida — por bono, el último dato ≤ fecha (tolerancia 7 días).
         Pasá el mouse por un bono para ver cuánto amplió o comprimió y cuánto movió el precio entre la primera y la última fecha; en la leyenda, click apaga/prende un bono (sin recalcular) y la × lo saca del fit.
         Abajo, el <b>total return realizado</b> entre "TR desde" y "TR hasta": ΔP <i>dirty</i> + cupones/amortizaciones cobrados en la ventana (de la ficha) — el corte de cupón no muerde.
@@ -59,8 +60,8 @@
   </div>
 
   {% if scatter and scatter.n %}
-  <div class="card hc-wrap" style="margin-top:12px" data-curve="{{ curve_sel }}">
-    <div class="card-title"><span>📐 {{ scatter.curve_label }} — {{ scatter.metric }} vs Duration</span>
+  <div class="card hc-wrap u-mt12" data-curve="{{ curve_sel }}">
+    <div class="card-title"><span>{{ icon("ruler") }} {{ scatter.curve_label }} — {{ scatter.metric }} vs Duration</span>
       <span class="card-title-aux">{% for s in scatter.series %}<span style="color:{{ s.color }}">● {{ s.fecha }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% if scatter.mixto %} · <span class="muted" title="Con Tipo = Todos cada fecha lleva DOS curvas: la base (línea llena, puntos llenos) y los proyectados 'j' (línea punteada, puntos huecos) — son dos poblaciones distintas. Tipo = Base deja una curva por fecha.">● base llena · ○ proy (j) punteada → {{ scatter.n_curvas }} curvas; Tipo = Base para {{ scatter.series | length }}</span>{% endif %}
         · <label class="hc-toggle" title="Etiquetas de los bonos en la fecha más reciente"><input type="checkbox" class="hc-labels-toggle" checked> etiquetas</label>
         {# Proyectados (j) a un click: el mismo selector Tipo del form (Todos ↔
@@ -113,7 +114,7 @@
          también atenúa su barra. #}
       {% set d = scatter.delta %}
       <div class="hc-delta-title">
-        <span>📊 Δ {{ scatter.metric }} por bono · {{ d.f1 | ar_date }} → {{ d.f2 | ar_date }} · en bps</span>
+        <span>{{ icon("chart-bar") }} Δ {{ scatter.metric }} por bono · {{ d.f1 | ar_date }} → {{ d.f2 | ar_date }} · en bps</span>
         <span class="muted">promedio {{ d.prom_txt }} bps · {{ d.n }} bono{{ 's' if d.n != 1 else '' }}{% if d.mixto %} · hueco = proy (j){% endif %} · <span class="hc-dn">▮</span> comprimió · <span class="hc-up">▮</span> amplió</span>
       </div>
       <svg class="hc-delta" viewBox="0 0 {{ d.width }} {{ d.height }}" style="width:100%;max-width:{{ d.width }}px" role="img">
@@ -142,13 +143,13 @@
         <span class="cmp-chip hc-chip" data-code="{{ c.code }}" title="dur {{ c.dur | ar_num(2) }} · click: apagar/prender · ×: excluir del fit">{{ c.code }}<b class="hc-excl" title="Excluir del fit">×</b></span>
         {% endfor %}
         {% if scatter.excluded %}
-        <span class="muted hc-excluded" style="font-size:11px;align-self:center">excluidos:
+        <span class="muted hc-excluded u-sm">excluidos:
           {% for c in scatter.excluded %}<span class="hc-restore lnk" data-code="{{ c }}" title="Volver a incluir">{{ c }} ↺</span>{% if not loop.last %}, {% endif %}{% endfor %}</span>
         {% endif %}
         {% if scatter.fuera_tramo %}
         {# Bonos con dato que el tramo de duration deja afuera: se ven y se
            vuelve al total con un click (vacía Dur mín/máx y re-pide). #}
-        <span class="muted hc-fuera" style="font-size:11px;align-self:center">fuera del tramo {{ scatter.tramo_txt }}:
+        <span class="muted hc-fuera u-sm">fuera del tramo {{ scatter.tramo_txt }}:
           {{ scatter.fuera_tramo | join(', ') }} · <span class="lnk" onclick="hcQuitar(this, ['dmin','dmax'])" title="Sacar el tramo de duration y recalcular">quitar tramo</span></span>
         {% endif %}
       </div>
@@ -157,7 +158,7 @@
   {% elif scatter %}
   {# Vacío por el FILTRO (la base sí tiene historia) vs. vacío por falta de
      datos: decir cuál, y arreglar el primero con un click. #}
-  <div class="alert" style="margin-top:12px">
+  <div class="alert">
     {% if scatter.vacio %}
       <strong>Sin puntos por el filtro, no por falta de datos.</strong>
       La base tiene {{ scatter.vacio.n }} bono{{ 's' if scatter.vacio.n != 1 else '' }} de {{ scatter.curve_label }} con dato en esas fechas
@@ -174,13 +175,13 @@
   {% endif %}
 
   {% if tr and tr.rows %}
-  <div class="card" style="margin-top:12px">
-    <div class="card-title"><span>💰 TR realizado — {{ tr.curve_label }} · {{ tr.d1 }} → {{ tr.d2 }}</span>
+  <div class="card u-mt12">
+    <div class="card-title"><span>{{ icon("dollar") }} TR realizado — {{ tr.curve_label }} · {{ tr.d1 }} → {{ tr.d2 }}</span>
       <span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#tr-realizado-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · ΔP dirty + cupones cobrados (ventana real por bono)</span></div>
     <div class="card-body table-scroll">
       <table class="cashflows curve-table mercado-table" data-sortable id="tr-realizado-tbl">
         <thead><tr>
-          <th style="text-align:left" data-sort>Bono</th><th data-sort>Ventana</th>
+          <th class="u-left" data-sort>Bono</th><th data-sort>Ventana</th>
           <th data-sort>P inicial</th><th data-sort>P final</th>
           <th data-sort>Δ Precio</th><th data-sort>Cupones</th><th data-sort>TR total</th>
           <th data-sort>TIR ini</th><th data-sort>TIR fin</th><th data-sort>ΔTIR</th>
@@ -188,8 +189,8 @@
         <tbody>
           {% for r in tr.rows %}
           <tr>
-            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.code }}</td>
-            <td style="font-size:11px;color:var(--text-muted)">{{ r.f1 }} → {{ r.f2 }}</td>
+            <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.code }}</td>
+            <td class="u-note">{{ r.f1 }} → {{ r.f2 }}</td>
             <td>{{ r.p1 | ar_num(2) }}</td>
             <td>{{ r.p2 | ar_num(2) }}</td>
             <td class="{{ fx.vcls(r.px_var) }}">{{ r.px_var | ar_pct(2) }}</td>
@@ -203,7 +204,7 @@
         </tbody>
         {% if tr.summary %}
         <tfoot><tr style="font-weight:700;border-top:2px solid var(--border)">
-          <td style="text-align:left">Promedio ({{ tr.summary.n }})</td><td></td><td></td><td></td>
+          <td class="u-left">Promedio ({{ tr.summary.n }})</td><td></td><td></td><td></td>
           <td class="{{ fx.vcls(tr.summary.px_var) }}">{{ tr.summary.px_var | ar_pct(2) }}</td>
           <td>{{ tr.summary.cup_pct | ar_pct(2) }}</td>
           <td class="{{ fx.vcls(tr.summary.tr) }}">{{ tr.summary.tr | ar_pct(2) }}</td>
@@ -214,6 +215,6 @@
     </div>
   </div>
   {% elif tr %}
-  <div class="alert" style="margin-top:12px">Sin bonos con precio en ambas fechas para el TR realizado.</div>
+  <div class="alert">Sin bonos con precio en ambas fechas para el TR realizado.</div>
   {% endif %}
 {% endif %}

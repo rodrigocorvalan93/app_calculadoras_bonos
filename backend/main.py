@@ -54,6 +54,8 @@ from backend.routes.yas import router as yas_router
 from backend.routes.nueva import router as nueva_router
 from backend.routes.auth import router as auth_router
 from backend.routes.admin import router as admin_router
+from backend.routes.salud import router as salud_router
+from backend.routes.prefs import router as prefs_router
 from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, symbols as syms
 from backend.services.primary_ws import get_ws_client
 from backend.services.warmup import get_daemon as get_warmup_daemon
@@ -198,6 +200,13 @@ async def lifespan(app: FastAPI):
         # (el warning de "sin superuser" ya lo loguea auth: no se repite acá)
     except Exception:  # noqa: BLE001
         logger.exception("[main] auth bootstrap failed")
+
+    # «Qué hay de nuevo» (/novedades): git log en un thread, nunca en un request.
+    try:
+        from backend.services import novedades as _novedades
+        _novedades.iniciar()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] novedades no se pudo iniciar")
 
     try:
         bond_universe.ensure_loaded()
@@ -618,6 +627,10 @@ def create_app() -> FastAPI:
     # Horarios de mercado para los relojes de la topbar (configurables por env).
     templates.env.globals["mkt_horarios"] = {"arg": settings.mkt_horario_arg,
                                              "ny": settings.mkt_horario_ny}
+    # Versión que corre (pie de página → /novedades): la lee un thread al
+    # arrancar (services/novedades); '' hasta entonces o sin git.
+    from backend.services import novedades as _novedades
+    templates.env.globals["app_version"] = _novedades.version
     app.state.templates = templates
 
     # .webmanifest no está en el registro de mimetypes de Python → StaticFiles
@@ -649,6 +662,8 @@ def create_app() -> FastAPI:
     app.mount("/static", _StaticInmutable(directory=str(STATIC_DIR)), name="static")
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(salud_router)
+    app.include_router(prefs_router)
     app.include_router(inicio_router)
     app.include_router(yas_router)
     app.include_router(nueva_router)

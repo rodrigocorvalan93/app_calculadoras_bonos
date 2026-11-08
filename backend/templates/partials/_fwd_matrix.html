@@ -3,7 +3,7 @@
 <table class="cashflows curve-table mercado-table">
   <thead>
     <tr>
-      <th style="text-align:left">corto \ largo</th>
+      <th class="u-left">corto \ largo</th>
       {% for h in fwd.header %}
         <th>{{ h.code }}<br><span class="muted" style="font-weight:400;font-size:10px">{{ h.t | ar_num(1) }}a</span></th>
       {% endfor %}
@@ -12,7 +12,7 @@
   <tbody>
     {% for r in fwd.rows %}
       <tr>
-        <td style="text-align:left;color:var(--accent);font-weight:600">
+        <td class="u-left" style="color:var(--accent);font-weight:600">
           {{ r.code }} <span class="muted" style="font-weight:400">{{ r.t | ar_num(1) }}a</span>
         </td>
         {# Celdas con forward: clickeables → cargan ese par (fila=corto,
