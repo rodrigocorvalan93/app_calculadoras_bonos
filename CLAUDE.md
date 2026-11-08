@@ -935,6 +935,46 @@ propiedades y lo que ninguna clase cubre). Dentro de `.cashflows` un `td` con
 `.muted` sí se ve gris (`.cashflows td.muted`). Regresión:
 `tests/test_glowup_estados.py`.
 
+**Pulido visual (glow-up F, 08/11)**: escala tipográfica en tokens
+(`--fs-xs 10,5 · --fs-sm 11 · --fs-md 12 · --fs-base 13 · --fs-lg 15 ·
+--fs-xl 20`; 11,5 → sm y 13,5 → base; 9,5 / 10 / 12,5 / 14 siguen literales
+donde estaban) — un tamaño nuevo usa un token, no un px suelto. **Controles
+de formulario** uniformes: base a especificidad cero (`:where(select,
+textarea, input…)`) que cualquier clase pisa, `<select>` con `appearance:
+none` y flecha propia (`--sel-arrow`, también sobre `.field select` y en
+foco porque su `background:` corto la borraba), checkbox / radio con
+`accent-color`, foco visible también en inputs, `disabled` uniforme.
+**Tablas**: hover de fila en toda `.cashflows` (salvo la matriz, que tiene lo
+suyo) y cabecera sticky dentro de `.table-scroll`. **Cargas**: los "Cargando…"
+de texto son `skeleton(3, "Cargando X…")` (`_estados.html`); `charts.js`
+`clear()` / `clearBox()` quitan también `.skel` al dibujar (si no quedaba
+pegado arriba del gráfico, como pasaba con el `<p>`). **Swap suave**:
+`.htmx-settling` con un fade de 140 ms SÓLO fuera del motor live (se excluyen
+`data-flash-scope`, `data-delta-scope`, `md-update`, tape y marquesina) y
+nada con `prefers-reduced-motion`.
+
+**Auditoría de eficiencia / responsividad (08/11)** — lo aplicado: Jinja de
+`/inicio/body` y `/inicio/pizarra` al executor (como `curve_table_partial`;
+36-39 KB de render que iban en el event loop por tick); los sondeos chicos
+(`/market/seq`, `/market/health`, `/cierre/chip`) en `_SIN_GZIP` (auth_guard
+es BaseHTTPMiddleware → la respuesta sale en streaming y GZip ignoraba
+`minimum_size`: 4 bytes gzipeados a 30 + chunked); `#inicio-pizarra` sólo
+pollea si hay `.piz-grid` (una pizarra vacía pedía 64 req/min por pestaña);
+`/dolares/rail` salta al pool sólo cuando `historico.macro_refresh_pendiente()`
+(2×/día, no por tick); mobile ≤ 980: `.layout { align-items: stretch }` (la
+tabla de Mercado scrolleaba el documento entero), riel de dólar DEBAJO del
+contenido y en grilla (antes el h1 arrancaba 1,4 pantallas abajo), targets de
+la topbar ≥ 36 px, a ≤ 560 la topbar envuelve y el chip de usuario se va
+(queda en el title del logout). **Diferido con evidencia** (ver el informe de
+la auditoría en el scratchpad de la sesión): swap POR TARJETA de
+`#inicio-body` (hoy 41 KB / ~1.900 nodos por tick, ~31 ms de main thread; el
+diff de flashes corre en `afterSwap` sobre el target, así que un swap parcial
+necesita re-disparar ese hook), SSE por `asyncio.Event` en vez de `sleep(0,25)`
+(latencia media 125 ms, N×4 despertares/s), `estado_cierre` 5-9 ms con base
+real (`journal_dir()` por archivo y `contenido_perdido` sin memo; el chip lo
+pide 1×/min por pestaña), las 11 curvas de Inicio en UNA tarea del pool, y
+pre-gzip + ETag del memo de la pizarra.
+
 **Autonomía visible (glow-up C, 06/11)**: el dot + texto del feed de la topbar
 es un LINK (`#live-link`): a `/salud` normalmente y, con «⚠ Feed caído» / «⚠
 Precios viejos», a `/conexion` para reconectar ahí mismo (`app.js liveLink`).

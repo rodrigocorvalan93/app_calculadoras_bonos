@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_estados.html" import skeleton %}
 {% block title %}Qué pasó{% endblock %}
 {% block tab_quepaso %}active{% endblock %}
 
@@ -11,7 +12,7 @@
   </header>
 
   <div id="hist-semanal" hx-get="/historicos/semanal" hx-trigger="load" hx-swap="innerHTML">
-    <div class="muted" style="padding:12px">Cargando…</div>
+    {{ skeleton(3, "Cargando…") }}
   </div>
 </section>
 {% endblock %}

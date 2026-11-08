@@ -107,7 +107,11 @@ async def inicio_hoy(request: Request) -> HTMLResponse:
 async def inicio_body(request: Request) -> HTMLResponse:
     """El resumen entero (todas las tarjetas) en un partial: lo que swapea el
     motor live en cada tick."""
-    return _render(request, "partials/inicio_body.html", **(await _contexto()))
+    # Jinja de 36 KB al pool (como curve_table_partial): no en el event loop
+    # en cada tick (auditoría 08/11: −3 ms de loop por tick por pestaña).
+    ctx = await _contexto()
+    return await asyncio.get_running_loop().run_in_executor(
+        None, lambda: _render(request, "partials/inicio_body.html", **ctx))
 
 
 # ── Pizarra por usuario ──────────────────────────────────────────────────────
@@ -194,7 +198,8 @@ async def _pizarra_response(request: Request, error: Optional[str] = None) -> HT
             return HTMLResponse(ent[3], headers=hdr)
     piz_stats["miss"] += 1
     ctx = await _pizarra_ctx(request, prefs)
-    resp = _render(request, "partials/inicio_pizarra.html", error=error, **ctx)
+    resp = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: _render(request, "partials/inicio_pizarra.html", error=error, **ctx))
     if error is None:
         if len(_PIZ_MEMO) > 256:            # fusible (usuarios reales: decenas)
             _PIZ_MEMO.clear()

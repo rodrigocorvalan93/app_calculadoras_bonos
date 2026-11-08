@@ -62,8 +62,12 @@
       {% endfor %}
     </span>
   </header>
+  {# Sin cuadros (el default) no hay nada que refrescar: el filtro [..] de
+     htmx corta los 64 requests/min por pestaña de una pizarra vacía
+     (auditoría 08/11); el alta devuelve la pizarra entera y de ahí en más
+     la .piz-grid existe y el refresh vuelve solo. #}
   <div id="inicio-pizarra" data-flash-scope
-       hx-get="/inicio/pizarra" hx-trigger="md-update from:body, every 30s" hx-swap="innerHTML">
+       hx-get="/inicio/pizarra" hx-trigger="md-update[document.querySelector('#inicio-pizarra .piz-grid')] from:body, every 30s [document.querySelector('#inicio-pizarra .piz-grid')]" hx-swap="innerHTML">
     {% include "partials/inicio_pizarra.html" %}
   </div>
 </section>

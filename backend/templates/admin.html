@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_estados.html" import skeleton %}
 {% from "partials/_icons.html" import icon %}
 {% block title %}Administración{% endblock %}
 
@@ -220,7 +221,7 @@
         <span class="card-title-aux">feed · store · caches · pollers · errores del proceso</span></div>
       <div class="card-body">
         <div id="admin-salud" hx-get="/admin/salud" hx-trigger="load, every 60s" hx-swap="innerHTML">
-          <p class="muted u-note">Cargando…</p>
+          {{ skeleton(3, "Cargando…") }}
         </div>
       </div>
     </div>
@@ -231,7 +232,7 @@
         <span class="card-title-aux">carteras vs base de especies · Galileo sin normalizar</span></div>
       <div class="card-body">
         <div id="admin-especies" hx-get="/admin/especies-faltantes" hx-trigger="load" hx-swap="innerHTML">
-          <p class="muted u-note">Cargando…</p>
+          {{ skeleton(3, "Cargando…") }}
         </div>
       </div>
     </div>
@@ -242,7 +243,7 @@
         <span class="card-title-aux">carpeta de la app · Delta Bases · cierres · carteras · journal</span></div>
       <div class="card-body">
         <div id="admin-copias" hx-get="/admin/copias" hx-trigger="load" hx-swap="innerHTML">
-          <p class="muted u-note">Cargando…</p>
+          {{ skeleton(3, "Cargando…") }}
         </div>
       </div>
     </div>
@@ -275,7 +276,7 @@
              onclick="this.href='/admin/auditoria.csv?'+new URLSearchParams(new FormData(this.closest('form'))).toString()">⤓ CSV</a>
         </form>
         <div id="admin-aud" hx-get="/admin/auditoria" hx-trigger="load" hx-swap="innerHTML">
-          <p class="muted u-note">Cargando…</p>
+          {{ skeleton(3, "Cargando…") }}
         </div>
       </div>
     </div>

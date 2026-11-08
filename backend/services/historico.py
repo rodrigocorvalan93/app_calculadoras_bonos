@@ -144,6 +144,19 @@ def series_list() -> List[Dict[str, Any]]:
     return [{"key": k, "label": v["label"], "n": len(v["points"])} for k, v in c["series"].items()]
 
 
+def macro_refresh_pendiente() -> bool:
+    """¿`macro_maybe_refresh` tendría algo que hacer ahora? La misma comparación
+    de (fecha, horario cruzado) contra `_macro_slot`, sin lock ni I/O: el riel
+    del dólar la consulta en el loop y sólo salta al executor cuando es que sí
+    (dos veces por día, no en cada tick — auditoría 08/11)."""
+    now = datetime.now(_TZ_BA)
+    idx = None
+    for i, (h, m) in enumerate(_MACRO_REFRESH_TIMES):
+        if (now.hour, now.minute) >= (h, m):
+            idx = i
+    return idx is not None and _macro_slot != (now.date(), idx)
+
+
 def macro_maybe_refresh() -> None:
     """Re-lee el backup BCRA (barato; NO toca la API del BCRA) sólo cuando se
     cruza un horario programado (11:00 / 15:30 hora de Buenos Aires). Idempotente: dispara

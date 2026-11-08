@@ -1,3 +1,4 @@
+{% from "partials/_estados.html" import skeleton %}
 {% if not hist_meta or not hist_meta.loaded %}
   <div class="alert">
     <strong>Histórico BYMA no disponible.</strong>
@@ -42,6 +43,6 @@
   </div>
 
   <div id="hist-curva-uplot" style="min-height:320px">
-    <p class="muted" style="padding:10px">Cargando histórico BYMA…</p>
+    {{ skeleton(3, "Cargando histórico BYMA…") }}
   </div>
 {% endif %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_estados.html" import skeleton %}
 {% block title %}Gráficos{% endblock %}
 {% block tab_graficos %}active{% endblock %}
 
@@ -122,7 +123,7 @@
 
   {# Chart interactivo (uPlot, client-side). charts.js lee #graf-controls y lo dibuja. #}
   <div id="grafico-uplot" style="min-height:300px">
-    <p class="muted" style="padding:10px">Cargando gráfico…</p>
+    {{ skeleton(3, "Cargando gráfico…") }}
   </div>
 
   {# Parámetros de la curva NSS ajustada (β/τ + nivel/pendiente/convexidad). #}

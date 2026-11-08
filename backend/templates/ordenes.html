@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_estados.html" import skeleton %}
 {% from "partials/_icons.html" import icon %}
 {% block title %}Órdenes{% endblock %}
 {% block tab_ordenes %}active{% endblock %}
@@ -91,13 +92,13 @@
   {# ── Blotter (estado de órdenes desde el audit) ─────────────────────────── #}
   <div id="orden-blotter" hx-get="/ordenes/blotter"
        hx-trigger="load, every 8s, orden-done from:body" hx-swap="innerHTML" class="u-mt12">
-    <p class="muted u-note">Cargando blotter…</p>
+    {{ skeleton(3, "Cargando blotter…") }}
   </div>
 
   {# ── Comitentes + órdenes vivas del broker ─────────────────────────────── #}
   <div id="ordenes-panel" hx-get="/ordenes/panel" hx-trigger="load, every 15s"
        hx-include="#acct-input" hx-swap="innerHTML" class="u-mt12">
-    <p class="muted u-note">Cargando cuentas del broker…</p>
+    {{ skeleton(3, "Cargando cuentas del broker…") }}
   </div>
 </section>
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "partials/_estados.html" import empty %}
+{% from "partials/_estados.html" import empty, skeleton %}
 {% block title %}YAS · {{ selected or "Análisis de Yields" }}{% endblock %}
 {% block tab_yas %}active{% endblock %}
 
@@ -118,7 +118,7 @@
     hx-include="[name=code], [name=plazo], [name=mode], [name=value], [name=value_raw]"
     hx-swap="innerHTML"
   >
-    <p class="muted u-note" style="padding:8px 0">Cargando datos de mercado…</p>
+    {{ skeleton(3, "Cargando datos de mercado…") }}
   </div>
 
   <div id="yas-result" aria-live="polite">

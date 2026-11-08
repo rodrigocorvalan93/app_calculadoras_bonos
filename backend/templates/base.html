@@ -36,6 +36,7 @@
   <script src="{{ url_for('static', path='vendor/uplot-1.6.31.min.js') }}" defer></script>
 </head>
 {% from "partials/_icons.html" import icon, sprite %}
+{% from "partials/_estados.html" import skeleton %}
 <body hx-boost="false" data-asset-v="{{ asset_v }}"
       x-data="{ railOpen: (function(){ try { return localStorage.getItem('fx_rail') !== '0'; } catch (e) { return true; } })() }">
   {{ sprite() }}
@@ -90,7 +91,7 @@
          reconecta (los no-superuser sólo entre brokers conocidos). #}
       <a class="rail-toggle" href="/conexion" title="Conexión del feed BYMA (reconectar / cambiar broker)" aria-label="Conexión del feed">{{ icon("plug") }}</a>
       <span class="user-chip" title="Sesión ({{ request.state.user.role }})">{{ request.state.user.username }}<i class="muted"> · {{ request.state.user.role }}</i></span>
-      <a class="rail-toggle" href="/logout" title="Cerrar sesión" aria-label="Cerrar sesión">{{ icon("logout") }}</a>
+      <a class="rail-toggle" href="/logout" title="Cerrar sesión ({{ request.state.user.username }})" aria-label="Cerrar sesión">{{ icon("logout") }}</a>
       {% endif %}
       <button type="button" class="rail-toggle" :class="{ active: railOpen }"
               @click="railOpen = !railOpen; try { localStorage.setItem('fx_rail', railOpen ? '1' : '0'); } catch (e) {}; if (railOpen && window.htmx) { var r = document.querySelector('.fx-rail'); if (r) window.htmx.trigger(r, 'load'); }"
@@ -145,7 +146,7 @@
               seguía re-renderizando en cada tick. #}
            hx-trigger="load, md-update[fxRailOpen()] from:body, every 30s [fxRailOpen()]"
            hx-swap="innerHTML">
-      <div class="muted" style="padding:12px;font-size:12px">Cargando dólar…</div>
+      {{ skeleton(3, "Cargando dólar…") }}
     </aside>
     <main class="content">
       {% block content %}{% endblock %}

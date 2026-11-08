@@ -927,7 +927,12 @@ def create_app() -> FastAPI:
     # comprimiría ~3× a costa de ~1 s de CPU del server (en las versiones de
     # Starlette de los venvs del desk, inline en el event loop). Van tal
     # cual: el desk descarga por LAN.
-    _SIN_GZIP = ("/historicos/base/archivo", "/historicos/base/cierre", "/historicos/base.csv")
+    # Descargas ya comprimidas / CSV grande, y los SONDEOS chicos (auditoría
+    # 08/11): auth_guard es BaseHTTPMiddleware → toda respuesta sale en
+    # streaming y GZipMiddleware ignora minimum_size: /market/seq (4 bytes)
+    # viajaba gzipeado a 30 bytes y chunked, ~45 µs de zlib por request.
+    _SIN_GZIP = ("/historicos/base/archivo", "/historicos/base/cierre", "/historicos/base.csv",
+                 "/market/seq", "/market/health", "/cierre/chip")
 
     class _SSESinGzip:
         def __init__(self, app):  # noqa: ANN001
