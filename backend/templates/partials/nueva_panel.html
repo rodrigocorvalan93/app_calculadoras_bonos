@@ -17,7 +17,7 @@
   </ul>
 </div>
 
-<form class="yas-form nueva-calc" style="margin-top:12px"
+<form class="yas-form nueva-calc u-mt12"
       hx-post="/nueva/recompute" hx-target="#nueva-result" hx-swap="innerHTML"
       hx-trigger="change, keyup changed delay:120ms from:input[name=value]"
       x-data="{ mode: {{ mode | tojson }}, useSettle: false }">

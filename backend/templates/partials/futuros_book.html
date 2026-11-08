@@ -11,7 +11,7 @@
      hx-get="/futuros/book?code={{ code | urlencode }}&spot_override={{ spot_override | urlencode }}"
      hx-trigger="md-update from:body, every 30s" hx-target="this" hx-swap="outerHTML">
   <div class="card-title">
-    <span>Libro · {{ label }} <span class="muted" style="font-size:11px">{{ code }}</span></span>
+    <span>Libro · {{ label }} <span class="muted u-sm">{{ code }}</span></span>
     <span class="card-title-aux">{% if vto %}vto {{ vto }} · {% endif %}{% if dias is not none %}{{ dias }}d · {% endif %}spot {{ spot | ar_num(2) }}{% if spot_override %} (override){% endif %}</span>
   </div>
   <div class="card-body">
@@ -39,7 +39,7 @@
           {% for l in bids %}
           <tr class="depth-bid" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
             <td style="color:var(--cyan)">{{ l.tna | ar_pct(2) }}</td>
-            <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
+            <td class="muted">{{ l.cum | ar_int }}</td>
             <td>{{ l.size | ar_int }}</td>
             <td class="px-up" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
           </tr>
@@ -53,7 +53,7 @@
           <tr class="depth-ask" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
             <td class="px-down" style="font-weight:600">{{ l.price | ar_num(2) }}</td>
             <td>{{ l.size | ar_int }}</td>
-            <td style="color:var(--text-muted)">{{ l.cum | ar_int }}</td>
+            <td class="muted">{{ l.cum | ar_int }}</td>
             <td style="color:var(--cyan)">{{ l.tna | ar_pct(2) }}</td>
           </tr>
           {% else %}<tr><td colspan="4" style="color:var(--text-muted)">— sin offers —</td></tr>{% endfor %}

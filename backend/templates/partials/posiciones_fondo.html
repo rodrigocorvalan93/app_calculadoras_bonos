@@ -1,16 +1,22 @@
+{% from "partials/_estados.html" import empty %}
 {% if not rows %}
-  <div class="alert">{% if fondo %}Sin tenencias en {{ nombre }}.{% else %}Elegí un fondo (o no hay posiciones cargadas).{% endif %}</div>
+  {% if pos_status and pos_status.error %}{{ empty("No se cargaron las posiciones", pos_status.error, '<a class="btn btn-sm" href="/posiciones?refresh=1">↻ Releer carteras</a>', icono="warning", tipo="error") }}
+  {% elif fondo %}{{ empty("Sin tenencias en " ~ nombre, "La cartera no tiene filas para este fondo (o no es visible para tu usuario).", icono="inbox") }}
+  {% else %}{{ empty("Elegí un fondo", "Arriba, en el selector. Si la lista está vacía, la composición de carteras no se cargó todavía.", icono="inbox") }}{% endif %}
 {% else %}
-  {% include "partials/composicion_resumen.html" %}
+  {# Orden (desk 06/11): primero la tabla de tenencias, después la composición. #}
   <div class="card">
     <div class="card-title">
       <span>{{ nombre }} · tenencias</span>
       <span class="card-title-aux">
+        {# Frescura: la tabla NO se refresca sola (el Last es editable); la hora
+           es la del render y app.js mueve el "hace N min" (stale a los 15). #}
+        <span class="pos-fresh" data-ts="{{ render_ts }}" title="Hora (BA) en que se valuó la tabla. No se refresca sola: ↻ Precios BYMA para actualizar.">precios {{ render_hora }}<span class="pos-fresh-ago"></span></span> ·
         <button type="button" class="lnk" data-csv-of="#pos-tbl" title="Descargar la tabla como se ve (CSV es-AR: respeta filtros, orden y columnas visibles)">⤓ CSV</button> · 
         {{ rows | length }} especies · Valor {{ total_valor | ar_int }}{% if pn %} · {{ (total_valor / pn * 100) | ar_pct_pp(1) }} del PN{% endif %}{% if n_sin_regla %} · <span class="muted" title="Tenencias cuya Categoría es la Clase de Activo cruda del Excel: sin ficha en especies.py, sin Ajuste/Tasa en Delta - Especies y sin una descripción reconocida (plazo fijo, caución, cheque, pagaré, fideicomiso, FCI). Pasá el mouse por la columna Categoría para ver de dónde salió cada una.">{{ n_sin_regla }} sin regla fina</span>{% endif %}
         · <span id="pos-day-ret" class="pos-day-ret" title="Σ (peso por valor × retorno Last vs Px val). Editá un Last para simular.">Ret. día —</span>
         · <span id="pos-fondo-tirdur" class="pos-day-ret" data-fondo="{{ fondo or '' }}" title="TIR y duration del FONDO ponderadas por valor de mercado (Σ w·TIR / Σ w). Entre paréntesis, la cobertura: % del valor del fondo que aporta dato. TODAS las tasas de la tabla son editables — lo tipeado alimenta SOLO este ponderado (no toca precios ni recalcula nada) y sobrevive a los refresh.">TIR — · Dur —</span>
-        <label class="lnk" style="cursor:pointer" title="PROYECTADO: los CER usan su ficha hermana j (TIR nominal con la inflación proyectada) y los DLK componen con la deva implícita de ROFEX a la duration — para leer un fondo en PESOS. Sin tildar: la versión real/actual (p. ej. un fondo CER puro). El default de cada modo siempre es el valor calculado."><input type="checkbox" id="pos-proy" style="vertical-align:-2px"> proy.</label>
+        <label class="lnk" title="PROYECTADO: los CER usan su ficha hermana j (TIR nominal con la inflación proyectada) y los DLK componen con la deva implícita de ROFEX a la duration — para leer un fondo en PESOS. Sin tildar: la versión real/actual (p. ej. un fondo CER puro). El default de cada modo siempre es el valor calculado."><input type="checkbox" id="pos-proy" style="vertical-align:-2px"> proy.</label>
         <button type="button" id="pos-tirdur-reset" class="lnk" title="Restaurar los valores calculados del modo actual (borra las tasas tipeadas a mano)">↺</button>
       </span>
     </div>
@@ -23,11 +29,11 @@
       <table id="pos-tbl" class="cashflows curve-table" data-sortable>
         <thead>
           <tr>
-            <th data-sort style="text-align:left">Especie</th>
-            <th data-sort style="text-align:left">Nombre</th>
-            <th data-sort style="text-align:left">Emisor</th>
+            <th data-sort class="u-left">Especie</th>
+            <th data-sort class="u-left">Nombre</th>
+            <th data-sort class="u-left">Emisor</th>
             <th data-sort>Vto</th>
-            <th data-sort style="text-align:left">Categoría</th>
+            <th data-sort class="u-left">Categoría</th>
             <th data-sort>Rating</th>
             <th data-sort>VN</th>
             <th data-sort>Valor</th>
@@ -50,7 +56,7 @@
           <tr class="pos-grp" data-grp="{{ g.cat }}" title="Click para plegar/desplegar">
             {# colspan 6 = Especie+Nombre+Emisor+Vto+Categoría+Rating: los
                subtotales tienen que caer bajo Valor / %PN #}
-            <td colspan="6" style="text-align:left"><span class="grp-caret">▾</span>{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
+            <td colspan="6" class="u-left"><span class="grp-caret">▾</span>{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
             <td></td>
             <td>{{ g.valor | ar_int }}</td>
             <td>{{ (g.pct_pn * 100) | ar_pct_pp(2) if g.pct_pn is not none else "—" }}</td>
@@ -70,15 +76,15 @@
                 data-dur="{{ r.duration if r.duration is not none and r.duration == r.duration else '' }}"
                 data-tirea-proy="{{ r.tirea_proy if r.tirea_proy is not none and r.tirea_proy == r.tirea_proy else '' }}"
                 data-dur-proy="{{ r.duration_proy if r.duration_proy is not none and r.duration_proy == r.duration_proy else '' }}">
-              <td style="text-align:left;color:var(--accent);font-weight:600">
+              <td class="u-left" style="color:var(--accent);font-weight:600">
                 {% if r.in_universe %}<a href="/yas?code={{ r.cod_delta }}" title="Abrir en YAS">{{ r.abrev }}</a>{% else %}{{ r.abrev }}{% endif %}
               </td>
-              <td style="text-align:left;font-size:11px;color:var(--text-muted);max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.nombre or '' }}">{{ r.nombre or "—" }}</td>
-              <td style="text-align:left;font-size:11px;color:var(--text-soft);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.emisor or '' }}">{{ r.emisor or "—" }}</td>
+              <td class="u-left u-note u-ellipsis" style="max-width:210px" title="{{ r.nombre or '' }}">{{ r.nombre or "—" }}</td>
+              <td class="u-left u-sm u-ellipsis" style="max-width:150px" title="{{ r.emisor or '' }}">{{ r.emisor or "—" }}</td>
               {# data-sort = ordinal del date → el sort es cronológico, no "por día del mes" #}
-              <td style="font-size:11px" data-sort="{{ r.vencimiento.toordinal() if r.vencimiento else '' }}">{{ r.vencimiento | ar_date }}</td>
-              <td style="text-align:left;font-size:11px" title="{{ r.cat_src_txt }}">{{ r.categoria }}</td>
-              <td style="font-size:11px;color:var(--text-muted)">{{ r.rating }}</td>
+              <td class="u-sm" data-sort="{{ r.vencimiento.toordinal() if r.vencimiento else '' }}">{{ r.vencimiento | ar_date }}</td>
+              <td class="u-left u-sm" title="{{ r.cat_src_txt }}">{{ r.categoria }}</td>
+              <td class="u-note">{{ r.rating }}</td>
               <td>{{ r.cantidad | ar_int }}</td>
               <td>{{ r.valor | ar_int }}</td>
               <td>{{ (r.pct_pn * 100) | ar_pct_pp(2) if r.pct_pn is not none else "—" }}</td>
@@ -103,7 +109,7 @@
               <td class="pos-dur-cell"><input class="pos-dur cell-edit" type="text" inputmode="decimal"
                      value="{{ r.duration | ar_num(2) if r.duration is not none and r.duration == r.duration else '' }}"
                      placeholder="✎" title="Duration en años (ej. 2,35) — editable; alimenta la Dur ponderada del fondo"></td>
-              <td style="font-size:10.5px;color:var(--text-muted)">{{ r.price_source or "—" }}</td>
+              <td class="u-xs muted">{{ r.price_source or "—" }}</td>
             </tr>
           {% endfor %}
           {% endfor %}
@@ -112,4 +118,5 @@
       </div>
     </div>
   </div>
+  {% include "partials/composicion_resumen.html" %}
 {% endif %}

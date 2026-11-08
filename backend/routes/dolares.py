@@ -101,8 +101,11 @@ async def dolares_rail(request: Request, plazo: str = "24hs") -> HTMLResponse:
     # 2×/día (11:00 / 15:30) esto re-lee la serie macro del BCRA (I/O de red, ~19 ms).
     # Como el riel se pollea en TODAS las pestañas, ese stall congelaría el event
     # loop para todos los usuarios a la vez → al pool.
-    await asyncio.get_running_loop().run_in_executor(
-        None, _safe, "macro_refresh", historico.macro_maybe_refresh, None)
+    # …y sólo cuando hay un horario por cruzar: el chequeo es una comparación
+    # en el loop, el salto al pool (~0,2 ms de latencia por miss) se paga 2×/día.
+    if historico.macro_refresh_pendiente():
+        await asyncio.get_running_loop().run_in_executor(
+            None, _safe, "macro_refresh", historico.macro_maybe_refresh, None)
     cauciones = _safe("caucion_rail", cauc_svc.rail_picks, [])     # [ARS, USD] (en ese orden)
     return _render(request, "partials/fx_rail.html", summary=dx.summary(pz),
                    cauciones=cauciones,

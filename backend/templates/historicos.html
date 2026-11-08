@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
+{% from "partials/_estados.html" import empty, skeleton %}
 {% block title %}Históricos{% endblock %}
 {% block tab_historicos %}active{% endblock %}
 
@@ -11,44 +13,31 @@
     {# Guardado manual de la base px/tasas con la data viva del store (Excel +
        Parquet, mismo esquema/dedup que bymaapi). El autoguardado corre solo a
        las 17:01 si la app está abierta; este botón es el "ahora". #}
-    <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <div class="u-gap u-mt8">
       <button class="btn" type="button"
               hx-request='{"timeout":600000}' hx-post="/historicos/guardar-base" hx-target="#guardar-base-out" hx-swap="innerHTML"
               hx-confirm="¿Guardar la base px/tasas de HOY en el Excel/Parquet de Delta Bases?"
-              hx-disabled-elt="this">💾 Guardar base de hoy</button>
-      <span id="guardar-base-out" class="muted" style="font-size:12px">autoguardado 17:01 hs (días hábiles) con la app abierta</span>
+              hx-disabled-elt="this">{{ icon("save", 14) }} Guardar base de hoy</button>
+      <span id="guardar-base-out" class="muted u-note">autoguardado 17:01 hs (días hábiles) con la app abierta</span>
     </div>
     {% endif %}
   </header>
 
-  <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)">
-    <button @click="tab='macro'"
-            :style="tab==='macro' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📊 Macro (BCRA)</button>
-    <button @click="tab='curvas'; if(!curvaLoaded){curvaLoaded=true; $nextTick(()=>htmx.trigger('#hist-curva','reveal'))}"
-            :style="tab==='curvas' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Tasas por curva</button>
-    <button @click="tab='fechas'; if(!fechasLoaded){fechasLoaded=true; $nextTick(()=>htmx.trigger('#hist-fechas','reveal'))}"
-            :style="tab==='fechas' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📐 Curva por fecha + TR</button>
-    <button @click="tab='series'; if(!seriesLoaded){seriesLoaded=true; $nextTick(()=>htmx.trigger('#hist-series','reveal'))}"
-            :style="tab==='series' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">💾 Series diarias (FX + caución)</button>
-    <button @click="tab='acciones'; if(!accionesLoaded){accionesLoaded=true; $nextTick(()=>htmx.trigger('#hist-acciones','reveal'))}"
-            :style="tab==='acciones' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">📈 Acciones (price action)</button>
-    <button @click="tab='comp'; if(!compLoaded){compLoaded=true; $nextTick(()=>htmx.trigger('#hist-comp','reveal'))}"
-            :style="tab==='comp' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">⚖ Comparar (COMP)</button>
-    <button @click="tab='base'; if(!baseLoaded){baseLoaded=true; $nextTick(()=>htmx.trigger('#hist-base','reveal'))}"
-            :style="tab==='base' ? 'border-bottom:2px solid var(--accent);color:var(--text)' : 'color:var(--text-muted)'"
-            style="background:none;border:none;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600">🗄 Base (ver / bajar)</button>
+  {# Pestañas secundarias: componente .sub-tabs (antes 7 botones con estilo inline) #}
+  <div class="sub-tabs" role="tablist">
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='macro' }" :aria-selected="tab==='macro'" @click="tab='macro'">{{ icon("chart-bar") }} Macro (BCRA)</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='curvas' }" :aria-selected="tab==='curvas'" @click="tab='curvas'; if(!curvaLoaded){curvaLoaded=true; $nextTick(()=>htmx.trigger('#hist-curva','reveal'))}">{{ icon("chart-line") }} Tasas por curva</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='fechas' }" :aria-selected="tab==='fechas'" @click="tab='fechas'; if(!fechasLoaded){fechasLoaded=true; $nextTick(()=>htmx.trigger('#hist-fechas','reveal'))}">{{ icon("ruler") }} Curva por fecha + TR</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='series' }" :aria-selected="tab==='series'" @click="tab='series'; if(!seriesLoaded){seriesLoaded=true; $nextTick(()=>htmx.trigger('#hist-series','reveal'))}">{{ icon("save") }} Series diarias (FX + caución)</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='acciones' }" :aria-selected="tab==='acciones'" @click="tab='acciones'; if(!accionesLoaded){accionesLoaded=true; $nextTick(()=>htmx.trigger('#hist-acciones','reveal'))}">{{ icon("chart-line") }} Acciones (price action)</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='comp' }" :aria-selected="tab==='comp'" @click="tab='comp'; if(!compLoaded){compLoaded=true; $nextTick(()=>htmx.trigger('#hist-comp','reveal'))}">{{ icon("scale") }} Comparar (COMP)</button>
+    <button type="button" role="tab" class="sub-tab" :class="{ active: tab==='base' }" :aria-selected="tab==='base'" @click="tab='base'; if(!baseLoaded){baseLoaded=true; $nextTick(()=>htmx.trigger('#hist-base','reveal'))}">{{ icon("database") }} Base (ver / bajar)</button>
   </div>
 
   {# ── Macro (BCRA) ── #}
   <div x-show="tab==='macro'">
     {% if status and not status.loaded %}
-      <div class="alert">No se cargaron las series: {{ status.error }}</div>
+      {{ empty("No se cargaron las series macro", status.error, icono="warning", tipo="error") }}
     {% endif %}
     <div id="hm-ctrls" class="curve-picker card">
       <div class="card-body">
@@ -83,18 +72,18 @@
               <option value="barras">Barras</option>
             </select>
           </label>
-          <a class="btn-primary" style="align-self:flex-end" href="/historicos?refresh=1&serie={{ selected }}&rango={{ rango }}">↻ Actualizar</a>
+          <a class="btn-primary field-end" href="/historicos?refresh=1&serie={{ selected }}&rango={{ rango }}">↻ Actualizar</a>
         </div>
-        <p class="muted" style="font-size:11px;margin-top:6px">Desde/Hasta tienen prioridad sobre el preset de Rango. Interactivo (uPlot): zoom arrastrando, doble click reset.</p>
+        <p class="muted u-note u-mt8">Desde/Hasta tienen prioridad sobre el preset de Rango. Interactivo (uPlot): zoom arrastrando, doble click reset.</p>
       </div>
     </div>
     <div id="hist-macro-uplot" style="min-height:300px">
-      <p class="muted" style="padding:10px">Cargando gráfico…</p>
+      {{ skeleton(3, "Cargando gráfico…") }}
     </div>
     {# Datos numéricos de la serie: se arman recién al abrir (charts.js, con el
        JSON ya bajado) — la página no paga la tabla al cargar. #}
-    <details id="hm-datos" class="card hm-datos" style="margin-top:12px">
-      <summary class="card-title" style="cursor:pointer;list-style:none"><span>🗒 Ver datos <small class="muted">(fecha · valor · Δ · Δ%, se arma al abrir)</small></span><span class="card-title-aux">▾</span></summary>
+    <details id="hm-datos" class="card hm-datos u-mt12">
+      <summary class="card-title" style="cursor:pointer;list-style:none"><span>{{ icon("table") }} Ver datos <small class="muted">(fecha · valor · Δ · Δ%, se arma al abrir)</small></span><span class="card-title-aux">▾</span></summary>
       <div class="hm-datos-body"></div>
     </details>
   </div>
@@ -105,21 +94,21 @@
        server trabado) dispara htmx:timeout → app.js muestra el error con
        "Reintentar" en vez de dejar "Cargando…" para siempre. #}
     <div id="hist-curva" hx-get="/historicos/curva" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
-      <p class="muted" style="padding:10px">Cargando histórico BYMA…</p>
+      {{ skeleton(3, "Cargando histórico BYMA…") }}
     </div>
   </div>
 
   {# ── Curva por fecha + TR realizado (lazy: carga al abrir el tab) ── #}
   <div x-show="tab==='fechas'" x-cloak>
     <div id="hist-fechas" hx-get="/historicos/curva-fechas" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
-      <p class="muted" style="padding:10px">Cargando curvas por fecha…</p>
+      {{ skeleton(3, "Cargando curvas por fecha…") }}
     </div>
   </div>
 
   {# ── Series diarias FX + caución (lazy: archivo de 1 fila/día, cache mtime) ── #}
   <div x-show="tab==='series'" x-cloak>
     <div id="hist-series" hx-get="/historicos/series-diarias" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
-      <p class="muted" style="padding:10px">Cargando series diarias…</p>
+      {{ skeleton(3, "Cargando series diarias…") }}
     </div>
   </div>
 
@@ -127,7 +116,7 @@
      (lazy: parquet cacheado por mtime, análisis numpy ~1 ms, HTML cacheado) ── #}
   <div x-show="tab==='acciones'" x-cloak>
     <div id="hist-acciones" hx-get="/historicos/acciones" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
-      <p class="muted" style="padding:10px">Cargando price action…</p>
+      {{ skeleton(3, "Cargando price action…") }}
     </div>
   </div>
 
@@ -136,7 +125,7 @@
      lo dibuja charts.js con el JSON embebido) ── #}
   <div x-show="tab==='comp'" x-cloak>
     <div id="hist-comp" hx-get="/historicos/comp" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
-      <p class="muted" style="padding:10px">Cargando comparación…</p>
+      {{ skeleton(3, "Cargando comparación…") }}
     </div>
   </div>
 
@@ -145,7 +134,7 @@
      executor; HTML cacheado por parámetros + firmas; descargas por streaming) ── #}
   <div x-show="tab==='base'" x-cloak>
     <div id="hist-base" hx-get="/historicos/base" hx-trigger="reveal" hx-swap="innerHTML" hx-request='{"timeout":90000}'>
-      <p class="muted" style="padding:10px">Cargando la base…</p>
+      {{ skeleton(3, "Cargando la base…") }}
     </div>
   </div>
 </section>

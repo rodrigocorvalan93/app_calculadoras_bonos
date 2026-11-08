@@ -1,0 +1,27 @@
+{# Estados compartidos (glow-up 06/11): un solo componente para "sin datos" /
+   "no se pudo" con causa y acción, en lugar del cartel amarillo genérico.
+   `empty(titulo, causa, acciones, icono, tipo)`: tipo = "neutro" (sin datos
+   por filtro o selección: no es un error) | "warn" (falta algo que debería
+   estar) | "error" (falló una carga). `acciones` es HTML ya armado (links /
+   botones) o vacío. `skeleton(filas)`: filas grises animadas mientras carga. #}
+{%- from "partials/_icons.html" import icon -%}
+{%- macro empty(titulo, causa="", acciones="", icono="inbox", tipo="neutro") -%}
+<div class="empty-state es-{{ tipo }}" role="status">
+  <div class="es-icon">{{ icon(icono, 22) }}</div>
+  <div class="es-body">
+    <div class="es-title">{{ titulo }}</div>
+    {# `causa` se ESCAPA (puede traer el mensaje de una excepción con texto del
+       request: revisión 08/11); un template que quiera HTML en la causa lo
+       marca `| safe` en el literal y escapa la variable (`| e`).
+       `acciones` es SIEMPRE HTML literal del template (links / botones). #}
+    {% if causa %}<div class="es-cause">{{ causa }}</div>{% endif %}
+    {% if acciones %}<div class="es-actions">{{ acciones | safe }}</div>{% endif %}
+  </div>
+</div>
+{%- endmacro -%}
+{%- macro skeleton(filas=4, texto="Cargando…") -%}
+<div class="skel" aria-busy="true" aria-label="{{ texto }}">
+  {% for _ in range(filas) %}<div class="skel-row" style="--w:{{ (92 - loop.index0 * 9) % 60 + 40 }}%"></div>{% endfor %}
+  <div class="skel-txt muted">{{ texto }}</div>
+</div>
+{%- endmacro -%}

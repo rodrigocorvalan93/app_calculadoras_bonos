@@ -43,7 +43,7 @@
                    hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=mas]"
                    title="Busca por ticker en TODOS los CEDEARs que conoce BYMA (~1.300), no sólo los del panel. Si el que buscás no está suscripto, se suscribe al vuelo y el precio aparece en 1-2 s.">
             <input type="hidden" name="mas" id="ced-mas-n" value="0">
-            <button type="button" id="ced-mas" class="btn-primary" style="font-size:11px;white-space:nowrap"
+            <button type="button" id="ced-mas" class="btn-primary u-sm u-nowrap"
                     hx-get="/mercado/table" hx-trigger="click"
                     hx-target="#mercado-table" hx-swap="innerHTML"
                     hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg], [name=fuente], [name=panel], [name=ym], [name=q], [name=mas]"
@@ -138,7 +138,7 @@
           </select>
         </label>
 
-        <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+        <label class="field-toggle field-end" style="padding-bottom:6px">
           {# hidden 'false' + [name=only_quoting] en el include: sin esto, desmarcar
              no enviaba nada y el filtro no se podía apagar (ver curves.html). #}
           <input type="hidden" name="only_quoting" value="false">
@@ -176,11 +176,11 @@
      ≥/≤ por columna (ej Bid sz ≥ 1.000.000, TIREA@Last ≤ 60). Persisten al refresh. #}
   <div class="tbl-filters" data-table-filters="#mercado-tbl">
     <input type="text" data-f-text placeholder="filtrar ticker…" autocomplete="off">
-    <span class="muted" style="font-size:11px">·</span>
+    <span class="muted u-sm">·</span>
     <select data-f-col title="columna"></select>
     <select data-f-op title="operador"><option value=">=">≥</option><option value="<=">≤</option></select>
     <input type="text" data-f-val placeholder="valor (ej 1M, 60)" autocomplete="off" style="width:96px">
-    <button type="button" class="btn-primary" data-f-add style="font-size:11px">+ filtro</button>
+    <button type="button" class="btn-primary u-sm" data-f-add>+ filtro</button>
     <span data-f-chips></span>
   </div>
   {# Live por FILAS: en cada md-update app.js (data-delta-scope) pide sólo las

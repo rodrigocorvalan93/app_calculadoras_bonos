@@ -1,4 +1,5 @@
 {% import "partials/_fx_macros.html" as fx %}
+{% from "partials/_icons.html" import icon %}
 {# Series diarias del archivo FX/caución del cierre — estilo GP/HP de BBG:
    gráfico (línea o barras) + tabla histórica fecha/valor/Δ/Δ%. Sin polling:
    la data cambia 1×/día; se carga al abrir el tab o tocar el form. #}
@@ -29,10 +30,10 @@
             <input type="date" name="desde" value="{{ desde or '' }}"></label>
           <label class="field"><span>Hasta</span>
             <input type="date" name="hasta" value="{{ hasta or '' }}"></label>
-          <button type="submit" class="btn-primary" style="align-self:end">Actualizar</button>
+          <button type="submit" class="btn-primary field-end">Actualizar</button>
         </div>
       </form>
-      <p class="muted" style="font-size:11px;margin-top:6px">
+      <p class="muted u-note u-mt8">
         Desde/Hasta tienen prioridad sobre la ventana.
         Serie diaria del cierre ({{ archivo.dmin }} → {{ archivo.dmax }} · {{ archivo.n }} días guardados).
         Las de caución usan el plazo o/n real de cada día (viernes 3D, pre-feriado 4D — columna Plazo).
@@ -41,7 +42,7 @@
       {# Cobertura por serie: cuántos días tienen dato y el último. Una serie que
          dejó de grabarse (caución sin tasa "de hoy" al cierre, feed sin ese
          símbolo) se ve acá, no recién por un hueco en el gráfico. #}
-      <p class="muted sd-cobertura" style="font-size:11px;margin-top:4px">
+      <p class="muted sd-cobertura u-note" style="margin-top:4px">
         <b>Con dato:</b>
         {% for k, s in archivo.series.items() %}<span class="sd-cob{% if s.n == 0 or (s.ultimo and s.ultimo != archivo.dmax) %} sd-cob-warn{% endif %}"
             title="{{ s.label }}: {{ s.n }} días con dato{% if s.ultimo %} · último {{ s.ultimo }}{% endif %}">{{ s.label | replace(' — ', ' ') }}
@@ -51,7 +52,7 @@
       {% if archivo.n < 60 %}
       {# Serie corta: cómo completar CCL/MEP/canje hacia atrás desde una fuente
          externa sin pisar lo que grabó la app (corre fuera de la app). #}
-      <p class="muted" style="font-size:11px;margin-top:4px">
+      <p class="muted u-note" style="margin-top:4px">
         Pocos días todavía. Para completar CCL / MEP / canje hacia atrás: <code>backfill_historico.bat</code> en la raíz del repo
         (o <code>python -m backend.tools.backfill_fx --argentinadatos --dry-run</code> para ver el plan y después sin <code>--dry-run</code>);
         sólo agrega fechas anteriores a la primera de la app, nunca pisa una fila y deja respaldo.
@@ -63,9 +64,9 @@
   {% if data and data.rows %}
   {% set meta = data.meta %}
   {% set last = data.rows[-1] %}
-  <div class="card" style="margin-top:12px">
+  <div class="card u-mt12">
     <div class="card-title">
-      <span>📉 {{ meta.label }}</span>
+      <span>{{ icon("chart-line") }} {{ meta.label }}</span>
       <span class="card-title-aux">
         Último <b>{{ val(last.valor, meta) }}</b> ({{ last.fecha }})
         {% if last.var is not none %} · Δ <b class="{{ fx.vcls(last.var) }}">{{ fx.arrow(last.var) }} {{ last.var | ar_num(meta.dec) }}{{ " pp" if meta.unit == "%" else "" }}</b>{% endif %}
@@ -102,8 +103,8 @@
     </div>
   </div>
 
-  <div class="card" style="margin-top:12px">
-    <div class="card-title"><span>🗒 Tabla histórica (HP)</span>
+  <div class="card u-mt12">
+    <div class="card-title"><span>{{ icon("table") }} Tabla histórica (HP)</span>
       <span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#hp-series-tbl" title="Descargar la tabla como se ve (CSV es-AR)">⤓ CSV</button> · más reciente primero{% if n_tabla == 500 %} · recortada a 500 filas{% endif %}</span></div>
     <div class="card-body table-scroll">
       {# Celdas PRE-FORMATEADAS en la route (_sd_fmt_rows): filtros Jinja por
@@ -111,14 +112,14 @@
          mtime dejan el render frío en ~10 ms y el warm en un lookup. #}
       <table class="cashflows curve-table mercado-table" data-sortable id="hp-series-tbl">
         <thead><tr>
-          <th style="text-align:left" data-sort>Fecha</th>
+          <th class="u-left" data-sort>Fecha</th>
           {% if con_plazo %}<th data-sort>Plazo</th>{% endif %}
           <th data-sort>Valor</th><th data-sort>Δ</th><th data-sort>Δ%</th>
         </tr></thead>
         <tbody>
           {% for r in rows_fmt %}
           <tr>
-            <td style="text-align:left;color:var(--accent);font-weight:600">{{ r.fecha }}</td>
+            <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.fecha }}</td>
             {% if con_plazo %}<td>{{ r.plazo }}</td>{% endif %}
             <td style="font-weight:600">{{ r.valor_s }}</td>
             <td class="{{ r.var_cls }}">{{ r.var_s }}</td>
@@ -130,6 +131,6 @@
     </div>
   </div>
   {% else %}
-  <div class="alert" style="margin-top:12px">La serie elegida no tiene datos todavía (se llena con el autosave del cierre).</div>
+  <div class="alert">La serie elegida no tiene datos todavía (se llena con el autosave del cierre).</div>
   {% endif %}
 {% endif %}

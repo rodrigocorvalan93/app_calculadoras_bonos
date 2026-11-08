@@ -1,3 +1,4 @@
+{% from "partials/_estados.html" import skeleton %}
 {# Cuerpo de Forwards: filtro de bonos + matriz de mercado + what-if.
    Se re-renderiza entero cuando cambia curva/plazo/leg (estado fresco). #}
 {% if not selected_def %}
@@ -52,7 +53,7 @@
        hx-trigger="revealed, change, change from:#forwards-filter delay:200ms"
        hx-include="[name=curve],[name=plazo],[name=leg],[name=only_quoting],#forwards-filter,#wi-prices"
        hx-swap="innerHTML">
-    <p class="muted" style="font-size:12px">Cargando what-if…</p>
+    {{ skeleton(3, "Cargando what-if…") }}
   </div>
 
   {# ── Histórico del forward de un par (base diaria TIREA/Duration) ────── #}

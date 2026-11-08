@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
+{% block title %}{{ codigo }}{% endblock %}
+{% block content %}
+<section class="error-page">
+  <div class="error-code">{{ codigo }}</div>
+  <h1 class="error-title">{{ titulo }}</h1>
+  <p class="error-text">{{ detalle }}</p>
+  <div class="error-actions">
+    <a class="btn btn-primary" href="/inicio">{{ icon("home", 14) }} Ir al inicio</a>
+    <button type="button" class="btn btn-ghost" onclick="history.back()">Volver atrás</button>
+    {% if codigo == 403 and not request.state.is_superuser %}<span class="muted u-sm">Si necesitás esta sección, pedile al superuser que la habilite para tu rol.</span>{% endif %}
+    {% if codigo == 500 %}<span class="muted u-sm">El detalle quedó registrado{% if request.state.is_superuser %}: <a href="/admin#salud">/admin · Salud</a>{% else %} para el superuser{% endif %}.</span>{% endif %}
+  </div>
+</section>
+{% endblock %}

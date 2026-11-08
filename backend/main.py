@@ -54,6 +54,8 @@ from backend.routes.yas import router as yas_router
 from backend.routes.nueva import router as nueva_router
 from backend.routes.auth import router as auth_router
 from backend.routes.admin import router as admin_router
+from backend.routes.salud import router as salud_router
+from backend.routes.prefs import router as prefs_router
 from backend.services import bond_universe, curves as curves_svc, fx as fx_svc, symbols as syms
 from backend.services.primary_ws import get_ws_client
 from backend.services.warmup import get_daemon as get_warmup_daemon
@@ -198,6 +200,13 @@ async def lifespan(app: FastAPI):
         # (el warning de "sin superuser" ya lo loguea auth: no se repite acá)
     except Exception:  # noqa: BLE001
         logger.exception("[main] auth bootstrap failed")
+
+    # «Qué hay de nuevo» (/novedades): git log en un thread, nunca en un request.
+    try:
+        from backend.services import novedades as _novedades
+        _novedades.iniciar()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] novedades no se pudo iniciar")
 
     try:
         bond_universe.ensure_loaded()
@@ -618,6 +627,10 @@ def create_app() -> FastAPI:
     # Horarios de mercado para los relojes de la topbar (configurables por env).
     templates.env.globals["mkt_horarios"] = {"arg": settings.mkt_horario_arg,
                                              "ny": settings.mkt_horario_ny}
+    # Versión que corre (pie de página → /novedades): la lee un thread al
+    # arrancar (services/novedades); '' hasta entonces o sin git.
+    from backend.services import novedades as _novedades
+    templates.env.globals["app_version"] = _novedades.version
     app.state.templates = templates
 
     # .webmanifest no está en el registro de mimetypes de Python → StaticFiles
@@ -649,6 +662,8 @@ def create_app() -> FastAPI:
     app.mount("/static", _StaticInmutable(directory=str(STATIC_DIR)), name="static")
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(salud_router)
+    app.include_router(prefs_router)
     app.include_router(inicio_router)
     app.include_router(yas_router)
     app.include_router(nueva_router)
@@ -712,6 +727,63 @@ def create_app() -> FastAPI:
 
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
+
+    def _pagina_error(request: Request, codigo: int, titulo: str, detalle: str) -> Response:
+        """403 / 404 / 500 con la plantilla de la app (antes un `<h1>403</h1>`
+        pelado). Un request de htmx recibe un alert corto que el panel puede
+        swapear; el add-in / JSON siguen con JSON. `titulo` / `detalle` se
+        escapan (el detalle de un 500 es el mensaje de una excepción, que puede
+        repetir texto del request) y la respuesta lleva los headers de
+        seguridad: el handler de Exception corre en ServerErrorMiddleware, FUERA
+        de _SecurityMiddleware (revisión 08/11)."""
+        import html as _html
+        t, d = _html.escape(str(titulo)), _html.escape(str(detalle))
+        if request.headers.get("hx-request"):
+            resp: Response = HTMLResponse(f'<div class="alert alert-error"><b>{codigo} · {t}.</b> {d}</div>',
+                                          status_code=codigo)
+        elif request.url.path.startswith(("/excel/", "/api/")) or "application/json" in (request.headers.get("accept") or ""):
+            resp = JSONResponse({"error": f"{codigo} {titulo}", "detalle": detalle}, status_code=codigo)
+        else:
+            try:
+                resp = app.state.templates.TemplateResponse(
+                    request, "error.html", {"codigo": codigo, "titulo": titulo, "detalle": detalle},
+                    status_code=codigo)
+            except Exception:  # noqa: BLE001 — la página de error nunca puede fallar
+                resp = HTMLResponse(f"<h1>{codigo}</h1><p>{t}. {d}</p>", status_code=codigo)
+        for k, v in _SEC_HEADERS:
+            resp.headers.setdefault(k.decode("latin-1"), v.decode("latin-1"))
+        return resp
+
+    app.state.pagina_error = _pagina_error
+
+    from starlette.exceptions import HTTPException as _StarletteHTTPException
+
+    @app.exception_handler(_StarletteHTTPException)
+    async def _http_exc(request: Request, exc: _StarletteHTTPException):
+        textos = {403: ("Sin acceso", "No tenés permiso para esta sección."),
+                  404: ("No existe", "La página que pediste no está (o cambió de lugar)."),
+                  405: ("Método no permitido", "Esa acción no se puede hacer así.")}
+        if exc.status_code in textos and not request.url.path.startswith("/static/"):
+            titulo, detalle = textos[exc.status_code]
+            if exc.detail and isinstance(exc.detail, str) and exc.detail not in ("Not Found", "Forbidden", "Method Not Allowed"):
+                detalle = exc.detail
+            return _pagina_error(request, exc.status_code, titulo, detalle)
+        from fastapi.exception_handlers import http_exception_handler
+        return await http_exception_handler(request, exc)
+
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception):
+        # El detalle va al log (y al ring de /admin · Salud); al usuario una
+        # página de la app con qué pasó, sin traceback. Starlette re-lanza
+        # igual después de responder, así uvicorn lo registra como siempre.
+        logging.getLogger("backend.main").exception("500 en %s %s: %s", request.method, request.url.path, exc)
+        # El mensaje de la excepción (rutas absolutas con el usuario de Windows,
+        # URLs del broker…) sólo lo ve el superuser; el resto, qué hacer.
+        if getattr(request.state, "is_superuser", False):
+            detalle = f"{type(exc).__name__}: {str(exc)[:200]}"
+        else:
+            detalle = "Error interno. Quedó registrado para el superuser (/admin · Salud); probá de nuevo en un momento."
+        return _pagina_error(request, 500, "Algo falló", detalle)
 
     def _needs_login(request: Request) -> Response:
         # htmx (partial/polling): 401 + HX-Redirect para que el cliente navegue
@@ -807,15 +879,12 @@ def create_app() -> FastAPI:
         auth_svc.marcar_visto(username)
 
         if any(path == p or path.startswith(p + "/") for p in _SUPERUSER_ONLY) and role != "superuser":
-            return HTMLResponse("<h1>403</h1><p>Sección reservada al superuser.</p>", status_code=403)
+            return _pagina_error(request, 403, "Sin acceso", "Sección reservada al superuser.")
         for p, feat in _FEATURE_PATHS:
             if (path == p or path.startswith(p + "/")) and feat not in request.state.features:
-                return HTMLResponse("<h1>403</h1><p>Panel no habilitado para tu rol.</p>",
-                                    status_code=403)
+                return _pagina_error(request, 403, "Sin acceso", "Panel no habilitado para tu rol.")
         if not auth_svc.can_access_path(role, path):
-            return HTMLResponse(
-                "<h1>403</h1><p>No tenés acceso a esta sección. "
-                "<a href='/inicio'>Volver</a></p>", status_code=403)
+            return _pagina_error(request, 403, "Sin acceso", "No tenés acceso a esta sección.")
         return await call_next(request)
 
     # SessionMiddleware se agrega DESPUÉS del guard → queda MÁS AFUERA (Starlette
@@ -858,7 +927,12 @@ def create_app() -> FastAPI:
     # comprimiría ~3× a costa de ~1 s de CPU del server (en las versiones de
     # Starlette de los venvs del desk, inline en el event loop). Van tal
     # cual: el desk descarga por LAN.
-    _SIN_GZIP = ("/historicos/base/archivo", "/historicos/base/cierre", "/historicos/base.csv")
+    # Descargas ya comprimidas / CSV grande, y los SONDEOS chicos (auditoría
+    # 08/11): auth_guard es BaseHTTPMiddleware → toda respuesta sale en
+    # streaming y GZipMiddleware ignora minimum_size: /market/seq (4 bytes)
+    # viajaba gzipeado a 30 bytes y chunked, ~45 µs de zlib por request.
+    _SIN_GZIP = ("/historicos/base/archivo", "/historicos/base/cierre", "/historicos/base.csv",
+                 "/market/seq", "/market/health", "/cierre/chip")
 
     class _SSESinGzip:
         def __init__(self, app):  # noqa: ANN001

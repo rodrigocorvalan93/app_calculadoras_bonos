@@ -40,6 +40,8 @@ os.environ.setdefault("BNA_FX", "0")
 os.environ.setdefault("BNA_FX_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_bna_fx.json"))
 # Pizarra de Inicio (cuadros por usuario): nunca el data/pizarra.json real.
 os.environ.setdefault("PIZARRA_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_pizarra_"), "pizarra.json"))
+# Prefs de interfaz por usuario (glow-up D): nunca el data/prefs.json real.
+os.environ.setdefault("PREFS_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_prefs_"), "prefs.json"))
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")
 os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_auth_store.json"))
 # Bootstrap del superuser de la suite: valores SINTÉTICOS (nunca una cuenta

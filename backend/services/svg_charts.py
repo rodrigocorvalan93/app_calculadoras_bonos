@@ -45,6 +45,47 @@ def _nice_ticks(lo: float, hi: float, n: int = 5) -> List[float]:
     return out or [lo]
 
 
+def donut(items: List[Dict[str, Any]], *, size: int = 170, r_in: float = 50.0,
+          r_out: float = 80.0, gap_deg: float = 0.8) -> Optional[Dict[str, Any]]:
+    """Geometría de una dona (torta con agujero) para SVG server-side.
+
+    `items`: [{"label": str, "val": float, ...extras}] — la porción es
+    proporcional a `val` (los ≤ 0 o no finitos no se dibujan); los extras
+    (pct, monto…) se conservan en cada porción para la leyenda / tooltip.
+    Devuelve {size, cx, cy, slices: [{i, d, frac, ...item}]} o None sin datos.
+    Una sola porción = anillo completo (dos arcos, SVG no dibuja 360° de un
+    tirón). El color lo da la clase `comp-c{i}` (CSS, 8 tonos cíclicos)."""
+    vals = [(it, float(it.get("val") or 0.0)) for it in items]
+    vals = [(it, v) for it, v in vals if v > 0 and math.isfinite(v)]
+    total = sum(v for _, v in vals)
+    if not vals or total <= 0:
+        return None
+    cx = cy = size / 2.0
+    gap = math.radians(gap_deg) if len(vals) > 1 else 0.0
+
+    def P(r: float, a: float) -> str:
+        return f"{cx + r * math.cos(a):.1f},{cy + r * math.sin(a):.1f}"
+
+    def sector(a0: float, a1: float) -> str:
+        big = 1 if (a1 - a0) > math.pi else 0
+        return (f"M{P(r_out, a0)} A{r_out:.1f},{r_out:.1f} 0 {big} 1 {P(r_out, a1)} "
+                f"L{P(r_in, a1)} A{r_in:.1f},{r_in:.1f} 0 {big} 0 {P(r_in, a0)} Z")
+
+    slices: List[Dict[str, Any]] = []
+    a = -math.pi / 2.0
+    for i, (it, v) in enumerate(vals):
+        frac = v / total
+        a1 = a + 2.0 * math.pi * frac
+        if len(vals) == 1:
+            mid = a + math.pi
+            d = sector(a, mid) + " " + sector(mid, a1)
+        else:
+            d = sector(a + gap / 2.0, a1 - gap / 2.0)
+        slices.append({**it, "i": i, "d": d, "frac": round(frac, 6)})
+        a = a1
+    return {"size": size, "cx": cx, "cy": cy, "slices": slices, "n": len(slices)}
+
+
 def barras_pct(segs: List[Dict[str, Any]], avg_val: Optional[float], *,
                width: int = 880, height: int = 250,
                ticks: int = 4, pad_l: int = 54,

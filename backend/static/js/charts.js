@@ -471,7 +471,7 @@
     function clear() {
       // p = el placeholder "Cargando gráfico…" del template (quedaba pegado
       // arriba del chart para siempre).
-      Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert,p")).forEach(function (n) { n.remove(); });
+      Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert,p,.skel")).forEach(function (n) { n.remove(); });
     }
 
     function render(j, recreate) {
@@ -763,7 +763,7 @@
   function clearBox(box) {
     // p.muted = el placeholder "Cargando gráfico…" del template: quedaba
     // pegado arriba del chart de Históricos para siempre.
-    Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert,p.muted")).forEach(function (n) { n.remove(); });
+    Array.prototype.slice.call(box.querySelectorAll(".uplot,.alert,p.muted,.skel")).forEach(function (n) { n.remove(); });
   }
   function palette() {
     return ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c",

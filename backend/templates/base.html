@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ΔYieldVertex - {% block title %}Calculadora de Bonos{% endblock %}</title>
+  <title>{% block title %}Calculadora de Bonos{% endblock %} · ΔYieldVertex</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', path='favicon.ico') }}?v={{ asset_v }}">
   <link rel="icon" type="image/png" href="{{ url_for('static', path='favicon.png') }}?v={{ asset_v }}">
   {# PWA: instalable desde el navegador del celu ("Agregar a inicio") sin
@@ -35,8 +35,11 @@
   <link rel="stylesheet" href="{{ url_for('static', path='vendor/uplot-1.6.31.min.css') }}">
   <script src="{{ url_for('static', path='vendor/uplot-1.6.31.min.js') }}" defer></script>
 </head>
+{% from "partials/_icons.html" import icon, sprite %}
+{% from "partials/_estados.html" import skeleton %}
 <body hx-boost="false" data-asset-v="{{ asset_v }}"
       x-data="{ railOpen: (function(){ try { return localStorage.getItem('fx_rail') !== '0'; } catch (e) { return true; } })() }">
+  {{ sprite() }}
   <header class="topbar" x-data="themeSwitcher()">
     {# Marca ΔYV en dos colores: el Δ (triángulo SVG de siempre) en accent,
        "YV" en tinta normal. Nombre completo (ΔYieldVertex) en footer y title. #}
@@ -59,7 +62,7 @@
     {# Fuera del <nav>: .tabs tiene overflow:hidden (recorta las que no entran)
        y adentro también recortaría este dropdown. #}
     <div class="tab-more" id="nav-more" hidden>
-      <button type="button" id="nav-more-btn" class="tab" title="Más pestañas">⋯</button>
+      <button type="button" id="nav-more-btn" class="tab" title="Más pestañas" aria-label="Más pestañas">{{ icon("more", 16) }}</button>
       <div class="tab-menu" id="nav-more-menu"></div>
     </div>
     <div class="topbar-meta">
@@ -67,27 +70,32 @@
       {# Campana de alertas (sólo superuser, como toda /alertas): badge rojo =
          alertas disparadas sin re-armar. app.js la sondea cada ~30 s. #}
       <button type="button" id="alert-bell" class="rail-toggle" style="position:relative"
-              onclick="window.location.href='/alertas'" title="Alertas de precio/TIR">
-        🔔<span id="alert-bell-badge" class="bell-badge" hidden></span>
+              onclick="window.location.href='/alertas'" title="Alertas de precio/TIR" aria-label="Alertas">
+        {{ icon("bell") }}<span id="alert-bell-badge" class="bell-badge" hidden></span>
       </button>
       {% endif %}
       <button type="button" class="rail-toggle" onclick="if (window.ckOpen) window.ckOpen()"
-              title="Búsqueda global — Ctrl+K / Cmd+K (bonos y pestañas)">🔍</button>
-      <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
-      <span id="live-meta" class="live-meta muted"></span>
+              title="Búsqueda global — Ctrl+K / Cmd+K (bonos y pestañas)" aria-label="Buscar (Ctrl+K)">{{ icon("search") }}</button>
+      {# Dot + texto del feed son un link: /salud (qué anda y qué no, para
+         todos) o, con el feed caído / precios viejos, /conexion para
+         reconectar ahí mismo (app.js meta() cambia el href). #}
+      <a id="live-link" class="live-link" href="/salud" title="Estado del feed y de los datos — click para ver la salud de la app">
+        <span id="live-dot" class="live-dot" data-state="idle" title="Estado del feed"></span>
+        <span id="live-meta" class="live-meta muted"></span>
+      </a>
       {% if request.state.user %}
       {% if request.state.user.role == 'superuser' %}
-      <a class="rail-toggle" href="/admin" title="Panel de administración (usuarios y permisos)" style="text-decoration:none">👤</a>
+      <a class="rail-toggle" href="/admin" title="Panel de administración (usuarios y permisos)" aria-label="Administración">{{ icon("user") }}</a>
       {% endif %}
-      {# 🔌 para TODOS los logueados: si el broker default se cae, cualquiera
+      {# Conexión para TODOS los logueados: si el broker default se cae, cualquiera
          reconecta (los no-superuser sólo entre brokers conocidos). #}
-      <a class="rail-toggle" href="/conexion" title="Conexión del feed BYMA (reconectar / cambiar broker)" style="text-decoration:none">🔌</a>
+      <a class="rail-toggle" href="/conexion" title="Conexión del feed BYMA (reconectar / cambiar broker)" aria-label="Conexión del feed">{{ icon("plug") }}</a>
       <span class="user-chip" title="Sesión ({{ request.state.user.role }})">{{ request.state.user.username }}<i class="muted"> · {{ request.state.user.role }}</i></span>
-      <a class="rail-toggle" href="/logout" title="Cerrar sesión" style="text-decoration:none">⎋</a>
+      <a class="rail-toggle" href="/logout" title="Cerrar sesión ({{ request.state.user.username }})" aria-label="Cerrar sesión">{{ icon("logout") }}</a>
       {% endif %}
       <button type="button" class="rail-toggle" :class="{ active: railOpen }"
               @click="railOpen = !railOpen; try { localStorage.setItem('fx_rail', railOpen ? '1' : '0'); } catch (e) {}; if (railOpen && window.htmx) { var r = document.querySelector('.fx-rail'); if (r) window.htmx.trigger(r, 'load'); }"
-              title="Mostrar/ocultar el monitor de dólar">💵</button>
+              title="Mostrar/ocultar el monitor de dólar" aria-label="Monitor de dólar">{{ icon("dollar") }}</button>
       <div class="theme-switch" role="tablist" aria-label="Tema">
         <button type="button" role="tab" :aria-selected="theme==='dark'"  :class="{ active: theme==='dark'  }" @click="set('dark')"  title="Dark (Bloomberg)">Dark</button>
         <button type="button" role="tab" :aria-selected="theme==='light'" :class="{ active: theme==='light' }" @click="set('light')" title="Light">Light</button>
@@ -138,7 +146,7 @@
               seguía re-renderizando en cada tick. #}
            hx-trigger="load, md-update[fxRailOpen()] from:body, every 30s [fxRailOpen()]"
            hx-swap="innerHTML">
-      <div class="muted" style="padding:12px;font-size:12px">Cargando dólar…</div>
+      {{ skeleton(3, "Cargando dólar…") }}
     </aside>
     <main class="content">
       {% block content %}{% endblock %}
@@ -146,9 +154,7 @@
   </div>
 
   <footer class="footer">
-    <span>FastAPI rewrite · sub-50 ms p95 target</span>
-    <span style="margin-left:12px;opacity:.75">·</span>
-    <span style="margin-left:12px">ΔYieldVertex 2024-2026 · autoría
+    <span>ΔYieldVertex 2024-2026 · autoría
       <a href="https://github.com/rodrigocorvalan93/app_calculadoras_bonos"
          target="_blank" rel="noopener" style="color:inherit"
          title="Repositorio canónico del autor">Rodrigo Corvalán Salguero</a>
@@ -163,6 +169,8 @@
        lo manda (HX-Trigger) el botón Ignorar del banner: refresco a los 2,5 s
        en vez de esperar el minuto. #}
     <span id="cierre-chip" class="cierre-slot" hx-get="/cierre/chip" hx-trigger="load, every 60s, cierre-refresh from:body delay:2500ms" hx-swap="innerHTML"></span>
+    {# Versión que corre → «Qué hay de nuevo» (git log, leído al arrancar). #}
+    <a class="footer-ver" href="/novedades" title="Qué hay de nuevo en la app">{{ app_version() or "novedades" }}</a>
     {% endif %}
   </footer>
 

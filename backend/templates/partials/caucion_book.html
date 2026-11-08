@@ -11,7 +11,7 @@
      hx-trigger="md-update from:body, every 30s" hx-target="this" hx-swap="outerHTML">
   <div class="card-title">
     <span>Libro · Caución {{ b.moneda }} {{ b.plazo }}</span>
-    <span class="card-title-aux">liquida en {{ b.dias }} día{{ "s" if b.dias != 1 else "" }} · vto {{ b.vencimiento }}{% if not b.es_hoy %} · <span style="color:var(--red)">datos de la última rueda</span>{% endif %}</span>
+    <span class="card-title-aux">liquida en {{ b.dias }} día{{ "s" if b.dias != 1 else "" }} · vto {{ b.vencimiento }}{% if not b.es_hoy %} · <span class="var-down">datos de la última rueda</span>{% endif %}</span>
   </div>
   <div class="card-body">
     <div class="book-stats">
@@ -35,7 +35,7 @@
           {% for l in b.bids %}
           <tr class="depth-bid" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
             <td class="px-up" style="font-weight:600">{{ l.tasa | ar_num(2) }}%</td>
-            <td style="color:var(--text-muted)">{{ l.cum | ar_hum }}</td>
+            <td class="muted">{{ l.cum | ar_hum }}</td>
             <td>{{ l.monto | ar_hum }}</td>
           </tr>
           {% else %}<tr><td colspan="3" style="color:var(--text-muted)">— sin bids —</td></tr>{% endfor %}
@@ -47,7 +47,7 @@
           {% for l in b.offers %}
           <tr class="depth-ask" style="--df:{{ ((l.frac or 0)*100)|round(0)|int }}%">
             <td>{{ l.monto | ar_hum }}</td>
-            <td style="color:var(--text-muted)">{{ l.cum | ar_hum }}</td>
+            <td class="muted">{{ l.cum | ar_hum }}</td>
             <td class="px-down" style="font-weight:600">{{ l.tasa | ar_num(2) }}%</td>
           </tr>
           {% else %}<tr><td colspan="3" style="color:var(--text-muted)">— sin offers —</td></tr>{% endfor %}

@@ -16,21 +16,21 @@
   <span class="muted" style="font-weight:400">WARNING+ · en memoria del proceso · {{ errs | length }}</span></div>
 {% if errs %}
 <div class="table-scroll" style="max-height:280px">
-  <table class="cashflows" style="font-size:11px">
-    <thead><tr><th style="white-space:nowrap">ts</th><th>nivel</th><th>logger</th>
-      <th style="text-align:left">mensaje</th></tr></thead>
+  <table class="cashflows u-sm">
+    <thead><tr><th class="u-nowrap">ts</th><th>nivel</th><th>logger</th>
+      <th class="u-left">mensaje</th></tr></thead>
     <tbody>
       {% for e in errs %}
       <tr>
-        <td style="white-space:nowrap">{{ e.ts }}</td>
+        <td class="u-nowrap">{{ e.ts }}</td>
         <td><b style="color:{{ 'var(--red)' if e.level == 'ERROR' or e.level == 'CRITICAL' else '#f0883e' }}">{{ e.level }}</b></td>
-        <td class="muted" style="white-space:nowrap">{{ e.logger }}</td>
-        <td style="text-align:left;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word">{{ e.msg }}</td>
+        <td class="muted u-nowrap">{{ e.logger }}</td>
+        <td class="u-left" style="font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word">{{ e.msg }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 {% else %}
-<p class="muted" style="font-size:12px;margin:6px 0 0">Sin warnings ni errores desde el arranque.</p>
+<p class="muted u-note" style="margin:6px 0 0">Sin warnings ni errores desde el arranque.</p>
 {% endif %}

@@ -31,7 +31,7 @@
             {% for v in [1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0] %}<option value="{{ v }}" {% if v == score_min %}selected{% endif %}>{{ v }}</option>{% endfor %}
           </select>
         </label>
-        <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+        <label class="field-toggle field-end" style="padding-bottom:6px">
           <input type="checkbox" name="solo_ons" value="true" {% if solo_ons %}checked{% endif %}
                  hx-get="/creditos/table" hx-trigger="change" hx-target="#cred-table" hx-swap="innerHTML"
                  hx-include="#cred-ctrls [name=sector], #cred-ctrls [name=score_min]">

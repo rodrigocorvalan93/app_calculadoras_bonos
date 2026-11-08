@@ -18,11 +18,11 @@
                  hx-get="/cafci/table" hx-trigger="keyup changed delay:250ms, change"
                  hx-target="#cafci-body" hx-swap="innerHTML" hx-indicator="#cafci-spin">
         </label>
-        <button type="button" class="btn-primary" style="align-self:flex-end"
+        <button type="button" class="btn-primary field-end"
                 hx-get="/cafci/table?refresh=1" hx-include="[name='q']"
                 hx-target="#cafci-body" hx-swap="innerHTML" hx-indicator="#cafci-spin"
                 title="Releer el Excel del día (se actualiza solo 1×/día; esto fuerza ya)">↻ Actualizar</button>
-        <span id="cafci-spin" class="htmx-indicator muted" style="align-self:flex-end">cargando…</span>
+        <span id="cafci-spin" class="htmx-indicator muted field-end">cargando…</span>
       </div>
     </div>
   </div>
@@ -37,7 +37,7 @@
   <!-- Carga lazy: la pestaña abre al instante; el vector (que puede tardar la
        primera vez por el Excel/OneDrive) llega por htmx con un spinner. -->
   <div id="cafci-body" hx-get="/cafci/table?q={{ q | urlencode }}" hx-trigger="load" hx-swap="innerHTML">
-    <div class="muted" style="padding:24px;text-align:center">
+    <div class="muted u-center" style="padding:24px">
       Cargando vector CAFCI… <span class="muted">(la primera carga del día puede tardar unos segundos)</span>
     </div>
   </div>

@@ -34,33 +34,33 @@
       {% for d, lbl in [(7, '1 sem'), (14, '2 sem'), (30, '1 mes')] %}
       <button type="button" hx-get="/historicos/semanal?dias={{ d }}"
               hx-target="#hist-semanal" hx-swap="innerHTML"
-              class="{{ 'btn-primary' if dias == d else '' }}" style="font-size:11px">{{ lbl }}</button>
+              class="{{ 'btn-primary' if dias == d else '' }} u-sm">{{ lbl }}</button>
       {% endfor %}
-      <a href="/historicos/semanal.csv?dias={{ dias }}" class="lnk" style="font-size:11px"
+      <a href="/historicos/semanal.csv?dias={{ dias }}" class="lnk"
          title="Descargar el resumen (segmentos + detalle por bono, todos los bonos) como CSV es-AR — abre directo en Excel">⬇ CSV</a>
       <span style="margin-left:14px">Tasa:</span>
       {# Toggle TIR ↔ TEM client-side: los dos datasets ya viajan en el render
          (cero requests extra); Alpine sólo cambia qué columnas se ven. #}
-      <button type="button" @click="ym='tir'" :class="ym==='tir' ? 'btn-primary' : ''" style="font-size:11px">TIR</button>
-      <button type="button" @click="ym='tem'" :class="ym==='tem' ? 'btn-primary' : ''" style="font-size:11px">TEM</button>
+      <button type="button" class="u-sm" @click="ym='tir'" :class="ym==='tir' ? 'btn-primary' : ''">TIR</button>
+      <button type="button" class="u-sm" @click="ym='tem'" :class="ym==='tem' ? 'btn-primary' : ''">TEM</button>
     </div>
     <div class="table-scroll">
     <table class="cashflows curve-table sem-tbl">
       <thead><tr>
-        <th style="text-align:left">Segmento</th><th>Δ Precio</th>
+        <th class="u-left">Segmento</th><th>Δ Precio</th>
         <th x-show="ym==='tir'">Δ TIR</th>
         <th x-show="ym==='tem'" x-cloak>Δ TEM</th>
         <th x-show="ym==='tir'" title="TIREA promedio del segmento al cierre de la ventana">TIR prom.</th>
         <th x-show="ym==='tem'" x-cloak title="TEM promedio del segmento al cierre de la ventana">TEM prom.</th>
         <th title="Duration promedio del segmento al cierre de la ventana">Dur. prom.</th>
-        <th style="text-align:left">Bonos</th>
+        <th class="u-left">Bonos</th>
       </tr></thead>
         {% for s in w.segments %}
         <tbody x-data="{ open: false }" data-seg="{{ s.key }}">
           <tr class="sem-row" :class="{ open: open }" @click="open = !open"
               tabindex="0" @keydown.enter="open = !open" @keydown.space.prevent="open = !open"
               title="Ver detalle por bono">
-            <td style="text-align:left">
+            <td class="u-left">
               <span class="sem-caret" :class="{ open: open }" aria-hidden="true">▸</span>
               <b>{{ s.label }}</b> <i class="muted sem-c-n">({{ s.n }})</i>
             </td>
@@ -78,7 +78,7 @@
             <td x-show="ym==='tir'" class="sem-c-tir">{{ ((s.tir_avg * 100) | ar_num(1)) ~ '%' if s.tir_avg is not none else '—' }}</td>
             <td x-show="ym==='tem'" x-cloak class="sem-c-tem">{{ ((s.tem_avg * 100) | ar_num(2)) ~ '%' if s.tem_avg is not none else '—' }}</td>
             <td class="sem-c-dur">{{ (s.dur_avg | ar_num(2)) if s.dur_avg is not none else '—' }}</td>
-            <td style="text-align:left" class="sem-codes muted">{% for m in s.members %}<span class="sem-m" data-m="{{ m }}">{{ m }}</span>{{ ' · ' if not loop.last }}{% endfor %}</td>
+            <td class="sem-codes muted u-left">{% for m in s.members %}<span class="sem-m" data-m="{{ m }}">{{ m }}</span>{{ ' · ' if not loop.last }}{% endfor %}</td>
           </tr>
           {% if s.rows %}
           <tr x-show="open" x-cloak class="sem-detail-row">
@@ -110,7 +110,7 @@
               {% endif %}
               <table class="sem-detail">
                 <thead><tr>
-                  <th style="text-align:left">Bono
+                  <th class="u-left">Bono
                     <button type="button" class="lnk sem-all" style="font-size:10px;margin-left:8px;display:none"
                             title="Volver a tildar todos los bonos del segmento">✓ todos</button></th>
                   <th>Δ Precio</th><th>Δ TIR</th><th>Δ TEM</th>
@@ -127,11 +127,11 @@
                       data-tir1="{{ b.tir1 if b.tir1 is not none else '' }}"
                       data-tem1="{{ b.tem1 if b.tem1 is not none else '' }}"
                       data-dur="{{ b.dur if b.dur is not none else '' }}">
-                    <td style="text-align:left"><label style="cursor:pointer"><input type="checkbox" class="sem-chk" checked
+                    <td class="u-left"><label style="cursor:pointer"><input type="checkbox" class="sem-chk" checked
                           title="Destildar: el bono no entra en los promedios del segmento"> <b>{{ b.code }}</b></label></td>
                     <td class="{{ 'px-up' if (b.dprice or 0) >= 0 else 'px-down' }}">{{
                       ((b.dprice * 100) | ar_num(2)) ~ '%' if b.dprice is not none else '—' }}
-                      {%- if b.cup_pct and b.cup_pct > 0.0001 %} <span class="muted" style="font-size:10px"
+                      {%- if b.cup_pct and b.cup_pct > 0.0001 %} <span class="muted u-xs"
                         title="Cortó cupón en la ventana: cobro como % del precio inicial">✂ +{{ (b.cup_pct * 100) | ar_num(2) }}%</span>{% endif %}</td>
                     <td class="{{ 'px-up' if (b.dtir or 0) <= 0 else 'px-down' }}">{{
                       (('+' if b.dtir >= 0 else '') ~ ((b.dtir * 100) | ar_num(2)) ~ ' pp') if b.dtir is not none else '—' }}</td>

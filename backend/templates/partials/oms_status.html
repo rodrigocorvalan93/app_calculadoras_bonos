@@ -1,27 +1,28 @@
+{% from "partials/_icons.html" import icon %}
 {# Barra de estado del OMS — swappable (#oms-status). La devuelven /ordenes/kill
    y /ordenes/live, así el badge y los botones se actualizan sin recargar. #}
 <div class="oms-statusbar">
   {% if live %}<span class="badge-new" style="background:rgba(239,68,68,.15);color:var(--red);border-color:var(--red)">● LIVE</span>
   {% else %}<span class="badge-new" style="color:var(--green);border-color:var(--green)">● PAPER</span>{% endif %}
   {% if kill %}<span class="badge-new" style="color:var(--red);border-color:var(--red)">KILL-SWITCH</span>{% endif %}
-  <span class="muted" style="font-size:11.5px">
+  <span class="muted u-sm">
     Topes: <b>{{ max_notional | ar_int }} ARS</b> · <b>{{ max_notional_usd | ar_int }} USD</b> · banda ±{{ band | ar_num(0) }}%
   </span>
 
-  <span style="flex:1"></span>
+  <span class="u-grow"></span>
 
   {# Kill-switch #}
-  <form hx-post="/ordenes/kill" hx-target="#oms-status" hx-swap="innerHTML" style="display:inline">
+  <form hx-post="/ordenes/kill" hx-target="#oms-status" hx-swap="innerHTML" class="u-inline">
     <input type="hidden" name="on" value="{{ '0' if kill else '1' }}">
     <button type="submit" class="btn-primary" style="background:{{ 'var(--green)' if kill else 'var(--red)' }};font-size:11px">
-      {{ '▶ Reactivar envíos' if kill else '⛔ KILL' }}</button>
+      {% if kill %}▶ Reactivar envíos{% else %}{{ icon("warning", 14) }} KILL{% endif %}</button>
   </form>
 
   {# Switch PAPER ⇄ LIVE #}
   {% if live %}
-    <form hx-post="/ordenes/live" hx-target="#oms-status" hx-swap="innerHTML" style="display:inline">
+    <form hx-post="/ordenes/live" hx-target="#oms-status" hx-swap="innerHTML" class="u-inline">
       <input type="hidden" name="arm" value="0">
-      <button type="submit" class="btn-primary" style="font-size:11px">↩ Volver a PAPER</button>
+      <button type="submit" class="btn-primary u-sm">↩ Volver a PAPER</button>
     </form>
   {% else %}
     <form hx-post="/ordenes/live" hx-target="#oms-status" hx-swap="innerHTML" style="display:inline-flex;gap:4px;align-items:center"

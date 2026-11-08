@@ -62,7 +62,7 @@
           </select>
         </label>
 
-        <label class="field-toggle" style="align-self:flex-end;padding-bottom:6px">
+        <label class="field-toggle field-end" style="padding-bottom:6px">
           {# Hidden 'false' ANTES del checkbox: un checkbox desmarcado no envía
              nada, así que sin esto no se podía DESactivar el filtro (el server
              caía a su default True). Con el hidden, desmarcado manda false;
@@ -90,11 +90,11 @@
      ≥/≤ por columna (ej Bid sz ≥ 1.000.000, TIREA ≤ 60). Persisten al refresh. #}
   <div class="tbl-filters" data-table-filters="#curve-tbl">
     <input type="text" data-f-text placeholder="filtrar ticker…" autocomplete="off">
-    <span class="muted" style="font-size:11px">·</span>
+    <span class="muted u-sm">·</span>
     <select data-f-col title="columna"></select>
     <select data-f-op title="operador"><option value=">=">≥</option><option value="<=">≤</option></select>
     <input type="text" data-f-val placeholder="valor (ej 1M, 60)" autocomplete="off" style="width:96px">
-    <button type="button" class="btn-primary" data-f-add style="font-size:11px">+ filtro</button>
+    <button type="button" class="btn-primary u-sm" data-f-add>+ filtro</button>
     <span data-f-chips></span>
   </div>
 
@@ -102,9 +102,9 @@
      Elegís qué curvas juntar; setea el <select name=curve> a 'mix:a,b,c' y
      dispara el mismo flujo htmx (la combinada también se autorefresca live).
      Guardás/cargás tus combinaciones en el browser (localStorage). #}
-  <div class="card" x-data="curveMix()" style="margin-bottom:12px">
+  <div class="card u-mb12" x-data="curveMix()">
     <details>
-      <summary style="cursor:pointer;color:var(--accent);font-weight:600;padding:4px 0">⊕ Combinar curvas (armá la tuya)</summary>
+      <summary class="u-pointer" style="color:var(--accent);font-weight:600;padding:4px 0">⊕ Combinar curvas (armá la tuya)</summary>
       <div class="card-body">
         <div class="mix-grid">
           {% for c in all_curves %}{% if c.bond_type != "_aggregate" %}
@@ -119,13 +119,13 @@
           <button type="button" class="btn-primary" @click="ver()" :disabled="picked.length < 2">
             Ver combinada (<span x-text="picked.length"></span>)</button>
           <button type="button" @click="picked = []" x-show="picked.length">Limpiar</button>
-          <span style="flex:1"></span>
+          <span class="u-grow"></span>
           <input type="text" x-model="name" placeholder="nombre p/ guardar" autocomplete="off"
                  style="width:140px;font-size:12px;padding:5px 8px">
           <button type="button" class="btn-primary" @click="save()" :disabled="picked.length < 2 || !name.trim()">Guardar</button>
         </div>
         <div style="margin-top:10px" x-show="combos.length" x-cloak>
-          <span class="muted" style="font-size:12px">Mis combinadas:</span>
+          <span class="muted u-note">Mis combinadas:</span>
           <template x-for="(c, i) in combos" :key="c.name">
             <span class="mix-chip">
               <a href="#" @click.prevent="load(c)" x-text="c.name"></a>

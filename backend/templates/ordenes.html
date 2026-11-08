@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "partials/_estados.html" import skeleton %}
+{% from "partials/_icons.html" import icon %}
 {% block title %}Órdenes{% endblock %}
 {% block tab_ordenes %}active{% endblock %}
 
@@ -11,16 +13,16 @@
   </header>
 
   {# Estado del OMS (PAPER/LIVE/KILL + switches) — swappable sin recargar. #}
-  <div id="oms-status" class="card" style="padding:10px 14px;margin-bottom:12px">
+  <div id="oms-status" class="card u-mb12" style="padding:10px 14px">
     {% include "partials/oms_status.html" %}
   </div>
 
   <div class="ord-layout">
     {# ── Ticket (single + multi en el mismo form, 2 botones htmx) ─────────── #}
     <div class="card">
-      <div class="card-title"><span>🎫 Ticket</span>
+      <div class="card-title"><span>{{ icon("table") }} Ticket</span>
         <span class="card-title-aux">
-          <label style="font-size:11px"><input type="checkbox" x-model="multi"> Multi-comitente</label>
+          <label class="u-sm"><input type="checkbox" x-model="multi"> Multi-comitente</label>
         </span>
       </div>
       <div class="card-body">
@@ -47,7 +49,7 @@
                       hx-trigger="change" hx-include="[name=code]">
                 <option value="24hs" {% if plazo=='24hs' %}selected{% endif %}>24hs</option>
                 <option value="CI" {% if plazo=='CI' %}selected{% endif %}>CI</option></select></label>
-            <label class="field" style="min-width:auto;align-self:flex-end"
+            <label class="field field-end" style="min-width:auto"
                    title="Habilita enviar aunque no haya cotización de mercado ni valor técnico para validar el precio (salta el guard fat-finger). Usar con cuidado.">
               <span style="font-size:10px">Sin ref.</span>
               <input type="checkbox" name="confirm_no_ref" value="1"></label>
@@ -59,9 +61,9 @@
               <input type="text" name="qty" inputmode="decimal" placeholder="100.000"></label>
             <label class="field" style="flex:1;min-width:200px"><span>Comitente</span>
               <input type="text" name="account" id="acct-input" autocomplete="off" placeholder="elegila del panel ↓"></label>
-            <button type="submit" class="btn-primary" style="align-self:flex-end"
+            <button type="submit" class="btn-primary field-end"
                     hx-post="/ordenes/ticket">Armar ticket</button>
-            <span id="ord-spin" class="htmx-indicator muted" style="align-self:flex-end">validando…</span>
+            <span id="ord-spin" class="htmx-indicator muted field-end">validando…</span>
           </div>
 
           {# Multi: una línea por comitente "COMITENTE, CANTIDAD" #}
@@ -79,7 +81,7 @@
 
     {# ── Quote: book + bid/offer + tenencia (idéntico a Mercado) ──────────── #}
     <div id="orden-quote">
-      <div class="card"><div class="card-body muted" style="font-size:12px">
+      <div class="card"><div class="card-body muted u-note">
         Tipeá una especie para ver book, bid/offer y tu tenencia. Tocá un precio del libro para cargarlo en el ticket.
       </div></div>
     </div>
@@ -89,14 +91,14 @@
 
   {# ── Blotter (estado de órdenes desde el audit) ─────────────────────────── #}
   <div id="orden-blotter" hx-get="/ordenes/blotter"
-       hx-trigger="load, every 8s, orden-done from:body" hx-swap="innerHTML" style="margin-top:12px">
-    <p class="muted" style="font-size:12px">Cargando blotter…</p>
+       hx-trigger="load, every 8s, orden-done from:body" hx-swap="innerHTML" class="u-mt12">
+    {{ skeleton(3, "Cargando blotter…") }}
   </div>
 
   {# ── Comitentes + órdenes vivas del broker ─────────────────────────────── #}
   <div id="ordenes-panel" hx-get="/ordenes/panel" hx-trigger="load, every 15s"
-       hx-include="#acct-input" hx-swap="innerHTML" style="margin-top:12px">
-    <p class="muted" style="font-size:12px">Cargando cuentas del broker…</p>
+       hx-include="#acct-input" hx-swap="innerHTML" class="u-mt12">
+    {{ skeleton(3, "Cargando cuentas del broker…") }}
   </div>
 </section>
 

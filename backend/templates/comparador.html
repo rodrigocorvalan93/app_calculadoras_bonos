@@ -38,7 +38,7 @@
         </label>
       </div>
 
-      <div class="row-fields" style="margin-top:10px">
+      <div class="row-fields u-mt12">
         <label class="field">
           <span>Bono A</span>
           <input type="text" name="a" list="codes-list" value="{{ a }}" placeholder="ej. AL30" autocomplete="off"
@@ -64,8 +64,7 @@
           <span id="valfield-b"><input type="text" inputmode="decimal" name="val_b" placeholder="vacío = last de mercado" autocomplete="off"></span>
         </label>
         <button
-          class="btn-primary"
-          style="align-self:flex-end"
+          class="btn-primary field-end"
           hx-get="/comparador/result"
           hx-target="#comp-result"
           hx-swap="innerHTML"

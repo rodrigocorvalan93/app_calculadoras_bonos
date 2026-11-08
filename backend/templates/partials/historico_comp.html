@@ -30,11 +30,11 @@
           </select></label>
         <label class="field"><span>Desde</span><input type="date" name="desde" value="{{ desde or '' }}"></label>
         <label class="field"><span>Hasta</span><input type="date" name="hasta" value="{{ hasta or '' }}"></label>
-        <button type="submit" class="btn-primary" style="align-self:end">Comparar</button>
+        <button type="submit" class="btn-primary field-end">Comparar</button>
       </div>
     </form>
     <datalist id="hc-comp-list">{% for n in names %}<option value="{{ n }}">{% endfor %}</datalist>
-    <p class="muted" style="font-size:11px;margin-top:6px">
+    <p class="muted u-note u-mt8">
       Bonos por código de calc (AL30D, GD30C, TX26, TX26j), acciones y CEDEARs por ticker, MERVAL para el índice.
       Base 100 = cada activo vale 100 en su primera rueda con dato del rango; Variación % = lo mismo en %; Nivel = precio tal cual.
       Desde/Hasta tienen prioridad sobre el rango. Zoom arrastrando, doble click reset; click en la leyenda apaga una serie.

@@ -1,3 +1,4 @@
+{% from "partials/_estados.html" import skeleton %}
 {% if not hist_meta or not hist_meta.loaded %}
   <div class="alert">
     <strong>Histórico BYMA no disponible.</strong>
@@ -37,11 +38,11 @@
           </select>
         </label>
       </div>
-      <p class="muted" style="font-size:11px;margin-top:6px">{{ hist_meta.n_codes }} códigos · {{ hist_meta.n_dates }} fechas · {{ hist_meta.dmin }} → {{ hist_meta.dmax }}. Cada línea es la métrica histórica de un bono; bandas = prom/mín/máx. Interactivo: zoom arrastrando, click en la leyenda para aislar.</p>
+      <p class="muted u-note u-mt8">{{ hist_meta.n_codes }} códigos · {{ hist_meta.n_dates }} fechas · {{ hist_meta.dmin }} → {{ hist_meta.dmax }}. Cada línea es la métrica histórica de un bono; bandas = prom/mín/máx. Interactivo: zoom arrastrando, click en la leyenda para aislar.</p>
     </div>
   </div>
 
   <div id="hist-curva-uplot" style="min-height:320px">
-    <p class="muted" style="padding:10px">Cargando histórico BYMA…</p>
+    {{ skeleton(3, "Cargando histórico BYMA…") }}
   </div>
 {% endif %}

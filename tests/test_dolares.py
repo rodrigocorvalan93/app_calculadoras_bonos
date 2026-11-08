@@ -271,7 +271,7 @@ async def test_rail_renders_macro(monkeypatch) -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             r = await ac.get("/dolares/rail")
         assert r.status_code == 200
-        for tok in ("📈 Macro", "TAMAR", "BADLAR", "CER", "UVA",
+        for tok in ("Macro</span>", "TAMAR", "BADLAR", "CER", "UVA",
                     "aplicable", "35,00%", "31,00%"):     # último y aplicable de TAMAR
             assert tok in r.text, tok
     finally:

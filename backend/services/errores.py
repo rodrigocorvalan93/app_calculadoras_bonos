@@ -28,6 +28,7 @@ class _RingHandler(logging.Handler):
             msg = record.getMessage()
         with _lock:
             _BUF.append({
+                "t": record.created,                 # epoch: /salud cuenta "en la última hora"
                 "ts": datetime.fromtimestamp(record.created, _TZ_BA).strftime("%d/%m %H:%M:%S"),
                 "level": record.levelname,
                 "logger": record.name,

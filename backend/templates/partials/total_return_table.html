@@ -53,12 +53,12 @@
           hx-include="#tr-form, [name^='y1__']" class="table-tools muted">
       <input type="hidden" name="use_manual" value="1">
       <span>Editá la <b>TIR final</b> de cualquier fila y</span>
-      <button type="submit" class="btn-primary" style="font-size:11px">↻ recalcular con mis tasas</button>
+      <button type="submit" class="btn btn-primary btn-sm">↻ recalcular con mis tasas</button>
     </form>
     <div class="table-scroll">
     <table id="tr-tbl" class="cashflows curve-table" data-sortable>
       <thead><tr>
-        <th data-sort style="text-align:left">Código</th>
+        <th data-sort class="u-left">Código</th>
         <th data-sort>Dur inicial</th>
         <th data-sort>TIR inicial</th>
         <th data-sort>Dur final</th>
@@ -74,7 +74,7 @@
         {% for r in rows %}
         {% set trcls = 'var-up' if r.tr_total >= 0 else 'var-down' %}
         <tr>
-          <td style="text-align:left;color:var(--accent);font-weight:600">
+          <td class="u-left" style="color:var(--accent);font-weight:600">
             <a href="/yas?code={{ r.code }}" title="Abrir en YAS">{{ r.code }}</a></td>
           <td>{{ r.dur0 | ar_num(2) }}</td>
           <td>{{ r.y0 | ar_pct(2) }}</td>
