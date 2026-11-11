@@ -80,9 +80,12 @@ REM --- Archivos a peticion de OneDrive (carpeta del codigo sincronizada) ---
 REM Un archivo NUEVO del repo llega a las otras PCs como marcador "solo en la
 REM nube" y, si OneDrive no lo entrega al leerlo, Python muere al importar con
 REM "OSError: [Errno 22] Invalid argument" (Pablo, 13/10). Esto baja lo que
-REM falte (requirements.txt incluido: pip lo lee en el paso siguiente), deja la
-REM carpeta "Mantener siempre en este dispositivo" y corta con un mensaje claro
-REM si OneDrive no responde. Fuera de OneDrive no hace nada. Solo usa la
+REM falte DEL CODIGO (lo que git versiona + certs/ data/ secrets.txt;
+REM requirements.txt incluido: pip lo lee en el paso siguiente), deja
+REM "Mantener siempre en este dispositivo" solo sobre las carpetas del codigo
+REM (backend/, tests/, .git/...) -- lo vecino (proyecto_cauciones_ml,
+REM exportaciones sueltas) queda en la nube (11/11) -- y corta con un mensaje
+REM claro si OneDrive no responde. Fuera de OneDrive no hace nada. Solo usa la
 REM biblioteca estandar: corre aunque las dependencias no esten instaladas.
 "%PY%" -m backend.tools.onedrive
 if errorlevel 4 if not errorlevel 5 (
@@ -112,10 +115,12 @@ if errorlevel 1 (
 REM --- Carpetas de DATOS sincronizadas por OneDrive (Delta Bases / Carteras / CAFCI) ---
 REM En una PC nueva la biblioteca "Inversiones - Documentos" llega entera como
 REM marcadores "solo en la nube": la app arrancaba con cientos de "[Errno 22]"
-REM y Posiciones / Matriz vacias (04/11). Esto deja esas carpetas "Mantener
-REM siempre en este dispositivo" (lo nuevo llega ya bajado, Storage Sense no
-REM las vacia) y baja AHORA lo que la app necesita al arrancar; el resto lo
-REM baja OneDrive en segundo plano. Nunca corta el arranque: solo avisa.
+REM y Posiciones / Matriz vacias (04/11). Esto deja "Mantener siempre en este
+REM dispositivo" SOLO sobre lo que la app lee (archivos de la raiz de Delta
+REM Bases, cierres\, Carteras; la historia CAFCI y las exportaciones viejas
+REM quedan en la nube: 11/11, antes bajaba 34 GB a cada PC) y baja AHORA lo
+REM que la app necesita al arrancar. ONEDRIVE_PIN_DATOS=0 en secrets.txt =
+REM sin pin; =todo = la biblioteca entera. Nunca corta el arranque: solo avisa.
 "%PY%" -m backend.tools.onedrive --datos
 if errorlevel 4 if not errorlevel 5 (
   echo.

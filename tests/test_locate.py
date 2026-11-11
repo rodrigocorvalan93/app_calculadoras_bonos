@@ -72,7 +72,7 @@ async def test_curvas_combinada_adhoc() -> None:
     union = cv.mix_codes(["globales", "bonares"])
     assert set(union) == set(cv.build_curve_codes()["globales"]) | set(cv.build_curve_codes()["bonares"])
     assert cv.curve_key_for("TX28") == "cer"             # reverse-map intacto
-    assert cv.curve_key_for("TX26") == "lecap"           # ficha "Soberano ARS Tasa Fija" (desk 23/10)
+    assert cv.curve_key_for("T30J7") == "lecap"          # soberano ARS tasa fija (TX26 venció el 09/11/2026)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.get("/curves/table", params={"curve": "mix:globales,bonares", "plazo": "24hs"})
     assert r.status_code == 200 and "Combinada" in r.text

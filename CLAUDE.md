@@ -1774,17 +1774,38 @@ carpetas. Tres piezas:
   del código y ANTES de pip; sólo AVISA con errorlevel 4, nunca `exit`: la
   app sabe correr sin bases): `carpetas_datos()` resuelve las carpetas desde
   secrets.txt (`OMSsecrets.load` + `deltapaths`, stdlib, import tardío),
-  deduplicadas (Carteras va adentro de Delta Bases), las FIJA "Mantener
-  siempre en este dispositivo" (`fijar`: OneDrive baja todo en segundo plano
-  y lo nuevo que escriba el writer de otra PC llega ya bajado; Storage Sense
-  no las vacía — pedido del desk: "que Delta Bases siempre se baje") y baja
+  deduplicadas (Carteras va adentro de Delta Bases: `carpetas_datos_detalle`
+  la deja como subcarpeta), fija "Mantener siempre en este dispositivo"
+  **sólo sobre lo que la app lee** (11/11, `plan_pin` + `fijar_parcial`: los
+  archivos de la raíz de Delta Bases, `cierres/` entera — una partición por
+  rueda, Históricos las lee todas — y los archivos de cada subcarpeta de
+  datos, Carteras; la carpeta CAFCI NO se fija: años de vectores) y baja
   YA sólo `esenciales(esc)` = `ESENCIALES_DATOS` (composición / PN / Galileo /
   Fondos / Especies / px_tasas xlsx + parquet + firma / FX / acciones /
   manifiesto / huecos) + los `CAFCI_ULTIMOS` (3) vectores `AAAAMMDD.xlsx` más
-  nuevos. `escanear(..., clasificar_basura=False)`: en una carpeta de datos
-  NADA se clasifica como caché ni se borra. Las particiones de cierres y la
-  historia CAFCI las baja OneDrive por el pin; `cierres` reintenta solo cada
-  60 s.
+  nuevos. Hasta el 11/11 fijaba la CARPETA ENTERA (`fijar`: la PC del desk
+  bajaba 27 GB de Delta Bases y 7 GB de CAFCI — exportaciones viejas e
+  historia que la app no abre) y una raíz que quedó fijada así se destraba
+  (`desfijar` = `attrib -P` recursivo + raíz, sin `+U`: lo bajado queda, a
+  mano "Liberar espacio"); `fijado_parcial` (stat de las carpetas y del
+  primer archivo de cada patrón) evita repetir el attrib en cada arranque,
+  porque la raíz ya no lleva la marca. `ONEDRIVE_PIN_DATOS` en secrets.txt:
+  `0` = sin pin (sólo lo esencial, el resto a petición), `todo` (o `--todo`)
+  = la biblioteca entera como antes. `escanear(..., clasificar_basura=False)`:
+  en una carpeta de datos NADA se clasifica como caché ni se borra. Las
+  particiones de cierres las baja OneDrive por el pin; `cierres` reintenta
+  solo cada 60 s; la historia CAFCI se baja cuando la pestaña la lee.
+  **Carpeta del código, mismo criterio** (11/11; 470 MB de 562 archivos
+  "sólo en la nube" eran `proyecto_cauciones_ml` 312 MB y exportaciones
+  sueltas en la raíz, con el repo pesando 9,5 MB): `seleccion_codigo` baja
+  sólo lo que git versiona (`archivos_versionados` = `git ls-files`; sin git,
+  sufijo en `_SUFIJOS_CODIGO` + ≤ 20 MB + fuera de `_SIN_GIT_EXCLUIR`) más
+  `certs/` `data/` y `ARCHIVOS_LOCALES` (secrets, auth_store, audit), y fija
+  `CARPETAS_CODIGO` (.git, .github, backend, tests, deploy, scripts, certs,
+  data) + los archivos de la raíz que git versiona (por nombre; sin git por
+  sufijo, `_PATRONES_RAIZ_SIN_GIT`) — la raíz NUNCA; una raíz fijada por el
+  pre-flight viejo se destraba. Lo omitido se informa ("N archivos de la
+  carpeta no son del código … quedan en la nube").
 - **`services/nube.py`** (stdlib): `es_marcador(path)` (bit
   RECALL_ON_DATA_ACCESS / OFFLINE / RECALL_ON_OPEN, un stat), `en_nube(path)`
   (además PINNED / UNPINNED: atributos que sólo pone el motor),

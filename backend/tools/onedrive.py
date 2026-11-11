@@ -19,17 +19,26 @@ template, .js o .json que la app abre recién cuando lo necesita.
 El .bat corre esta herramienta ANTES de uvicorn (y antes de https_local, que
 ya importa medio backend):
 
-  1. recorre la carpeta del proyecto (sin .git, __pycache__, data, certs, …;
-     `os.scandir` con `follow_symlinks=False`: los atributos salen del
-     listado, sin un syscall por archivo) y junta los archivos que todavía no
-     tienen contenido local;
+  1. recorre la carpeta del proyecto (sin .git, __pycache__, …; `os.scandir`
+     con `follow_symlinks=False`: los atributos salen del listado, sin un
+     syscall por archivo) y junta los archivos que todavía no tienen
+     contenido local — y de ésos, SÓLO los que git versiona (`git ls-files`;
+     sin git, sufijo + tamaño) más lo local que lee el arranque (certs/,
+     data/, secrets.txt): al lado del código viven proyectos vecinos y
+     exportaciones sueltas (470 MB de 562 archivos en la PC del desk, con el
+     repo pesando 9,5 MB; 11/11) que no son la app y quedan en la nube;
   2. los LEE enteros — eso le pide la bajada al motor de OneDrive (un
      `attrib +P` solo es un pedido asincrónico: no garantiza nada cuando
-     vuelve) — y, si la carpeta está sincronizada por la nube, la deja
-     marcada "Mantener siempre en este dispositivo" (`attrib -U +P`, lo
-     mismo que el botón derecho) para que lo que llegue con los próximos git
-     pull venga ya bajado y Storage Sense (Windows 11 22H2: "sólo en la
-     nube" lo que no se abrió en 30 días) no lo vuelva a vaciar;
+     vuelve) — y, si la carpeta está sincronizada por la nube, deja
+     "Mantener siempre en este dispositivo" (`attrib -U +P`, lo mismo que el
+     botón derecho) SÓLO sobre las carpetas del código (`CARPETAS_CODIGO`:
+     backend/, tests/, .git/, certs/, data/…) y los archivos de la raíz que
+     git versiona, para que lo que llegue con los próximos git pull venga ya
+     bajado y Storage Sense (Windows 11 22H2: "sólo en la nube" lo que no se
+     abrió en 30 días) no lo vuelva a vaciar; la raíz NO se fija (hasta el
+     11/11 sí, y OneDrive bajaba todo lo vecino a cada PC: una raíz que
+     quedó fijada se destraba con `attrib -P`, sin liberar espacio).
+     `--todo` = lo de antes (todo lo pendiente y la raíz entera);
   3. si alguno NO se pudo bajar, sale con código 4 y el .bat explica qué
      hacer (abrir OneDrive, esperar que sincronice, volver a arrancar) en vez
      de dejar un traceback de importlib.
@@ -63,7 +72,12 @@ no existen los marcadores): sale 0 al instante.
     python -m backend.tools.onedrive --carpeta "C:\\otra\\carpeta"   # otra raíz
     python -m backend.tools.onedrive --datos    # las carpetas de DATOS de secrets.txt
                                                 # (Delta Bases / Carteras / CAFCI): fijar
-                                                # + bajar lo esencial (ver ESENCIALES_DATOS)
+                                                # SÓLO lo que la app lee (archivos de la
+                                                # raíz, cierres/, Carteras; CAFCI sin pin) +
+                                                # bajar lo esencial (ver ESENCIALES_DATOS).
+                                                # ONEDRIVE_PIN_DATOS=0 → sin pin; =todo →
+                                                # la biblioteca entera (lo de hasta el 11/11)
+    python -m backend.tools.onedrive --todo     # código / --datos: todo y la raíz entera
 """
 from __future__ import annotations
 
@@ -578,15 +592,11 @@ def por_origen(basura: Iterable[Archivo]) -> List[Tuple[str, int, int]]:
     return sorted(((k, n, b) for k, (n, b) in acc.items()), key=lambda t: (-t[2], t[0]))
 
 
-def fijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> Tuple[bool, str]:
-    """"Mantener siempre en este dispositivo" para la carpeta y todo lo de
-    adentro: `attrib -U +P` sobre la raíz (lo NUEVO que cree el motor
-    adentro hereda el pin) y `attrib -U +P <raíz>\\* /S /D` (todo lo que ya
-    existe, .git incluido; `/S` sólo recorre lo que matchea el patrón, por
-    eso el `\\*`). El `-U` importa: un archivo que OneDrive ya marcó "sólo en
-    la nube" (Liberar espacio / Storage Sense) lleva UNPINNED y ese estado
-    propio le gana al pin de la carpeta. attrib viene con Windows; no pide
-    admin y sólo cambia el ChangeTime de NTFS, que git no mira."""
+def _attrib(flags: List[str], patron: str, recursivo: bool,
+            run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> Tuple[bool, str]:
+    """Un `attrib <flags> <patrón> [/S /D]`. attrib viene con Windows, no pide
+    admin y sólo cambia el ChangeTime de NTFS, que git no mira. Best-effort:
+    nunca tira (el arranque sigue igual)."""
     # attrib escribe sus mensajes en el code page OEM (cp850: "No se restablece
     # el archivo oculto - …\.git", uno por ruta) y Popen(text=True) a secas los
     # decodifica con el ANSI (cp1252) en modo estricto: una ruta con ü / É
@@ -594,20 +604,88 @@ def fijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = s
     # con todo ya bajado. `oem` sólo existe en Windows; `replace` nunca tira.
     texto = dict(capture_output=True, text=True, errors="replace",
                  encoding="oem" if es_windows() else "utf-8")
+    cmd = ["attrib", *flags, patron] + (["/S", "/D"] if recursivo else [])
+    try:
+        r = run(cmd, timeout=300 if recursivo else 60, **texto)
+    except Exception as e:  # noqa: BLE001 — paso best-effort: nunca aborta el arranque
+        return False, str(e)
+    if r.returncode == 0:
+        return True, ""
+    det = ((r.stderr or "") + (r.stdout or "")).strip()
+    return False, det or f"attrib devolvió {r.returncode}"
+
+
+def fijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> Tuple[bool, str]:
+    """"Mantener siempre en este dispositivo" para la carpeta y TODO lo de
+    adentro: `attrib -U +P` sobre la raíz (lo NUEVO que cree el motor
+    adentro hereda el pin) y `attrib -U +P <raíz>\\* /S /D` (todo lo que ya
+    existe; `/S` sólo recorre lo que matchea el patrón, por eso el `\\*`).
+    El `-U` importa: un archivo que OneDrive ya marcó "sólo en la nube"
+    (Liberar espacio / Storage Sense) lleva UNPINNED y ese estado propio le
+    gana al pin de la carpeta. Desde el 11/11 el pre-flight lo usa sólo para
+    subcarpetas acotadas (`fijar_parcial`) o con `ONEDRIVE_PIN_DATOS=todo` /
+    `--todo`: fijar una raíz entera obliga a OneDrive a bajar TODO lo que
+    cuelga de ella (27 GB de Delta Bases en la PC del desk, 11/11)."""
     # Primero el recursivo y recién después la raíz: `root_fijado` (el pin de
     # la raíz) es lo que decide no volver a fijar en el próximo arranque — si
     # el `/S` vence el timeout o lo corta un Ctrl+C, la raíz queda SIN pin y
     # se reintenta (revisión 04/11: con la raíz fijada primero, lo que attrib
     # no alcanzó quedaba sin pin para siempre y `--listar` decía "fijada").
-    try:
-        r2 = run(["attrib", "-U", "+P", str(root / "*"), "/S", "/D"], timeout=300, **texto)
-        r1 = run(["attrib", "-U", "+P", str(root)], timeout=60, **texto)
-    except Exception as e:  # noqa: BLE001 — paso best-effort: nunca aborta el arranque
-        return False, str(e)
-    if r1.returncode == 0 and r2.returncode == 0:
-        return True, ""
-    det = ((r1.stderr or "") + (r1.stdout or "") + (r2.stderr or "") + (r2.stdout or "")).strip()
-    return False, det or f"attrib devolvió {r1.returncode} / {r2.returncode}"
+    ok2, det2 = _attrib(["-U", "+P"], str(root / "*"), True, run)
+    if not ok2:
+        return False, det2                       # la raíz queda sin pin: se reintenta
+    return _attrib(["-U", "+P"], str(root), False, run)
+
+
+def fijar_parcial(root: Path, carpetas: Iterable[Path], patrones: Iterable[str],
+                  run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> Tuple[bool, str]:
+    """Pin SELECTIVO (11/11): `carpetas` enteras (recursivo, como `fijar`) y
+    los archivos que matchean cada patrón relativo a `root` (sin `/S`: un
+    `*` son los archivos de la raíz, `Carteras\\*` los de esa carpeta, un
+    nombre exacto ese archivo). La raíz NO se fija: lo que OneDrive cree
+    adentro después queda a petición, que es la idea. Devuelve (todo ok,
+    detalle de lo que falló)."""
+    fallos: List[str] = []
+    for c in carpetas:
+        ok, det = fijar(c, run)
+        if not ok:
+            fallos.append(f"{c.name}: {det}")
+    for p in patrones:
+        ok, det = _attrib(["-U", "+P"], str(root / p), False, run)
+        if not ok:
+            fallos.append(f"{p}: {det}")
+    return not fallos, "; ".join(fallos)
+
+
+def desfijar(root: Path, run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> Tuple[bool, str]:
+    """Saca el pin "Mantener siempre en este dispositivo" de la carpeta y de
+    todo lo de adentro (`attrib -P`, sin `+U`): OneDrive deja de bajar lo que
+    falta y lo que ya está bajado QUEDA (no se libera espacio acá — Storage
+    Sense suelta solo lo que nadie abre en 30 días; a mano: botón derecho >
+    "Liberar espacio"). Migración del pin entero que ponía el pre-flight
+    hasta el 11/11."""
+    ok2, det2 = _attrib(["-P"], str(root / "*"), True, run)
+    if not ok2:
+        return False, det2                       # la raíz sigue fijada: se reintenta
+    return _attrib(["-P"], str(root), False, run)
+
+
+def fijado_parcial(root: Path, carpetas: Iterable[Path], patrones: Iterable[str]) -> bool:
+    """¿El pin selectivo ya está puesto? Cada carpeta lleva PINNED y, por
+    patrón, el primer archivo que matchea también (un patrón sin archivos no
+    cuenta). Unos pocos stat: decide no repetir `fijar_parcial` en cada
+    arranque (la raíz no se fija, así que `root_fijado` ya no sirve de marca)."""
+    for c in carpetas:
+        if not (_atributos_de(c)[0] & FILE_ATTRIBUTE_PINNED):
+            return False
+    for p in patrones:
+        try:
+            f = next((x for x in root.glob(p) if x.is_file()), None)
+        except OSError:
+            f = None
+        if f is not None and not (_atributos_de(f)[0] & FILE_ATTRIBUTE_PINNED):
+            return False
+    return True
 
 
 def _kb(n: int) -> str:
@@ -670,11 +748,13 @@ _VARS_ARCHIVOS = ("DELTA_CAFCI_PATH", "DELTA_ESPECIES_PATH", "DELTA_COMPOSICION_
                   "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH", "DELTA_FONDOS_PATH", "DELTA_HISTORICO_PATH")
 
 
-def carpetas_datos() -> List[Tuple[str, Path]]:
-    """[(etiqueta, carpeta)] de datos que la app lee, resueltas desde
-    secrets.txt como lo hace la app (`OMSsecrets.load` + `deltapaths`), sin
-    duplicados ni carpetas contenidas en otra de la lista (Carteras vive
-    adentro de Delta Bases: se recorre una vez). Sólo las que existen."""
+def carpetas_datos_detalle() -> List[Tuple[str, Path, List[Path]]]:
+    """[(etiqueta, carpeta, subcarpetas de datos adentro)] que la app lee,
+    resueltas desde secrets.txt como lo hace la app (`OMSsecrets.load` +
+    `deltapaths`), sin duplicados: una carpeta contenida en otra de la lista
+    (Carteras vive adentro de Delta Bases) se recorre una vez y queda como
+    subcarpeta de la que la contiene — el pin selectivo la fija aparte. Sólo
+    las que existen."""
     raiz = default_root()
     if str(raiz) not in sys.path:
         sys.path.insert(0, str(raiz))
@@ -697,13 +777,91 @@ def carpetas_datos() -> List[Tuple[str, Path]]:
         f = deltapaths.expand(os.getenv(var), want="file")
         if f and os.path.isfile(f):
             cand.append((var, os.path.dirname(f)))
-    out: List[Tuple[str, Path]] = []
+    out: List[Tuple[str, Path, List[Path]]] = []
     for label, d in cand:
         p = Path(d).resolve()
-        if any(p == q or q in p.parents for _l, q in out):
-            continue                                        # ya cubierta por una carpeta padre
-        out = [(l, q) for l, q in out if not (p in q.parents)] + [(label, p)]
+        padre = next((e for e in out if p == e[1] or e[1] in p.parents), None)
+        if padre is not None:
+            if p != padre[1] and p not in padre[2]:
+                padre[2].append(p)                          # subcarpeta de una ya listada
+            continue
+        hijas: List[Path] = []
+        resto: List[Tuple[str, Path, List[Path]]] = []
+        for e in out:
+            if p in e[1].parents:                           # la nueva contiene a una listada
+                hijas.append(e[1])
+                hijas.extend(h for h in e[2] if h not in hijas)
+            else:
+                resto.append(e)
+        out = resto + [(label, p, hijas)]
     return out
+
+
+def carpetas_datos() -> List[Tuple[str, Path]]:
+    """[(etiqueta, carpeta)] — `carpetas_datos_detalle` sin las subcarpetas."""
+    return [(label, root) for label, root, _h in carpetas_datos_detalle()]
+
+
+def modo_pin_datos() -> str:
+    """`ONEDRIVE_PIN_DATOS` (secrets.txt / entorno): `selectivo` (default,
+    11/11: sólo lo que la app lee), `todo` (la carpeta entera, como hasta el
+    11/11 — la PC que quiera toda la biblioteca local) o `no` (`0`: ningún
+    pin; se baja sólo lo esencial y el resto a petición)."""
+    v = (os.getenv("ONEDRIVE_PIN_DATOS") or "").strip().lower()
+    if v in ("0", "no", "off", "false"):
+        return "no"
+    if v in ("todo", "2", "all", "entera"):
+        return "todo"
+    return "selectivo"
+
+
+def es_carpeta_cafci(label: str, root: Path) -> bool:
+    """La carpeta de vectores CAFCI (un `AAAAMMDD.xlsx` por día, años de
+    historia): por la variable que la trajo o, resuelta de otro modo, por
+    su contenido (la mayoría de los xlsx con nombre de fecha)."""
+    if "CAFCI" in label.upper():
+        return True
+    try:
+        xlsx = [p for p in root.iterdir() if p.suffix.lower() == ".xlsx"]
+    except OSError:
+        return False
+    fechas = [p for p in xlsx if p.stem.isdigit() and len(p.stem) == 8]
+    return len(xlsx) >= 10 and len(fechas) * 2 >= len(xlsx)
+
+
+def plan_pin(label: str, root: Path, hijas: Iterable[Path]) -> Optional[Tuple[List[Path], List[str]]]:
+    """Qué fijar de una carpeta de datos en modo selectivo: (carpetas
+    enteras, patrones relativos a `root`). Delta Bases → los archivos de la
+    raíz (bases px/tasas + espejo + firma, FX, Especies, Fondos, manifiesto,
+    huecos), `cierres/` entera (una partición por rueda, Históricos las lee
+    todas) y los archivos de cada subcarpeta de datos (Carteras: composición
+    vigente, PN); nada de los años de exportaciones que viven al lado. La
+    carpeta CAFCI no se fija (None): sólo se bajan los `CAFCI_ULTIMOS`
+    vectores más nuevos y la historia queda a petición."""
+    if es_carpeta_cafci(label, root):
+        return None
+    carpetas = [root / "cierres"] if (root / "cierres").is_dir() else []
+    patrones = ["*"]
+    for h in hijas:
+        try:
+            rel = h.relative_to(root)
+        except ValueError:
+            continue
+        if rel.parts and rel.parts[0] == "cierres":
+            continue
+        patrones.append(os.path.join(str(rel), "*"))
+    return carpetas, patrones
+
+
+def _describir_plan(plan: Optional[Tuple[List[Path], List[str]]]) -> str:
+    if plan is None:
+        return "sin fijar (sólo se bajan los vectores más nuevos; la historia queda a petición)"
+    carpetas, patrones = plan
+    partes = []
+    for p in patrones:
+        partes.append("archivos de la raíz" if p == "*" else f"archivos de {os.path.dirname(p)}")
+    partes.extend(f"{c.name}{os.sep} entera" for c in carpetas)
+    return " · ".join(partes)
 
 
 def esenciales(esc: Escaneo) -> List[Archivo]:
@@ -722,14 +880,15 @@ def _datos(args) -> int:
     """`--datos`: por cada carpeta de datos, fijar (pin) + bajar lo esencial.
     0 = todo lo esencial está (o no hay carpetas de nube); EXIT_SIN_BAJAR =
     algo esencial sigue sin contenido (el .bat avisa y la app arranca igual)."""
-    carpetas = carpetas_datos()
+    carpetas = carpetas_datos_detalle()
     say = (lambda m: None) if args.quiet else _say   # noqa: E731
     if not carpetas:
         say("[onedrive] sin carpetas de datos configuradas en secrets.txt: nada que bajar")
         return 0
+    modo = "todo" if args.todo else modo_pin_datos()
     exponer_marcadores()
     salida = 0
-    for label, root in carpetas:
+    for label, root, hijas in carpetas:
         esc = escanear(root, excluir=(), clasificar_basura=False)
         if not esc.nube and not esc.pendientes:
             say(f"[onedrive] {label}: carpeta común ({_n(esc.total)} archivos)")
@@ -738,24 +897,54 @@ def _datos(args) -> int:
             _say(f"[onedrive] ! no pude listar {d}: {e}")
         ese = esenciales(esc)
         total_b = sum(a.size for a in esc.pendientes)
+        plan = plan_pin(label, root, hijas) if modo == "selectivo" else None
         if args.listar:
+            if modo == "todo":
+                pin = "carpeta fijada entera" if esc.root_fijado else "carpeta SIN fijar (se fija entera)"
+            elif modo == "no":
+                pin = "sin fijar (ONEDRIVE_PIN_DATOS=0)" + ("; la raíz figura fijada: se destraba" if esc.root_fijado else "")
+            else:
+                pin = ("fijada ENTERA (pre-flight viejo): se destraba y queda " if esc.root_fijado
+                       else ("fijado " if plan and fijado_parcial(root, *plan) else "SIN fijar; se fija ")) + _describir_plan(plan)
             _say(f"[onedrive] {label} ({root}): {_n(len(esc.pendientes))} de {_n(esc.total)} archivos 'sólo en la "
-                 f"nube' ({_tam(total_b)}), {_n(len(ese))} esenciales para el arranque"
-                 f"{'; carpeta fijada' if esc.root_fijado else '; carpeta SIN fijar'}")
+                 f"nube' ({_tam(total_b)}), {_n(len(ese))} esenciales para el arranque; {pin}")
             for a in ese:
                 _say(f"[onedrive]   {a.path} ({_kb(a.size)})")
             if esc.pendientes:
                 salida = EXIT_SIN_BAJAR
             continue
-        # 1) pin: OneDrive empieza a bajar TODO en segundo plano y lo nuevo llega bajado
-        if esc.nube and not esc.root_fijado and not args.sin_pin:
-            ok, det = fijar(root)
-            if ok:
-                say(f"[onedrive] {label}: carpeta marcada \"Mantener siempre en este dispositivo\" — "
-                    "OneDrive baja el resto en segundo plano y lo nuevo llega ya bajado")
+        # 1) pin. Hasta el 11/11 era la carpeta ENTERA (OneDrive bajaba 27 GB
+        #    de Delta Bases y 7 GB de CAFCI a cada PC); ahora sólo lo que la
+        #    app lee, y una raíz fijada por el pre-flight viejo se destraba.
+        if esc.nube and not args.sin_pin:
+            if modo == "todo":
+                if not esc.root_fijado:
+                    ok, det = fijar(root)
+                    if ok:
+                        say(f"[onedrive] {label}: carpeta marcada \"Mantener siempre en este dispositivo\" "
+                            "(ONEDRIVE_PIN_DATOS=todo) — OneDrive baja el resto en segundo plano")
+                    else:
+                        _say(f"[onedrive] ! {label}: no pude fijar la carpeta con attrib ({det}); a mano: botón "
+                             f"derecho sobre {root.name} > \"Mantener siempre en este dispositivo\"")
             else:
-                _say(f"[onedrive] ! {label}: no pude fijar la carpeta con attrib ({det}); a mano: botón "
-                     f"derecho sobre {root.name} > \"Mantener siempre en este dispositivo\"")
+                if esc.root_fijado:
+                    ok, det = desfijar(root)
+                    if ok:
+                        _say(f"[onedrive] {label}: dejo de forzar la bajada de la carpeta entera "
+                             f"({_n(esc.total)} archivos; el pre-flight la fijaba hasta el 11/11). Lo ya bajado "
+                             "queda en el disco: para recuperar espacio, botón derecho sobre la carpeta > "
+                             "\"Liberar espacio\" (OneDrive vuelve a bajar lo que la app lea).")
+                    else:
+                        _say(f"[onedrive] ! {label}: no pude sacar el pin de la carpeta entera ({det}); a mano: "
+                             f"botón derecho sobre {root.name} > destildar \"Mantener siempre en este dispositivo\"")
+                if plan is not None and not fijado_parcial(root, *plan):
+                    ok, det = fijar_parcial(root, *plan)
+                    if ok:
+                        say(f"[onedrive] {label}: \"Mantener siempre en este dispositivo\" sólo para lo que la "
+                            f"app lee ({_describir_plan(plan)}); el resto queda a petición")
+                    else:
+                        _say(f"[onedrive] ! {label}: no pude fijar {det}; a mano: botón derecho > "
+                             "\"Mantener siempre en este dispositivo\" sobre esos archivos / carpetas")
         # 2) lo esencial, ahora
         if not esc.pendientes:
             say(f"[onedrive] {label}: datos completos en esta PC ({_n(esc.total)} archivos)")
@@ -770,9 +959,97 @@ def _datos(args) -> int:
                  "Matriz / Históricos van a estar vacíos hasta que OneDrive los baje (después: ↻ en la pestaña).")
         resto = len(esc.pendientes) - len(ese)
         if resto > 0:
-            say(f"[onedrive] {label}: los otros {_n(resto)} (cierres, historia CAFCI…) los baja OneDrive en "
-                "segundo plano; Históricos los toma solo cuando llegan")
+            if modo == "todo":
+                say(f"[onedrive] {label}: los otros {_n(resto)} (cierres, historia CAFCI…) los baja OneDrive en "
+                    "segundo plano; Históricos los toma solo cuando llegan")
+            elif plan is not None:
+                say(f"[onedrive] {label}: los otros {_n(resto)} ({_tam(total_b)} en total) quedan en la nube; "
+                    "OneDrive baja en segundo plano lo fijado (cierres…) y el resto sólo si la app lo lee")
+            else:
+                say(f"[onedrive] {label}: los otros {_n(resto)} ({_tam(total_b)}) quedan en la nube y se bajan "
+                    "sólo si la app los lee")
     return salida
+
+
+# ── Carpeta del código: sólo lo que git versiona (11/11) ─────────────────────
+# El clon del desk vive en la biblioteca compartida y al lado del código hay
+# de todo (proyecto_cauciones_ml con 312 MB de datasets, exportaciones sueltas
+# en la raíz: 470 MB de 562 archivos "sólo en la nube" en la PC del desk, con
+# el repo versionado pesando 9,5 MB). Se baja y se fija lo que git versiona
+# (`git ls-files`), más lo local que la app lee al arrancar (certs/, data/,
+# secrets.txt…). Sin git a mano, una heurística por sufijo y tamaño.
+CARPETAS_CODIGO = (".git", ".github", "backend", "tests", "deploy", "scripts", "certs", "data")
+SIEMPRE_LOCALES = frozenset({"certs", "data"})                 # no versionadas, las lee el arranque
+ARCHIVOS_LOCALES = frozenset({"secrets.txt", "auth_store.json", "oms_audit.jsonl",
+                              "bcra_data_backup.json", "ust_backup.json"})
+_SUFIJOS_CODIGO = frozenset({".py", ".html", ".js", ".cjs", ".css", ".json", ".jsonl", ".txt", ".md", ".bat",
+                             ".command", ".ps1", ".sh", ".ini", ".cfg", ".toml", ".yml", ".yaml", ".csv",
+                             ".xlsx", ".svg", ".ico", ".png", ".pem", ".crt", ".key", ".gitignore"})
+_MAX_SIN_GIT = 20 << 20                                        # sin git: nada de más de 20 MB
+_SIN_GIT_EXCLUIR = frozenset({"proyecto_cauciones_ml"})         # sin git: carpetas que no son la app
+_PATRONES_RAIZ_SIN_GIT = ("*.py", "*.bat", "*.command", "*.json", "*.txt", "*.md", "*.ini", ".gitignore", "LICENSE")
+
+
+@dataclass
+class Seleccion:
+    necesarios: List[Archivo]
+    omitidos: List[Archivo]
+    fuente: str                                   # "git" | "heurística"
+    carpetas_pin: List[Path]
+    patrones_pin: List[str]
+
+
+def archivos_versionados(root: Path) -> Optional[set]:
+    """Rutas relativas (normcase) que git versiona en `root`, o None si no hay
+    `.git`, no hay git en el PATH o falló (índice "sólo en la nube", clon
+    roto): el que llama cae a la heurística."""
+    if not (root / ".git").exists():
+        return None
+    try:
+        r = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, timeout=60)
+    except Exception:  # noqa: BLE001 — sin git / timeout: heurística
+        return None
+    if r.returncode != 0 or not r.stdout:
+        return None
+    out = set()
+    for raw in r.stdout.split(b"\0"):
+        if raw:
+            out.add(os.path.normcase(str(Path(raw.decode("utf-8", "replace")))))
+    return out or None
+
+
+def seleccion_codigo(esc: Escaneo, root: Path, versionados: Optional[set] = None) -> Seleccion:
+    """Qué bajar y qué fijar de la carpeta del código: los pendientes que git
+    versiona (+ certs/, data/ y los locales que lee el arranque), o sin git
+    los que parecen código (sufijo, ≤ 20 MB, fuera de los proyectos vecinos).
+    El pin va por carpetas acotadas (`CARPETAS_CODIGO` que existan) y por los
+    archivos de la raíz: nombre por nombre con git, por sufijo sin git."""
+    if versionados is None:
+        versionados = archivos_versionados(root)
+    nec: List[Archivo] = []
+    omit: List[Archivo] = []
+    for a in esc.pendientes:
+        try:
+            rel = a.path.relative_to(root)
+        except ValueError:
+            omit.append(a)
+            continue
+        primero = rel.parts[0] if rel.parts else ""
+        if primero in SIEMPRE_LOCALES or (len(rel.parts) == 1 and rel.name in ARCHIVOS_LOCALES):
+            nec.append(a)
+        elif versionados is not None:
+            (nec if os.path.normcase(str(rel)) in versionados else omit).append(a)
+        elif (primero not in _SIN_GIT_EXCLUIR and a.size <= _MAX_SIN_GIT
+              and (a.path.suffix.lower() in _SUFIJOS_CODIGO or a.path.name in _SUFIJOS_CODIGO)):
+            nec.append(a)
+        else:
+            omit.append(a)
+    carpetas = [root / d for d in CARPETAS_CODIGO if (root / d).is_dir()]
+    if versionados is not None:
+        raiz = sorted({Path(v).name for v in versionados if os.sep not in v and "/" not in v})
+        raiz += sorted(n for n in ARCHIVOS_LOCALES if n not in raiz and (root / n).is_file())
+        return Seleccion(nec, omit, "git", carpetas, raiz)
+    return Seleccion(nec, omit, "heurística", carpetas, list(_PATRONES_RAIZ_SIN_GIT))
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -799,6 +1076,9 @@ def _main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--datos", action="store_true",
                     help="las carpetas de DATOS de secrets.txt (Delta Bases / Carteras / CAFCI): fijarlas "
                          "y bajar lo esencial para el arranque; nunca corta la app")
+    ap.add_argument("--todo", action="store_true",
+                    help="como hasta el 11/11: bajar y fijar la carpeta ENTERA (código: también lo que git "
+                         "no versiona; --datos: toda la biblioteca, igual que ONEDRIVE_PIN_DATOS=todo)")
     ap.add_argument("--quiet", action="store_true", help="sólo problemas")
     args = ap.parse_args(argv)
 
@@ -859,17 +1139,29 @@ def _main(argv: Optional[List[str]] = None) -> int:
                 _say(f"[onedrive] ! {_n(len(fallos_py))} no se pudieron borrar (p. ej. {a0.name}: {e0}); "
                      "se reintenta en el próximo arranque")
 
-    if not esc.pendientes:
+    # Sólo lo que git versiona (+ certs/ data/ secrets): lo demás que vive en
+    # la carpeta (proyectos vecinos, exportaciones sueltas) no es la app y
+    # queda en la nube (11/11). `--todo` = el comportamiento viejo.
+    sel = None if args.todo else seleccion_codigo(esc, root)
+    pendientes = esc.pendientes if sel is None else sel.necesarios
+    omitidos = [] if sel is None else sel.omitidos
+    if omitidos:
+        det_om = " · ".join(f"{c} {_n(n)} ({_tam(b)})" for c, n, b in por_carpeta(omitidos, root)[:5])
+        say(f"[onedrive] {_n(len(omitidos))} archivos de la carpeta no son del código "
+            f"({'git no los versiona' if sel.fuente == 'git' else 'no parecen código'}; "
+            f"{_tam(sum(a.size for a in omitidos))}: {det_om}) y quedan en la nube")
+
+    if not pendientes:
         say(f"[onedrive] código completo en esta PC ({esc.total} archivos"
             f"{', carpeta fijada' if esc.root_fijado else ''})")
     else:
         if args.listar:
-            _say(f"[onedrive] {len(esc.pendientes)} de {esc.total} archivos están 'sólo en la nube':")
-            for a in esc.pendientes:
+            _say(f"[onedrive] {len(pendientes)} de {esc.total} archivos del código están 'sólo en la nube':")
+            for a in pendientes:
                 _say(f"[onedrive]   {a.path} ({_kb(a.size)})")
             return EXIT_SIN_BAJAR
-        total_b = sum(a.size for a in esc.pendientes)
-        n_pend = len(esc.pendientes)
+        total_b = sum(a.size for a in pendientes)
+        n_pend = len(pendientes)
         _say(f"[onedrive] {_n(n_pend)} de {_n(esc.total)} archivos del código están 'sólo en la nube' "
              f"(Archivos a petición de OneDrive, {_tam(total_b)}): bajándolos…")
         # progreso = `say` (--quiet lo calla); un fallo se ve siempre. Con
@@ -878,7 +1170,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
         detalle = n_pend <= DETALLE_MAX
         progreso = None
         if not detalle:
-            for carpeta, n, b in por_carpeta(esc.pendientes, root)[:8]:
+            for carpeta, n, b in por_carpeta(pendientes, root)[:8]:
                 say(f"[onedrive]   {carpeta}: {_n(n)} archivos, {_tam(b)}")
             paso = max(1, -(-n_pend // 10))              # ~10 líneas de avance
 
@@ -892,7 +1184,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
             elif detalle:
                 say(f"[onedrive] {m}")                   # "… ok" por archivo, sólo con pocos
 
-        fallos = hidratar(esc.pendientes, avisar=avisar, progreso=progreso)
+        fallos = hidratar(pendientes, avisar=avisar, progreso=progreso)
         if fallos:
             _say(f"[onedrive] {len(fallos)} archivo(s) siguen sin contenido: OneDrive no los entregó "
                  "(cerrado, pausado, sin sesión o sin red). La app no puede arrancar así.")
@@ -904,19 +1196,44 @@ def _main(argv: Optional[List[str]] = None) -> int:
              "no se bajó. La app no puede arrancar así.")
         return EXIT_SIN_BAJAR
 
-    if esc.nube and not esc.root_fijado and not args.sin_pin and not args.listar and not basura_pendiente:
-        ok, det = fijar(root)
-        if ok and not (_atributos_de(root)[0] & FILE_ATTRIBUTE_PINNED):
-            # attrib devolvió 0 pero la raíz no muestra el pin: se vuelve a
-            # intentar en el próximo arranque (root_fijado sigue en False).
-            _say("[onedrive] ! attrib corrió pero la carpeta todavía no figura fijada; "
-                 "se reintenta en el próximo arranque")
-        elif ok:
-            say("[onedrive] carpeta marcada \"Mantener siempre en este dispositivo\" (attrib -U +P): "
-                "lo que llegue con los próximos git pull viene ya bajado")
+    if not esc.nube or args.sin_pin or args.listar or basura_pendiente:
+        return 0
+    if sel is None:                                      # --todo: la carpeta entera, como hasta el 11/11
+        if not esc.root_fijado:
+            ok, det = fijar(root)
+            if ok and not (_atributos_de(root)[0] & FILE_ATTRIBUTE_PINNED):
+                # attrib devolvió 0 pero la raíz no muestra el pin: se vuelve a
+                # intentar en el próximo arranque (root_fijado sigue en False).
+                _say("[onedrive] ! attrib corrió pero la carpeta todavía no figura fijada; "
+                     "se reintenta en el próximo arranque")
+            elif ok:
+                say("[onedrive] carpeta marcada \"Mantener siempre en este dispositivo\" (attrib -U +P): "
+                    "lo que llegue con los próximos git pull viene ya bajado")
+            else:
+                _say(f"[onedrive] ! no pude fijar la carpeta con attrib ({det}); a mano: botón derecho "
+                     "sobre la carpeta del código > \"Mantener siempre en este dispositivo\"")
+        return 0
+    if esc.root_fijado:
+        # el pre-flight de hasta el 11/11 fijaba la raíz entera: OneDrive bajaba
+        # también lo que no es la app (470 MB en la PC del desk)
+        ok, det = desfijar(root)
+        if ok:
+            _say(f"[onedrive] dejo de forzar la bajada de la carpeta entera (fijada por el arranque viejo): "
+                 f"lo que no es la app queda a petición. Lo ya bajado sigue en el disco — para recuperar "
+                 f"espacio, botón derecho sobre {root.name} > \"Liberar espacio\".")
         else:
-            _say(f"[onedrive] ! no pude fijar la carpeta con attrib ({det}); a mano: botón derecho "
-                 "sobre la carpeta del código > \"Mantener siempre en este dispositivo\"")
+            _say(f"[onedrive] ! no pude sacar el pin de la carpeta entera ({det}); a mano: botón derecho "
+                 f"sobre {root.name} > destildar \"Mantener siempre en este dispositivo\"")
+    if not fijado_parcial(root, sel.carpetas_pin, sel.patrones_pin):
+        ok, det = fijar_parcial(root, sel.carpetas_pin, sel.patrones_pin)
+        if ok:
+            say("[onedrive] \"Mantener siempre en este dispositivo\" sólo para el código ("
+                + ", ".join(c.name for c in sel.carpetas_pin) + " y los archivos de la raíz"
+                f"{' que git versiona' if sel.fuente == 'git' else ''}): lo que llegue con los próximos "
+                "git pull viene ya bajado; lo demás de la carpeta queda a petición")
+        else:
+            _say(f"[onedrive] ! no pude fijar {det}; a mano: botón derecho sobre backend/ y tests/ > "
+                 "\"Mantener siempre en este dispositivo\"")
     return 0
 
 
