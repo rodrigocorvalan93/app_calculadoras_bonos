@@ -36,6 +36,9 @@ if errorlevel 1 (
   pause
   exit /b 4
 )
+REM Clon sano: lo versionado que OneDrive dejo distinto vuelve a ser el repo
+REM (salvo especies.py); solo avisa.
+"%PY%" -m backend.tools.repo_sano --quiet
 REM Las carpetas de DATOS (Delta Bases / Carteras / CAFCI): fijar solo lo que la
 REM app lee y bajar lo esencial. Solo avisa (el backfill lee la base: si falta,
 REM lo va a decir).

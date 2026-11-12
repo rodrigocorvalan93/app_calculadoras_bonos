@@ -112,6 +112,36 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM --- Clon sano (12/11): lo que OneDrive dejo distinto al repo vuelve a ser el repo ---
+REM Dos PCs arrancaron con un especies.py que OneDrive dejo a medias (NameError:
+REM S13N6) y una copia en conflicto especies-DAM-NB-RC.py al lado: la app quedo
+REM sin universo de bonos. Esto restaura los archivos VERSIONADOS que difieren
+REM del repo (git checkout), salvo especies.py (lo edita el desk a mano) y lo que
+REM la app reescribe; borra copias en conflicto identicas al repo; y chequea
+REM especies.py ANTES de importarlo. Si especies.py esta roto, pregunta si
+REM restaurarlo desde el repo (el actual se guarda en %LOCALAPPDATA%\bonos\conflictos).
+REM REPO_SANO=0 en secrets.txt lo apaga; REPO_AUTOPULL=1 ademas trae la rama.
+"%PY%" -m backend.tools.repo_sano
+if errorlevel 4 if not errorlevel 5 (
+  echo.
+  echo [ERROR] El especies.py de esta PC esta roto ^(ver arriba^): asi la app arranca sin bonos.
+  echo         Si nadie cargo fichas a mano en esta PC, conviene restaurarlo desde el repo.
+  echo         El archivo actual se guarda en %%LOCALAPPDATA%%\bonos\conflictos por si hace falta.
+  choice /C SN /N /T 60 /D N /M "Restaurar especies.py desde el repo? [S/N] (N en 60 s) "
+  if errorlevel 2 (
+    echo   Queda como esta. Para arreglarlo a mano: git diff especies.py / git checkout -- especies.py
+    echo.
+    pause
+    exit /b 4
+  )
+  "%PY%" -m backend.tools.repo_sano --restaurar-especies
+  if errorlevel 1 (
+    echo [ERROR] No se pudo restaurar especies.py ^(ver arriba^).
+    pause
+    exit /b 4
+  )
+)
+
 REM --- Carpetas de DATOS sincronizadas por OneDrive (Delta Bases / Carteras / CAFCI) ---
 REM En una PC nueva la biblioteca "Inversiones - Documentos" llega entera como
 REM marcadores "solo en la nube": la app arrancaba con cientos de "[Errno 22]"

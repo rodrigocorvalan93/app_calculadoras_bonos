@@ -1851,6 +1851,35 @@ carpetas. Tres piezas:
   Regresión: `tests/test_nube_marcadores.py` y los casos `--datos` de
   `tests/test_onedrive.py`.
 
+## Clon sano al arrancar (`backend/tools/repo_sano.py`, 12/11)
+
+Dos PCs del desk arrancaron con un `especies.py` que OneDrive dejó a medias
+(`NameError: S13N6` en la línea 29772; en el repo la ficha está en la 467 y el
+`Bono` en la 30037) y `especies-DAM-NB-RC.py` al lado (copia en conflicto de
+OneDrive: dos PCs guardaron el archivo a la vez): sin universo de bonos, 500 en
+todo. El .bat corre `repo_sano` (stdlib) DESPUÉS del pre-flight de OneDrive
+del código y ANTES del de datos / pip: (1) `git status --porcelain -z` y
+`git checkout HEAD --` de los VERSIONADOS que difieren del repo, menos
+`PROTEGIDOS` (`especies.py`: lo edita el desk a mano, se respeta y se avisa)
+y `ESCRIBE_LA_APP` (`bcra_data_backup.json`, `bymaprices.xlsx`); lo no
+versionado (secrets, certs/, data/) no se toca; (2) copias en conflicto de un
+versionado (`x-PC.py`, `x (conflicted copy …).py`, `x (1).py`:
+`copias_en_conflicto` + `igual_al_repo` por `git hash-object`) idénticas al
+repo se borran, distintas se avisan y se dejan (pueden traer fichas de otra
+PC); (3) `chequear_especies` (AST, sin ejecutar: sintaxis, `Bono(X)` sin
+ficha X, nombres de la lista final) → roto = `EXIT_ESPECIES_ROTO` (4) y el
+.bat pregunta con `choice` (default N a los 60 s) antes de
+`--restaurar-especies`, que guarda el roto en
+`%LOCALAPPDATA%\bonos\conflictos\especies-roto-<fecha>.py` (`dir_conflictos`,
+`BONOS_LOCAL_DIR`) y repone el del repo — NUNCA solo: puede tener trabajo del
+desk; roto en el propio repo → "corregirlo en git". `REPO_SANO=0` apaga;
+`REPO_AUTOPULL=1` suma `git fetch` + `merge --ff-only` de la rama actual
+(sólo sin `especies.py` tocado; divergente = aviso con el `reset --keep`,
+nunca forzado) — apagado por default porque el `.git` también viaja por
+OneDrive. Sin git / sin `.git` / `git status` que falla / excepción propia:
+exit 0 y la app sigue. `backfill_historico.bat` lo corre `--quiet`.
+Regresión: `tests/test_repo_sano.py` (repo git real en tmp).
+
 ## Estado por máquina fuera de OneDrive (15/10)
 
 El desk vio `data/` con ~6 GB y el chequeo de arranque bajando 6.522 de 8.449
