@@ -128,6 +128,13 @@ if errorlevel 4 if not errorlevel 5 (
   echo         Si nadie cargo fichas a mano en esta PC, conviene restaurarlo desde el repo.
   echo         El archivo actual se guarda en %%LOCALAPPDATA%%\bonos\conflictos por si hace falta.
   choice /C SN /N /T 60 /D N /M "Restaurar especies.py desde el repo? [S/N] (N en 60 s) "
+  REM solo con S (errorlevel 1) se restaura: N = 2, Ctrl+C / Ctrl+Pausa = 0, choice roto = 255
+  if not errorlevel 1 (
+    echo   Cancelado.
+    echo.
+    pause
+    exit /b 4
+  )
   if errorlevel 2 (
     echo   Queda como esta. Para arreglarlo a mano: git diff especies.py / git checkout -- especies.py
     echo.
@@ -136,7 +143,7 @@ if errorlevel 4 if not errorlevel 5 (
   )
   "%PY%" -m backend.tools.repo_sano --restaurar-especies
   if errorlevel 1 (
-    echo [ERROR] No se pudo restaurar especies.py ^(ver arriba^).
+    echo [ERROR] No se pudo restaurar especies.py, o el del repo tambien esta roto ^(ver arriba^).
     pause
     exit /b 4
   )

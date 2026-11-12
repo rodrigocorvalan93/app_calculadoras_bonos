@@ -1860,25 +1860,41 @@ OneDrive: dos PCs guardaron el archivo a la vez): sin universo de bonos, 500 en
 todo. El .bat corre `repo_sano` (stdlib) DESPUÉS del pre-flight de OneDrive
 del código y ANTES del de datos / pip: (1) `git status --porcelain -z` y
 `git checkout HEAD --` de los VERSIONADOS que difieren del repo, menos
-`PROTEGIDOS` (`especies.py`: lo edita el desk a mano, se respeta y se avisa)
-y `ESCRIBE_LA_APP` (`bcra_data_backup.json`, `bymaprices.xlsx`); lo no
-versionado (secrets, certs/, data/) no se toca; (2) copias en conflicto de un
+`PROTEGIDOS` (`especies.py`: lo edita el desk a mano, se respeta y se avisa),
+`ESCRIBE_LA_APP` (`bcra_data_backup.json`, `bymaprices.xlsx`) y los
+LANZADORES (`es_lanzador`: `.bat` / `.cmd` / `.command` de la raíz — cmd.exe
+relee el .bat que está corriendo por offset de bytes, reescribirlo a mitad
+de camino lo deja ejecutando basura; se avisa "al cerrar, git checkout");
+lo no versionado (secrets, certs/, data/) no se toca, y lo que está en el
+índice pero no en HEAD (`A`/`R`/`C`: `git add` sin commit) se ignora porque
+abortaría el lote entero del checkout; (2) copias en conflicto de un
 versionado (`x-PC.py`, `x (conflicted copy …).py`, `x (1).py`:
 `copias_en_conflicto` + `igual_al_repo` por `git hash-object`) idénticas al
 repo se borran, distintas se avisan y se dejan (pueden traer fichas de otra
-PC); (3) `chequear_especies` (AST, sin ejecutar: sintaxis, `Bono(X)` sin
-ficha X, nombres de la lista final) → roto = `EXIT_ESPECIES_ROTO` (4) y el
-.bat pregunta con `choice` (default N a los 60 s) antes de
-`--restaurar-especies`, que guarda el roto en
-`%LOCALAPPDATA%\bonos\conflictos\especies-roto-<fecha>.py` (`dir_conflictos`,
-`BONOS_LOCAL_DIR`) y repone el del repo — NUNCA solo: puede tener trabajo del
-desk; roto en el propio repo → "corregirlo en git". `REPO_SANO=0` apaga;
-`REPO_AUTOPULL=1` suma `git fetch` + `merge --ff-only` de la rama actual
-(sólo sin `especies.py` tocado; divergente = aviso con el `reset --keep`,
-nunca forzado) — apagado por default porque el `.git` también viaja por
-OneDrive. Sin git / sin `.git` / `git status` que falla / excepción propia:
-exit 0 y la app sigue. `backfill_historico.bat` lo corre `--quiet`.
-Regresión: `tests/test_repo_sano.py` (repo git real en tmp).
+PC), y si no se pudieron comparar (None) también se dejan con su aviso; (3)
+`chequear_especies` (AST sobre BYTES — mismo BOM / coding cookie que el
+import, un archivo cortado a mitad de un carácter es "sintaxis" —, sin
+ejecutar: `Bono(X)` sin ficha X, nombres de la lista final; los nombres se
+juntan como el import: a nivel módulo y adentro de if / for / while / try /
+with, por tupla y walrus, más los públicos de un `from utils import *`
+hermano — si ese módulo no se lee, no se acusa a nadie) → roto o FALTANTE
+(`est.borrados`) = `EXIT_ESPECIES_ROTO` (4) y el .bat pregunta con `choice`
+(default N a los 60 s; sólo la S restaura: Ctrl+C = errorlevel 0 y 255 de
+error también cancelan) antes de `--restaurar-especies`, que guarda el roto
+en `%LOCALAPPDATA%\bonos\conflictos\especies-roto-<fecha>.py`
+(`dir_conflictos`, `BONOS_LOCAL_DIR`), repone el del repo y lo VUELVE a
+chequear (el del repo también roto → 4 otra vez, "corregirlo en git"; no
+pude → 1; en ese modo una excepción propia o un `git status` fallido
+también devuelven 1, nunca 0) — NUNCA solo: puede tener trabajo del desk.
+`REPO_SANO=0` apaga; `REPO_AUTOPULL=1` suma `git fetch` + `merge --ff-only`
+de la rama actual (sólo sin `especies.py` tocado; antes repone del repo lo de
+`ESCRIBE_LA_APP` que el pull también trae — si no, "would be overwritten";
+divergente = aviso con el `reset --keep`, nunca forzado) — apagado por
+default porque el `.git` también viaja por OneDrive. Sin git / sin `.git` /
+`git status` que falla / excepción propia: exit 0 y la app sigue.
+`backfill_historico.bat` lo corre `--quiet`. Revisión adversarial del 12/11
+(10 hallazgos, todos con test). Regresión: `tests/test_repo_sano.py` (repo
+git real en tmp).
 
 ## Estado por máquina fuera de OneDrive (15/10)
 

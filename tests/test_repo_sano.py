@@ -208,3 +208,165 @@ def test_el_bat_corre_repo_sano_y_pregunta_antes_de_restaurar_especies() -> None
     assert bloque.index("choice") < bloque.index("--restaurar-especies")
     bf = (ROOT / "backfill_historico.bat").read_text(encoding="utf-8")
     assert "backend.tools.repo_sano --quiet" in bf and bf.isascii()
+
+
+# ── Revisión adversarial 12/11 ───────────────────────────────────────────────
+def test_el_lanzador_que_corre_el_paso_no_se_restaura(clon: Path, capsys) -> None:
+    """cmd.exe relee el .bat que está ejecutando por offset de bytes: si
+    `git checkout` lo reemplaza a mitad del arranque, el resto corre basura.
+    Se avisa y se deja; `--listar` tampoco lo cuenta entre los restaurables."""
+    bat = clon / "run_backend (CORRER APP).bat"
+    bat.write_text("@echo off\r\nREM distinto\r\n", encoding="utf-8")
+    (clon / "rentafija.py").write_text("roto", encoding="utf-8")
+    assert rs.main(["--carpeta", str(clon), "--listar"]) == 0
+    out = capsys.readouterr().out
+    assert "1 archivo(s) versionados difieren" in out and "rentafija.py" in out
+    assert rs.main(["--carpeta", str(clon)]) == 0
+    out = capsys.readouterr().out
+    assert bat.read_bytes() == b"@echo off\r\nREM distinto\r\n"
+    assert (clon / "rentafija.py").read_text(encoding="utf-8") == "class Bono:\n    pass\n"
+    assert "run_backend (CORRER APP).bat difiere del repo: no se toca mientras corre" in out
+    assert rs.es_lanzador("backfill_historico.bat") and rs.es_lanzador("correr_app.command")
+    assert not rs.es_lanzador("deploy/instalar.bat") and not rs.es_lanzador("rentafija.py")
+
+
+def test_restaurar_rechequea_y_el_del_repo_roto_sale_4(clon: Path, capsys) -> None:
+    (clon / "especies.py").write_text(ESPECIES_ROTO, encoding="utf-8")
+    _git(clon, "commit", "-qam", "roto en el repo")
+    (clon / "especies.py").write_text(ESPECIES_ROTO + "# local\n", encoding="utf-8")
+    assert rs.main(["--carpeta", str(clon), "--restaurar-especies"]) == rs.EXIT_ESPECIES_ROTO
+    out = capsys.readouterr().out
+    assert "restaurado desde el repo" in out and "el especies.py del repo también está ROTO" in out
+    assert (clon / "especies.py").read_text(encoding="utf-8") == ESPECIES_ROTO
+
+
+def test_restaurar_que_no_pudo_sale_1_nunca_0(clon: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    """En modo --restaurar-especies el .bat espera el resultado: una
+    excepción propia, un git status caído o una copia que no se pudo guardar
+    devuelven 1 (el .bat avisa), no el 0 'sigo igual' del chequeo."""
+    (clon / "especies.py").write_text(ESPECIES_ROTO, encoding="utf-8")
+    (tmp_path / "archivo-no-carpeta").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("BONOS_LOCAL_DIR", str(tmp_path / "archivo-no-carpeta"))
+    assert rs.main(["--carpeta", str(clon), "--restaurar-especies"]) == 1
+    out = capsys.readouterr().out
+    assert "no pude guardar la copia" in out and "no lo toco" in out
+    assert (clon / "especies.py").read_text(encoding="utf-8") == ESPECIES_ROTO
+    monkeypatch.setattr(rs, "estado", lambda root: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert rs.main(["--carpeta", str(clon), "--restaurar-especies"]) == 1
+    assert "no pude restaurar especies.py (RuntimeError: boom)" in capsys.readouterr().out
+    monkeypatch.setattr(rs, "estado", lambda root: rs.Estado(error="git caído"))
+    assert rs.main(["--carpeta", str(clon), "--restaurar-especies"]) == 1
+    assert "no puedo restaurar especies.py" in capsys.readouterr().out
+    assert rs.main(["--carpeta", str(clon)]) == 0                       # el chequeo normal sigue igual
+
+
+def test_especies_faltante_sale_4_y_se_repone(clon: Path, capsys) -> None:
+    (clon / "especies.py").unlink()
+    assert rs.main(["--carpeta", str(clon)]) == rs.EXIT_ESPECIES_ROTO
+    out = capsys.readouterr().out
+    assert "especies.py FALTA en esta PC" in out and "--restaurar-especies" in out
+    assert rs.main(["--carpeta", str(clon), "--restaurar-especies"]) == 0
+    assert (clon / "especies.py").read_text(encoding="utf-8") == ESPECIES_OK
+
+
+def test_chequear_especies_lee_bytes_bom_y_cortado(tmp_path: Path) -> None:
+    p = tmp_path / "especies.py"
+    p.write_bytes(b"\xef\xbb\xbf" + ESPECIES_OK.encode("utf-8"))               # BOM: el import lo acepta
+    assert rs.chequear_especies(p) == []
+    p.write_bytes(b'import rentafija\nX = {"C\xc3')                             # cortado a mitad de un carácter
+    probs = rs.chequear_especies(p)
+    assert len(probs) == 1 and probs[0].startswith("sintaxis:")
+    p.write_bytes(b"import rentafija\nX = 1\x00\n")                             # bytes nulos
+    assert rs.chequear_especies(p)[0].startswith("sintaxis:")
+
+
+def test_chequear_especies_junta_nombres_como_el_import(tmp_path: Path) -> None:
+    """Fichas definidas adentro de un if / try / for, por tupla, con walrus o
+    traídas por `from utils import *` (módulo hermano) NO son falsos
+    positivos; un `import *` que no se puede resolver no acusa a nadie."""
+    p = tmp_path / "especies.py"
+    (tmp_path / "utils.py").write_text("import os\nDEL_UTILS = {}\n_privado = {}\ndef f():\n    pass\n",
+                                       encoding="utf-8")
+    p.write_text('''from utils import *
+import rentafija
+if True:
+    EN_IF = {}
+try:
+    EN_TRY = {}
+except Exception:
+    EN_EXC = {}
+for N in [1]:
+    pass
+A, B = {}, {}
+C: dict = {}
+if (W := {}):
+    pass
+with open(__file__) as FH:
+    pass
+EN_IF = rentafija.Bono(EN_IF)
+EN_TRY = rentafija.Bono(EN_TRY)
+EN_EXC = rentafija.Bono(EN_EXC)
+A = rentafija.Bono(A)
+B = rentafija.Bono(B)
+C = rentafija.Bono(C)
+W = rentafija.Bono(W)
+DEL_UTILS = rentafija.Bono(DEL_UTILS)
+LISTA = [EN_IF, A, B, C, W, N, FH, DEL_UTILS, f, os]
+MAL = rentafija.Bono(_privado)
+''', encoding="utf-8")
+    assert rs.chequear_especies(p) == ["línea 26: rentafija.Bono(_privado) sin la ficha _privado definida antes"]
+    p.write_text("from noexiste import *\nimport rentafija\nX = rentafija.Bono(X)\nL = [X, Y]\n", encoding="utf-8")
+    assert rs.chequear_especies(p) == []                                        # no se sabe qué trae
+
+
+def test_lo_staged_sin_commit_no_aborta_el_checkout(clon: Path, capsys) -> None:
+    (clon / "rentafija.py").write_text("roto", encoding="utf-8")
+    (clon / "nuevo.py").write_text("n = 1\n", encoding="utf-8")
+    _git(clon, "add", "nuevo.py")
+    _git(clon, "mv", "backend/main.py", "backend/main2.py")
+    assert rs.main(["--carpeta", str(clon)]) == 0
+    out = capsys.readouterr().out
+    assert (clon / "rentafija.py").read_text(encoding="utf-8") == "class Bono:\n    pass\n"
+    assert (clon / "nuevo.py").exists() and (clon / "backend" / "main2.py").exists()
+    assert "1 archivo(s) del código volvieron" in out and "no pude restaurar" not in out
+
+
+def test_autopull_repone_lo_que_la_app_escribe_si_el_pull_lo_trae(clon: Path, tmp_path: Path, monkeypatch, capsys) -> None:
+    remoto = tmp_path / "remoto.git"
+    _git(clon, "clone", "-q", "--bare", str(clon), str(remoto))
+    _git(clon, "remote", "add", "origin", str(remoto))
+    otro = tmp_path / "otro"
+    _git(clon, "clone", "-q", str(remoto), str(otro))
+    (otro / "bcra_data_backup.json").write_text('{"a3500": 2}', encoding="utf-8")
+    _git(otro, "commit", "-qam", "backup nuevo")
+    _git(otro, "push", "-q", "origin", "trabajo")
+    (clon / "bcra_data_backup.json").write_text('{"a3500": 1}', encoding="utf-8")   # la app lo reescribió
+    monkeypatch.setenv("REPO_AUTOPULL", "1")
+    assert rs.main(["--carpeta", str(clon)]) == 0
+    out = capsys.readouterr().out
+    assert "bcra_data_backup.json repuesto del repo" in out and "rama trabajo al día con origin" in out
+    assert (clon / "bcra_data_backup.json").read_text(encoding="utf-8") == '{"a3500": 2}'
+
+
+def test_copia_que_no_se_pudo_comparar_se_deja_con_aviso(clon: Path, monkeypatch, capsys) -> None:
+    (clon / "especies-DAM-NB-RC.py").write_text(ESPECIES_OK, encoding="utf-8")
+    git_real = rs._git
+
+    def git_sin_hash(root, *args, **kw):
+        if args and args[0] == "hash-object":
+            return -1, b"", "TimeoutExpired"
+        return git_real(root, *args, **kw)
+
+    monkeypatch.setattr(rs, "_git", git_sin_hash)
+    assert rs.main(["--carpeta", str(clon)]) == 0
+    out = capsys.readouterr().out
+    assert (clon / "especies-DAM-NB-RC.py").exists()
+    assert "no pude compararla" in out and "DISTINTO" not in out
+
+
+def test_el_bat_solo_restaura_con_la_s() -> None:
+    bat = (ROOT / "run_backend (CORRER APP).bat").read_text(encoding="utf-8")
+    bloque = bat[bat.index("choice /C SN"):bat.index("--restaurar-especies")]
+    assert "if not errorlevel 1 (" in bloque and "if errorlevel 2 (" in bloque
+    assert bloque.index("if not errorlevel 1") < bloque.index("if errorlevel 2")
+    assert bloque.count("exit /b 4") == 2

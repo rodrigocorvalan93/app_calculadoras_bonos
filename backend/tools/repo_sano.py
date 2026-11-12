@@ -13,26 +13,36 @@ bajados) y ANTES de pip / uvicorn, con la biblioteca estándar sola:
 
   1. `git status` del clon: los archivos VERSIONADOS que difieren del repo
      (HEAD) se restauran con `git checkout` — menos los PROTEGIDOS:
-     `especies.py` (lo edita el desk a mano: fichas nuevas) y lo que la app
-     reescribe a propósito (`bcra_data_backup.json`, `bymaprices.xlsx`).
-     Lo que no está versionado (secrets.txt, certs/, data/) no se toca.
+     `especies.py` (lo edita el desk a mano: fichas nuevas), lo que la app
+     reescribe a propósito (`bcra_data_backup.json`, `bymaprices.xlsx`) y
+     los LANZADORES (`.bat` / `.command`: cmd.exe relee el .bat que está
+     corriendo por offset de bytes — reescribirlo a mitad de camino lo
+     deja ejecutando basura; se avisa y se arregla al cerrar). Lo que no
+     está versionado (secrets.txt, certs/, data/) no se toca. Lo que está
+     en el índice pero no en HEAD (`git add` / `git mv` sin commit) tampoco.
   2. copias en conflicto de OneDrive de un archivo versionado
      (`<nombre>-<PC>.<ext>`, `<nombre> (conflicted copy …).<ext>`): si son
      byte a byte iguales a lo del repo se borran (no hay nada que perder);
-     si difieren se avisa y se dejan (pueden tener fichas cargadas a mano).
+     si difieren, o no se pudieron comparar, se avisa y se dejan (pueden
+     tener fichas cargadas a mano).
   3. `especies.py` se chequea ANTES de importarlo (AST, sin ejecutar nada):
      sintaxis, y que cada `rentafija.Bono(X)` y cada nombre de la lista
-     final tengan su diccionario. Roto → sale con `EXIT_ESPECIES_ROTO` (4) y
-     el .bat ofrece `--restaurar-especies`: el archivo roto se guarda en la
-     carpeta local de la máquina (`%LOCALAPPDATA%\\bonos\\conflictos`) y se
-     repone el del repo. Nunca se restaura solo: puede tener trabajo del desk.
+     final tengan su diccionario (definido arriba, también adentro de un
+     if / for / try, por tupla, o traído por `from utils import *`). Roto o
+     FALTANTE → sale con `EXIT_ESPECIES_ROTO` (4) y el .bat ofrece
+     `--restaurar-especies`: el archivo roto se guarda en la carpeta local
+     de la máquina (`%LOCALAPPDATA%\\bonos\\conflictos`) y se repone el del
+     repo; después se vuelve a chequear (el del repo también puede estar
+     roto: ahí hay que corregirlo en git). Nunca se restaura solo: puede
+     tener trabajo del desk.
 
 `REPO_AUTOPULL=1` (secrets.txt) suma un `git fetch` + fast-forward de la
-rama actual cuando el clon quedó limpio; apagado por default porque el
-`.git` también viaja por OneDrive y dos PCs trayendo a la vez se pisan.
-`REPO_SANO=0` apaga todo. Sin git en el PATH, sin `.git` o fuera de
-Windows / Mac: silencio y exit 0 — este paso nunca frena la app por un
-problema propio.
+rama actual cuando el clon quedó limpio (lo que la app reescribe y el pull
+también trae se repone antes: la app lo vuelve a escribir); apagado por
+default porque el `.git` también viaja por OneDrive y dos PCs trayendo a la
+vez se pisan. `REPO_SANO=0` apaga todo. Sin git en el PATH, sin `.git` o
+fuera de Windows / Mac: silencio y exit 0 — este paso nunca frena la app por
+un problema propio (sólo `--restaurar-especies` devuelve 1 si no pudo).
 
     python -m backend.tools.repo_sano               # lo que corre el .bat
     python -m backend.tools.repo_sano --listar      # sólo informar
@@ -50,11 +60,12 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Set, Tuple
 
 EXIT_ESPECIES_ROTO = 4            # el .bat pregunta si restaurar
 PROTEGIDOS = frozenset({"especies.py"})                       # lo edita el desk a mano
 ESCRIBE_LA_APP = frozenset({"bcra_data_backup.json", "bymaprices.xlsx"})   # reescritos a propósito
+_SUFIJOS_LANZADOR = (".bat", ".cmd", ".command")              # el proceso que corre este paso
 _RE_COPIA = re.compile(r"^(?P<stem>.+?)(?:-[A-Za-z0-9_.-]+| \(conflicted copy[^)]*\)| \([0-9]+\))$")
 _PLATFORM = sys.platform
 
@@ -123,7 +134,9 @@ class Estado:
 
 def estado(root: Path) -> Estado:
     """`git status --porcelain -z`: qué difiere del repo. `-z` por las rutas
-    con espacios ("run_backend (CORRER APP).bat")."""
+    con espacios ("run_backend (CORRER APP).bat"). Lo que está en el índice
+    pero no en HEAD (`A` / `R` / `C`: un `git add` o `git mv` sin commit) se
+    ignora: `git checkout HEAD --` no lo conoce y abortaría el lote entero."""
     est = Estado()
     rc, out, err = _git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     if rc != 0:
@@ -143,6 +156,8 @@ def estado(root: Path) -> Estado:
             i += 1
         if xy == "??":
             est.sin_versionar.append(ruta)
+        elif xy[0] in "ARC":
+            continue                          # en el índice, no en HEAD
         elif "D" in xy:
             est.borrados.append(ruta)
         else:
@@ -150,13 +165,26 @@ def estado(root: Path) -> Estado:
     return est
 
 
+def _nombre(ruta: str) -> Tuple[bool, str]:
+    """(está en la raíz, nombre de archivo)."""
+    p = ruta.replace("\\", "/")
+    return "/" not in p, p.rsplit("/", 1)[-1]
+
+
+def es_lanzador(ruta: str) -> bool:
+    """Un .bat / .command de la raíz: el que puede estar corriendo este
+    paso. cmd.exe relee el archivo por offset de bytes en cada línea."""
+    raiz, nombre = _nombre(ruta)
+    return raiz and nombre.lower().endswith(_SUFIJOS_LANZADOR)
+
+
 def restaurables(est: Estado) -> List[str]:
     """Versionados a restaurar: todo lo modificado / borrado menos los
-    protegidos y lo que la app reescribe (sólo si están en la raíz)."""
+    protegidos, lo que la app reescribe y los lanzadores (sólo en la raíz)."""
     out = []
     for ruta in est.modificados + est.borrados:
-        nombre = ruta.replace("\\", "/").rsplit("/", 1)[-1]
-        if "/" not in ruta.replace("\\", "/") and (nombre in PROTEGIDOS or nombre in ESCRIBE_LA_APP):
+        raiz, nombre = _nombre(ruta)
+        if raiz and (nombre in PROTEGIDOS or nombre in ESCRIBE_LA_APP or es_lanzador(ruta)):
             continue
         out.append(ruta)
     return out
@@ -209,41 +237,119 @@ def igual_al_repo(root: Path, copia: str, original: str) -> Optional[bool]:
 
 
 # ── especies.py ──────────────────────────────────────────────────────────────
+def _destinos(t: ast.AST) -> List[str]:
+    """Nombres que liga un target: `X`, `(A, B)`, `[A, *B]`."""
+    if isinstance(t, ast.Name):
+        return [t.id]
+    if isinstance(t, (ast.Tuple, ast.List)):
+        return [n for e in t.elts for n in _destinos(e)]
+    if isinstance(t, ast.Starred):
+        return _destinos(t.value)
+    return []
+
+
+def _publicos_de(path_mod: Path) -> Optional[Set[str]]:
+    """Nombres públicos que `from M import *` trae de un módulo hermano
+    (ligados en cualquier parte del archivo); None si no se puede leer."""
+    try:
+        tree = ast.parse(path_mod.read_bytes())
+    except Exception:  # noqa: BLE001 — no está / no parsea
+        return None
+    out: Set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(n.name)
+        elif isinstance(n, ast.Assign):
+            for t in n.targets:
+                out.update(_destinos(t))
+        elif isinstance(n, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            out.update(_destinos(n.target))
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            out.update((a.asname or a.name).split(".")[0] for a in n.names if a.name != "*")
+    return {n for n in out if not n.startswith("_")}
+
+
 def chequear_especies(path: Path) -> List[str]:
     """Problemas de `especies.py` que harían fallar el import, sin ejecutarlo:
     sintaxis, `rentafija.Bono(X)` con X sin diccionario, nombres de la lista
     final sin definir. [] = sano. Un NameError de éstos deja la app sin
-    universo de bonos (12/11)."""
+    universo de bonos (12/11). Se lee en BYTES (mismo BOM / coding cookie
+    que el import; un archivo cortado a mitad de un carácter es "sintaxis",
+    no una excepción). Los nombres se juntan como lo haría el import: a
+    nivel módulo, también adentro de if / for / while / try / with, por
+    tupla, walrus, y los públicos de un `from M import *` hermano; si ese
+    módulo no se puede leer, no se acusa a nadie (no se sabe qué trae)."""
     try:
-        src = path.read_text(encoding="utf-8")
+        src = path.read_bytes()
     except OSError as e:
         return [f"no se pudo leer: {e}"]
     try:
         tree = ast.parse(src)
-    except SyntaxError as e:
-        return [f"sintaxis: línea {e.lineno}: {e.msg}"]
-    definidos, problemas = set(), []
-    for node in tree.body:
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            for a in node.names:
-                definidos.add((a.asname or a.name).split(".")[0])
-            continue
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-            definidos.add(node.name)
-            continue
-        if not isinstance(node, ast.Assign):
-            continue
-        nombres = [t.id for t in node.targets if isinstance(t, ast.Name)]
-        v = node.value
-        if isinstance(v, ast.Call) and getattr(v.func, "attr", "") == "Bono":
+    except (SyntaxError, ValueError) as e:        # ValueError: bytes nulos / decode
+        return [f"sintaxis: línea {getattr(e, 'lineno', None) or '?'}: {getattr(e, 'msg', e)}"]
+    definidos: Set[str] = set()
+    problemas: List[str] = []
+    desconocidos = False                          # un `import *` que no se pudo resolver
+
+    def valor(v: ast.AST, lineno: int) -> None:
+        if desconocidos:
+            return
+        if isinstance(v, ast.Call) and (getattr(v.func, "attr", "") == "Bono" or getattr(v.func, "id", "") == "Bono"):
             for arg in v.args:
                 if isinstance(arg, ast.Name) and arg.id not in definidos:
-                    problemas.append(f"línea {node.lineno}: rentafija.Bono({arg.id}) sin la ficha {arg.id} definida antes")
+                    problemas.append(f"línea {lineno}: rentafija.Bono({arg.id}) sin la ficha {arg.id} definida antes")
         elif isinstance(v, (ast.List, ast.Tuple)):
             for e in v.elts:
                 if isinstance(e, ast.Name) and e.id not in definidos:
                     problemas.append(f"línea {e.lineno}: {e.id} en la lista no está definido")
-        definidos.update(nombres)
+
+    def visitar(stmts: Iterable[ast.stmt]) -> None:
+        nonlocal desconocidos
+        for node in stmts:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for a in node.names:
+                    if a.name == "*":
+                        mod = getattr(node, "module", None)
+                        pub = _publicos_de(path.parent / (mod.replace(".", "/") + ".py")) if mod else None
+                        if pub is None:
+                            desconocidos = True
+                        else:
+                            definidos.update(pub)
+                    else:
+                        definidos.add((a.asname or a.name).split(".")[0])
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                definidos.add(node.name)
+            elif isinstance(node, ast.Assign):
+                valor(node.value, node.lineno)
+                for t in node.targets:
+                    definidos.update(_destinos(t))
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                if node.value is not None:
+                    valor(node.value, node.lineno)
+                definidos.update(_destinos(node.target))
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                definidos.update(_destinos(node.target))
+                visitar(node.body)
+                visitar(node.orelse)
+            elif isinstance(node, (ast.If, ast.While)):
+                visitar(node.body)
+                visitar(node.orelse)
+            elif isinstance(node, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+                visitar(node.body)
+                for h in node.handlers:
+                    visitar(h.body)
+                visitar(node.orelse)
+                visitar(node.finalbody)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for it in node.items:
+                    if it.optional_vars is not None:
+                        definidos.update(_destinos(it.optional_vars))
+                visitar(node.body)
+            for sub in ast.walk(node):            # walrus en cualquier lado del statement
+                if isinstance(sub, ast.NamedExpr):
+                    definidos.update(_destinos(sub.target))
+
+    visitar(tree.body)
     return problemas
 
 
@@ -269,11 +375,15 @@ def _cargar_secrets(root: Path) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    restaurando = "--restaurar-especies" in (argv if argv is not None else sys.argv[1:])
     try:
         return _main(argv)
     except KeyboardInterrupt:
         return 0
-    except Exception as e:  # noqa: BLE001 — nunca frena la app por un problema propio
+    except Exception as e:  # noqa: BLE001 — nunca frena la app por un problema propio…
+        if restaurando:                           # …salvo que el .bat esté esperando el resultado
+            _say(f"[repo] ! no pude restaurar especies.py ({type(e).__name__}: {e}); queda como está")
+            return 1
         _say(f"[repo] ! el chequeo del clon falló ({type(e).__name__}: {e}); sigo igual")
         return 0
 
@@ -293,28 +403,21 @@ def _main(argv: Optional[List[str]] = None) -> int:
     if (os.getenv("REPO_SANO") or "1").strip() == "0":
         return 0
     if not git_disponible(root):
+        if args.restaurar_especies:
+            _say("[repo] ! sin git no puedo restaurar especies.py")
+            return 1
         return 0                                          # sin git / sin .git: nada que comparar
     est = estado(root)
     if est.error:
-        _say(f"[repo] ! git status falló ({est.error}); sigo igual")
-        return 0
+        _say(f"[repo] ! git status falló ({est.error}); "
+             + ("no puedo restaurar especies.py" if args.restaurar_especies else "sigo igual"))
+        return 1 if args.restaurar_especies else 0
 
     especies = root / "especies.py"
     if args.restaurar_especies:
-        if "especies.py" not in est.modificados + est.borrados:
-            say("[repo] especies.py ya es el del repo")
-            return 0
-        if especies.exists():
-            guardado = apartar(especies, dir_conflictos())
-            _say(f"[repo] el especies.py actual quedó guardado en {guardado}")
-        ok, err = restaurar(root, ["especies.py"])
-        if not ok:
-            _say(f"[repo] ! no pude restaurar especies.py ({err})")
-            return 1
-        _say("[repo] especies.py restaurado desde el repo")
-        return 0
+        return _restaurar_especies(root, especies, est, say)
 
-    # 1) versionados que difieren del repo (menos protegidos y lo que la app escribe)
+    # 1) versionados que difieren del repo (menos protegidos, lo que la app escribe y los lanzadores)
     rutas = restaurables(est)
     if rutas:
         if args.listar:
@@ -332,12 +435,20 @@ def _main(argv: Optional[List[str]] = None) -> int:
     protegidos_tocados = [r for r in est.modificados if r in PROTEGIDOS]
     if protegidos_tocados:
         say(f"[repo] {', '.join(protegidos_tocados)} tiene cambios locales: se respeta (lo edita el desk)")
+    lanzadores = [r for r in est.modificados + est.borrados if es_lanzador(r)]
+    if lanzadores:
+        _say(f"[repo] ! {', '.join(lanzadores)} difiere del repo: no se toca mientras corre (cmd seguiría "
+             "leyendo el archivo nuevo desde el mismo byte). Al cerrar esta ventana, a mano: "
+             "git checkout -- \"<archivo>\"")
 
     # 2) copias en conflicto de OneDrive de archivos versionados
     copias = copias_en_conflicto(est, versionados(root))
     for copia, original in copias:
         iguales = igual_al_repo(root, copia, original)
-        if iguales and not args.listar:
+        if iguales is None:
+            _say(f"[repo] ! {copia}: copia en conflicto de OneDrive de {original}; no pude compararla con el "
+                 "repo (git no contestó o el archivo no se pudo leer) — se deja, revisarla a mano")
+        elif iguales and not args.listar:
             try:
                 (root / copia).unlink()
                 say(f"[repo] borré {copia}: copia en conflicto de OneDrive idéntica a {original} del repo")
@@ -350,6 +461,11 @@ def _main(argv: Optional[List[str]] = None) -> int:
                  "revisarla a mano (puede tener fichas cargadas en otra PC) y borrarla")
 
     # 3) especies.py importable
+    if "especies.py" in est.borrados:
+        _say("[repo] x especies.py FALTA en esta PC (OneDrive lo borró o todavía no lo trajo); la app "
+             "arrancaría sin universo de bonos.")
+        _say("[repo]   difiere del repo: reponerlo con python -m backend.tools.repo_sano --restaurar-especies")
+        return EXIT_ESPECIES_ROTO
     if especies.exists():
         problemas = chequear_especies(especies)
         if problemas:
@@ -372,8 +488,36 @@ def _main(argv: Optional[List[str]] = None) -> int:
     return 0
 
 
+def _restaurar_especies(root: Path, especies: Path, est: Estado, say: Callable[[str], None]) -> int:
+    """`--restaurar-especies`: guarda el actual en la carpeta local, repone
+    el del repo y lo vuelve a chequear. 0 = quedó sano; 1 = no pude;
+    EXIT_ESPECIES_ROTO = el del repo también está roto (corregirlo en git)."""
+    if "especies.py" in est.modificados + est.borrados:
+        if especies.exists():
+            try:
+                guardado = apartar(especies, dir_conflictos())
+            except OSError as e:
+                _say(f"[repo] ! no pude guardar la copia del especies.py actual en {dir_conflictos()} ({e}); "
+                     "no lo toco")
+                return 1
+            _say(f"[repo] el especies.py actual quedó guardado en {guardado}")
+        ok, err = restaurar(root, ["especies.py"])
+        if not ok:
+            _say(f"[repo] ! no pude restaurar especies.py ({err})")
+            return 1
+        _say("[repo] especies.py restaurado desde el repo")
+    else:
+        say("[repo] especies.py ya es el del repo")
+    problemas = chequear_especies(especies) if especies.exists() else ["no existe"]
+    if problemas:
+        _say(f"[repo] x el especies.py del repo también está ROTO ({problemas[0]}): hay que corregirlo en git; "
+             "la app arrancaría sin universo de bonos")
+        return EXIT_ESPECIES_ROTO
+    return 0
+
+
 def _autopull(root: Path, est: Estado, say: Callable[[str], None]) -> None:
-    if est.modificados and [r for r in est.modificados if r in PROTEGIDOS]:
+    if [r for r in est.modificados if r in PROTEGIDOS]:
         say("[repo] autopull: especies.py con cambios locales, no traigo la rama")
         return
     if not est.rama or est.rama == "HEAD":
@@ -382,9 +526,25 @@ def _autopull(root: Path, est: Estado, say: Callable[[str], None]) -> None:
     if rc != 0:
         _say(f"[repo] ! autopull: fetch falló ({err})")
         return
+    # lo que la app reescribe (bcra_data_backup.json…) y el pull también trae
+    # bloquearía el merge ("would be overwritten"): se repone del repo antes —
+    # la app lo vuelve a escribir en el próximo indices.main()
+    rc, out, _e = _git(root, "diff", "--name-only", "-z", "HEAD", f"origin/{est.rama}", timeout=60.0)
+    entrantes = {p.decode("utf-8", "replace") for p in out.split(b"\0") if p} if rc == 0 else set()
+    sucios = [r for r in est.modificados if _nombre(r)[0] and _nombre(r)[1] in ESCRIBE_LA_APP and r in entrantes]
+    if sucios:
+        ok, err = restaurar(root, sucios)
+        if not ok:
+            _say(f"[repo] ! autopull: no pude reponer {', '.join(sucios)} ({err}); no traigo la rama")
+            return
+        say(f"[repo] autopull: {', '.join(sucios)} repuesto del repo (la app lo reescribe)")
     rc, _o, err = _git(root, "merge", "--ff-only", f"origin/{est.rama}", timeout=120.0)
     if rc == 0:
         say(f"[repo] rama {est.rama} al día con origin")
+    elif "overwritten" in err:
+        archivos = [ln.strip() for ln in err.splitlines() if ln.startswith("\t")]
+        _say(f"[repo] ! autopull: cambios locales en {', '.join(archivos) or 'archivos'} frenan la rama; a mano: "
+             f"git checkout -- <archivo> && git merge --ff-only origin/{est.rama}")
     else:
         _say(f"[repo] ! autopull: la rama {est.rama} no avanza en fast-forward ({err.splitlines()[-1] if err else rc}); "
              "a mano: git fetch origin && git reset --keep origin/" + est.rama)
