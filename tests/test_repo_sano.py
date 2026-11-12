@@ -216,7 +216,7 @@ def test_el_lanzador_que_corre_el_paso_no_se_restaura(clon: Path, capsys) -> Non
     `git checkout` lo reemplaza a mitad del arranque, el resto corre basura.
     Se avisa y se deja; `--listar` tampoco lo cuenta entre los restaurables."""
     bat = clon / "run_backend (CORRER APP).bat"
-    bat.write_text("@echo off\r\nREM distinto\r\n", encoding="utf-8")
+    bat.write_bytes(b"@echo off\r\nREM distinto\r\n")          # bytes: en Windows write_text dobla el \r
     (clon / "rentafija.py").write_text("roto", encoding="utf-8")
     assert rs.main(["--carpeta", str(clon), "--listar"]) == 0
     out = capsys.readouterr().out
