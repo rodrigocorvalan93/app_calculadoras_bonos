@@ -29904,7 +29904,6 @@ YFCKD = rentafija.Bono(YFCKD)
 # SOBS EN MONEDA LOCAL
 S16O6 = rentafija.Bono(S16O6)
 S30O6 = rentafija.Bono(S30O6)
-S13N6 = rentafija.Bono(S13N6)
 S30N6 = rentafija.Bono(S30N6)
 S29E7 = rentafija.Bono(S29E7)
 S26F7 = rentafija.Bono(S26F7)
@@ -30092,7 +30091,7 @@ todos_los_bonos = [
 
     # SOBERANOS PESOS (SOBS)
 
-    S13N6, S29E7, S26F7,
+    S29E7, S26F7,
     S16O6, S30O6, S30N6,
     TO26, TTD26,
     TTD26v,
