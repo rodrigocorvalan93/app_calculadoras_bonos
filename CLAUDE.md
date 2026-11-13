@@ -793,6 +793,94 @@ inventa una desde su primera rueda). Antes "1 mes" podía medir mes y medio sin
 decirlo (CER +4,35 % con el mercado en 2-3 %, 30/09). El CSV lleva las
 mismas columnas (Precio ini/fin, Fecha ini/fin) y el aviso.
 
+## Proyecciones editables — inflación mensual y A3500 (13/11)
+
+Pedido del desk: dejar de editar `indices.py` a mano y que un cambio de
+proyección lo tome TODO al instante sin trabar nada (en las calculadoras
+viejas cada widget re-corría el equivalente de `indices.main()` entero en el
+hilo de la interfaz). Pestaña **Proyecciones** (`auth.TABS` después de
+Escenario; `routes/proyecciones.py`, `services/proyecciones.py`,
+`templates/proyecciones.html` + `partials/proyecciones_preview.html`).
+
+- **Un archivo compartido, no código**: `data/proyecciones.json`
+  (`{"inflacion": {"AAAA-MM": % m/m}, "a3500": {"AAAA-MM-DD": nivel}, "meta"}`;
+  viaja por OneDrive como la pizarra; `PROYECCIONES_PATH` lo mueve, la suite lo
+  apunta a un tmp) + `proyecciones_log.jsonl` al lado (quién / cuándo / nota /
+  escenario anterior y nuevo). Los dicts de `indices.py` quedan como semilla y
+  fallback (`proyecciones.defaults()`). **`indices.main()` lee el archivo**
+  (`indices.proyecciones_vigentes()`, stdlib: archivo válido → manda; roto o
+  ausente → los dicts), así un reinicio conserva el escenario; y el bloque de
+  proyecciones de `main()` pasó a `indices.armar_proyecciones(cer, inflamom,
+  a3500, uva, tabla_infl, tabla_deva)` + `tabla_inflacion_mensual` (claves
+  `Nov-26` legacy o `2026-11`), bit a bit igual al inline de antes (verificado
+  contra el `main()` anterior en las 10 series). Es el único toque a
+  `indices.py`.
+- **Recalcular SÓLO la parte proyectada**: `proyecciones.calcular(esc)` toma
+  las observadas de `rentafija.inputs` (`observadas()`: CER, `inflamom_observado`,
+  A3500 cortado en el último PUBLICADO por el BCRA —la fila de hoy inyectada
+  por especies.py no entra, igual que en `main()`—, UVA; memo por ids) y pasa
+  por `armar_proyecciones` → 10 ms, idéntico a arrancar con esas tablas
+  (`test_calcular_con_las_tablas_del_codigo_es_bit_a_bit_…`). `aplicar()` =
+  `normalizar` (rangos: inflación −5…50 % m/m, A3500 > 0, meses AAAA-MM
+  válidos, tope 360 filas; TODOS los problemas en un ValueError es-AR) +
+  archivo atómico + log + `_instalar` (= `inputs.update` de las cuatro claves
+  `COLS`: `cer_proyectado / uva_proyectado / a3500_proyectado / inflamom`).
+  Los bonos leen esas claves en cada cálculo y `pricing._proyeccion_token`
+  (id + largo + último valor) está en la key de métricas, memo de flujos y
+  filas de Curvas/Mercado/Inicio → las TIR de los CER PROYECTADO (patas `j`),
+  UVA PROYECTADO, el drift de Total Return y Escenario se recomputan solas
+  en el próximo tick (≤ 2 s por el TTL de `_index_val_cache`). Los **CER base
+  no cambian** (valúan con `inputs['CER']` observado: TIR real) y los
+  floaters tampoco (TAMAR/BADLAR siguen planas al promedio 5 ruedas: etapa
+  siguiente, no se toca `refresh_floater_coupons`). `deshacer` repone el
+  `antes` de la última línea del log (intercambio, no pila); `restablecer`
+  escribe los dicts del código al archivo (todas las PCs convergen).
+  `escenario_prefs.infl_default` lee `proyecciones.vigente()` (antes el dict
+  de indices): Escenario arranca con la inflación vigente.
+- **Las otras PCs lo toman solas**: `start_vigilante()` (lifespan, thread
+  daemon, un `stat` por segundo; `PROYECCIONES_WATCH=0` apaga) compara la
+  firma mtime+tamaño del JSON con la instalada y reinstala
+  (`instalar_desde_archivo`). `calcular_vigente()` memo por (firma,
+  observadas); `token()` = ids de los cuatro frames (cambia con instalar Y con
+  `inputs.refresh()` del warmup) keyea los memos derivados.
+- **Pestaña**: tablas editables (meses INDEC publicados en gris con el dato
+  real; un mes proyectado ≤ último publicado y un punto A3500 ≤ último
+  publicado se marcan `pisado`: la app usa el real), `+ mes` / `+ fila`,
+  pegado de una columna de Excel, **⤵ traer de los futuros**
+  (`GET /proyecciones/futuros`: precio de cada DLR mayorista en su fin de
+  mes — lo que se copiaba a mano de ROFEX), Nota. **Previsualizar**
+  (`POST /proyecciones/preview`, cualquier rol con la pestaña) recalcula el
+  borrador SIN aplicar: resumen (inflación anualizada implícita por año, CER y
+  A3500 a 12/24/36 m —sin inventar más allá de donde termina la tabla—) y
+  tres gráficos uPlot (`charts.js initProyecciones`, JSON embebido en
+  `[data-proy-chart]`, cero requests: observado lleno, proyectado punteado,
+  la vigente en gris); "Bajar el borrador" = `POST /proyecciones/csv`
+  (cer / uva / a3500 / inflamom, CSV es-AR con columna Tramo). **Aplicar /
+  Deshacer / Volver al código** = feature `proyecciones` (`auth.FEATURES`,
+  gate en `main._FEATURE_PATHS`; sin ella la pestaña es sólo lectura y el
+  botón no se muestra); responden `HX-Redirect: /proyecciones?ok=1`. Una
+  pestaña nueva NO entra sola al `role_tabs` guardado de premium/básico:
+  tildarla en /admin. Medido warm: `/proyecciones` p50 10,6 · p95 11,7 ms;
+  preview p50 22 · p95 30 ms.
+- **Históricos · Macro con las series proyectadas** (`historico.PROYECTADAS`:
+  `cer_proy / uva_proy / a3500_proy / tamar_proy / badlar_proy /
+  inflamom_proy`, desde `rentafija.inputs`, memo por id del frame):
+  optgroup propio en el selector, `series_points` trae `corte` (última
+  observación) y con un preset de Rango muestra ese lapso hacia atrás Y
+  hacia adelante del corte; `/historicos/data` manda `corte` y `charts.js
+  initHistMacro` dibuja el tramo proyectado punteado (+ columna Tramo en
+  "Ver datos"); memo keyeado por `proyecciones.token()`. Descargas: **⤓ CSV**
+  (`/historicos/macro.csv?serie&rango&desde&hasta`, es-AR + Tramo, el link
+  sigue a los controles) y **⤓ Todas (xlsx)** (`/historicos/macro.xlsx`: una
+  hoja por serie observada y proyectada, ~1,3 MB, memo por versión de las dos
+  fuentes); las dos en `_SIN_GZIP`. Medido: `/historicos/data?serie=cer_proy`
+  p95 2,3 ms · macro.csv p95 4,9 ms.
+- Regresión: `tests/test_proyecciones.py` (bit a bit vs `indices.main()`,
+  claves legacy/ISO, JSON válido/roto, validación, aplicar → TIR de un CER
+  PROYECTADO sube y deshacer la devuelve exacta, vigilante, Escenario sigue
+  la vigente, Históricos corte/rango/CSV/xlsx, pestaña por HTTP, gate de la
+  feature).
+
 ## Inicio y orden de pestañas (07/10)
 
 `auth.TABS` manda el orden de la nav: **Inicio** (`home`, `/inicio`),
@@ -1508,6 +1596,15 @@ p95 9,7 ms; vacío 2,5; `/yas/ficha` 2,0; `/yas/market` 1,9; `/yas` 5,0.
   crudo en pesos sobre la ficha en dólares al cambiar de bono. Las tarjetas
   secundarias van en % VN (val. técnico 101,5694; int. corridos 1,5694), el
   ticket completo de siempre queda en un `<details>` (nada se pierde).
+- **Ubicación en la curva con referencia** (13/11): el widget `[data-locate]`
+  (YAS y Comparador, `charts.js`) etiqueta cada punto de la curva con su
+  código en gris tenue (anti-superposición 26×11 px como Gráficos; el bono
+  resaltado primero y en su color) y al pasar el mouse muestra un tooltip
+  código · TIR · duration (`.locate-tip`, mismo anti-clip que Gráficos). Los
+  códigos salen del `codes` que `/graficos/data` ya mandaba alineado a `xs`
+  (se splicean junto con ars/usd al intercalar los resaltados): cero
+  requests ni cálculo nuevos. Regresión: `tests/test_locate.py` +
+  `tests/locate_harness.cjs` (uPlot falso: etiquetas y tooltip).
 - Regresión: `tests/test_yas_layout.py`.
 
 ## Revisión de eficiencia 22-23/10 — memo de flujos y warmup que cede el GIL
@@ -1774,17 +1871,38 @@ carpetas. Tres piezas:
   del código y ANTES de pip; sólo AVISA con errorlevel 4, nunca `exit`: la
   app sabe correr sin bases): `carpetas_datos()` resuelve las carpetas desde
   secrets.txt (`OMSsecrets.load` + `deltapaths`, stdlib, import tardío),
-  deduplicadas (Carteras va adentro de Delta Bases), las FIJA "Mantener
-  siempre en este dispositivo" (`fijar`: OneDrive baja todo en segundo plano
-  y lo nuevo que escriba el writer de otra PC llega ya bajado; Storage Sense
-  no las vacía — pedido del desk: "que Delta Bases siempre se baje") y baja
+  deduplicadas (Carteras va adentro de Delta Bases: `carpetas_datos_detalle`
+  la deja como subcarpeta), fija "Mantener siempre en este dispositivo"
+  **sólo sobre lo que la app lee** (11/11, `plan_pin` + `fijar_parcial`: los
+  archivos de la raíz de Delta Bases, `cierres/` entera — una partición por
+  rueda, Históricos las lee todas — y los archivos de cada subcarpeta de
+  datos, Carteras; la carpeta CAFCI NO se fija: años de vectores) y baja
   YA sólo `esenciales(esc)` = `ESENCIALES_DATOS` (composición / PN / Galileo /
   Fondos / Especies / px_tasas xlsx + parquet + firma / FX / acciones /
   manifiesto / huecos) + los `CAFCI_ULTIMOS` (3) vectores `AAAAMMDD.xlsx` más
-  nuevos. `escanear(..., clasificar_basura=False)`: en una carpeta de datos
-  NADA se clasifica como caché ni se borra. Las particiones de cierres y la
-  historia CAFCI las baja OneDrive por el pin; `cierres` reintenta solo cada
-  60 s.
+  nuevos. Hasta el 11/11 fijaba la CARPETA ENTERA (`fijar`: la PC del desk
+  bajaba 27 GB de Delta Bases y 7 GB de CAFCI — exportaciones viejas e
+  historia que la app no abre) y una raíz que quedó fijada así se destraba
+  (`desfijar` = `attrib -P` recursivo + raíz, sin `+U`: lo bajado queda, a
+  mano "Liberar espacio"); `fijado_parcial` (stat de las carpetas y del
+  primer archivo de cada patrón) evita repetir el attrib en cada arranque,
+  porque la raíz ya no lleva la marca. `ONEDRIVE_PIN_DATOS` en secrets.txt:
+  `0` = sin pin (sólo lo esencial, el resto a petición), `todo` (o `--todo`)
+  = la biblioteca entera como antes. `escanear(..., clasificar_basura=False)`:
+  en una carpeta de datos NADA se clasifica como caché ni se borra. Las
+  particiones de cierres las baja OneDrive por el pin; `cierres` reintenta
+  solo cada 60 s; la historia CAFCI se baja cuando la pestaña la lee.
+  **Carpeta del código, mismo criterio** (11/11; 470 MB de 562 archivos
+  "sólo en la nube" eran `proyecto_cauciones_ml` 312 MB y exportaciones
+  sueltas en la raíz, con el repo pesando 9,5 MB): `seleccion_codigo` baja
+  sólo lo que git versiona (`archivos_versionados` = `git ls-files`; sin git,
+  sufijo en `_SUFIJOS_CODIGO` + ≤ 20 MB + fuera de `_SIN_GIT_EXCLUIR`) más
+  `certs/` `data/` y `ARCHIVOS_LOCALES` (secrets, auth_store, audit), y fija
+  `CARPETAS_CODIGO` (.git, .github, backend, tests, deploy, scripts, certs,
+  data) + los archivos de la raíz que git versiona (por nombre; sin git por
+  sufijo, `_PATRONES_RAIZ_SIN_GIT`) — la raíz NUNCA; una raíz fijada por el
+  pre-flight viejo se destraba. Lo omitido se informa ("N archivos de la
+  carpeta no son del código … quedan en la nube").
 - **`services/nube.py`** (stdlib): `es_marcador(path)` (bit
   RECALL_ON_DATA_ACCESS / OFFLINE / RECALL_ON_OPEN, un stat), `en_nube(path)`
   (además PINNED / UNPINNED: atributos que sólo pone el motor),
@@ -1829,6 +1947,51 @@ carpetas. Tres piezas:
   loguea además el `error` de positions / delta_especies cuando no cargan.
   Regresión: `tests/test_nube_marcadores.py` y los casos `--datos` de
   `tests/test_onedrive.py`.
+
+## Clon sano al arrancar (`backend/tools/repo_sano.py`, 12/11)
+
+Dos PCs del desk arrancaron con un `especies.py` que OneDrive dejó a medias
+(`NameError: S13N6` en la línea 29772; en el repo la ficha está en la 467 y el
+`Bono` en la 30037) y `especies-DAM-NB-RC.py` al lado (copia en conflicto de
+OneDrive: dos PCs guardaron el archivo a la vez): sin universo de bonos, 500 en
+todo. El .bat corre `repo_sano` (stdlib) DESPUÉS del pre-flight de OneDrive
+del código y ANTES del de datos / pip: (1) `git status --porcelain -z` y
+`git checkout HEAD --` de los VERSIONADOS que difieren del repo, menos
+`PROTEGIDOS` (`especies.py`: lo edita el desk a mano, se respeta y se avisa),
+`ESCRIBE_LA_APP` (`bcra_data_backup.json`, `bymaprices.xlsx`) y los
+LANZADORES (`es_lanzador`: `.bat` / `.cmd` / `.command` de la raíz — cmd.exe
+relee el .bat que está corriendo por offset de bytes, reescribirlo a mitad
+de camino lo deja ejecutando basura; se avisa "al cerrar, git checkout");
+lo no versionado (secrets, certs/, data/) no se toca, y lo que está en el
+índice pero no en HEAD (`A`/`R`/`C`: `git add` sin commit) se ignora porque
+abortaría el lote entero del checkout; (2) copias en conflicto de un
+versionado (`x-PC.py`, `x (conflicted copy …).py`, `x (1).py`:
+`copias_en_conflicto` + `igual_al_repo` por `git hash-object`) idénticas al
+repo se borran, distintas se avisan y se dejan (pueden traer fichas de otra
+PC), y si no se pudieron comparar (None) también se dejan con su aviso; (3)
+`chequear_especies` (AST sobre BYTES — mismo BOM / coding cookie que el
+import, un archivo cortado a mitad de un carácter es "sintaxis" —, sin
+ejecutar: `Bono(X)` sin ficha X, nombres de la lista final; los nombres se
+juntan como el import: a nivel módulo y adentro de if / for / while / try /
+with, por tupla y walrus, más los públicos de un `from utils import *`
+hermano — si ese módulo no se lee, no se acusa a nadie) → roto o FALTANTE
+(`est.borrados`) = `EXIT_ESPECIES_ROTO` (4) y el .bat pregunta con `choice`
+(default N a los 60 s; sólo la S restaura: Ctrl+C = errorlevel 0 y 255 de
+error también cancelan) antes de `--restaurar-especies`, que guarda el roto
+en `%LOCALAPPDATA%\bonos\conflictos\especies-roto-<fecha>.py`
+(`dir_conflictos`, `BONOS_LOCAL_DIR`), repone el del repo y lo VUELVE a
+chequear (el del repo también roto → 4 otra vez, "corregirlo en git"; no
+pude → 1; en ese modo una excepción propia o un `git status` fallido
+también devuelven 1, nunca 0) — NUNCA solo: puede tener trabajo del desk.
+`REPO_SANO=0` apaga; `REPO_AUTOPULL=1` suma `git fetch` + `merge --ff-only`
+de la rama actual (sólo sin `especies.py` tocado; antes repone del repo lo de
+`ESCRIBE_LA_APP` que el pull también trae — si no, "would be overwritten";
+divergente = aviso con el `reset --keep`, nunca forzado) — apagado por
+default porque el `.git` también viaja por OneDrive. Sin git / sin `.git` /
+`git status` que falla / excepción propia: exit 0 y la app sigue.
+`backfill_historico.bat` lo corre `--quiet`. Revisión adversarial del 12/11
+(10 hallazgos, todos con test). Regresión: `tests/test_repo_sano.py` (repo
+git real en tmp).
 
 ## Estado por máquina fuera de OneDrive (15/10)
 

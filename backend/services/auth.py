@@ -67,6 +67,7 @@ TABS: List[Tuple[str, str, str]] = [
     ("forwards",     "Forwards",     "/forwards"),
     ("total_return", "Total Return", "/total-return"),
     ("escenario",    "Escenario",    "/escenario"),
+    ("proyecciones", "Proyecciones", "/proyecciones"),
     ("quepaso",      "Qué pasó",     "/que-paso"),
     ("creditos",     "Créditos",     "/creditos"),
     ("cafci",        "CAFCI",        "/cafci"),
@@ -93,6 +94,10 @@ ALWAYS_TABS: Tuple[str, ...] = ("home",)
 # FEATURE_KEYS.)
 FEATURES: List[Tuple[str, str]] = [
     ("cafci_fondos", "Panel VCP fondos propios (API CAFCI)"),
+    # Editar las proyecciones vigentes (inflación mensual / A3500) desde la
+    # pestaña Proyecciones: aplicar, deshacer, restablecer. Sin la feature la
+    # pestaña es sólo lectura (vista previa y descargas sí).
+    ("proyecciones", "Editar las proyecciones vigentes (inflación / A3500)"),
 ]
 FEATURE_KEYS: Tuple[str, ...] = tuple(k for k, _ in FEATURES)
 # Features que arrancan TILDADAS para un rol (una sola vez: si el superuser

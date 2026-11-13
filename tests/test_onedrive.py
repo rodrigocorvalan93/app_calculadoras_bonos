@@ -23,6 +23,26 @@ NUBE_TAG = 0x9000601A                      # un tag de la familia IO_REPARSE_TAG
 RECALL = onedrive.FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | 0x20   # + ARCHIVE
 
 
+_ATTRIB_REAL = onedrive._attrib
+_VERSIONADOS_REAL = onedrive.archivos_versionados
+
+
+@pytest.fixture(autouse=True)
+def _sin_git_ni_attrib(monkeypatch):
+    """Ningún test corre `git ls-files` ni `attrib` de verdad: sin git el
+    pre-flight cae a la heurística (el que quiera git patchea
+    `archivos_versionados`) y cada attrib queda grabado en `onedrive._CMDS`."""
+    monkeypatch.setattr(onedrive, "archivos_versionados", lambda root: None)
+    cmds: list[list[str]] = []
+    monkeypatch.setattr(onedrive, "_CMDS", cmds, raising=False)
+
+    def attrib(flags, patron, recursivo, run=None):
+        cmds.append([*flags, str(patron)] + (["/S", "/D"] if recursivo else []))
+        return True, ""
+
+    monkeypatch.setattr(onedrive, "_attrib", attrib)
+
+
 def _arbol(tmp_path: Path) -> Path:
     root = tmp_path / "app"
     (root / "backend" / "services").mkdir(parents=True)
@@ -151,7 +171,8 @@ def test_hidratar_lee_y_reporta_lo_que_onedrive_no_entrega(tmp_path, monkeypatch
     assert avisos[0].startswith("x ") and "Invalid argument" in avisos[0] and avisos[1].endswith("ok")
 
 
-def test_fijar_usa_attrib_sobre_la_raiz_y_recursivo(tmp_path) -> None:
+def test_fijar_usa_attrib_sobre_la_raiz_y_recursivo(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(onedrive, "_attrib", _ATTRIB_REAL)          # acá se prueba el attrib de verdad
     llamadas: list[tuple] = []
 
     kws: list[dict] = []
@@ -212,10 +233,106 @@ def test_fijar_usa_attrib_sobre_la_raiz_y_recursivo(tmp_path) -> None:
     assert not ok and "attrib" in det
 
 
-def test_main_baja_fija_y_sale_0(tmp_path, monkeypatch, capsys) -> None:
+_VERSIONADOS = {"backend/services/bna_fx.py", "backend/services/fx.py", "backend/templates/base.html",
+                "rentafija.py"}
+
+
+def _con_vecinos(tmp_path: Path) -> Path:
+    """El clon del desk: al lado del código, un proyecto vecino con datasets y
+    exportaciones sueltas en la raíz (470 MB de 562 archivos en la PC del
+    desk, con el repo pesando 9,5 MB)."""
     root = _arbol(tmp_path)
+    (root / "proyecto_cauciones_ml").mkdir()
+    (root / "proyecto_cauciones_ml" / "dataset.parquet").write_bytes(b"d" * 4000)
+    (root / "proyecto_cauciones_ml" / "extractor.py").write_bytes(b"e")
+    (root / "export viejo.xlsx").write_bytes(b"x" * 2000)
+    return root
+
+
+def test_main_baja_y_fija_solo_lo_que_git_versiona(tmp_path, monkeypatch, capsys) -> None:
+    """11/11: se baja sólo lo que git versiona y el pin «Mantener siempre en
+    este dispositivo» va por carpetas acotadas (backend/, tests/, .git/…) y
+    por los archivos de la raíz que git versiona — nunca la raíz entera (eso
+    hacía bajar 470 MB de vecinos en cada PC). Lo vecino se informa y queda
+    en la nube."""
+    root = _con_vecinos(tmp_path)
     monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
-    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake({"bna_fx.py"}))
+    monkeypatch.setattr(onedrive, "_atributos",
+                        _atributos_fake({"bna_fx.py", "dataset.parquet", "extractor.py", "export viejo.xlsx"}))
+    monkeypatch.setattr(onedrive, "archivos_versionados",
+                        lambda r: {os.path.normcase(str(Path(v))) for v in _VERSIONADOS})
+    leidos: list[str] = []
+    monkeypatch.setattr(onedrive, "_leer", lambda p: leidos.append(p.name))
+    monkeypatch.setattr(onedrive, "fijar", lambda r, run=None: pytest.fail("la raíz entera no se fija"))
+    fij: list = []
+    monkeypatch.setattr(onedrive, "fijar_parcial",
+                        lambda r, c, pt, run=None: (fij.append((r, list(c), list(pt))), (True, ""))[1])
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert leidos == ["bna_fx.py"]                                     # ni el dataset ni el xlsx suelto
+    assert "1 de 7 archivos del código" in out and "bna_fx.py" in out
+    assert "3 archivos de la carpeta no son del código" in out and "git no los versiona" in out
+    assert "proyecto_cauciones_ml 2" in out and "quedan en la nube" in out
+    assert fij == [(root, [root / ".git", root / "backend"], ["rentafija.py"])]
+    assert "sólo para el código" in out and "queda a petición" in out
+
+
+def test_main_sin_git_cae_a_la_heuristica(tmp_path, monkeypatch, capsys) -> None:
+    """Sin git en el PATH (o `.git` sin bajar): por sufijo y tamaño, fuera de
+    los proyectos vecinos; el pin de la raíz va por sufijos."""
+    root = _con_vecinos(tmp_path)
+    (root / "grande.py").write_bytes(b"g")
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    sin = {"bna_fx.py", "dataset.parquet", "extractor.py", "export viejo.xlsx", "grande.py"}
+    attrs = _atributos_fake(sin)
+
+    def con_tamanio(entry):
+        a, t, size = attrs(entry)
+        return a, t, (30 << 20) if entry.name == "grande.py" else size
+
+    monkeypatch.setattr(onedrive, "_atributos", con_tamanio)
+    leidos: list[str] = []
+    monkeypatch.setattr(onedrive, "_leer", lambda p: leidos.append(p.name))
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert sorted(leidos) == ["bna_fx.py", "export viejo.xlsx"]       # el .py de 30 MB y el vecino, no
+    assert "no parecen código" in out
+    cmds = onedrive._CMDS
+    assert ["-U", "+P", str(root / "backend" / "*"), "/S", "/D"] in cmds
+    assert ["-U", "+P", str(root / "*.py")] in cmds and not any("proyecto" in c[2] for c in cmds)
+    assert not any(c[2] == str(root) for c in cmds)                    # la raíz, nunca
+
+
+def test_main_migra_el_pin_entero_del_codigo(tmp_path, monkeypatch, capsys) -> None:
+    """Una PC con la raíz fijada por el pre-flight de hasta el 11/11: se saca
+    el pin de la carpeta entera (attrib -P, sin liberar espacio) y se pone el
+    selectivo; en el arranque siguiente, con lo selectivo ya fijado, nada."""
+    root = _con_vecinos(tmp_path)
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
+    monkeypatch.setattr(onedrive, "_atributos_de",
+                        lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG) if p == root else (0x10, NUBE_TAG))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "dejo de forzar la bajada de la carpeta entera" in out and "Liberar espacio" in out
+    cmds = onedrive._CMDS
+    assert cmds[0] == ["-P", str(root / "*"), "/S", "/D"] and cmds[1] == ["-P", str(root)]
+    assert ["-U", "+P", str(root / "backend" / "*"), "/S", "/D"] in cmds[2:]
+    # raíz sin pin y lo selectivo fijado: no se toca nada
+    cmds.clear()
+    monkeypatch.setattr(onedrive, "_atributos_de",
+                        lambda p: (0x10, NUBE_TAG) if p == root else (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    assert onedrive.main(["--carpeta", str(root)]) == 0
+    assert not cmds and "código completo" in capsys.readouterr().out
+
+
+def test_main_todo_baja_y_fija_la_carpeta_entera(tmp_path, monkeypatch, capsys) -> None:
+    """`--todo` = lo de antes: todo lo pendiente y la raíz entera."""
+    root = _con_vecinos(tmp_path)
+    monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake({"bna_fx.py", "dataset.parquet"}))
     leidos: list[str] = []
     monkeypatch.setattr(onedrive, "_leer", lambda p: leidos.append(p.name))
     fijadas: list[Path] = []
@@ -223,10 +340,10 @@ def test_main_baja_fija_y_sale_0(tmp_path, monkeypatch, capsys) -> None:
     # la raíz: sin pin antes de fijar, con pin después (attrib pone el atributo al toque)
     estados = iter([(0x10, NUBE_TAG), (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG)])
     monkeypatch.setattr(onedrive, "_atributos_de", lambda p: next(estados))
-    assert onedrive.main(["--carpeta", str(root)]) == 0
+    assert onedrive.main(["--carpeta", str(root), "--todo"]) == 0
     out = capsys.readouterr().out
-    assert leidos == ["bna_fx.py"] and fijadas == [root]
-    assert "1 de 4 archivos" in out and "bna_fx.py" in out and "Mantener siempre en este dispositivo" in out
+    assert sorted(leidos) == ["bna_fx.py", "dataset.parquet"] and fijadas == [root]
+    assert "2 de 7 archivos" in out and "Mantener siempre en este dispositivo" in out
 
 
 def test_main_sale_4_si_onedrive_no_entrega_y_no_fija(tmp_path, monkeypatch, capsys) -> None:
@@ -259,18 +376,21 @@ def test_main_todo_local_fija_una_vez_y_despues_calla(tmp_path, monkeypatch, cap
     monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
     monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
     monkeypatch.setattr(onedrive, "_leer", lambda p: pytest.fail("nada que bajar"))
-    fijadas: list[Path] = []
-    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (fijadas.append(root), (True, ""))[1])
+    fij: list = []
+    monkeypatch.setattr(onedrive, "fijar_parcial",
+                        lambda r, c, pt, run=None: (fij.append(r), (True, ""))[1])
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG))
     assert onedrive.main(["--carpeta", str(root)]) == 0
-    assert fijadas == [root] and "código completo" in capsys.readouterr().out
-    # raíz ya fijada (attrib +P de la vez anterior): no se vuelve a correr attrib
-    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    assert fij == [root] and "código completo" in capsys.readouterr().out
+    # lo selectivo ya fijado (attrib +P de la vez anterior): no se vuelve a correr attrib
+    monkeypatch.setattr(onedrive, "_atributos_de",
+                        lambda p: (0x10, NUBE_TAG) if p == root else (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
     assert onedrive.main(["--carpeta", str(root)]) == 0
-    assert fijadas == [root] and "carpeta fijada" in capsys.readouterr().out
+    assert fij == [root] and "código completo" in capsys.readouterr().out
     # --sin-pin tampoco
     monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG))
     assert onedrive.main(["--carpeta", str(root), "--sin-pin"]) == 0
-    assert fijadas == [root]
+    assert fij == [root]
 
 
 def test_main_carpeta_comun_y_otras_plataformas_silencio(tmp_path, monkeypatch, capsys) -> None:
@@ -371,26 +491,86 @@ def _modo_datos(monkeypatch, sin_contenido: set[str]) -> tuple[list[str], list[P
     fijadas: list[Path] = []
     monkeypatch.setattr(onedrive, "_leer", lambda p: leidos.append(p.name))
     monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (fijadas.append(root), (True, ""))[1])
+    monkeypatch.delenv("ONEDRIVE_PIN_DATOS", raising=False)
     return leidos, fijadas
 
 
-def test_datos_fija_las_carpetas_y_baja_solo_lo_esencial(tmp_path, monkeypatch, capsys) -> None:
-    """`--datos` (04/11): Delta Bases (Carteras y cierres adentro: UNA carpeta)
-    y Precios Cafci se fijan "Mantener siempre en este dispositivo" y se bajan
-    YA los archivos que el arranque necesita (composición, PN, Especies, bases
-    px/tasas + espejo + firma, FX, manifiesto, los 3 vectores CAFCI más
-    nuevos); las particiones de cierres, la historia CAFCI y un json suelto
-    los baja OneDrive en segundo plano. Nada se clasifica como basura ni se
-    borra: es la biblioteca compartida."""
+def test_datos_fija_solo_lo_que_la_app_lee_y_baja_lo_esencial(tmp_path, monkeypatch, capsys) -> None:
+    """`--datos` (04/11, selectivo desde el 11/11): se bajan YA los archivos
+    que el arranque necesita (composición, PN, Especies, bases px/tasas +
+    espejo + firma, FX, manifiesto, los 3 vectores CAFCI más nuevos) y el pin
+    "Mantener siempre en este dispositivo" va SÓLO a lo que la app lee: los
+    archivos de la raíz de Delta Bases, `cierres/` entera y los archivos de
+    Carteras — no la carpeta entera (27 GB en la PC del desk) ni la de CAFCI
+    (7 GB de historia; queda a petición). Nada se clasifica como basura ni
+    se borra: es la biblioteca compartida."""
     bases, cart, cafci = _arbol_datos(tmp_path, monkeypatch)
     leidos, fijadas = _modo_datos(monkeypatch, _TODOS_DATOS)
     assert onedrive.main(["--datos"]) == 0
     out = capsys.readouterr().out
     assert set(leidos) == _ESENCIALES_ESPERADOS
-    assert set(fijadas) == {bases.resolve(), cafci.resolve()}          # Carteras va adentro de Delta Bases
+    assert fijadas == [(bases / "cierres").resolve()]                   # la única carpeta entera
+    b = bases.resolve()
+    assert onedrive._CMDS == [["-U", "+P", str(b / "*")], ["-U", "+P", str(b / "Carteras" / "*")]]
+    assert not any("Cafci" in c[2] for c in onedrive._CMDS)
     assert (bases / "bna_fx (1).json").exists()                        # ni basura ni borrado
-    assert "Mantener siempre en este dispositivo" in out and "segundo plano" in out
+    assert "sólo para lo que la app lee" in out and "archivos de la raíz · archivos de Carteras · cierres" in out
+    assert "queda a petición" in out and "sólo si la app los lee" in out
     assert "Delta Bases:" in out and "DELTA_CAFCI_DIR:" in out
+
+
+def test_datos_pin_datos_0_no_fija_nada_y_destraba_el_pin_viejo(tmp_path, monkeypatch, capsys) -> None:
+    """`ONEDRIVE_PIN_DATOS=0` en secrets.txt: ningún pin (se baja lo esencial
+    y el resto a petición); una raíz fijada por el pre-flight viejo se
+    destraba (attrib -P, sin liberar espacio)."""
+    bases, cart, cafci = _arbol_datos(tmp_path, monkeypatch)
+    leidos, fijadas = _modo_datos(monkeypatch, _TODOS_DATOS)
+    monkeypatch.setenv("ONEDRIVE_PIN_DATOS", "0")
+    assert onedrive.main(["--datos"]) == 0
+    assert set(leidos) == _ESENCIALES_ESPERADOS and not fijadas and not onedrive._CMDS
+    assert "quedan en la nube y se bajan" in capsys.readouterr().out
+    # la raíz figura fijada: se destraba
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    assert onedrive.main(["--datos"]) == 0
+    out = capsys.readouterr().out
+    b, c = bases.resolve(), cafci.resolve()
+    assert onedrive._CMDS == [["-P", str(b / "*"), "/S", "/D"], ["-P", str(b)],
+                              ["-P", str(c / "*"), "/S", "/D"], ["-P", str(c)]]
+    assert "dejo de forzar la bajada de la carpeta entera" in out and "Liberar espacio" in out
+    assert not fijadas
+
+
+def test_datos_pin_datos_todo_fija_las_carpetas_enteras(tmp_path, monkeypatch, capsys) -> None:
+    """`ONEDRIVE_PIN_DATOS=todo` (o `--todo`): lo de hasta el 11/11, la
+    biblioteca entera local en esa PC."""
+    bases, cart, cafci = _arbol_datos(tmp_path, monkeypatch)
+    leidos, fijadas = _modo_datos(monkeypatch, _TODOS_DATOS)
+    monkeypatch.setenv("ONEDRIVE_PIN_DATOS", "todo")
+    assert onedrive.main(["--datos"]) == 0
+    out = capsys.readouterr().out
+    assert set(fijadas) == {bases.resolve(), cafci.resolve()} and not onedrive._CMDS
+    assert "ONEDRIVE_PIN_DATOS=todo" in out and "segundo plano" in out
+    fijadas.clear()
+    monkeypatch.delenv("ONEDRIVE_PIN_DATOS")
+    assert onedrive.main(["--datos", "--todo"]) == 0
+    assert set(fijadas) == {bases.resolve(), cafci.resolve()}
+
+
+def test_carpetas_datos_detalle_anida_carteras_en_delta_bases(tmp_path, monkeypatch) -> None:
+    bases, cart, cafci = _arbol_datos(tmp_path, monkeypatch)
+    det = onedrive.carpetas_datos_detalle()
+    assert [(l, r) for l, r, _h in det] == onedrive.carpetas_datos()
+    por_label = {l: (r, h) for l, r, h in det}
+    assert por_label["Delta Bases"] == (bases.resolve(), [cart.resolve()])
+    assert por_label["DELTA_CAFCI_DIR"] == (cafci.resolve(), [])
+    # el plan de pin: raíz + Carteras por archivos, cierres entera; CAFCI sin pin
+    plan = onedrive.plan_pin("Delta Bases", bases.resolve(), [cart.resolve()])
+    assert plan == ([(bases / "cierres").resolve()], ["*", os.path.join("Carteras", "*")])
+    assert onedrive.plan_pin("DELTA_CAFCI_DIR", cafci.resolve(), []) is None
+    assert onedrive.es_carpeta_cafci("DELTA_COMPOSICION_PATH", cafci.resolve()) is False   # pocos xlsx
+    for i in range(10):
+        (cafci / f"2025100{i}.xlsx").write_bytes(b"v")
+    assert onedrive.es_carpeta_cafci("otra", cafci.resolve()) is True   # por contenido
 
 
 def test_datos_avisa_y_sale_4_sin_cortar_si_onedrive_no_entrega(tmp_path, monkeypatch, capsys) -> None:
@@ -418,7 +598,10 @@ def test_datos_listar_informa_sin_tocar_y_sin_carpetas_calla(tmp_path, monkeypat
     leidos, fijadas = _modo_datos(monkeypatch, set())
     monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
     assert onedrive.main(["--datos"]) == 0
-    assert not leidos and not fijadas and "datos completos" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert not leidos and not fijadas and "datos completos" in out
+    # la raíz fijada entera (pre-flight viejo) se destraba; lo selectivo ya está (PINNED): no se repite
+    assert [c[0] for c in onedrive._CMDS] == ["-P", "-P", "-P", "-P"] and "dejo de forzar" in out
     # sin carpetas de datos en secrets.txt: nada que hacer
     for v in ("DELTA_HISTORICO_DIR", "DELTA_BASES_DIR", "DELTA_CAFCI_DIR"):
         monkeypatch.delenv(v)
@@ -480,20 +663,20 @@ def test_main_avisa_si_attrib_falla_o_el_pin_no_se_ve(tmp_path, monkeypatch, cap
     root = _arbol(tmp_path)
     monkeypatch.setattr(onedrive, "_PLATFORM", "win32")
     monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
-    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (False, "Acceso denegado"))
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG))
+    monkeypatch.setattr(onedrive, "fijar_parcial", lambda r, c, pt, run=None: (False, "backend: Acceso denegado"))
     assert onedrive.main(["--carpeta", str(root)]) == 0                 # fijar es best-effort
     out = capsys.readouterr().out
     assert "no pude fijar" in out and "Acceso denegado" in out and "Mantener siempre en este dispositivo" in out
-    # attrib devolvió 0 pero la raíz no muestra PINNED (el tmp de Linux nunca lo tiene)
+    # --todo: attrib devolvió 0 pero la raíz no muestra PINNED (el tmp de Linux nunca lo tiene)
     monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (True, ""))
-    assert onedrive.main(["--carpeta", str(root)]) == 0
+    assert onedrive.main(["--carpeta", str(root), "--todo"]) == 0
     out = capsys.readouterr().out
     assert "todavía no figura fijada" in out and "carpeta marcada" not in out
     # y con el pin visible, el mensaje normal
-    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG) if "x" in str(p) else (0, 0))
     estados = iter([(0x10, NUBE_TAG), (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG)])
     monkeypatch.setattr(onedrive, "_atributos_de", lambda p: next(estados))
-    assert onedrive.main(["--carpeta", str(root)]) == 0
+    assert onedrive.main(["--carpeta", str(root), "--todo"]) == 0
     assert "carpeta marcada" in capsys.readouterr().out
 
 
@@ -627,22 +810,23 @@ def test_main_borra_la_basura_sin_bajarla_y_despues_fija(tmp_path, monkeypatch, 
     monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(sin))
     leidos: list[str] = []
     monkeypatch.setattr(onedrive, "_leer", lambda p: leidos.append(p.name))
-    fijadas: list[Path] = []
-    monkeypatch.setattr(onedrive, "fijar", lambda root, run=None: (fijadas.append(root), (True, ""))[1])
-    estados = iter([(0x10, NUBE_TAG), (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG)])
-    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: next(estados))
+    fij: list = []
+    monkeypatch.setattr(onedrive, "fijar_parcial",
+                        lambda r, c, pt, run=None: (fij.append((r, list(c))), (True, ""))[1])
+    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (0x10, NUBE_TAG))
     assert onedrive.main(["--carpeta", str(root)]) == 0
     out = capsys.readouterr().out
-    # la basura NO se lee (no se baja): sólo lo legítimo
+    # la basura NO se lee (no se baja): sólo lo legítimo (data/ se baja aunque git no lo versione)
     assert sorted(leidos) == ["pizarra-DAM-NB-CIO.json", "pizarra.json", "riesgo_pais.json.88.tmp"]
     quedan = sorted(p.name for p in (root / "data").iterdir())
     assert quedan == ["pizarra-DAM-NB-CIO.json", "pizarra.json", "riesgo_pais.json.88.tmp"]
     assert (root / "bcra_data_backup.json").exists() and not (root / "bcra_data_backup-DAM-NB-CIO.json").exists()
     assert "borré 6 restos" in out and "market_snapshot.json 4" in out and "sin bajarlos" in out
-    assert "%LOCALAPPDATA%\\bonos" in out and fijadas == [root]
+    assert "%LOCALAPPDATA%\\bonos" in out and fij == [(root, [root / ".git", root / "backend", root / "data"])]
     # segundo arranque: nada que borrar, nada que decir de eso
     monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(set()))
-    monkeypatch.setattr(onedrive, "_atributos_de", lambda p: (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
+    monkeypatch.setattr(onedrive, "_atributos_de",
+                        lambda p: (0x10, NUBE_TAG) if p == root else (onedrive.FILE_ATTRIBUTE_PINNED | 0x10, NUBE_TAG))
     assert onedrive.main(["--carpeta", str(root)]) == 0
     assert "borré" not in capsys.readouterr().out
 
@@ -776,3 +960,82 @@ def test_los_launchers_ponen_los_pyc_fuera_del_clon() -> None:
         assert bat.isascii(), nombre
     cmd = (ROOT / "correr_app.command").read_text(encoding="utf-8")
     assert cmd.index("export PYTHONPYCACHEPREFIX=") < cmd.index('"$PY" -m')
+
+
+def test_fijar_parcial_y_desfijar_arman_los_attrib(tmp_path, monkeypatch) -> None:
+    """`fijar_parcial`: cada carpeta entera (recursivo + la carpeta, como
+    `fijar`) y cada patrón de archivos sin /S; la raíz nunca. `desfijar`:
+    `-P` recursivo y después la raíz; si el recursivo falla, la raíz sigue
+    fijada (se reintenta)."""
+    monkeypatch.setattr(onedrive, "_attrib", _ATTRIB_REAL)
+    llamadas: list[list[str]] = []
+
+    def run(argv, **kw):
+        llamadas.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    ok, det = onedrive.fijar_parcial(tmp_path, [tmp_path / "cierres"], ["*", "Carteras/*"], run=run)
+    assert ok and det == ""
+    assert llamadas == [["attrib", "-U", "+P", str(tmp_path / "cierres" / "*"), "/S", "/D"],
+                        ["attrib", "-U", "+P", str(tmp_path / "cierres")],
+                        ["attrib", "-U", "+P", str(tmp_path / "*")],
+                        ["attrib", "-U", "+P", str(tmp_path / "Carteras/*")]]
+    assert not any(a[-1] == str(tmp_path) for a in llamadas)
+    llamadas.clear()
+    assert onedrive.desfijar(tmp_path, run=run) == (True, "")
+    assert llamadas == [["attrib", "-P", str(tmp_path / "*"), "/S", "/D"], ["attrib", "-P", str(tmp_path)]]
+
+    def run_mal(argv, **kw):
+        if "/S" in argv:
+            return subprocess.CompletedProcess(argv, 1, "", "Acceso denegado")
+        pytest.fail("con el recursivo fallido no se toca la raíz")
+
+    ok, det = onedrive.desfijar(tmp_path, run=run_mal)
+    assert not ok and "Acceso denegado" in det
+
+    def run_mal_s(argv, **kw):                      # falla sólo el recursivo: los patrones siguen (best-effort)
+        return subprocess.CompletedProcess(argv, 1 if "/S" in argv else 0, "", "Acceso denegado")
+
+    llamadas.clear()
+    ok, det = onedrive.fijar_parcial(tmp_path, [tmp_path / "cierres"], ["*"], run=run_mal_s)
+    assert not ok and det == "cierres: Acceso denegado"
+
+
+def test_seleccion_codigo_git_vs_heuristica(tmp_path, monkeypatch) -> None:
+    """Pura: con git, lo versionado + certs/ data/ + los locales del
+    arranque; sin git, sufijo + ≤ 20 MB + fuera de los vecinos. Y los
+    objetivos del pin."""
+    root = _con_vecinos(tmp_path)
+    (root / "certs").mkdir(); (root / "certs" / "ca.crt").write_bytes(b"c")
+    (root / "secrets.txt").write_bytes(b"s")
+    monkeypatch.setattr(onedrive, "_atributos", _atributos_fake(
+        {"bna_fx.py", "dataset.parquet", "extractor.py", "export viejo.xlsx", "ca.crt", "secrets.txt"}))
+    esc = onedrive.escanear(root)
+    ver = {os.path.normcase(str(Path(v))) for v in _VERSIONADOS}
+    sel = onedrive.seleccion_codigo(esc, root, versionados=ver)
+    assert sel.fuente == "git"
+    assert sorted(a.path.name for a in sel.necesarios) == ["bna_fx.py", "ca.crt", "secrets.txt"]
+    assert sorted(a.path.name for a in sel.omitidos) == ["dataset.parquet", "export viejo.xlsx", "extractor.py"]
+    assert sel.carpetas_pin == [root / ".git", root / "backend", root / "certs"]
+    assert sel.patrones_pin == ["rentafija.py", "secrets.txt"]
+    sel = onedrive.seleccion_codigo(esc, root, versionados=None)
+    assert sel.fuente == "heurística"
+    assert sorted(a.path.name for a in sel.necesarios) == ["bna_fx.py", "ca.crt", "export viejo.xlsx", "secrets.txt"]
+    assert sorted(a.path.name for a in sel.omitidos) == ["dataset.parquet", "extractor.py"]
+    assert sel.patrones_pin == list(onedrive._PATRONES_RAIZ_SIN_GIT)
+
+
+def test_archivos_versionados_sin_git_o_sin_repo(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(onedrive, "archivos_versionados", _VERSIONADOS_REAL)
+    assert onedrive.archivos_versionados(tmp_path) is None             # sin .git
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(onedrive.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError(2, "git")))
+    assert onedrive.archivos_versionados(tmp_path) is None             # sin git en el PATH
+    salida = subprocess.CompletedProcess([], 0, b"backend/x.py\0rentafija.py\0", b"")
+    monkeypatch.setattr(onedrive.subprocess, "run", lambda *a, **k: salida)
+    assert onedrive.archivos_versionados(tmp_path) == {os.path.normcase(os.path.join("backend", "x.py")),
+                                                       "rentafija.py"}
+    # el repo de verdad: lo que git versiona acá
+    monkeypatch.undo()
+    ver = onedrive.archivos_versionados(ROOT)
+    assert ver is None or os.path.normcase(os.path.join("backend", "tools", "onedrive.py")) in ver

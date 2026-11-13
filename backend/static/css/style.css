@@ -2262,3 +2262,20 @@ button:disabled, .btn:disabled, .btn-primary:disabled, .btn[aria-disabled="true"
   .topbar { flex-wrap: wrap; row-gap: 4px; padding: 6px 10px; }
   .topbar-meta { flex-wrap: wrap; gap: 4px; margin-left: auto; }
 }
+
+/* ── Proyecciones (inflación / A3500 editables, 13/11) ───────────────────── */
+.proy .kv-grid { grid-template-columns: repeat(4, 1fr); }
+.proy .kv-grid > div { padding: 8px 10px; background: var(--panel); display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-md); }
+.proy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 900px) { .proy-grid { grid-template-columns: 1fr; } }
+.proy-tbl-wrap { max-height: 440px; overflow: auto; }
+.proy-tbl th:first-child, .proy-tbl td:first-child { width: 110px; }
+.proy-tbl input[type=text], .proy-tbl input[type=date] { width: 100%; max-width: 150px; padding: 2px 6px; font-size: var(--fs-md); text-align: right; }
+.proy-tbl input[type=date] { text-align: left; }
+.proy-tbl tr.obs td { color: var(--text-muted); }
+.proy-tbl tr.pisado td { opacity: .55; }
+.proy-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.proy-charts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 1100px) { .proy-charts { grid-template-columns: 1fr; } }
+.proy-chart { min-height: 220px; position: relative; }
+.proy-metrics .metric-value { font-size: var(--fs-lg); }
