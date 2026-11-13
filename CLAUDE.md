@@ -793,6 +793,94 @@ inventa una desde su primera rueda). Antes "1 mes" podía medir mes y medio sin
 decirlo (CER +4,35 % con el mercado en 2-3 %, 30/09). El CSV lleva las
 mismas columnas (Precio ini/fin, Fecha ini/fin) y el aviso.
 
+## Proyecciones editables — inflación mensual y A3500 (13/11)
+
+Pedido del desk: dejar de editar `indices.py` a mano y que un cambio de
+proyección lo tome TODO al instante sin trabar nada (en las calculadoras
+viejas cada widget re-corría el equivalente de `indices.main()` entero en el
+hilo de la interfaz). Pestaña **Proyecciones** (`auth.TABS` después de
+Escenario; `routes/proyecciones.py`, `services/proyecciones.py`,
+`templates/proyecciones.html` + `partials/proyecciones_preview.html`).
+
+- **Un archivo compartido, no código**: `data/proyecciones.json`
+  (`{"inflacion": {"AAAA-MM": % m/m}, "a3500": {"AAAA-MM-DD": nivel}, "meta"}`;
+  viaja por OneDrive como la pizarra; `PROYECCIONES_PATH` lo mueve, la suite lo
+  apunta a un tmp) + `proyecciones_log.jsonl` al lado (quién / cuándo / nota /
+  escenario anterior y nuevo). Los dicts de `indices.py` quedan como semilla y
+  fallback (`proyecciones.defaults()`). **`indices.main()` lee el archivo**
+  (`indices.proyecciones_vigentes()`, stdlib: archivo válido → manda; roto o
+  ausente → los dicts), así un reinicio conserva el escenario; y el bloque de
+  proyecciones de `main()` pasó a `indices.armar_proyecciones(cer, inflamom,
+  a3500, uva, tabla_infl, tabla_deva)` + `tabla_inflacion_mensual` (claves
+  `Nov-26` legacy o `2026-11`), bit a bit igual al inline de antes (verificado
+  contra el `main()` anterior en las 10 series). Es el único toque a
+  `indices.py`.
+- **Recalcular SÓLO la parte proyectada**: `proyecciones.calcular(esc)` toma
+  las observadas de `rentafija.inputs` (`observadas()`: CER, `inflamom_observado`,
+  A3500 cortado en el último PUBLICADO por el BCRA —la fila de hoy inyectada
+  por especies.py no entra, igual que en `main()`—, UVA; memo por ids) y pasa
+  por `armar_proyecciones` → 10 ms, idéntico a arrancar con esas tablas
+  (`test_calcular_con_las_tablas_del_codigo_es_bit_a_bit_…`). `aplicar()` =
+  `normalizar` (rangos: inflación −5…50 % m/m, A3500 > 0, meses AAAA-MM
+  válidos, tope 360 filas; TODOS los problemas en un ValueError es-AR) +
+  archivo atómico + log + `_instalar` (= `inputs.update` de las cuatro claves
+  `COLS`: `cer_proyectado / uva_proyectado / a3500_proyectado / inflamom`).
+  Los bonos leen esas claves en cada cálculo y `pricing._proyeccion_token`
+  (id + largo + último valor) está en la key de métricas, memo de flujos y
+  filas de Curvas/Mercado/Inicio → las TIR de los CER PROYECTADO (patas `j`),
+  UVA PROYECTADO, el drift de Total Return y Escenario se recomputan solas
+  en el próximo tick (≤ 2 s por el TTL de `_index_val_cache`). Los **CER base
+  no cambian** (valúan con `inputs['CER']` observado: TIR real) y los
+  floaters tampoco (TAMAR/BADLAR siguen planas al promedio 5 ruedas: etapa
+  siguiente, no se toca `refresh_floater_coupons`). `deshacer` repone el
+  `antes` de la última línea del log (intercambio, no pila); `restablecer`
+  escribe los dicts del código al archivo (todas las PCs convergen).
+  `escenario_prefs.infl_default` lee `proyecciones.vigente()` (antes el dict
+  de indices): Escenario arranca con la inflación vigente.
+- **Las otras PCs lo toman solas**: `start_vigilante()` (lifespan, thread
+  daemon, un `stat` por segundo; `PROYECCIONES_WATCH=0` apaga) compara la
+  firma mtime+tamaño del JSON con la instalada y reinstala
+  (`instalar_desde_archivo`). `calcular_vigente()` memo por (firma,
+  observadas); `token()` = ids de los cuatro frames (cambia con instalar Y con
+  `inputs.refresh()` del warmup) keyea los memos derivados.
+- **Pestaña**: tablas editables (meses INDEC publicados en gris con el dato
+  real; un mes proyectado ≤ último publicado y un punto A3500 ≤ último
+  publicado se marcan `pisado`: la app usa el real), `+ mes` / `+ fila`,
+  pegado de una columna de Excel, **⤵ traer de los futuros**
+  (`GET /proyecciones/futuros`: precio de cada DLR mayorista en su fin de
+  mes — lo que se copiaba a mano de ROFEX), Nota. **Previsualizar**
+  (`POST /proyecciones/preview`, cualquier rol con la pestaña) recalcula el
+  borrador SIN aplicar: resumen (inflación anualizada implícita por año, CER y
+  A3500 a 12/24/36 m —sin inventar más allá de donde termina la tabla—) y
+  tres gráficos uPlot (`charts.js initProyecciones`, JSON embebido en
+  `[data-proy-chart]`, cero requests: observado lleno, proyectado punteado,
+  la vigente en gris); "Bajar el borrador" = `POST /proyecciones/csv`
+  (cer / uva / a3500 / inflamom, CSV es-AR con columna Tramo). **Aplicar /
+  Deshacer / Volver al código** = feature `proyecciones` (`auth.FEATURES`,
+  gate en `main._FEATURE_PATHS`; sin ella la pestaña es sólo lectura y el
+  botón no se muestra); responden `HX-Redirect: /proyecciones?ok=1`. Una
+  pestaña nueva NO entra sola al `role_tabs` guardado de premium/básico:
+  tildarla en /admin. Medido warm: `/proyecciones` p50 10,6 · p95 11,7 ms;
+  preview p50 22 · p95 30 ms.
+- **Históricos · Macro con las series proyectadas** (`historico.PROYECTADAS`:
+  `cer_proy / uva_proy / a3500_proy / tamar_proy / badlar_proy /
+  inflamom_proy`, desde `rentafija.inputs`, memo por id del frame):
+  optgroup propio en el selector, `series_points` trae `corte` (última
+  observación) y con un preset de Rango muestra ese lapso hacia atrás Y
+  hacia adelante del corte; `/historicos/data` manda `corte` y `charts.js
+  initHistMacro` dibuja el tramo proyectado punteado (+ columna Tramo en
+  "Ver datos"); memo keyeado por `proyecciones.token()`. Descargas: **⤓ CSV**
+  (`/historicos/macro.csv?serie&rango&desde&hasta`, es-AR + Tramo, el link
+  sigue a los controles) y **⤓ Todas (xlsx)** (`/historicos/macro.xlsx`: una
+  hoja por serie observada y proyectada, ~1,3 MB, memo por versión de las dos
+  fuentes); las dos en `_SIN_GZIP`. Medido: `/historicos/data?serie=cer_proy`
+  p95 2,3 ms · macro.csv p95 4,9 ms.
+- Regresión: `tests/test_proyecciones.py` (bit a bit vs `indices.main()`,
+  claves legacy/ISO, JSON válido/roto, validación, aplicar → TIR de un CER
+  PROYECTADO sube y deshacer la devuelve exacta, vigilante, Escenario sigue
+  la vigente, Históricos corte/rango/CSV/xlsx, pestaña por HTTP, gate de la
+  feature).
+
 ## Inicio y orden de pestañas (07/10)
 
 `auth.TABS` manda el orden de la nav: **Inicio** (`home`, `/inicio`),

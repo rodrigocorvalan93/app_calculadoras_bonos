@@ -270,9 +270,11 @@ def infl_default(settle_d: date, n_months: int) -> str:
     'IPC <mes>'; regla del lag en _slot_ipc_ref). Meses sin proyección: hacia
     atrás usa la primera conocida, hacia adelante extiende la última."""
     try:
-        import indices
-        proy = {datetime.strptime(k, "%b-%y").date().replace(day=1): float(v)
-                for k, v in indices.proyeccion_inflacion_mensual.items()}
+        # La proyección VIGENTE (archivo de la pestaña Proyecciones, o los
+        # dicts de indices.py si no hay archivo): claves 'AAAA-MM'.
+        from backend.services import proyecciones
+        proy = {date(int(k[:4]), int(k[5:7]), 1): float(v)
+                for k, v in proyecciones.vigente()["inflacion"].items()}
     except Exception:  # noqa: BLE001
         logger.exception("[escenario_prefs] proyección de inflación no disponible")
         return ""

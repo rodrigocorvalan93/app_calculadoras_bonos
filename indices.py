@@ -498,6 +498,148 @@ proyeccion_devaoficial_escenariobase = {
 
 import logging
 
+
+# -----------------------------------------------------------------------------
+# Proyecciones vigentes (13/11): la app las edita desde la pestaña Proyecciones
+# y las guarda en data/proyecciones.json (compartido por OneDrive, PROYECCIONES_PATH
+# lo mueve). Si el archivo existe y es válido, manda; si no, los dicts de arriba
+# (semilla / fallback). Sólo biblioteca estándar: este módulo no importa backend.
+# -----------------------------------------------------------------------------
+
+def _ruta_proyecciones():
+    env = os.environ.get("PROYECCIONES_PATH")
+    if env:
+        return os.path.expandvars(os.path.expanduser(env))
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "proyecciones.json")
+
+
+def _tabla_numerica(raw):
+    """{clave: número} con claves str y valores finitos, o None si no sirve."""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for k, v in raw.items():
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        if f != f or f in (float("inf"), float("-inf")):
+            return None
+        out[str(k)] = f
+    return out
+
+
+def proyecciones_vigentes():
+    """(inflación mensual, A3500 por fecha): las tablas del archivo compartido si
+    existe y es válido, si no las de este módulo. Las claves de inflación pueden
+    venir como 'Nov-26' (legacy) o '2026-11' (archivo); `tabla_inflacion_mensual`
+    entiende las dos."""
+    path = _ruta_proyecciones()
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        infl = _tabla_numerica(data.get("inflacion"))
+        deva = _tabla_numerica(data.get("a3500"))
+        if infl is None or deva is None:
+            raise ValueError("tablas inválidas")
+        return infl, deva
+    except FileNotFoundError:
+        pass
+    except Exception as exc:  # noqa: BLE001 — un archivo roto no voltea la carga de índices
+        logging.getLogger("indices").warning("[indices] proyecciones.json ilegible (%s): uso las del código", exc)
+    return dict(proyeccion_inflacion_mensual), dict(proyeccion_devaoficial_escenariobase)
+
+
+def tabla_inflacion_mensual(proyeccion):
+    """dict {'Nov-26' | '2026-11' | '2026-11-30': % mensual} → DataFrame indexado
+    por FIN de mes (date), columna 'inflacionmom', ordenado. Es el mismo armado
+    que corría inline en main() (bit a bit: misma conversión a período mensual)."""
+    proy_inf_df = pd.DataFrame(list(proyeccion.items()), columns=["d", "inflacionmomproy"])
+    if proy_inf_df.empty:
+        vacio = pd.DataFrame(columns=["inflacionmom"])
+        vacio.index.name = "fecha"
+        return vacio
+    claves = proy_inf_df["d"].astype(str)
+    if claves.str.match(r"^\d{4}-\d{2}(-\d{2})?$").all():
+        fechas = pd.to_datetime(claves.where(claves.str.len() > 7, claves + "-01"), format="%Y-%m-%d")
+    else:
+        fechas = pd.to_datetime(claves, format="%b-%y")
+    proy_inf_df["d"] = fechas.dt.strftime("%Y-%m-%d")
+    proy_inf_df.set_index("d", inplace=True)
+    proy_inf_df.index = (
+        pd.to_datetime(proy_inf_df.index)
+        .to_period("M")
+        .to_timestamp("M")
+        .date
+    )
+    proy_inf_df.rename(columns={"inflacionmomproy": "inflacionmom"}, inplace=True)
+    proy_inf_df["inflacionmom"] = proy_inf_df["inflacionmom"].astype(float)
+    proy_inf_df.index.name = "fecha"
+    proy_inf_df.sort_index(inplace=True)
+    return proy_inf_df
+
+
+def armar_proyecciones(combined_df_cer, combined_df_inflamom, combined_df_a3500, combined_df_uva,
+                       proy_inflacion, proy_deva):
+    """Las series PROYECTADAS a partir de las observadas y las dos tablas:
+    (inflamom combinada obs+proy, CER completo, UVA completo, A3500 completo).
+    Es el bloque que corría inline en main() — main() y la pestaña
+    Proyecciones (recalculo sin volver a bajar nada del BCRA) pasan por acá,
+    así el resultado es el mismo bit a bit."""
+    proy_inf_df = tabla_inflacion_mensual(proy_inflacion)
+
+    # Combinamos proyección + histórico (lo observado gana en el mismo mes)
+    if not combined_df_inflamom.empty:
+        df_inflamom_combinado = combined_df_inflamom.combine_first(proy_inf_df)
+    else:
+        df_inflamom_combinado = proy_inf_df.copy()
+    df_inflamom_combinado.sort_index(inplace=True)
+
+    # CER proyectado
+    if not combined_df_cer.empty and not df_inflamom_combinado.empty:
+        cer_inicial = combined_df_cer["CER"].iloc[-1]
+        fecha_inicial_cer = combined_df_cer.index[-1]
+        df_cer_proyectado = calcular_CER_diario_proyectado(
+            df_inflamom_combinado,
+            cer_inicial,
+            fecha_inicial_cer,
+        )
+        cer_completo_escenario_base = pd.concat(
+            [combined_df_cer.iloc[:-1], df_cer_proyectado],
+            axis=0,
+        )
+    else:
+        cer_completo_escenario_base = combined_df_cer.copy()
+
+    # UVA proyectado desde CER
+    if not cer_completo_escenario_base.empty:
+        uva_completo_escenario_base = cer_completo_escenario_base * 2.5217
+        uva_completo_escenario_base.columns = ["UVA"]
+    else:
+        uva_completo_escenario_base = combined_df_uva.copy()
+
+    # Proyección A3500 (oficial)
+    if not combined_df_a3500.empty:
+        fecha_inicial_a3500 = combined_df_a3500.index[-1].strftime("%Y-%m-%d")
+        valor_inicial_a3500 = combined_df_a3500.iloc[-1]["tca3500"]
+        a3500_proy_escenario_base = proyectadeva(
+            proy_deva,
+            fecha_inicial_a3500,
+            valor_inicial_a3500,
+        )
+        if not a3500_proy_escenario_base.empty:
+            a3500_completo_escenario_base = pd.concat(
+                [combined_df_a3500, a3500_proy_escenario_base],
+                axis=0,
+            )
+        else:
+            a3500_completo_escenario_base = combined_df_a3500.copy()
+    else:
+        a3500_completo_escenario_base = combined_df_a3500.copy()
+
+    return df_inflamom_combinado, cer_completo_escenario_base, uva_completo_escenario_base, a3500_completo_escenario_base
+
+
 # -----------------------------------------------------------------------------
 # FX A3500 en tiempo real — waterfall: MAE → BYMA DLR/SPOT → serie → default
 # Cache thread-safe 30s para no bombardear APIs en cada cálculo de bono.
@@ -973,43 +1115,14 @@ def main():
     else:
         combined_df_uva = _empty_series("UVA")
 
-    # 4) Proyección inflación mensual + CER proyectado
-    #    Armamos df de proyección base
-    proy_inf_df = pd.DataFrame(list(proyeccion_inflacion_mensual.items()), columns=["d", "inflacionmomproy"])
-    proy_inf_df["d"] = pd.to_datetime(proy_inf_df["d"], format="%b-%y").dt.strftime("%Y-%m-%d")
-    proy_inf_df.set_index("d", inplace=True)
-    proy_inf_df.index = (
-        pd.to_datetime(proy_inf_df.index)
-        .to_period("M")
-        .to_timestamp("M")
-        .date
-    )
-    proy_inf_df.rename(columns={"inflacionmomproy": "inflacionmom"}, inplace=True)
-    proy_inf_df.index.name = "fecha"
-    proy_inf_df.sort_index(inplace=True)
-
-    # Combinamos proyección + histórico
-    if not combined_df_inflamom.empty:
-        df_inflamom_combinado = combined_df_inflamom.combine_first(proy_inf_df)
-    else:
-        df_inflamom_combinado = proy_inf_df.copy()
-    df_inflamom_combinado.sort_index(inplace=True)
-
-    # CER proyectado
-    if not combined_df_cer.empty and not df_inflamom_combinado.empty:
-        cer_inicial = combined_df_cer["CER"].iloc[-1]
-        fecha_inicial_cer = combined_df_cer.index[-1]
-        df_cer_proyectado = calcular_CER_diario_proyectado(
-            df_inflamom_combinado,
-            cer_inicial,
-            fecha_inicial_cer,
-        )
-        cer_completo_escenario_base = pd.concat(
-            [combined_df_cer.iloc[:-1], df_cer_proyectado],
-            axis=0,
-        )
-    else:
-        cer_completo_escenario_base = combined_df_cer.copy()
+    # 4) Proyección inflación mensual + CER proyectado (+ UVA y A3500 más
+    #    abajo): tablas vigentes (archivo compartido de la pestaña Proyecciones
+    #    o los dicts de este módulo) y el armado compartido con esa pestaña.
+    proy_inflacion, proy_deva = proyecciones_vigentes()
+    (df_inflamom_combinado, cer_completo_escenario_base,
+     uva_completo_escenario_base, a3500_completo_escenario_base) = armar_proyecciones(
+        combined_df_cer, combined_df_inflamom, combined_df_a3500, combined_df_uva,
+        proy_inflacion, proy_deva)
 
     # Dump de inspección del CER proyectado (NADIE lo re-lee; sólo para mirarlo a
     # mano). Antes se escribía a "cer_completo.csv", que ESTÁ versionado en git →
@@ -1035,13 +1148,6 @@ def main():
             cer_completo_escenario_base.to_csv(_cer_dump, header=["Proyeccion CER"])
         except OSError as exc:
             _log_fx.warning("[indices] no pude escribir el dump CER %s (%s) — sigo con los datos en memoria", _cer_dump, exc)
-
-    # UVA proyectado desde CER
-    if not cer_completo_escenario_base.empty:
-        uva_completo_escenario_base = cer_completo_escenario_base * 2.5217
-        uva_completo_escenario_base.columns = ["UVA"]
-    else:
-        uva_completo_escenario_base = combined_df_uva.copy()
 
     # 5) Proyección BADLAR y TAMAR a 30 años hábiles
     if not combined_df_badlar.empty:
@@ -1074,24 +1180,7 @@ def main():
     else:
         tamar_serie_completa = combined_df_tamar.copy()
 
-    # 6) Proyección A3500 (oficial)
-    if not combined_df_a3500.empty:
-        fecha_inicial_a3500 = combined_df_a3500.index[-1].strftime("%Y-%m-%d")
-        valor_inicial_a3500 = combined_df_a3500.iloc[-1]["tca3500"]
-        a3500_proy_escenario_base = proyectadeva(
-            proyeccion_devaoficial_escenariobase,
-            fecha_inicial_a3500,
-            valor_inicial_a3500,
-        )
-        if not a3500_proy_escenario_base.empty:
-            a3500_completo_escenario_base = pd.concat(
-                [combined_df_a3500, a3500_proy_escenario_base],
-                axis=0,
-            )
-        else:
-            a3500_completo_escenario_base = combined_df_a3500.copy()
-    else:
-        a3500_completo_escenario_base = combined_df_a3500.copy()
+    # 6) A3500 proyectado: ya armado en (4) con las tablas vigentes.
 
     # 7) Empaquetado final
     data = {

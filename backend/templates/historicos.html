@@ -45,7 +45,14 @@
           <label class="field">
             <span>Variable</span>
             <select name="serie">
+              <optgroup label="Observadas (BCRA)">
               {% for s in series %}<option value="{{ s.key }}" {% if s.key == selected %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+              </optgroup>
+              {% if proyectadas %}
+              <optgroup label="Con las que valúa la app (obs. + proyección vigente)">
+              {% for s in proyectadas %}<option value="{{ s.key }}" {% if s.key == selected %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+              </optgroup>
+              {% endif %}
             </select>
           </label>
           <label class="field">
@@ -73,8 +80,12 @@
             </select>
           </label>
           <a class="btn-primary field-end" href="/historicos?refresh=1&serie={{ selected }}&rango={{ rango }}">↻ Actualizar</a>
+          <a class="btn field-end" id="hm-csv" href="/historicos/macro.csv?serie={{ selected }}&rango={{ rango }}" title="La serie elegida, en el rango elegido: CSV es-AR con la columna Tramo (observado / proyectado)">⤓ CSV</a>
+          <a class="btn field-end" href="/historicos/macro.xlsx" title="Todas las series (observadas + proyectadas), una hoja por serie">⤓ Todas (xlsx)</a>
         </div>
-        <p class="muted u-note u-mt8">Desde/Hasta tienen prioridad sobre el preset de Rango. Interactivo (uPlot): zoom arrastrando, doble click reset.</p>
+        <p class="muted u-note u-mt8">Desde/Hasta tienen prioridad sobre el preset de Rango. Interactivo (uPlot): zoom arrastrando, doble click reset.
+          Las series <b>proyectadas</b> son las que usa la app para valuar: observado hasta la última publicación y, punteado, la proyección vigente
+          (se edita en <a href="/proyecciones">Proyecciones</a>); con un preset de Rango muestran ese lapso hacia atrás y hacia adelante del corte.</p>
       </div>
     </div>
     <div id="hist-macro-uplot" style="min-height:300px">

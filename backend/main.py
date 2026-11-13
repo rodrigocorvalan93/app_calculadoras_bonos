@@ -44,6 +44,7 @@ from backend.routes.mae import router as tasas_router
 from backend.routes.ordenes import router as ordenes_router
 from backend.routes.total_return import router as total_return_router
 from backend.routes.escenario import router as escenario_router
+from backend.routes.proyecciones import router as proyecciones_router
 from backend.routes.excel import router as excel_router
 from backend.routes.historico import router as historico_router
 from backend.routes.inicio import router as inicio_router
@@ -369,6 +370,15 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("[main] BNA FX poller start failed")
 
+    # Proyecciones vigentes (inflación / A3500): si otra PC escribe el JSON
+    # compartido (OneDrive), este proceso lo toma solo — un stat por segundo,
+    # recalcula la parte proyectada e instala en rentafija.inputs. PROYECCIONES_WATCH=0 apaga.
+    from backend.services import proyecciones as proyecciones_svc
+    try:
+        proyecciones_svc.start_vigilante()
+    except Exception:  # noqa: BLE001
+        logger.exception("[main] vigilante de proyecciones no arrancó")
+
     # Autoguardado del histórico px/tasas al cierre (17:01 BA, días hábiles):
     # si la app está corriendo a esa hora, la base del día se guarda sola en
     # el Excel/Parquet de bymaapi (mismo esquema/dedup — correr bymaapi a mano
@@ -682,6 +692,7 @@ def create_app() -> FastAPI:
     app.include_router(ordenes_router)
     app.include_router(total_return_router)
     app.include_router(escenario_router)
+    app.include_router(proyecciones_router)
     app.include_router(historico_router)
     app.include_router(posiciones_router)
     app.include_router(market_router)
@@ -723,7 +734,10 @@ def create_app() -> FastAPI:
     # Paths gateados por FEATURE (administrable desde /admin, a diferencia de
     # _SUPERUSER_ONLY que es fijo): superuser siempre pasa; premium/básico
     # sólo si el superuser les tildó la feature.
-    _FEATURE_PATHS = (("/cafci/fondos", "cafci_fondos"),)
+    _FEATURE_PATHS = (("/cafci/fondos", "cafci_fondos"),
+                      ("/proyecciones/aplicar", "proyecciones"),
+                      ("/proyecciones/deshacer", "proyecciones"),
+                      ("/proyecciones/restablecer", "proyecciones"))
 
     def _is_public(path: str) -> bool:
         return path in _PUBLIC_EXACT or path.startswith(_PUBLIC_PREFIX)
@@ -932,6 +946,7 @@ def create_app() -> FastAPI:
     # streaming y GZipMiddleware ignora minimum_size: /market/seq (4 bytes)
     # viajaba gzipeado a 30 bytes y chunked, ~45 µs de zlib por request.
     _SIN_GZIP = ("/historicos/base/archivo", "/historicos/base/cierre", "/historicos/base.csv",
+                 "/historicos/macro.csv", "/historicos/macro.xlsx", "/proyecciones/csv",
                  "/market/seq", "/market/health", "/cierre/chip")
 
     class _SSESinGzip:
