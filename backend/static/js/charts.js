@@ -1258,12 +1258,18 @@
       // Merge: eje x = xs de la curva + las durations de los bonos resaltados.
       var xs = d.xs.slice();
       var ars = d.ars.slice(), usd = d.usd.slice(), nss = (d.nss || []).slice();
+      // Códigos de la curva alineados a xs (los spliceamos igual que ars/usd):
+      // etiquetas tenues sobre cada punto + tooltip al pasar el mouse (pedido
+      // del desk 13/11: "para tener referencia"). Los resaltados llevan su
+      // propio código en `hlCodes`.
+      var codes = (d.codes && d.codes.length === d.xs.length) ? d.codes.slice() : xs.map(function () { return null; });
       var hls = pts.map(function () { return xs.map(function () { return null; }); });
+      var hlCodes = xs.map(function () { return null; });
       pts.forEach(function (p, i) {
         var j = xs.findIndex(function (x) { return x >= p.d; });
         if (j === -1) j = xs.length;
         xs.splice(j, 0, p.d);
-        ars.splice(j, 0, null); usd.splice(j, 0, null);
+        ars.splice(j, 0, null); usd.splice(j, 0, null); codes.splice(j, 0, null); hlCodes.splice(j, 0, p.c);
         if (nss.length) nss.splice(j, 0, null);
         hls.forEach(function (h, k) { h.splice(j, 0, k === i ? p.t : null); });
       });
@@ -1313,17 +1319,83 @@
         meta.textContent = metaTxt;
         el.appendChild(meta);
       }
+      // Series "scatter" con código por índice: ARS (1) y USD (2) llevan los de
+      // la curva; cada resaltado, el suyo. La NSS no tiene código.
+      var scat = [{ si: 1, cds: codes }, { si: 2, cds: codes }];
+      var hlBase = nss.length ? 4 : 3;
+      pts.forEach(function (p, i) { scat.push({ si: hlBase + i, cds: hlCodes }); });
+      el.style.position = "relative";
+      var tip = document.createElement("div");
+      tip.className = "locate-tip";
+      tip.style.cssText = "position:absolute;pointer-events:none;background:var(--bg);border:1px solid var(--border);" +
+        "border-radius:6px;padding:3px 8px;font-size:11px;line-height:1.35;display:none;z-index:6;white-space:nowrap;color:var(--text)";
+      var MUT = cssVar("--text-muted", "#8a8a8a");
+      var fmtDur = function (v) { return v.toFixed(2).replace(".", ","); };
       el.__u = new uPlot({
         width: Math.max(el.clientWidth || 600, 320), height: 240,
         legend: { show: true },
         scales: { x: { time: false } },
+        cursor: { points: { size: 9 }, focus: { prox: 24 } },
         axes: [
           { label: "Duration (años)", stroke: cssVar("--text-muted", "#999"), grid: { stroke: cssVar("--border-soft", "#222") } },
           { label: "TIREA %", stroke: cssVar("--text-muted", "#999"), grid: { stroke: cssVar("--border-soft", "#222") },
             values: function (u, vals) { return vals.map(fmtPct); } },
         ],
         series: series,
+        hooks: {
+          draw: [function (uu) {
+            // Código tenue sobre cada punto de la curva (mismo criterio que el
+            // chart de Gráficos: anti-superposición a 26×11 px; los resaltados
+            // van primero para que nunca pierdan su etiqueta, en su color).
+            var ctx = uu.ctx; ctx.save();
+            ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.textBaseline = "bottom"; ctx.textAlign = "left";
+            var X0 = uu.data[0], drawn = [];
+            var orden = scat.slice(2).concat(scat.slice(0, 2));
+            for (var s = 0; s < orden.length; s++) {
+              var e = orden[s], arr = uu.data[e.si], ser = uu.series[e.si];
+              if (!arr || !ser || !ser.show) continue;
+              ctx.fillStyle = (e.cds === hlCodes) ? (ser.stroke || MUT) : MUT;
+              ctx.globalAlpha = (e.cds === hlCodes) ? 1 : 0.75;
+              for (var i = 0; i < X0.length; i++) {
+                var yv = arr[i];
+                if (yv == null || !e.cds[i]) continue;
+                var X = uu.valToPos(X0[i], "x", true), Y = uu.valToPos(yv, "y", true), ok = true;
+                for (var k = 0; k < drawn.length; k++) {
+                  if (Math.abs(drawn[k][0] - X) < 26 && Math.abs(drawn[k][1] - Y) < 11) { ok = false; break; }
+                }
+                if (!ok) continue;
+                drawn.push([X, Y]);
+                ctx.fillText(e.cds[i], X + 5, Y - 3);
+              }
+            }
+            ctx.restore();
+          }],
+          setCursor: [function (uu) {
+            var i = uu.cursor.idx;
+            if (i == null) { tip.style.display = "none"; return; }
+            var cy = uu.cursor.top, best = null, bestD = Infinity;
+            for (var s = 0; s < scat.length; s++) {
+              var e = scat[s], ser = uu.series[e.si];
+              if (!ser || !ser.show) continue;
+              var yv = uu.data[e.si][i];
+              if (yv == null || !e.cds[i]) continue;
+              var dd = (cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy);
+              if (dd < bestD) { bestD = dd; best = { e: e, yv: yv }; }
+            }
+            if (!best) { tip.style.display = "none"; return; }
+            var X0c = uu.data[0];
+            tip.innerHTML = "<b>" + best.e.cds[i] + "</b>" + (best.e.cds === hlCodes ? " · a tu precio" : "") +
+              "<br>" + (d.ylabel || "TIREA") + " " + fmtPct(best.yv) + " · Dur " + fmtDur(X0c[i]);
+            tip.style.display = "block";
+            var L = uu.valToPos(X0c[i], "x"), T = uu.valToPos(best.yv, "y");
+            var bw = el.clientWidth, bh = el.clientHeight, tw = tip.offsetWidth, th = tip.offsetHeight;
+            var left = L + 12; if (left + tw > bw - 4) { left = L - tw - 12; } if (left < 2) { left = 2; }
+            var top = T - th - 8; if (top < 2) { top = T + 16; } if (top + th > bh - 2) { top = bh - th - 2; }
+            tip.style.left = left + "px"; tip.style.top = top + "px";
+          }],
+        },
       }, data, el);
+      el.appendChild(tip);
       if (window.chartCopyInject) window.chartCopyInject(el, "curva-" + curve);
     }).catch(function () { /* red caída: sin chart, sin ruido */ });
   }

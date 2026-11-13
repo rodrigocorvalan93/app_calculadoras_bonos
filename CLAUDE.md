@@ -1508,6 +1508,15 @@ p95 9,7 ms; vacío 2,5; `/yas/ficha` 2,0; `/yas/market` 1,9; `/yas` 5,0.
   crudo en pesos sobre la ficha en dólares al cambiar de bono. Las tarjetas
   secundarias van en % VN (val. técnico 101,5694; int. corridos 1,5694), el
   ticket completo de siempre queda en un `<details>` (nada se pierde).
+- **Ubicación en la curva con referencia** (13/11): el widget `[data-locate]`
+  (YAS y Comparador, `charts.js`) etiqueta cada punto de la curva con su
+  código en gris tenue (anti-superposición 26×11 px como Gráficos; el bono
+  resaltado primero y en su color) y al pasar el mouse muestra un tooltip
+  código · TIR · duration (`.locate-tip`, mismo anti-clip que Gráficos). Los
+  códigos salen del `codes` que `/graficos/data` ya mandaba alineado a `xs`
+  (se splicean junto con ars/usd al intercalar los resaltados): cero
+  requests ni cálculo nuevos. Regresión: `tests/test_locate.py` +
+  `tests/locate_harness.cjs` (uPlot falso: etiquetas y tooltip).
 - Regresión: `tests/test_yas_layout.py`.
 
 ## Revisión de eficiencia 22-23/10 — memo de flujos y warmup que cede el GIL
