@@ -200,7 +200,7 @@ def test_el_bat_no_compila_dependencias_y_prefiere_un_python_con_wheels() -> Non
         assert dep in req, dep
     bat = (ROOT / "run_backend (CORRER APP).bat").read_text(encoding="utf-8")
     assert "setlocal EnableDelayedExpansion" in bat                     # !PYVER! del mensaje de error
-    assert "pip install --only-binary=:all: -r" in bat and "pip install -r" not in bat.replace("--only-binary=:all: -r", "")
+    assert 'pip install -r "backend\\requirements.txt" --only-binary=:all:' in bat
     i_pref, i_any = bat.index("for %%v in (3.12 3.13 3.14) do ("), bat.index('set "PYBASE=py -3"')
     assert i_pref < i_any
     i_pip = bat.index("--only-binary=:all:")

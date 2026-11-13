@@ -129,7 +129,7 @@ if errorlevel 1 (
   REM --only-binary: nunca compilar C en la PC del desk (no hay MSVC). Si una
   REM dependencia no tiene wheel para este Python, pip corta con "No matching
   REM distribution" y abajo se explica: es un Python demasiado nuevo.
-  "%PY%" -m pip install --only-binary=:all: -r "backend\requirements.txt"
+  "%PY%" -m pip install -r "backend\requirements.txt" --only-binary=:all:
   if errorlevel 1 (
     for /f "delims=" %%v in ('"%PY%" --version') do set "PYVER=%%v"
     echo.
