@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
+{% block title %}Optimizador{% endblock %}
+
+{% block content %}
+<section class="yas">
+  <header class="yas-header">
+    <h1>{{ icon("pie", 20) }} Optimizador de cartera · q-Entropy Pooling</h1>
+    <p class="muted">Subí una serie histórica de <strong>TIR / spreads</strong> (o precios) por bono,
+      opcionalmente un ranking con tu view, y obtené la cartera óptima según tres modelos:
+      media-varianza sobre el prior, Entropy Pooling clásico (Shannon) y q-Tsallis-EP.
+      Las duration salen de las fichas de la app (<code>especies.py</code>) valuadas a la última TIR de tu serie.</p>
+  </header>
+
+  <form class="yas-form" hx-post="/optimizador/run" hx-encoding="multipart/form-data"
+        hx-target="#opt-result" hx-swap="innerHTML" hx-request='{"timeout":600000}'>
+    <div class="nueva-grid">
+      <label class="field"><span>Archivo (xlsx o csv)</span>
+        <input type="file" name="archivo" accept=".xlsx,.xls,.csv" required></label>
+      <label class="field"><span>Qué contiene la serie</span>
+        <select name="invariante">
+          <option value="tir" selected>TIR / spreads (niveles, en % o bps)</option>
+          <option value="precios">Precios (se usan retornos simples)</option>
+        </select></label>
+      <label class="field"><span>Ranking <i class="muted">(opcional, mejor primero)</i></span>
+        <input type="text" name="ranking" placeholder="GD35 > GD41 > GD30" autocomplete="off"
+               title="En términos de PRECIO: el primero es el que esperás que rinda más. Con TIR/spreads la app invierte el signo sola (mejor = comprime más)."></label>
+      <label class="field"><span>Confianza del view (%)</span>
+        <input type="text" inputmode="decimal" name="confianza" value="100" autocomplete="off"
+               title="Mezcla posterior = (1-c)·prior + c·posterior del view"></label>
+      <label class="field"><span>q de Tsallis</span>
+        <input type="text" inputmode="decimal" name="q" value="2" autocomplete="off"
+               title="q=2: entropía de colisión (posterior de mínima distancia euclídea al prior)"></label>
+      <label class="field"><span>Peso máximo por activo (%)</span>
+        <input type="text" inputmode="decimal" name="max_peso" value="35" autocomplete="off"></label>
+      <label class="field"><span>Aversión al riesgo (delta)</span>
+        <input type="text" inputmode="decimal" name="delta" value="2,5" autocomplete="off"></label>
+    </div>
+    <div class="u-mt12"><button type="submit" class="btn-primary">{{ icon("chart-bar") }} Optimizar</button></div>
+  </form>
+
+  <p class="muted u-note u-mt8">Formato esperado: primera columna la fecha (DD/MM/AAAA o AAAA-MM-DD),
+    una columna por ticker con el nivel de TIR/spread de cada rueda. CSV acepta <code>;</code> con coma
+    decimal. Mínimo 40 observaciones y 2 activos; huecos de hasta 5 ruedas se interpolan, los más
+    largos y la falta de historia inicial se respetan (covarianza pairwise + corrección PSD).</p>
+
+  <div id="opt-result" aria-live="polite" class="u-mt12">
+    <p class="muted u-note">Subí un archivo para ver la cartera óptima.</p>
+  </div>
+</section>
+{% endblock %}

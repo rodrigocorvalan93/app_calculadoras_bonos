@@ -1,0 +1,117 @@
+{% from "partials/_estados.html" import empty %}
+{% from "partials/_icons.html" import icon %}
+
+{% if error %}
+  {{ empty("No se pudo optimizar", causa=error, icono="warning", tipo="error") }}
+{% else %}
+
+  {% for a in avisos %}
+    <p class="muted u-note">{{ icon("info", 14) }} {{ a }}</p>
+  {% endfor %}
+
+  <p class="muted u-sm">
+    {{ diag.obs | ar_int }} escenarios · {{ diag.activos | ar_int }} activos ·
+    {{ diag.desde }} → {{ diag.hasta }} · invariante: {{ detalle_invariante }} ·
+    q={{ q | ar_num(2) }} · confianza {{ confianza | ar_pct(0) }} ·
+    tope por activo {{ max_peso | ar_pct(0) }}
+    {% if ranking %} · ranking: <b>{{ ranking }}</b>{% endif %}
+  </p>
+
+  <div class="card u-mt8">
+    <div class="card-body">
+      <h3 class="u-m0">Pesos óptimos</h3>
+      <div class="table-scroll u-mt8">
+        <table class="cashflows">
+          <thead>
+            <tr>
+              <th class="u-left">Ticker</th>
+              <th class="u-left">Ficha</th>
+              <th>Duration</th>
+              <th>Prior MV</th>
+              <th>EP (Shannon)</th>
+              <th>q-EP (q={{ q | ar_num(2) }})</th>
+              <th>E[R] anual q-EP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in filas %}
+            <tr>
+              <td class="u-left"><b>{{ r.ticker }}</b></td>
+              <td class="u-left muted">{{ r.codigo }}</td>
+              <td>{% if r.duration %}{{ r.duration | ar_num(2) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+              <td>{{ r.w_prior | ar_pct(2) }}</td>
+              <td>{{ r.w_ep | ar_pct(2) }}</td>
+              <td><b>{{ r.w_qep | ar_pct(2) }}</b></td>
+              <td>{{ r.mu_qep_anual | ar_pct(2) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% if dona %}
+  <div class="card u-mt12">
+    <div class="card-body">
+      <h3 class="u-m0">Composición q-EP</h3>
+      <div class="comp-donut u-mt8">
+        <svg class="comp-svg" viewBox="0 0 {{ dona.size }} {{ dona.size }}" width="{{ dona.size }}" height="{{ dona.size }}"
+             aria-label="Cartera q-EP: participación por activo">
+          {% for s in dona.slices %}
+          <path class="comp-slice comp-c{{ s.i % 8 }}" d="{{ s.d }}"><title>{{ s.label }}: {{ (s.frac * 100) | ar_pct_pp(1) }}</title></path>
+          {% endfor %}
+          <text class="comp-center" x="{{ dona.cx }}" y="{{ dona.cy + 4 }}" text-anchor="middle">{{ dona.n }}</text>
+          <text class="comp-center-sub" x="{{ dona.cx }}" y="{{ dona.cy + 17 }}" text-anchor="middle">{{ "activo" if dona.n == 1 else "activos" }}</text>
+        </svg>
+        <div class="comp-leyenda">
+          {% for s in dona.slices %}<div class="comp-lg"><span class="comp-sw comp-c{{ s.i % 8 }}"></span><b>{{ (s.frac * 100) | ar_pct_pp(1) }}</b> {{ s.label }}</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card u-mt12">
+    <div class="card-body">
+      <h3 class="u-m0">Métricas de la cartera</h3>
+      <div class="table-scroll u-mt8">
+        <table class="cashflows">
+          <thead>
+            <tr><th class="u-left">Métrica</th><th>Prior MV</th><th>EP (Shannon)</th><th>q-EP</th></tr>
+          </thead>
+          <tbody>
+            {% for m in metricas %}
+            <tr>
+              <td class="u-left">{{ m.label }}</td>
+              {% if m.pct %}
+              <td>{{ m.prior | ar_pct(2) }}</td><td>{{ m.ep | ar_pct(2) }}</td><td><b>{{ m.qep | ar_pct(2) }}</b></td>
+              {% else %}
+              <td>{{ m.prior | ar_num(2) }}</td><td>{{ m.ep | ar_num(2) }}</td><td><b>{{ m.qep | ar_num(2) }}</b></td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% if diag.views_efecto %}
+  <details class="u-mt8">
+    <summary class="muted u-pointer">{{ icon("ruler", 14) }} Diagnóstico de los views</summary>
+    <p class="muted u-sm u-mt8">
+      Distancia relativa del posterior al prior (‖p̃−p‖/‖p‖):
+      EP {{ diag.views_efecto.dist_ep | ar_num(4) }} ·
+      q-EP {{ diag.views_efecto.dist_qep | ar_num(4) }}.
+      Desigualdades del ranking que el prior NO cumplía (las que mueven el posterior):
+      {{ diag.views_efecto.binding | select | list | length }} de {{ diag.views_efecto.binding | length }}.
+    </p>
+  </details>
+  {% endif %}
+
+  <p class="muted u-xs u-mt8">La cartera es el resultado de una optimización media-varianza
+    long-only sobre la distribución posterior; no es una recomendación de inversión.
+    Motor adaptado de la tesis <em>Non-Extensive q-Entropy Pooling</em> (MFIN UTDT).</p>
+
+{% endif %}

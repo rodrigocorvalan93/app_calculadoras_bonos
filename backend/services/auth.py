@@ -72,6 +72,7 @@ TABS: List[Tuple[str, str, str]] = [
     ("cafci",        "CAFCI",        "/cafci"),
     ("ordenes",      "Órdenes",      "/ordenes"),
     ("alertas",      "Alertas",      "/alertas"),
+    ("optimizador",  "Optimizador",  "/optimizador"),
 ]
 # Tabs que NO entran en los defaults de ningún rol: son superuser-only por
 # middleware (main._SUPERUSER_ONLY); listarlas en la nav de premium/básico
