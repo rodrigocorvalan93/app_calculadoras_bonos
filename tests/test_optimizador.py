@@ -209,3 +209,47 @@ async def test_http_optimizador() -> None:
     assert page.status_code == 200 and "Optimizador" in page.text
     assert ok.status_code == 200 and "Pesos óptimos" in ok.text
     assert malo.status_code == 200 and "No se pudo optimizar" in malo.text
+
+
+# ── Gating superuser (como Alertas) ─────────────────────────────────────────
+
+@pytest.fixture()
+def auth_on(tmp_path, monkeypatch):
+    from backend.config import settings
+    from backend.services import auth
+
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "app_users_path", str(tmp_path / "store.json"))
+    auth.refresh()
+    assert auth.ensure_bootstrapped()["created"]
+    yield
+    auth.refresh()
+
+
+@pytest.mark.asyncio
+async def test_optimizador_solo_superuser(auth_on) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    def _client() -> AsyncClient:
+        return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+    async with _client() as su:
+        await su.post("/login", data={"username": "su_test",
+                                      "password": "clave-de-test-2026!", "next": "/yas"})
+        nav = await su.get("/yas")
+        assert ">Optimizador<" in nav.text                 # el superuser la ve en la nav
+        assert (await su.get("/optimizador")).status_code == 200
+        await su.post("/admin/users", data={"username": "prem",
+                                            "password": "clave123", "role": "premium"})
+    async with _client() as ac:
+        await ac.post("/login", data={"username": "prem", "password": "clave123",
+                                      "next": "/yas"})
+        nav = await ac.get("/yas")
+        assert ">Optimizador<" not in nav.text             # premium no la ve
+        assert (await ac.get("/optimizador")).status_code == 403
+        r = await ac.post("/optimizador/run",
+                          files={"archivo": ("d.csv", b"a;b\n", "text/csv")},
+                          data={"invariante": "precios"})
+        assert r.status_code == 403                        # el subárbol también

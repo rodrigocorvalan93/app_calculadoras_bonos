@@ -721,7 +721,7 @@ def create_app() -> FastAPI:
     _SUPERUSER_ONLY = ("/admin", "/ordenes/live", "/ordenes/kill",
                        "/historicos/guardar-base", "/historicos/reconstruir-cierre",
                        "/historicos/ignorar-hueco", "/historicos/aceptar-base",
-                       "/historicos/reponer-journal", "/alertas")
+                       "/historicos/reponer-journal", "/alertas", "/optimizador")
     # Paths gateados por FEATURE (administrable desde /admin, a diferencia de
     # _SUPERUSER_ONLY que es fijo): superuser siempre pasa; premium/básico
     # sólo si el superuser les tildó la feature.

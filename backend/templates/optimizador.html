@@ -39,7 +39,8 @@
     <div class="u-mt12"><button type="submit" class="btn-primary">{{ icon("chart-bar") }} Optimizar</button></div>
   </form>
 
-  <p class="muted u-note u-mt8">Formato esperado: primera columna la fecha (DD/MM/AAAA o AAAA-MM-DD),
+  <p class="muted u-note u-mt8">Pestaña exclusiva del superuser (gateada en el server, como Alertas).
+    Formato esperado: primera columna la fecha (DD/MM/AAAA o AAAA-MM-DD),
     una columna por ticker con el nivel de TIR/spread de cada rueda. CSV acepta <code>;</code> con coma
     decimal. Mínimo 40 observaciones y 2 activos; huecos de hasta 5 ruedas se interpolan, los más
     largos y la falta de historia inicial se respetan (covarianza pairwise + corrección PSD).</p>
