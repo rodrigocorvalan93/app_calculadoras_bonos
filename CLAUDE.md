@@ -706,17 +706,47 @@ swatch, porción y leyenda. La dona NO lleva `role="img"` (150 px: el ⧉ de
 `injectSvg` tapaba el centro). El título de la tabla dice `precios HH:MM ·
 hace N min` (`render_ts` / `render_hora` BA del ctx; app.js lo mueve cada 30
 s y lo marca `stale` a los 15 min): la tabla no se refresca sola a propósito
-(el Last es editable). **Delta/Galileo**: el desk unificó las bases en los
-ARCHIVOS (los Galileo pasaron a `Delta_Composicion.xlsx`); el código sigue
-leyendo `Galileo_Composicion.xlsx` best-effort, pero un fondo Galileo con el
-MISMO nombre normalizado (`_nombre_norm`) que uno de Delta se ignora (no se
-carga dos veces; `status()["galileo_ignorados"]`), y `positions.fuentes()`
-dice de qué archivo salió cada fondo (tarjeta "Fondos visibles" de /admin,
-`<details>` Fuentes). Sacar el loader Galileo del todo queda para cuando el
-desk confirme que el archivo ya no está en Delta Bases. Medido warm
-(`/posiciones/table`, cartera sintética de 9 tenencias): p50 4,6 · p95 6,2
-ms. Regresión: `test_posiciones_galileo.test_http_posiciones_tenencias_primero_y_torta`,
-`test_galileo_ya_unificado_en_delta_no_se_carga_dos_veces`, `test_donut_geometria`.
+(el Last es editable). **Galileo ya no se lee** (17/11, pedido del desk): los
+fondos Galileo viven en `Delta_Composicion.xlsx` / `Delta_PN.xlsx` como fondos
+Delta comunes y el viejo `Galileo_Composicion.xlsx` duplicaba fondos con las
+tenencias del último día en que se bajaba. `positions` no abre más
+`Galileo_Composicion.xlsx` / `Galileo_PN.xlsx` (afuera el loader, el namespace
+`GALILEO_OFFSET`, el mapa ISIN → ticker y el filtro Familia de la Matriz; un
+link viejo con `?familia=` responde igual); si el archivo sigue en la carpeta
+de carteras, la carga lo avisa una vez (`status()["galileo_viejo"]`, nota en
+la tarjeta "Fondos visibles" de /admin: se puede borrar o archivar) y el
+pre-flight de OneDrive ya no lo baja como esencial. Una allowlist de fondos
+que tuviera códigos Galileo viejos (10000 + n) deja de matchear: tildar el
+fondo con su código Delta en /admin. Medido warm (`/posiciones/table`,
+cartera sintética de 9 tenencias): p50 4,6 · p95 6,2 ms. Regresión:
+`test_posiciones_carteras.test_http_posiciones_tenencias_primero_y_torta`,
+`test_galileo_viejo_en_la_carpeta_no_se_carga`,
+`test_http_galileo_viejo_matriz_y_link_viejo`, `test_donut_geometria`.
+
+**Renta variable · hoja Base RV y sector (17/11)**: `delta_especies` abre
+`Delta - Especies.xlsx` UNA vez y lee también la hoja `Base RV` (misma
+cabecera de dos filas, `header=[2, 3]`) en un índice APARTE de `info()`:
+`info_rv(code)` / `sector_rv(code)` (clave `BYMA`; alias `Cod_Delta` entero y
+su primer token — `VIST US` no tiene BYMA —, que nunca pisan un BYMA; ticker
+repetido = manda la primera fila; texto sin espacios de más). Best-effort: sin
+hoja o con la hoja rota la Base RF carga igual (`status()["error_rv"]`).
+`routes/posiciones._clasif`: sin ficha y sin fila en la Base RF, un ticker de
+la Base RV toma la categoría de `Instrumento` (Acciones / CEDEARs / ADRs /
+ETFs, fuente `base_rv`) — ficha y Base RF siempre mandan. Cada fila de
+tenencias lleva `es_rv` / `sector` (`Sector Delta`; si falta, el GICS
+`Sector`; sin fila, "(sin sector)") y el emisor de la Base RV. **Fondo de
+acciones** = renta variable > 60 % del PN (sin PN, de lo invertido;
+`_UMBRAL_FONDO_RV`, estricto): `_agrupar_tenencias(por_sector=True)` abre la
+renta variable por SECTOR (grupo `sector: True`, tag "sector", `data-grp =
+"Sector · <nombre>"` para no chocar con una categoría homónima) y
+`_composicion_summary(sector=True)` suma la dimensión **Sector** después de
+Categoría con su dona (lo que no es RV va junto en "Resto de la cartera", al
+final); tocar una porción de Sector lleva al grupo (`app.js`). El resto de los
+fondos no cambia (el sector queda en el tooltip de la Categoría). /admin ·
+Especies faltantes lista la renta variable SIN sector (`reporte_clasificacion()
+["sin_sector"]`: falta la fila o el `Sector Delta` en la Base RV). Si agregás
+columnas de la Base RV, van en `delta_especies._KEEP_RV`. Regresión:
+`tests/test_posiciones_renta_variable.py`.
 
 **Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las rutas de pestaña
 llevan `@_pestana_resiliente(...)` — una excepción responde 200 con
@@ -1406,7 +1436,7 @@ pedido del desk para leer tamaño y peso de un vistazo. El ancho de columna
 sale del texto más largo, así que esa vista ensancha las columnas; el HTML
 va al mismo `_MATRIZ_CACHE` por (generación, familia, vista, visibles). Un
 test que pisa `positions._cache` a mano tiene que vaciar ese cache (es
-orden-dependiente si no). Regresión: `test_posiciones_galileo.test_http_matriz_markup_compacto`.
+orden-dependiente si no). Regresión: `test_posiciones_carteras.test_http_matriz_markup_compacto`.
 
 ## Seguridad — invariantes (no regresar sin querer)
 
@@ -1425,9 +1455,9 @@ controles son load-bearing. Tests en `tests/test_seguridad.py` +
   store; editor en /admin): filtro fino ADENTRO de las pestañas con
   tenencias. None = todos (default); lista = allowlist de `cod_fondo` (un
   fondo nuevo NO se muestra a un restringido hasta tildarlo). Los fondos
-  GALILEO viven en el mismo pipeline con `cod_fondo + positions.GALILEO_OFFSET`
-  (10000) — numeración propia que colisiona con la de Delta — así las
-  allowlists/URLs siguen siendo ints y un restringido no los ve hasta tildar. Se aplica
+  Galileo son fondos Delta comunes desde el 17/11 (ya no hay namespace
+  `GALILEO_OFFSET`: un código 10000 + n viejo en una allowlist no matchea
+  nada). Se aplica
   SERVER-SIDE en `services.positions` (param `visibles`) y entra por
   `auth.visible_fondos_for(request)` en Posiciones/Matriz (páginas y
   partials, robusto a `?fondo=` a mano) y en los desplegables de tenencia
@@ -1877,7 +1907,7 @@ carpetas. Tres piezas:
   archivos de la raíz de Delta Bases, `cierres/` entera — una partición por
   rueda, Históricos las lee todas — y los archivos de cada subcarpeta de
   datos, Carteras; la carpeta CAFCI NO se fija: años de vectores) y baja
-  YA sólo `esenciales(esc)` = `ESENCIALES_DATOS` (composición / PN / Galileo /
+  YA sólo `esenciales(esc)` = `ESENCIALES_DATOS` (composición / PN /
   Fondos / Especies / px_tasas xlsx + parquet + firma / FX / acciones /
   manifiesto / huecos) + los `CAFCI_ULTIMOS` (3) vectores `AAAAMMDD.xlsx` más
   nuevos. Hasta el 11/11 fijaba la CARPETA ENTERA (`fijar`: la PC del desk

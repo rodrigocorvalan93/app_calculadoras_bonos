@@ -1333,7 +1333,11 @@ window.lsSet = function (k, v) {
       if (!d2) return;
       select(d2, sl.getAttribute('data-i'), false);
       var cat = sl.getAttribute('data-cat') || (d2.querySelector('tr.comp-row[data-i="' + sl.getAttribute('data-i') + '"]') || {}).getAttribute && d2.querySelector('tr.comp-row[data-i="' + sl.getAttribute('data-i') + '"]').getAttribute('data-cat');
-      if (d2.getAttribute('data-dim') === 'Categoría' && cat) irAlGrupo(cat);
+      // Fondo de acciones: la tabla agrupa la renta variable por sector y el
+      // data-grp de esos grupos lleva el prefijo (posiciones_fondo.html).
+      var dimN = d2.getAttribute('data-dim');
+      if (dimN === 'Categoría' && cat) irAlGrupo(cat);
+      else if (dimN === 'Sector' && cat) irAlGrupo('Sector · ' + cat);
     }
   });
 })();

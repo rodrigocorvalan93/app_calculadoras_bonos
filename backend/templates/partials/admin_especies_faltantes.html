@@ -1,12 +1,13 @@
 {% from "partials/_icons.html" import icon %}
-{# Reporte de especies de las carteras que faltan en la base + filas Galileo
-   sin normalizar. Ordenado por valor (lo que más duele primero), cap 40 filas
-   por tabla — el resto se resume en el contador. #}
+{# Reporte de especies de las carteras que faltan en la base. Ordenado por
+   valor (lo que más duele primero), cap 40 filas por tabla — el resto se
+   resume en el contador. #}
 {% set cl = rep.clasif if rep else none %}
 {% set pendientes_clasif = cl and (cl.n_con_ticker or cl.n_sin_ticker) %}
-{% if not rep or (rep.n_faltantes == 0 and rep.n_sin_map == 0 and not pendientes_clasif) %}
+{% set pendientes_rv = cl and cl.n_sin_sector %}
+{% if not rep or (rep.n_faltantes == 0 and not pendientes_clasif and not pendientes_rv) %}
   <p class="muted u-note">{{ icon("check") }} Todas las especies de las carteras están en la base
-    (bonos en <code>especies.py</code>, acciones/CEDEARs en los paneles), Galileo quedó 100% normalizado
+    (bonos en <code>especies.py</code>, acciones/CEDEARs en los paneles)
     y Posiciones clasifica todo por ficha o por <code>Delta - Especies</code>.</p>
 {% else %}
   {% if rep.n_faltantes %}
@@ -16,14 +17,12 @@
   </p>
   <div class="table-scroll" style="margin-bottom:12px">
     <table class="cashflows curve-table mercado-table" data-sortable>
-      <thead><tr><th class="u-left" data-sort>Ticker</th><th class="u-left" data-sort>Descripción</th><th data-sort>ISIN</th><th data-sort>Familia</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
+      <thead><tr><th class="u-left" data-sort>Ticker</th><th class="u-left" data-sort>Descripción</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
       <tbody>
         {% for r in rep.faltantes[:40] %}
         <tr>
           <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.code }}</td>
           <td class="u-left" style="font-size:11.5px">{{ r.especie }}</td>
-          <td class="u-sm" style="color:var(--text-muted)">{{ r.isin or "—" }}</td>
-          <td>{{ r.familias }}</td>
           <td>{{ r.n_filas }}</td>
           <td>{{ r.valor | ar_hum }}</td>
         </tr>
@@ -31,32 +30,6 @@
       </tbody>
     </table>
     {% if rep.n_faltantes > 40 %}<p class="muted u-sm">… y {{ rep.n_faltantes - 40 }} más (ordenado por valor).</p>{% endif %}
-  </div>
-  {% endif %}
-
-  {% if rep.n_sin_map %}
-  <p class="muted u-note" style="margin-bottom:6px">
-    <strong>{{ rep.n_sin_map }}</strong> especie(s) de Galileo SIN normalizar a un ticker
-    (internacionales sin ficha local, o acciones sin ticker en la descripción → sumar alias por ISIN
-    en <code>positions._GALILEO_ALIAS_ISIN</code>):
-  </p>
-  <div class="table-scroll">
-    <table class="cashflows curve-table mercado-table" data-sortable>
-      <thead><tr><th class="u-left" data-sort>Descripción</th><th data-sort>ISIN</th><th class="u-left" data-sort>Clase</th><th data-sort title="Fichas del universo con el MISMO vencimiento — sugerencia para asignar el ISIN real; dos letras pueden vencer el mismo día, elegí vos">¿Ficha? (mismo vto)</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
-      <tbody>
-        {% for r in rep.sin_map[:40] %}
-        <tr>
-          <td class="u-left" style="font-size:11.5px">{{ r.especie }}</td>
-          <td class="u-sm" style="color:var(--text-muted)">{{ r.isin or "—" }}</td>
-          <td class="u-left u-sm">{{ r.clase or "—" }}</td>
-          <td class="u-sm" style="color:var(--cyan)">{{ r.candidatos or "—" }}</td>
-          <td>{{ r.n_filas }}</td>
-          <td>{{ r.valor | ar_hum }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% if rep.n_sin_map > 40 %}<p class="muted u-sm">… y {{ rep.n_sin_map - 40 }} más (ordenado por valor).</p>{% endif %}
   </div>
   {% endif %}
 
@@ -114,5 +87,34 @@
     {% if cl.n_sin_ticker > 40 %}<p class="muted u-sm">… y {{ cl.n_sin_ticker - 40 }} más (ordenado por valor).</p>{% endif %}
   </div>
   {% endif %}
+  {% endif %}
+
+  {# ── Renta variable sin sector: falta la fila (o el Sector Delta) en la hoja Base RV ── #}
+  {% if pendientes_rv %}
+  <p class="muted u-note" style="margin:10px 0 6px">
+    <strong>Renta variable sin sector</strong> · <strong>{{ cl.n_sin_sector }}</strong> de las acciones / CEDEARs en
+    cartera no tienen sector: cargá la fila en la hoja <code>Base RV</code> de <code>Delta - Especies</code>
+    (<code>BYMA</code>, <code>Instrumento</code> y <code>Sector Delta</code>). En un fondo de acciones quedan en
+    el grupo “(sin sector)”:
+  </p>
+  <div class="table-scroll">
+    <table class="cashflows curve-table mercado-table" data-sortable>
+      <thead><tr><th class="u-left" data-sort>Ticker</th><th class="u-left" data-sort>Descripción</th><th class="u-left" data-sort>Categoría hoy</th><th class="u-left" data-sort title="¿El ticker ya está en la hoja Base RV? Sí = tiene fila pero le falta el sector; No = falta la fila entera.">En Base RV</th><th class="u-left" data-sort>Fondos</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>
+      <tbody>
+        {% for r in cl.sin_sector[:40] %}
+        <tr>
+          <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.code }}</td>
+          <td class="u-left" style="font-size:11.5px">{{ r.especie }}</td>
+          <td class="u-left u-sm">{{ r.categoria }}</td>
+          <td class="u-left u-sm">{{ "sí, sin sector" if r.en_base else "no" }}</td>
+          <td class="u-left u-sm" style="color:var(--text-muted)">{{ r.fondos }}</td>
+          <td>{{ r.n_filas }}</td>
+          <td>{{ r.valor | ar_hum }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if cl.n_sin_sector > 40 %}<p class="muted u-sm">… y {{ cl.n_sin_sector - 40 }} más (ordenado por valor).</p>{% endif %}
+  </div>
   {% endif %}
 {% endif %}

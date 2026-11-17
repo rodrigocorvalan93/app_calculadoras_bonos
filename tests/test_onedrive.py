@@ -465,7 +465,7 @@ def _arbol_datos(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     vacio.write_text("", encoding="utf-8")
     monkeypatch.setenv("SECRETS_FILE", str(vacio))
     for v in ("DELTA_CAFCI_PATH", "DELTA_ESPECIES_PATH", "DELTA_COMPOSICION_PATH", "DELTA_PN_PATH",
-              "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH", "DELTA_FONDOS_PATH", "DELTA_HISTORICO_PATH"):
+              "DELTA_FONDOS_PATH", "DELTA_HISTORICO_PATH"):
         monkeypatch.delenv(v, raising=False)
     return bases, cart, cafci
 

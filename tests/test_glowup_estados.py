@@ -84,7 +84,7 @@ async def test_historicos_sub_tabs_componente() -> None:
 async def test_posiciones_sin_carteras_dice_la_causa(tmp_path, monkeypatch) -> None:
     from backend.services import positions
     monkeypatch.setenv("DELTA_BASES_DIR", str(tmp_path))
-    for env in ("DELTA_COMPOSICION_PATH", "DELTA_PN_PATH", "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH"):
+    for env in ("DELTA_COMPOSICION_PATH", "DELTA_PN_PATH"):
         monkeypatch.delenv(env, raising=False)
     positions.refresh()
     try:

@@ -734,8 +734,7 @@ def default_root() -> Path:
 # correr sin bases; el .bat sólo avisa.
 ESENCIALES_DATOS = frozenset({
     # Carteras → Posiciones / Matriz (services.positions, services.delta_especies)
-    "delta_composicion.xlsx", "delta_pn.xlsx", "galileo_composicion.xlsx", "galileo_pn.xlsx",
-    "delta_fondos.txt", "delta - especies.xlsx",
+    "delta_composicion.xlsx", "delta_pn.xlsx", "delta_fondos.txt", "delta - especies.xlsx",
     # Delta Bases → Históricos y el writer (historico_byma / fx_hist / acciones_hist / historico_writer)
     "delta - historico_byma_px_tasas.xlsx", "delta - historico_byma_px_tasas.parquet",
     "delta - historico_byma_px_tasas.parquet.src.json",
@@ -745,7 +744,7 @@ ESENCIALES_DATOS = frozenset({
 CAFCI_ULTIMOS = 3            # vectores CAFCI (AAAAMMDD.xlsx) más nuevos que se bajan ya
 _VARS_CARPETAS = ("DELTA_HISTORICO_DIR", "DELTA_BASES_DIR", "DELTA_CAFCI_DIR")
 _VARS_ARCHIVOS = ("DELTA_CAFCI_PATH", "DELTA_ESPECIES_PATH", "DELTA_COMPOSICION_PATH", "DELTA_PN_PATH",
-                  "GALILEO_COMPOSICION_PATH", "GALILEO_PN_PATH", "DELTA_FONDOS_PATH", "DELTA_HISTORICO_PATH")
+                  "DELTA_FONDOS_PATH", "DELTA_HISTORICO_PATH")
 
 
 def carpetas_datos_detalle() -> List[Tuple[str, Path, List[Path]]]:

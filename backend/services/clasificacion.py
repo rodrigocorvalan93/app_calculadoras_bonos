@@ -44,6 +44,7 @@ _COLS_TIPO = ("Subclase de Activo", "Clase de Activo", "Industria",
 FUENTES = {
     "ficha": "Categoría por la ficha de especies.py",
     "base": "Categoría por Delta - Especies (tipo de instrumento o Ajuste × Tasa de la base)",
+    "base_rv": "Categoría por la hoja Base RV de Delta - Especies (columna Instrumento)",
     "texto": "Categoría por la descripción de la cartera (columna Especie)",
     "clase": "Categoría por la Clase de Activo del Excel de cartera",
     "sin_regla": "Sin regla fina: Categoría = Clase de Activo cruda del Excel. Completá Ajuste/Tasa "

@@ -2,13 +2,14 @@
 <div class="card comp-card">
   <div class="card-title">
     <span>Composición por categoría</span>
-    <span class="card-title-aux">{% if pn %}PN {{ pn | ar_int }} · {% endif %}<span class="muted">tocá una fila para ver la torta{% if "Categoría" in summary %} · una porción de Categoría te lleva al grupo en la tabla{% endif %}</span></span>
+    <span class="card-title-aux">{% if pn %}PN {{ pn | ar_int }} · {% endif %}<span class="muted">tocá una fila para ver la torta{% if "Sector" in summary %} · una porción de Sector te lleva a ese sector en la tabla{% elif "Categoría" in summary %} · una porción de Categoría te lleva al grupo en la tabla{% endif %}</span></span>
   </div>
   <div class="card-body">
     <div class="resumen-grid">
       {# Itera los grupos que arme _composicion_summary (orden de inserción):
          Clase / Categoría / Tasa / Calificación / Vencimiento (+ Activos infra
-         sólo en el fondo de infraestructura). Cada bloque lleva su dona
+         sólo en el fondo de infraestructura; + Sector, después de Categoría,
+         sólo en un fondo de acciones: renta variable > 60 %). Cada bloque lleva su dona
          (svg_charts.donut, server-side) oculta: tocar una fila la abre con esa
          porción resaltada — todo client-side (app.js), cero requests. #}
       {% for label in summary %}

@@ -1194,6 +1194,12 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
 #pos-tbl tr.pos-grp .grp-caret { display: inline-block; width: 15px; color: var(--text-muted); }
 #pos-tbl tr.pos-grp .grp-n { color: var(--text-muted); font-weight: 400; font-size: var(--fs-sm); }
 #pos-tbl tr.pos-grp .pos-grp-ret { font-variant-numeric: tabular-nums; }
+/* Fondo de acciones: grupo de renta variable por sector (hoja Base RV) */
+#pos-tbl tr.pos-grp .grp-tag {
+  display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px;
+  border: 1px solid var(--border); color: var(--text-muted);
+  font-size: var(--fs-xs); font-weight: 500; text-transform: uppercase; letter-spacing: .04em;
+}
 #pos-tbl tr.grp-hide { display: none; }
 .var-up { color: var(--green); }
 .var-down { color: var(--red); }

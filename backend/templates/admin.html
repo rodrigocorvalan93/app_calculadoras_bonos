@@ -110,23 +110,27 @@
       <div class="card-body">
         {% if not fondos_all %}
         <p class="muted u-m0">Sin carteras cargadas: cuando la app tenga la composición
-          (Delta_Composicion.xlsx + Galileo_Composicion.xlsx — los Galileo aparecen como "G&lt;n&gt;"), acá se elige qué fondos ve cada usuario.</p>
+          (Delta_Composicion.xlsx), acá se elige qué fondos ve cada usuario.</p>
         {% else %}
         <p class="muted" style="margin:0 0 8px">“Todos” = ve todas las carteras (default, incluye
           fondos nuevos). Con una selección, ve <strong>sólo</strong> los tildados — un fondo nuevo no se
           muestra hasta tildarlo. Aplica a Posiciones, Matriz y los desplegables de tenencia
           (YAS / Comparador / Curvas).</p>
         {% if fondos_fuentes %}
-        {# De qué archivo salió cada fondo: con las bases unificadas en
-           Delta_Composicion, un Galileo repetido se ignora y acá se ve. #}
+        {# De qué archivo salió cada fondo: todos de Delta_Composicion (los
+           Galileo ya viven ahí); el viejo Galileo_Composicion no se lee. #}
         <details class="fondos-fuentes">
-          <summary class="muted u-sm" style="cursor:pointer">Fuentes: {{ fondos_fuentes | selectattr('ignorado', 'equalto', false) | list | length }} fondos cargados{% set ign = fondos_fuentes | selectattr('ignorado') | list %}{% if ign %} · <span class="var-up">{{ ign | length }} Galileo ignorado{{ 's' if ign | length != 1 }} (ya en Delta_Composicion)</span>{% endif %}</summary>
+          <summary class="muted u-sm" style="cursor:pointer">Fuentes: {{ fondos_fuentes | length }} fondos cargados{% if galileo_viejo %} · Galileo_Composicion.xlsx ignorado{% endif %}</summary>
+          {% if galileo_viejo %}
+          <p class="muted u-sm u-mt8">Galileo_Composicion.xlsx sigue en la carpeta de carteras: la app no lo lee
+            (los fondos Galileo ya viven en Delta_Composicion.xlsx). Se puede borrar o archivar.</p>
+          {% endif %}
           <table class="cashflows admin-tabs" style="margin:6px 0 10px">
             <thead><tr><th class="u-left">Fondo</th><th class="u-left">Archivo</th><th>Tenencias</th><th>PN</th></tr></thead>
             <tbody>
               {% for f in fondos_fuentes %}
-              <tr{% if f.ignorado %} class="muted"{% endif %}>
-                <td class="u-left">{{ f.nombre }}{% if f.ignorado %} <span class="tag">ignorado: ya está en Delta_Composicion</span>{% endif %}</td>
+              <tr>
+                <td class="u-left">{{ f.nombre }}</td>
                 <td class="u-left u-sm">{{ f.archivo }}</td>
                 <td>{{ f.n }}</td><td>{{ f.pn | ar_int if f.pn is not none else "—" }}</td>
               </tr>
@@ -226,10 +230,10 @@
       </div>
     </div>
 
-    {# ── Especies faltantes en la base (Delta + Galileo) — on-demand ── #}
+    {# ── Especies faltantes en la base — on-demand ── #}
     <div class="card">
       <div class="card-title"><span>{{ icon("database") }} Especies faltantes · qué pulir en la base</span>
-        <span class="card-title-aux">carteras vs base de especies · Galileo sin normalizar</span></div>
+        <span class="card-title-aux">carteras vs base de especies</span></div>
       <div class="card-body">
         <div id="admin-especies" hx-get="/admin/especies-faltantes" hx-trigger="load" hx-swap="innerHTML">
           {{ skeleton(3, "Cargando…") }}
