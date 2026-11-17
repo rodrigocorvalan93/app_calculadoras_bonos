@@ -97,6 +97,10 @@
     (<code>BYMA</code>, <code>Instrumento</code> y <code>Sector Delta</code>). En un fondo de acciones quedan en
     el grupo “(sin sector)”:
   </p>
+  {% if cl.rv_error %}
+  <p class="alert u-sm u-mb8">{{ icon("warning") }} La hoja <code>Base RV</code> no se leyó, por eso
+    ninguna tiene sector: {{ cl.rv_error }}</p>
+  {% endif %}
   <div class="table-scroll">
     <table class="cashflows curve-table mercado-table" data-sortable>
       <thead><tr><th class="u-left" data-sort>Ticker</th><th class="u-left" data-sort>Descripción</th><th class="u-left" data-sort>Categoría hoy</th><th class="u-left" data-sort title="¿El ticker ya está en la hoja Base RV? Sí = tiene fila pero le falta el sector; No = falta la fila entera.">En Base RV</th><th class="u-left" data-sort>Fondos</th><th data-sort>Filas</th><th data-sort>Valor</th></tr></thead>

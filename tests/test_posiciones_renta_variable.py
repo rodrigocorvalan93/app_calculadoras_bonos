@@ -28,11 +28,11 @@ _FILAS_RV = [
     ["AAPL AR", "AAPL AR / APPLE INC-CEDEAR", "CEDEARs", "Information Technology", "Tecnología", "Apple", None, "AAPL"],
     # sin 'Sector Delta': cae al GICS
     ["KO AR", "KO AR / COCA-COLA-CEDEAR", "CEDEARs", "Consumer Staples", None, "Coca-Cola", None, "KO"],
-    # sin BYMA: se encuentra por su Cod_Delta (entero y por el primer token)
+    # sin BYMA: se encuentra por su Cod_Delta entero (no por el primer token)
     ["VIST US", "VIST US / VISTA ENERGY", "ADRs", "Energy", "Petroleo & Gas", "Vista", None, None],
     # ticker repetido con otro sector: manda la primera fila
     ["TSM AR", "TSM AR / TAIWAN SEMI-CEDEAR", "CEDEARs", "Information Technology", "Tecnología", "TSMC", None, "TSM"],
-    ["TSM AR", "TSM AR / TAIWAN SEMI-CEDEAR", "CEDEARs", "Industrials", "Industria", "TSMC", None, "TSM"],
+    ["TSM US", "TSM US / TAIWAN SEMI-ADR", "ADRs", "Industrials", "Industria", "TSMC", None, "TSM"],
     # fórmula rota en la planilla: el error de Excel no es un sector
     ["PAMP AR", "PAMP AR / PAMPA ENERGIA", "ACCIONES", "#REF!", "#N/A", "Pampa Energía", None, "PAMP"],
     # fila vacía de la planilla
@@ -90,12 +90,44 @@ def test_base_rv_se_indexa_por_byma_con_alias_y_aparte_de_la_rf(especies) -> Non
     assert de.sector_rv("KO") == "Consumer Staples"                    # sin Sector Delta: el GICS
     # alias por Cod_Delta: como viene en la cartera y por su primer token
     assert de.info_rv("GGAL AR") is g
-    assert de.sector_rv("VIST US") == "Petroleo & Gas" and de.sector_rv("VIST") == "Petroleo & Gas"
-    assert de.sector_rv("TSM") == "Tecnología"                         # repetido: la primera fila
+    assert de.sector_rv("VIST US") == "Petroleo & Gas"
+    # ...pero NO por su primer token: 'VIST US' (el ADR) no es la fila de una
+    # tenencia 'VIST' (el CEDEAR) — con 'AGRO US' sería directamente otra empresa
+    assert de.info_rv("VIST") is None
+    assert de.sector_rv("TSM") == "Tecnología"                         # BYMA repetido: la primera fila
+    # la fila repetida no se pierde: se llega por su Cod_Delta completo
+    assert de.info_rv("TSM US")["Instrumento"] == "ADRs" and de.sector_rv("TSM US") == "Industria"
+    assert de.info_rv("TSM AR")["Instrumento"] == "CEDEARs"
     assert de.info_rv("NC") is None and de.info_rv(None) is None and de.sector_rv("ZZZ") is None
     # índices separados: la clasificación de bonos no ve la renta variable
     assert de.info("GGAL") is None and de.info_rv("ONT1") is None
     assert de.info("ONT1")["Tasa"] == "TAMAR"
+
+
+def test_indexar_rv_celdas_y_cabeceras_sucias() -> None:
+    """Planilla real: una columna de fórmulas toda en 0 llega float ("0.0" no
+    es un sector), dos columnas con el mismo nombre tras aplanar la cabecera
+    daban una Series por celda, y el alias corto sale de la MISMA
+    normalización que el ticker de una tenencia (sin depender del orden)."""
+    import pandas as pd
+
+    from backend.services import delta_especies as de
+
+    df = pd.DataFrame(
+        [["BAC US", "ADRs", 0.0, "Bancos", "x", None],
+         ["BAC AR", "CEDEARs", 0.0, "Bancos", "y", "BA.C"],
+         ["AGRO US", "ADRs", 0.0, "Agro", "z", None],
+         ["CENCOSUD CI", "ACCIONES", 0.0, None, "w", "CENCOSUD"]],
+        columns=["Cod_Delta", "Instrumento", "Sector", "Sector Delta", "Sector Delta", "BYMA"])
+    df = de._sin_duplicadas(df, "Base RV")
+    assert list(df.columns) == ["Cod_Delta", "Instrumento", "Sector", "Sector Delta", "BYMA"]
+    by = de._indexar_rv(df)["by_code"]
+    assert by["BA.C"]["Sector Delta"] == "Bancos"                      # la primera columna, texto limpio
+    assert "Sector" not in by["BA.C"]                                  # el 0.0 de la fórmula no es dato
+    assert by["BAC"]["Instrumento"] == "CEDEARs"                       # 'BAC AR' → BAC, no el ADR de arriba
+    assert by["BAC US"]["Instrumento"] == "ADRs" and by["BAC AR"]["Instrumento"] == "CEDEARs"
+    assert "AGRO" not in by and by["AGRO US"]["Sector Delta"] == "Agro"
+    assert by["CENCOSUD"]["Instrumento"] == "ACCIONES" and "Sector Delta" not in by["CENCOSUD"]
 
 
 def test_sin_hoja_rv_la_base_rf_carga_igual(tmp_path, monkeypatch) -> None:
@@ -218,7 +250,7 @@ def test_reporte_renta_variable_sin_sector(especies, monkeypatch) -> None:
     rep = P.reporte_clasificacion()
     assert rep["n_rv"] == 6 and rep["n_base"] == 5            # GGAL ×2, YPFD, VIST, AAPL por la base
     assert [r["code"] for r in rep["sin_sector"]] == ["NUEVA"] and rep["n_sin_sector"] == 1
-    assert rep["sin_sector"][0]["en_base"] is False
+    assert rep["sin_sector"][0]["en_base"] is False and rep["rv_error"] is None
     assert "NUEVA" not in {r["code"] for r in rep["con_ticker"]}
 
 

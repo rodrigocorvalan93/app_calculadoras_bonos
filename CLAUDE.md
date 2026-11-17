@@ -726,10 +726,15 @@ cartera sintética de 9 tenencias): p50 4,6 · p95 6,2 ms. Regresión:
 **Renta variable · hoja Base RV y sector (17/11)**: `delta_especies` abre
 `Delta - Especies.xlsx` UNA vez y lee también la hoja `Base RV` (misma
 cabecera de dos filas, `header=[2, 3]`) en un índice APARTE de `info()`:
-`info_rv(code)` / `sector_rv(code)` (clave `BYMA`; alias `Cod_Delta` entero y
-su primer token — `VIST US` no tiene BYMA —, que nunca pisan un BYMA; ticker
-repetido = manda la primera fila; texto sin espacios de más). Best-effort: sin
-hoja o con la hoja rota la Base RF carga igual (`status()["error_rv"]`).
+`info_rv(code)` / `sector_rv(code)` (clave `BYMA`; alias `Cod_Delta` entero
+— `VIST US` no tiene BYMA — y normalizado como una tenencia,
+`positions._norm_code`: `GGAL AR` → `GGAL`; nunca pisan un BYMA y NO hay
+alias por primer token: `AGRO US` no es `AGRO`; BYMA repetido = manda la
+primera fila y la segunda conserva su `Cod_Delta` completo; texto sin
+espacios de más, un error de fórmula `#REF!` o un 0 = celda vacía, columnas
+repetidas tras `_flatten` = la primera). Best-effort: sin hoja o con la hoja
+rota la Base RF carga igual (`status()["error_rv"]`, que /admin muestra
+arriba de la lista "sin sector").
 `routes/posiciones._clasif`: sin ficha y sin fila en la Base RF, un ticker de
 la Base RV toma la categoría de `Instrumento` (Acciones / CEDEARs / ADRs /
 ETFs, fuente `base_rv`) — ficha y Base RF siempre mandan. Cada fila de
@@ -1434,7 +1439,7 @@ en `_FEEDS`. Regresión: `tests/test_news.py`.
 "772.000.000 5,0%" (sin PN del fondo queda sólo el VN; sin tenencia, vacía) —
 pedido del desk para leer tamaño y peso de un vistazo. El ancho de columna
 sale del texto más largo, así que esa vista ensancha las columnas; el HTML
-va al mismo `_MATRIZ_CACHE` por (generación, familia, vista, visibles). Un
+va al mismo `_MATRIZ_CACHE` por (generación, vista, visibles). Un
 test que pisa `positions._cache` a mano tiene que vaciar ese cache (es
 orden-dependiente si no). Regresión: `test_posiciones_carteras.test_http_matriz_markup_compacto`.
 

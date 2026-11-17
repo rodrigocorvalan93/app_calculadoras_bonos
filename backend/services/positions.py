@@ -236,6 +236,28 @@ def _file_asof(path: Optional[str]) -> Optional[str]:
         return None
 
 
+def _galileo_viejo_presente(comp_path: str) -> bool:
+    """¿Sigue el viejo Galileo_Composicion.xlsx donde el loader anterior lo
+    buscaba? (GALILEO_COMPOSICION_PATH de un secrets.txt viejo, la carpeta de
+    Delta_Composicion y DELTA_BASES_DIR). Sólo un listado de carpeta / un
+    stat por carga: el archivo no se abre."""
+    env = os.getenv("GALILEO_COMPOSICION_PATH")
+    if env:
+        try:
+            if os.path.isfile(deltapaths.expand(env, want="file")):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+    carpetas = [os.path.dirname(comp_path)]
+    base = os.getenv("DELTA_BASES_DIR")
+    if base:
+        try:
+            carpetas.append(deltapaths.expand(base, want="dir").rstrip("\\/"))
+        except Exception:  # noqa: BLE001
+            pass
+    return any(_find_ci(d, _GALILEO_VIEJO_FILE) for d in carpetas)
+
+
 def _load() -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "loaded": False, "error": None, "holdings": [], "pn": {}, "fondos": {},
@@ -251,7 +273,7 @@ def _load() -> Dict[str, Any]:
         return out
     # El viejo archivo Galileo NO se abre (los fondos Galileo ya son fondos
     # Delta): sólo se avisa, una vez por carga, si sigue en la carpeta.
-    if _find_ci(os.path.dirname(comp_path), _GALILEO_VIEJO_FILE):
+    if _galileo_viejo_presente(comp_path):
         out["galileo_viejo"] = True
         logger.info("[positions] %s sigue en la carpeta de carteras: se ignora "
                     "(los fondos Galileo ya viven en %s)", _GALILEO_VIEJO_FILE, _COMPOSICION_FILE)

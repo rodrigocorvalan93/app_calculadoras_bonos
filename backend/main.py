@@ -240,7 +240,7 @@ async def lifespan(app: FastAPI):
     try:
         from backend.services import delta_especies
         de = delta_especies.ensure_loaded()
-        logger.info("[main] delta_especies: loaded=%s n=%s", de["loaded"], len(de["by_code"]))
+        logger.info("[main] delta_especies: loaded=%s n=%s rv=%s", de["loaded"], len(de["by_code"]), de.get("n_rv", 0))
         if not de["loaded"] and de.get("error"):
             logger.warning("[main] delta_especies: %s", de["error"])
     except Exception:  # noqa: BLE001

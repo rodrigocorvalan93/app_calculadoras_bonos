@@ -214,6 +214,34 @@ def test_aviso_galileo_viejo_sin_distinguir_mayusculas(tmp_path, monkeypatch, no
         _soltar_cache()
 
 
+@pytest.mark.parametrize("donde", ["bases", "env"])
+def test_aviso_galileo_viejo_donde_lo_buscaba_el_loader(tmp_path, monkeypatch, donde) -> None:
+    """Delta_Composicion en Carteras/ y el Galileo viejo en la raíz de
+    DELTA_BASES_DIR, o apuntado por un GALILEO_COMPOSICION_PATH que quedó en
+    secrets.txt: el loader viejo lo cargaba desde ahí, así que el aviso tiene
+    que verlo (revisión 17/11: sólo miraba la carpeta de Delta_Composicion)."""
+    cart = tmp_path / "Carteras"
+    cart.mkdir()
+    _env(tmp_path, monkeypatch)
+    _delta_files(cart)
+    monkeypatch.setenv("DELTA_COMPOSICION_PATH", str(cart / "Delta_Composicion.xlsx"))
+    monkeypatch.setenv("DELTA_PN_PATH", str(cart / "Delta_PN.xlsx"))
+    try:
+        assert positions.refresh()["loaded"] and positions.status()["galileo_viejo"] is False
+        if donde == "bases":
+            _galileo_viejo_files(tmp_path)
+        else:
+            otra = tmp_path / "otra"
+            otra.mkdir()
+            _galileo_viejo_files(otra)
+            monkeypatch.setenv("GALILEO_COMPOSICION_PATH", str(otra / "Galileo_Composicion.xlsx"))
+        c = positions.refresh()
+        assert c["loaded"] and positions.status()["galileo_viejo"] is True
+        assert {f["cod"] for f in positions.fondos()} == {5, 18, 22}       # se avisa, no se carga
+    finally:
+        _soltar_cache()
+
+
 @pytest.mark.asyncio
 async def test_http_posiciones_tenencias_primero_y_torta(carteras) -> None:
     """Pedido del desk 06/11: la tabla de tenencias va ANTES de la composición;

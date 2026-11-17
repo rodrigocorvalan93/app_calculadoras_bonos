@@ -139,9 +139,11 @@ de `Delta - Especies` es renta variable por dato:
 - **Emisor** = `Emisor / Sponsor` de la misma fila.
 
 La fila se busca por la columna `BYMA` (el ticker de pantalla). Si `BYMA` está
-vacío sirve `Cod_Delta` — entero (`VIST US`) o su primer token (`GGAL AR` →
-`GGAL`) —, pero un `BYMA` siempre tiene prioridad. Si un ticker está en dos
-filas, vale la primera.
+vacío sirve `Cod_Delta` — entero (`VIST US`) o sin el sufijo de la cartera
+(`GGAL AR` → `GGAL`, `CENCOSUD CI` → `CENCOSUD`) —, pero un `BYMA` siempre
+tiene prioridad. `VIST US` no vale para una tenencia `VIST`: cada listado
+(CEDEAR, ADR) necesita su fila. Si un `BYMA` está en dos filas vale la
+primera; la segunda se sigue encontrando por su `Cod_Delta` completo.
 
 **Fondo de acciones**: cuando la renta variable pasa del **60 % del PN** (sin
 PN cargado, de lo invertido) la pantalla cambia para ese fondo:

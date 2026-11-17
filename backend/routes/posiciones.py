@@ -223,6 +223,19 @@ def _pct_rv(rows: List[Dict[str, Any]], pn: Optional[float]) -> Optional[float]:
     return sum((r.get("valor") or 0.0) for r in rows if r.get("es_rv")) / denom
 
 
+def _rv_error() -> Optional[str]:
+    """Motivo por el que la hoja 'Base RV' no aportó nada, o None si se leyó."""
+    try:
+        st = delta_especies.status()
+    except Exception as exc:  # noqa: BLE001
+        return str(exc)
+    if not st.get("loaded"):
+        return st.get("error") or "Delta - Especies.xlsx no se cargó."
+    if st.get("error_rv"):
+        return st["error_rv"]
+    return None if st.get("n_rv") else "La hoja 'Base RV' no tiene filas con ticker."
+
+
 def _cat_for(h: Dict[str, Any], obj) -> str:
     return _clasif(h, obj)[0]
 
@@ -306,6 +319,9 @@ def reporte_clasificacion() -> Dict[str, Any]:
             # renta variable sin sector: falta la fila en la hoja 'Base RV' (o
             # su 'Sector Delta') — un fondo de acciones las deja en "(sin sector)"
             "sin_sector": _fin(sin_sector), "n_sin_sector": len(sin_sector), "n_rv": n_rv,
+            # por qué no hay sectores si la hoja entera no se leyó (sin eso la
+            # tarjeta mandaba a cargar filas que ya existen)
+            "rv_error": _rv_error(),
             "n_total": n_total, "n_ficha": n_ficha, "n_base": n_base}
 
 

@@ -110,6 +110,10 @@ def _txt(v: Any) -> Optional[str]:
     v = _clean(v)
     if v is None:
         return None
+    # un 0 numérico es el "no encontré" de una fórmula de la planilla (una
+    # columna de fórmulas toda en 0 llega float: "0.0" no estaba en _VACIOS)
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v == 0:
+        return None
     t = " ".join(str(v).split())
     # "#REF!" / "#VALUE!" / "#N/A": una fórmula rota de la planilla (Sector y
     # Grupo Industria salen de un BUSCARV sobre la hoja GICS) no es un dato
@@ -138,11 +142,27 @@ def _indexar_rf(df) -> Dict[str, Dict[str, Any]]:
     return by_code
 
 
+def _sin_duplicadas(df, hoja: str):
+    """Dos columnas con el mismo nombre después de `_flatten` (una celda de
+    cabecera combinada, el mismo campo bajo dos grupos) hacen que `r.get(c)`
+    devuelva una Series y la celda salga como texto basura: queda la primera."""
+    dup = df.columns.duplicated()
+    if dup.any():
+        logger.warning("[delta_especies] hoja '%s': columnas repetidas, uso la primera de cada una: %s",
+                       hoja, ", ".join(sorted({str(c) for c in df.columns[dup]})[:10]))
+        df = df.loc[:, ~dup]
+    return df
+
+
 def _indexar_rv(df) -> Dict[str, Any]:
     """Base RV → {clave: fila}. Clave principal = BYMA (ticker de pantalla);
-    alias = `Cod_Delta` tal cual ('VIST US', sin BYMA cargado) y su primer
-    token ('GGAL AR' → GGAL), que NUNCA pisan un BYMA. Un ticker repetido en
-    dos filas (TSM, con sectores distintos) → manda la primera y se cuenta."""
+    alias = `Cod_Delta` tal cual ('VIST US', sin BYMA cargado) y normalizado
+    como el ticker de una tenencia (`positions._norm_code`: 'GGAL AR' → GGAL,
+    'CENCOSUD CI' → CENCOSUD), que NUNCA pisan un BYMA. No hay alias por
+    "primer token": 'AGRO US' (Adecoagro) no es AGRO (Agrometal). Un BYMA
+    repetido en dos filas (TSM, con sectores distintos) → manda la primera,
+    pero la segunda conserva su Cod_Delta completo (el ADR 'TSM US')."""
+    from backend.services.positions import _norm_code
     keep = [c for c in _KEEP_RV if c in df.columns]
     has_cd = "Cod_Delta" in df.columns
     by_code: Dict[str, Dict[str, Any]] = {}
@@ -162,18 +182,25 @@ def _indexar_rv(df) -> Dict[str, Any]:
         if not rec:
             continue
         n += 1
+        repetido = False
         if byma:
             key = byma.upper()
             if key in by_code:
                 repetidos.append(key)
-                continue
-            rec["BYMA"] = key
-            by_code[key] = rec
+                repetido = True
+            else:
+                rec["BYMA"] = key
+                by_code[key] = rec
         if cd:
-            alias.append((cd.upper(), rec))
-    for cd, rec in alias:
+            alias.append((cd.upper(), rec, repetido))
+    # Dos pasadas: primero TODOS los Cod_Delta completos (match exacto de la
+    # tenencia), después los normalizados — así el orden de la hoja no decide.
+    for cd, rec, _ in alias:
         by_code.setdefault(cd, rec)
-        by_code.setdefault(cd.split(" ")[0], rec)
+    for cd, rec, repetido in alias:
+        corto = _norm_code(cd)
+        if corto and not repetido:
+            by_code.setdefault(corto, rec)
     return {"by_code": by_code, "n": n, "repetidos": repetidos}
 
 
@@ -205,6 +232,7 @@ def _load() -> Dict[str, Any]:
             out["error"] = f"Error leyendo especies: {exc}"
             return out
         df.columns = _flatten(df.columns)
+        df = _sin_duplicadas(df, _SHEET)
         if "BYMA" not in df.columns:
             out["error"] = "La hoja 'Base RF' no tiene columna 'BYMA'."
             return out
@@ -217,6 +245,7 @@ def _load() -> Dict[str, Any]:
             else:
                 dfv = pd.read_excel(xls, sheet_name=_SHEET_RV, header=_HEADER_ROWS)
                 dfv.columns = _flatten(dfv.columns)
+                dfv = _sin_duplicadas(dfv, _SHEET_RV)
                 if "BYMA" not in dfv.columns and "Cod_Delta" not in dfv.columns:
                     out["error_rv"] = f"La hoja '{_SHEET_RV}' no tiene columna 'BYMA' ni 'Cod_Delta'."
                 else:
