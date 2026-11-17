@@ -33,6 +33,8 @@ _FILAS_RV = [
     # ticker repetido con otro sector: manda la primera fila
     ["TSM AR", "TSM AR / TAIWAN SEMI-CEDEAR", "CEDEARs", "Information Technology", "Tecnología", "TSMC", None, "TSM"],
     ["TSM AR", "TSM AR / TAIWAN SEMI-CEDEAR", "CEDEARs", "Industrials", "Industria", "TSMC", None, "TSM"],
+    # fórmula rota en la planilla: el error de Excel no es un sector
+    ["PAMP AR", "PAMP AR / PAMPA ENERGIA", "ACCIONES", "#REF!", "#N/A", "Pampa Energía", None, "PAMP"],
     # fila vacía de la planilla
     [None, None, None, None, None, None, None, "NC"],
 ]
@@ -79,7 +81,8 @@ def test_base_rv_se_indexa_por_byma_con_alias_y_aparte_de_la_rf(especies) -> Non
     de = especies
     st = de.status()
     assert st["loaded"] and st["error"] is None and st["error_rv"] is None
-    assert st["n"] == 1 and st["n_rv"] == 7          # la fila "NC" vacía no cuenta
+    assert st["n"] == 1 and st["n_rv"] == 8          # la fila "NC" vacía no cuenta
+    assert de.info_rv("PAMP")["Instrumento"] == "ACCIONES" and de.sector_rv("PAMP") is None   # "#REF!" no es sector
     g = de.info_rv("ggal")
     assert g["Instrumento"] == "ACCIONES" and g["Emisor / Sponsor"] == "Grupo Financiero Galicia"
     assert g["Sector Delta"] == "Bancos y Servicios Financieros"       # sin el espacio de más

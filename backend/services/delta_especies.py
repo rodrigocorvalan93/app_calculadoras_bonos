@@ -111,7 +111,11 @@ def _txt(v: Any) -> Optional[str]:
     if v is None:
         return None
     t = " ".join(str(v).split())
-    return None if t.upper() in _VACIOS else t
+    # "#REF!" / "#VALUE!" / "#N/A": una fórmula rota de la planilla (Sector y
+    # Grupo Industria salen de un BUSCARV sobre la hoja GICS) no es un dato
+    if t.upper() in _VACIOS or t.startswith("#"):
+        return None
+    return t
 
 
 def _indexar_rf(df) -> Dict[str, Dict[str, Any]]:
