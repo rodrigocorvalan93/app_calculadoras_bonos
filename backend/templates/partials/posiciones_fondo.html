@@ -59,7 +59,7 @@
           <tr class="pos-grp{{ ' pos-grp-sector' if g.sector }}" data-grp="{{ ('Sector · ' ~ g.cat) if g.sector else g.cat }}" title="Click para plegar/desplegar">
             {# colspan 6 = Especie+Nombre+Emisor+Vto+Categoría+Rating: los
                subtotales tienen que caer bajo Valor / %PN #}
-            <td colspan="6" class="u-left"><span class="grp-caret">▾</span>{% if g.sector %}<span class="grp-tag" title="Renta variable agrupada por sector (Sector Delta de la hoja Base RV de Delta - Especies)">sector</span>{% endif %}{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
+            <td colspan="6" class="u-left"><span class="grp-caret">▾</span>{% if g.sector %}<span class="grp-tag" title="Renta variable agrupada por sector (Sector Delta de la hoja Base RV de Delta - Especies)">sector</span> {% endif %}{{ g.cat }} <span class="grp-n">· {{ g.n }} especie{{ "s" if g.n != 1 }}</span></td>
             <td></td>
             <td>{{ g.valor | ar_int }}</td>
             <td>{{ (g.pct_pn * 100) | ar_pct_pp(2) if g.pct_pn is not none else "—" }}</td>
@@ -86,7 +86,9 @@
               <td class="u-left u-sm u-ellipsis" style="max-width:150px" title="{{ r.emisor or '' }}">{{ r.emisor or "—" }}</td>
               {# data-sort = ordinal del date → el sort es cronológico, no "por día del mes" #}
               <td class="u-sm" data-sort="{{ r.vencimiento.toordinal() if r.vencimiento else '' }}">{{ r.vencimiento | ar_date }}</td>
-              <td class="u-left u-sm" title="{{ r.cat_src_txt }}">{{ r.categoria }}</td>
+              {# fondo de acciones: el sector también como texto de la fila —
+                 el filtro de texto, el orden y el CSV leen celdas, no el grupo #}
+              <td class="u-left u-sm" title="{{ r.cat_src_txt }}">{{ r.categoria }}{% if fondo_rv and r.es_rv %} <span class="pos-sector">· {{ r.sector }}</span>{% endif %}</td>
               <td class="u-note">{{ r.rating }}</td>
               <td>{{ r.cantidad | ar_int }}</td>
               <td>{{ r.valor | ar_int }}</td>

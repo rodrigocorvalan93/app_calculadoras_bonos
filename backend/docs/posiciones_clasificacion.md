@@ -145,11 +145,15 @@ tiene prioridad. `VIST US` no vale para una tenencia `VIST`: cada listado
 (CEDEAR, ADR) necesita su fila. Si un `BYMA` está en dos filas vale la
 primera; la segunda se sigue encontrando por su `Cod_Delta` completo.
 
-**Fondo de acciones**: cuando la renta variable pasa del **60 % del PN** (sin
-PN cargado, de lo invertido) la pantalla cambia para ese fondo:
+**Fondo de acciones**: cuando la renta variable pasa del **60 %** la pantalla
+cambia para ese fondo. El peso se mide contra el mayor entre el PN y lo
+invertido: con el PN al día es el % del PN de siempre, y un PN viejo o sin
+cargar no cambia el resultado.
 
 - la tabla de tenencias agrupa la renta variable **por sector** (el grupo
-  lleva la etiqueta `sector`); lo que no es renta variable sigue por Categoría;
+  lleva la etiqueta `sector` y cada fila lo repite al lado de la Categoría,
+  así el filtro de texto y el CSV también lo ven); lo que no es renta
+  variable sigue por Categoría;
 - la composición suma el cuadro **Sector** con su torta: cada sector y, al
   final, "Resto de la cartera" (todo lo que no es renta variable). Tocar una
   porción lleva al sector en la tabla.

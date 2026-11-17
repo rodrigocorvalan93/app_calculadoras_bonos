@@ -908,6 +908,8 @@ td[data-fwc]:hover { outline: 1px solid var(--accent); outline-offset: -1px; }
 .comp-c0 { --cc: var(--accent); } .comp-c1 { --cc: var(--green); } .comp-c2 { --cc: var(--amber, #f0b429); }
 .comp-c3 { --cc: var(--red); } .comp-c4 { --cc: #bc8cff; } .comp-c5 { --cc: var(--cyan, #39c5cf); }
 .comp-c6 { --cc: #e3b341; } .comp-c7 { --cc: var(--text-muted); }
+/* Sector · "Resto de la cartera": fuera del ciclo (con 9 filas repetía el tono del sector más grande) */
+.comp-resto { --cc: var(--border); }
 .comp-sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: var(--cc); margin-right: 7px; vertical-align: -1px; }
 .comp-tbl tr.comp-row { cursor: pointer; }
 .comp-tbl tr.comp-row:hover td { background: var(--accent-soft); }
@@ -1198,8 +1200,9 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
 #pos-tbl tr.pos-grp .grp-tag {
   display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px;
   border: 1px solid var(--border); color: var(--text-muted);
-  font-size: var(--fs-xs); font-weight: 500; text-transform: uppercase; letter-spacing: .04em;
+  font-size: var(--fs-xs); font-weight: 500; letter-spacing: .04em;
 }
+#pos-tbl .pos-sector { color: var(--text-muted); font-size: var(--fs-xs); }
 #pos-tbl tr.grp-hide { display: none; }
 .var-up { color: var(--green); }
 .var-down { color: var(--red); }

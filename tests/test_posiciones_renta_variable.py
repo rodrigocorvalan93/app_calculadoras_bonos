@@ -216,6 +216,14 @@ def test_fondo_mixto_no_cambia(especies, monkeypatch) -> None:
     _cartera(positions, monkeypatch, _H7 + _H8, {})
     assert P._fondo_ctx(7, "24hs")["pct_rv"] == pytest.approx(880.0 / 1000.0)
     assert P._fondo_ctx(8, "24hs")["fondo_rv"] is False
+    # un PN viejo / más chico que la cartera no convierte un fondo de renta
+    # fija en "fondo de acciones": el peso va contra el mayor de los dos
+    _cartera(positions, monkeypatch, [
+        {"cod_fondo": 8, "cod_delta": "GGAL", "especie": "GALICIA", "cantidad": 1.0, "valor": 70.0, "clase": "Renta Variable"},
+        {"cod_fondo": 8, "cod_delta": None, "especie": "PLAZO FIJO BANCO MACRO", "cantidad": None, "valor": 930.0, "clase": "Renta Fija"},
+    ], {8: 100.0})
+    ctx = P._fondo_ctx(8, "24hs")
+    assert ctx["fondo_rv"] is False and ctx["pct_rv"] == pytest.approx(0.07)
 
 
 def test_una_fila_de_renta_fija_nunca_se_lee_como_accion(especies, monkeypatch) -> None:
@@ -252,6 +260,30 @@ def test_reporte_renta_variable_sin_sector(especies, monkeypatch) -> None:
     assert [r["code"] for r in rep["sin_sector"]] == ["NUEVA"] and rep["n_sin_sector"] == 1
     assert rep["sin_sector"][0]["en_base"] is False and rep["rv_error"] is None
     assert "NUEVA" not in {r["code"] for r in rep["con_ticker"]}
+    # "Especies faltantes": un ticker que la Base RV sí tiene (el ADR 'VIST US',
+    # que no está en los paneles) no es un "bono sin ficha"; NUEVA sí falta
+    falt = {r["code"] for r in positions.especies_faltantes()["faltantes"]}
+    assert "VIST US" not in falt and "NUEVA" in falt
+    # renta variable SIN ticker y con la Clase cruda: no hay fila de la Base RV
+    # que cargar → sigue en "descripciones sin ticker" (no desaparece)
+    _cartera(positions, monkeypatch, _H7 + [
+        {"cod_fondo": 7, "cod_delta": None, "especie": "DIVIDENDOS A COBRAR", "cantidad": None, "valor": 20.0,
+         "clase": "Renta Variable"}], {7: 1000.0})
+    rep = P.reporte_clasificacion()
+    assert [r["especie"] for r in rep["sin_ticker"]] == ["DIVIDENDOS A COBRAR"]
+    assert [r["code"] for r in rep["sin_sector"]] == ["NUEVA"]
+
+
+def test_dona_conserva_el_indice_de_la_fila() -> None:
+    """Un sector en 0 (una acción sin valor) no se dibuja, pero la porción
+    siguiente conserva el índice de SU fila: mismo color, mismo resaltado y el
+    salto al grupo correcto (antes "Resto de la cartera" quedaba corrido)."""
+    from backend.services import svg_charts
+
+    d = svg_charts.donut([{"label": "A", "val": 3.0}, {"label": "Cero", "val": 0.0},
+                          {"label": "Resto de la cartera", "val": 1.0}])
+    assert [(s["i"], s["label"]) for s in d["slices"]] == [(0, "A"), (2, "Resto de la cartera")]
+    assert d["n"] == 2
 
 
 @pytest.mark.asyncio
@@ -269,8 +301,14 @@ async def test_http_posiciones_fondo_de_acciones(especies, monkeypatch) -> None:
         assert 'data-grp="Sector · Petroleo &amp; Gas"' in t and "pos-grp-sector" in t
         assert 'data-dim="Sector"' in t and "Resto de la cartera" in t
         assert "por sector" in t and "88,0" in t
+        # el sector también es TEXTO de la fila (filtro, orden y CSV leen celdas)
+        assert 'Acciones <span class="pos-sector">· Petroleo &amp; Gas</span>' in t
+        assert 'sector</span> Petroleo &amp; Gas' in t                  # tag y nombre no van pegados
+        assert t.count("comp-resto") == 3                              # fila, porción y leyenda de "Resto"
+        assert 'class="comp-lg" data-i="4" data-cat="Resto de la cartera"' in t
         assert t.index('data-dim="Categoría"') < t.index('data-dim="Sector"') < t.index('data-dim="Tasa"')
         r8 = await ac.get("/posiciones/table", params={"fondo": "8"})
         assert r8.status_code == 200
         assert 'data-dim="Sector"' not in r8.text and "pos-grp-sector" not in r8.text
+        assert "pos-sector" not in r8.text and "comp-resto" not in r8.text
         assert 'data-grp="Acciones"' in r8.text

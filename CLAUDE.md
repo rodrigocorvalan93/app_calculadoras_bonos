@@ -740,13 +740,19 @@ la Base RV toma la categoría de `Instrumento` (Acciones / CEDEARs / ADRs /
 ETFs, fuente `base_rv`) — ficha y Base RF siempre mandan. Cada fila de
 tenencias lleva `es_rv` / `sector` (`Sector Delta`; si falta, el GICS
 `Sector`; sin fila, "(sin sector)") y el emisor de la Base RV. **Fondo de
-acciones** = renta variable > 60 % del PN (sin PN, de lo invertido;
-`_UMBRAL_FONDO_RV`, estricto): `_agrupar_tenencias(por_sector=True)` abre la
+acciones** = renta variable > 60 % del MAYOR entre el PN y lo invertido
+(`_pct_rv`, `_UMBRAL_FONDO_RV`, estricto: un PN viejo o más chico que la
+cartera no convierte un fondo de renta fija en fondo de acciones): `_agrupar_tenencias(por_sector=True)` abre la
 renta variable por SECTOR (grupo `sector: True`, tag "sector", `data-grp =
 "Sector · <nombre>"` para no chocar con una categoría homónima) y
 `_composicion_summary(sector=True)` suma la dimensión **Sector** después de
 Categoría con su dona (lo que no es RV va junto en "Resto de la cartera", al
-final); tocar una porción de Sector lleva al grupo (`app.js`). El resto de los
+final, con color propio `comp-resto`); tocar una porción de Sector lleva al
+grupo (`app.js`). En esos fondos el sector va también como TEXTO en la celda
+Categoría (`.pos-sector`: el filtro, el orden y el CSV leen celdas, no el
+encabezado del grupo). `svg_charts.donut` conserva el índice ORIGINAL del
+item (`i`): fila, porción y leyenda comparten `data-i` y color aunque un item
+en 0 no se dibuje. El resto de los
 fondos no cambia (el sector queda en el tooltip de la Categoría). /admin ·
 Especies faltantes lista la renta variable SIN sector (`reporte_clasificacion()
 ["sin_sector"]`: falta la fila o el `Sector Delta` en la Base RV). Si agregás

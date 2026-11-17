@@ -493,12 +493,17 @@ def especies_faltantes() -> Dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
     eq = _equity_tickers_conocidos()
+    try:                                    # renta variable de la hoja Base RV (ADRs, 'VIST US'…)
+        from backend.services import delta_especies
+        en_rv = delta_especies.info_rv
+    except Exception:  # noqa: BLE001
+        en_rv = lambda _c: None             # noqa: E731
     faltantes: Dict[str, Dict[str, Any]] = {}
     for h in c["holdings"]:
         code = h["cod_delta"]
         if not code or not h.get("es_especie", True):
             continue                        # sin ticker (NC / cash): no es especie
-        if code in bonos or code in eq:
+        if code in bonos or code in eq or en_rv(code) is not None:
             continue
         d = faltantes.setdefault(code, {
             "code": code, "especie": h["especie"], "n_filas": 0, "valor": 0.0})

@@ -214,10 +214,12 @@ def _sector_for(code: Optional[str]) -> str:
 
 
 def _pct_rv(rows: List[Dict[str, Any]], pn: Optional[float]) -> Optional[float]:
-    """Peso de la renta variable del fondo: Σ valor RV / PN (sin PN, sobre lo
-    invertido — el mismo denominador que el resto de Posiciones)."""
+    """Peso de la renta variable del fondo: Σ valor RV sobre el MAYOR entre el
+    PN y lo invertido. Con el PN al día son lo mismo; con un PN viejo o más
+    chico que la cartera (activos brutos) el peso contra el PN solo se
+    inflaba y un fondo con 7 % de acciones pasaba a "fondo de acciones"."""
     total = sum((r.get("valor") or 0.0) for r in rows)
-    denom = pn if (pn and pn > 0) else (total if total > 0 else None)
+    denom = max(pn if (pn and pn > 0) else 0.0, total if total > 0 else 0.0)
     if not denom:
         return None
     return sum((r.get("valor") or 0.0) for r in rows if r.get("es_rv")) / denom
@@ -283,7 +285,10 @@ def reporte_clasificacion() -> Dict[str, Any]:
                 d["fondos"].add(h["cod_fondo"])
             if src == "base_rv":
                 n_base += 1
-            continue
+            if code or src != "sin_regla":
+                continue
+            # sin ticker y con la Clase cruda ('Renta Variable'): no hay fila
+            # de la Base RV que cargar — sigue a `sin_ticker`, como antes
         if src == "base":
             n_base += 1
             continue

@@ -53,11 +53,14 @@ def donut(items: List[Dict[str, Any]], *, size: int = 170, r_in: float = 50.0,
     proporcional a `val` (los ≤ 0 o no finitos no se dibujan); los extras
     (pct, monto…) se conservan en cada porción para la leyenda / tooltip.
     Devuelve {size, cx, cy, slices: [{i, d, frac, ...item}]} o None sin datos.
+    `i` es el índice ORIGINAL del item (no el de la porción): la fila de la
+    tabla, la porción y la leyenda comparten `data-i` y color aunque un item
+    en 0 no se dibuje (antes un sector en 0 corría todo lo que venía después).
     Una sola porción = anillo completo (dos arcos, SVG no dibuja 360° de un
     tirón). El color lo da la clase `comp-c{i}` (CSS, 8 tonos cíclicos)."""
-    vals = [(it, float(it.get("val") or 0.0)) for it in items]
-    vals = [(it, v) for it, v in vals if v > 0 and math.isfinite(v)]
-    total = sum(v for _, v in vals)
+    vals = [(i0, it, float(it.get("val") or 0.0)) for i0, it in enumerate(items)]
+    vals = [(i0, it, v) for i0, it, v in vals if v > 0 and math.isfinite(v)]
+    total = sum(v for _, _, v in vals)
     if not vals or total <= 0:
         return None
     cx = cy = size / 2.0
@@ -73,7 +76,7 @@ def donut(items: List[Dict[str, Any]], *, size: int = 170, r_in: float = 50.0,
 
     slices: List[Dict[str, Any]] = []
     a = -math.pi / 2.0
-    for i, (it, v) in enumerate(vals):
+    for i, it, v in vals:
         frac = v / total
         a1 = a + 2.0 * math.pi * frac
         if len(vals) == 1:
