@@ -142,6 +142,36 @@ def _indexar_rf(df) -> Dict[str, Dict[str, Any]]:
     return by_code
 
 
+# Lo que hace falta de la Base RF para conciliar un código de ESCO con la
+# ficha del bono (services.esco): la base tiene UNA fila por código de ESCO
+# (`Cod_Delta`: el de pesos y el "…D" son filas distintas con el mismo ISIN),
+# y `BYMA` es el ticker con el que el desk lo valúa — por eso el índice de
+# `info()` (por BYMA) no encuentra un `TTCDOD`.
+_KEEP_COD: List[str] = ["ISIN", "Pago", "Cotización", "BYMA", "CAFCI_BYMA", "Descripción"]
+
+
+def _indexar_cod(df) -> Dict[str, Dict[str, Any]]:
+    """Base RF → {Cod_Delta normalizado como el de una tenencia: datos para
+    conciliar}. Un Cod_Delta repetido: manda la primera fila."""
+    if "Cod_Delta" not in df.columns:
+        return {}
+    from backend.services.positions import _norm_code
+    keep = [c for c in _KEEP_COD if c in df.columns]
+    out: Dict[str, Dict[str, Any]] = {}
+    for _, r in df.iterrows():
+        cod = _norm_code(_txt(r.get("Cod_Delta")))
+        if not cod or cod in out:
+            continue
+        rec = {}
+        for c in keep:
+            cv = _txt(r.get(c))
+            if cv is not None:
+                rec[c] = cv
+        if rec:
+            out[cod] = rec
+    return out
+
+
 def _sin_duplicadas(df, hoja: str):
     """Dos columnas con el mismo nombre después de `_flatten` (una celda de
     cabecera combinada, el mismo campo bajo dos grupos) hacen que `r.get(c)`
@@ -206,7 +236,7 @@ def _indexar_rv(df) -> Dict[str, Any]:
 
 def _load() -> Dict[str, Any]:
     out: Dict[str, Any] = {"loaded": False, "error": None, "by_code": {}, "path": None,
-                           "by_code_rv": {}, "n_rv": 0, "error_rv": None}
+                           "by_cod": {}, "by_code_rv": {}, "n_rv": 0, "error_rv": None}
     path = _resolve_path()
     out["path"] = path
     if not path:
@@ -238,6 +268,10 @@ def _load() -> Dict[str, Any]:
             return out
         out["by_code"] = _indexar_rf(df)
         out["loaded"] = True
+        try:                                # índice por código de ESCO: nunca voltea la carga
+            out["by_cod"] = _indexar_cod(df)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[delta_especies] índice por Cod_Delta: %s", exc)
         # Renta variable: best-effort, nunca voltea la Base RF.
         try:
             if _SHEET_RV not in xls.sheet_names:
@@ -270,7 +304,14 @@ def _load() -> Dict[str, Any]:
 
 
 def ensure_loaded() -> Dict[str, Any]:
+    # Fast-path SIN lock (lectura de referencia, atómica por el GIL): refresh()
+    # sostiene `_lock` durante la lectura del Excel (segundos) y los lectores
+    # viven en caminos calientes (`esco.token()` desde `position_for`, por fila
+    # del libro) — con el lock incondicional quedaban frenados detrás.
     global _cache
+    c = _cache
+    if c is not None:
+        return c
     with _lock:
         if _cache is None:
             _cache = _load()
@@ -278,10 +319,13 @@ def ensure_loaded() -> Dict[str, Any]:
 
 
 def refresh() -> Dict[str, Any]:
+    """Carga FUERA del lock y swap adentro: mientras tanto los lectores siguen
+    con la versión anterior."""
     global _cache
+    nuevo = _load()
     with _lock:
-        _cache = _load()
-        return _cache
+        _cache = nuevo
+        return nuevo
 
 
 def status() -> Dict[str, Any]:
@@ -294,6 +338,20 @@ def info(code: Optional[str]) -> Optional[Dict[str, Any]]:
     if not code:
         return None
     return ensure_loaded()["by_code"].get(str(code).strip().upper())
+
+
+def info_cod(code: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Fila de la Base RF del CÓDIGO DE ESCO (`Cod_Delta`, el que trae la
+    cartera): ISIN, Pago (USD cable / USB MEP), BYMA / CAFCI_BYMA. Índice
+    aparte de `info()` (que busca por ticker BYMA). Lookup en memoria."""
+    if not code:
+        return None
+    return (ensure_loaded().get("by_cod") or {}).get(str(code).strip().upper())
+
+
+def generacion() -> int:
+    """Identidad de la carga actual: cambia con cada refresh (keyea memos)."""
+    return id(ensure_loaded())
 
 
 def info_rv(code: Optional[str]) -> Optional[Dict[str, Any]]:

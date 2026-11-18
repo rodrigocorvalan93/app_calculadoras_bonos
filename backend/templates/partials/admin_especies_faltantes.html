@@ -5,7 +5,9 @@
 {% set cl = rep.clasif if rep else none %}
 {% set pendientes_clasif = cl and (cl.n_con_ticker or cl.n_sin_ticker) %}
 {% set pendientes_rv = cl and cl.n_sin_sector %}
-{% if not rep or (rep.n_faltantes == 0 and not pendientes_clasif and not pendientes_rv) %}
+{% set es = cl.esco if cl else none %}
+{% set hay_esco = es and (es.n_resueltos or es.n_sin_resolver or es.n_isin_distinto) %}
+{% if not rep or (rep.n_faltantes == 0 and not pendientes_clasif and not pendientes_rv and not hay_esco) %}
   <p class="muted u-note">{{ icon("check") }} Todas las especies de las carteras están en la base
     (bonos en <code>especies.py</code>, acciones/CEDEARs en los paneles)
     y Posiciones clasifica todo por ficha o por <code>Delta - Especies</code>.</p>
@@ -120,5 +122,84 @@
     </table>
     {% if cl.n_sin_sector > 40 %}<p class="muted u-sm">… y {{ cl.n_sin_sector - 40 }} más (ordenado por valor).</p>{% endif %}
   </div>
+  {% endif %}
+
+  {# ── Códigos de ESCO conciliados con una ficha (services/esco.py) ── #}
+  {% if hay_esco %}
+  <p class="muted u-note" style="margin:10px 0 6px">
+    <strong>Códigos de ESCO → ficha</strong> · ESCO escribe un bono en dólares con su ticker de pesos (más una
+    “D” en los fondos en dólares) y la app lo valúa con la ficha nativa del mismo ISIN.
+    {{ es.n_resueltos }} código(s) conciliado(s){% if es.n_sin_resolver %}, <strong>{{ es.n_sin_resolver }}</strong> en
+    dólares sin ficha{% endif %}{% if es.n_isin_distinto %}, <strong>{{ es.n_isin_distinto }}</strong> con un ISIN
+    distinto al de su ficha{% endif %}. Revisá que cada código vaya a la ficha correcta:
+  </p>
+  {% if es.n_resueltos %}
+  <div class="table-scroll u-mb12">
+    <table class="cashflows curve-table mercado-table" data-sortable>
+      <thead><tr><th class="u-left" data-sort>Código ESCO</th><th class="u-left" data-sort>Ficha</th><th class="u-left" data-sort title="Cómo se encontró la ficha: por el ISIN de la cartera, por el ticker de la base de especies, o por el sufijo de ESCO sobre una especie con ficha">Por</th><th class="u-left" data-sort>ISIN</th><th class="u-left" data-sort>Pago</th><th class="u-left" data-sort>Descripción</th><th class="u-left" data-sort>Fondos</th><th data-sort>Valor</th><th class="u-left">Ojo</th></tr></thead>
+      <tbody>
+        {% for r in es.resueltos[:80] %}
+        <tr>
+          <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.code }}</td>
+          <td class="u-left" style="font-weight:600">{{ r.ficha }}</td>
+          <td class="u-left u-sm">{{ r.via_txt }}</td>
+          <td class="u-left u-sm">{{ r.isin or "—" }}</td>
+          <td class="u-left u-sm">{{ r.pago or "—" }}</td>
+          <td class="u-left" style="font-size:11.5px">{{ r.especie }}</td>
+          <td class="u-left u-sm" style="color:var(--text-muted)">{{ r.fondos }}</td>
+          <td>{{ r.valor | ar_hum }}</td>
+          <td class="u-left u-sm" style="color:var(--text-muted)">{{ r.nota }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if es.n_resueltos > 80 %}<p class="muted u-sm">… y {{ es.n_resueltos - 80 }} más (ordenado por valor).</p>{% endif %}
+  </div>
+  {% endif %}
+  {% if es.n_sin_resolver %}
+  <p class="muted u-note u-mb6"><strong>{{ es.n_sin_resolver }}</strong> bono(s) en dólares sin ficha que los valúe
+    (falta la ficha en <code>especies.py</code>, o su ISIN no coincide con el de la cartera):</p>
+  <div class="table-scroll u-mb12">
+    <table class="cashflows curve-table mercado-table" data-sortable>
+      <thead><tr><th class="u-left" data-sort>Código ESCO</th><th class="u-left" data-sort>ISIN</th><th class="u-left" data-sort>Pago</th><th class="u-left" data-sort>Descripción</th><th class="u-left" data-sort>Por qué</th><th class="u-left" data-sort>Fondos</th><th data-sort>Valor</th></tr></thead>
+      <tbody>
+        {% for r in es.sin_resolver[:60] %}
+        <tr>
+          <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.code }}</td>
+          <td class="u-left u-sm">{{ r.isin or "—" }}</td>
+          <td class="u-left u-sm">{{ r.pago or "—" }}</td>
+          <td class="u-left" style="font-size:11.5px">{{ r.especie }}</td>
+          <td class="u-left u-sm" style="color:var(--text-muted)">{{ r.motivo }}</td>
+          <td class="u-left u-sm" style="color:var(--text-muted)">{{ r.fondos }}</td>
+          <td>{{ r.valor | ar_hum }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if es.n_sin_resolver > 60 %}<p class="muted u-sm">… y {{ es.n_sin_resolver - 60 }} más.</p>{% endif %}
+  </div>
+  {% endif %}
+  {% if es.n_isin_distinto %}
+  <p class="muted u-note u-mb6"><strong>{{ es.n_isin_distinto }}</strong> código(s) con ficha propia cuyo ISIN en la
+    cartera no es el de la ficha — o el ISIN de <code>especies.py</code> está mal, o el código de ESCO coincide
+    con el ticker de otro bono:</p>
+  <div class="table-scroll">
+    <table class="cashflows curve-table mercado-table" data-sortable>
+      <thead><tr><th class="u-left" data-sort>Código</th><th class="u-left" data-sort>ISIN en la cartera</th><th class="u-left" data-sort>ISIN de la ficha</th><th class="u-left" data-sort>Descripción</th><th class="u-left" data-sort>Fondos</th><th data-sort>Valor</th></tr></thead>
+      <tbody>
+        {% for r in es.isin_distinto[:60] %}
+        <tr>
+          <td class="u-left" style="color:var(--accent);font-weight:600">{{ r.code }}</td>
+          <td class="u-left u-sm">{{ r.isin }}</td>
+          <td class="u-left u-sm">{{ r.isin_ficha }}</td>
+          <td class="u-left" style="font-size:11.5px">{{ r.especie }}</td>
+          <td class="u-left u-sm" style="color:var(--text-muted)">{{ r.fondos }}</td>
+          <td>{{ r.valor | ar_hum }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
   {% endif %}
 {% endif %}

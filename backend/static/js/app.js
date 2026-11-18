@@ -2233,7 +2233,7 @@ window.lsSet = function (k, v) {
     g.fillText('Perfil de vencimientos · ' + (card.dataset.nombre || ''), padL, 22);
     g.font = '11px system-ui, sans-serif'; g.fillStyle = cMut;
     g.fillText('flujos proyectados (renta + amortización) · ' +
-               (modo === 'pct' ? '% del fondo' : 'millones de ARS'), padL, 38);
+               (modo === 'pct' ? '% del fondo' : 'millones de ' + (card.dataset.unidad || 'ARS')), padL, 38);
 
     var maxA = 0;
     cols.forEach(function (c) { maxA = Math.max(maxA, parseFloat(c.dataset.ars) || 0); });
@@ -2252,7 +2252,7 @@ window.lsSet = function (k, v) {
       var pct = parseFloat(c.dataset.pct);
       var vTxt = modo === 'pct'
         ? (isNaN(pct) ? '' : fmtAR(pct * 100, 1) + '%')
-        : fmtAR(ars / 1e6, 0) + 'M';
+        : fmtAR(ars / 1e6, card.dataset.unidad === 'USD' ? 2 : 0) + 'M';
       g.fillText(vTxt, x + bw / 2, base - h - 5);
       g.fillText(c.dataset.label || '', x + bw / 2, base + 14);
       g.textAlign = 'left';

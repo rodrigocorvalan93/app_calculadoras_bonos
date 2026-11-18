@@ -636,6 +636,39 @@ la serie (límite de rentafija, igual que el YAS). Regresión:
 `test_excel_api.test_calc_cashflow_pendientes_todos_y_settle`, casos `cf_*`
 de `excel_getters_harness.cjs`, `test_excel_getters.test_cashflow_en_metadata_docs_y_panel`.
 
+## Add-in de Excel — cálculos con plazo y reintento (18/11, v27)
+
+Desk: "OMS.TIREA se queda ocupado mucho tiempo, a veces anda, a veces no",
+con 1 a 4 celdas. El server no era (≈ 3 ms por celda, lote de 40 repetido
+p95 4 ms; `_calc_batch` en el executor, sin locks compartidos con el camino
+live): `OMSCalc.sendChunk` hacía un `fetch` SIN plazo ni reintento. Un POST
+que se colgaba entre Excel y el puente https (webview suspendido por Office,
+conexión que no termina) dejaba la celda en #¡OCUPADO! hasta los 120 s del
+puente y, peor, `pending[k]` vivo para siempre: cada F9 de la MISMA fórmula
+se colgaba del pedido muerto hasta recargar el complemento. Ahora
+`postCalc(items, ms)` = carrera fetch + cuerpo contra un plazo con
+`AbortController` (mismo patrón que `fetchBody` / `histFn`),
+`CALC_TIMEOUTS_MS = [10000, 20000]`: plazo vencido, red caída, 5xx o cuerpo
+cortado → UN reintento a los 400 ms (el cálculo es puro, repetirlo es seguro,
+y el server ya cacheó lo que alcanzó a hacer); 401 / 4xx son definitivos. Si
+tampoco responde, la celda sale #N/D con "El servidor no respondió el cálculo
+(…, 2 intentos)" y `settle` libera `pending`: la fórmula se puede re-pedir.
+Dedup en vuelo, batch de 80 ms y memo intactos. **Diagnóstico** (para saber
+DÓNDE se va el tiempo la próxima vez, todo al log / ring de /admin): beacons
+`calc-lento` (≥ 3 s), `calc-reintento`, `calc-reintento-ok`, `calc-fallo`
+(`[addin functions|shared] …`); server `[excel calc] lento: N item(s) · espera
+del pool X ms · cálculo Y ms · más lento: <tipo> <code>` desde
+`_CALC_LENTO_S` (1 s; `_calc_batch_medido` mide por item, mismo resultado que
+`_calc_batch`); puente `[tls] lento | corte | 502 | 503: <MÉTODO /ruta>` sólo
+para `/excel/*`, con throttle de 10 s por (motivo, ruta) y la ruta SIN query
+(el manifest per-usuario lleva `?token=`). Cómo leerlo: `calc-reintento` sin
+`[excel calc] lento` ni `[tls] lento` = el pedido no llegó al server (Excel /
+webview / red local); `[tls] lento` sin `[excel calc] lento` = el tiempo se
+fue entre el puente y uvicorn (event loop ocupado); `espera del pool` alta =
+el executor default estaba tomado por otra cosa. El add-in cacheado de cada
+Excel toma el `functions.js` nuevo al reabrir Excel (`OMS.PING()` = v27).
+Regresión: `tests/test_excel_calc_reintento.py` + `tests/excel_calc_harness.cjs`.
+
 ## Add-in de Excel — patas calculadas en minúscula (15/10)
 
 Las fichas calculadas llevan sufijo en MINÚSCULA (`…v` = pata TAMAR de los
@@ -662,7 +695,8 @@ USD/USB → ARS Fija/TAMAR/BADLAR/Step Up). SIN ficha entra
 `services/clasificacion.py` (stdlib puro, ~µs por fila), primer match gana:
 (1) **tipo de instrumento por texto** — fila de `Delta - Especies` si el ticker
 está (Subclase / Clase de Activo / Industria / Sector Delta), descripción de
-la cartera (columna `Especie`) y Clase de Activo del Excel: Plazos Fijos ·
+la cartera (columna `Inversion` del archivo real; `Especie` si existiera) y
+Clase de Activo del Excel: Plazos Fijos ·
 Caución · Cheques (No) Garantizados · Pagarés (No) Garantizados ·
 Fideicomisos TAMAR/BADLAR | CER/UVA | Tasa Fija | USD-Linked | USD |
 Financieros · FCI Money Markets | FCI Cerrados | FCI; (2) **Ajuste × Tasa de
@@ -758,6 +792,74 @@ Especies faltantes lista la renta variable SIN sector (`reporte_clasificacion()
 ["sin_sector"]`: falta la fila o el `Sector Delta` en la Base RV). Si agregás
 columnas de la Base RV, van en `delta_especies._KEEP_RV`. Regresión:
 `tests/test_posiciones_renta_variable.py`.
+
+**Código de ESCO → ficha (18/11, delicado)**: ESCO no nombra a los bonos
+como el mercado. Un bono en dólares va con su ticker de PESOS y una "D" atrás
+cuando la contabilidad del fondo es en dólares (`GD30` / `GD30D`, `TTCDO` /
+`TTCDOD`; el "…D" es una especie aparte en ESCO, mismo ISIN, NO la pata MEP),
+no distingue USB de USD y a veces ni usa el ticker (`YPF34` = `YM34O`). La
+app valúa con UNA ficha nativa (`GD30C`, `TTCDC`) y las letras cambian de
+orden (`RCC1OD` → `RC1CC`, `BPOC7D` → `BPC7D`): Delta Renta Dólares Plus no
+reconocía `TTCDOD`. `services/esco.py` concilia por DATO, nunca por sufijo a
+ciegas: (1) **ISIN** — la composición lo trae por fila (`IsinCode`, con
+`Pago` y `CAFCI_BYMA`; respaldo: la fila del código en la Base RF,
+`delta_especies.info_cod`, índice por `Cod_Delta` aparte de `info()` que es
+por BYMA) → fichas del universo con ese ISIN sin las patas `j` / `v`; por si
+`especies.py` arrastra un ISIN repetido entre dos bonos (pasó con GD29 / GD30
+y VSCV / VSCX, ver abajo) el grupo se parte por vencimiento + cupón y se
+elige el bono que comparte raíz con el código — si no queda UNO, no se
+resuelve; dentro del bono va la NATIVA (la DIRTY: `CO32D` es la referencia
+CLEAN y valúa `CO32DC`), y con varias decide el pago de la base (USB → …D,
+USD → …C), después el ticker de la base y al final el parecido (`BPOA8D` →
+`BPA8D`, con nota); (2) **ticker de la base** con ficha, sólo sin ISIN útil o
+si es del mismo bono (misma raíz); (3) **sufijo** sobre una especie en pesos
+CON ficha en dólares (`GD29D` → `GD29C`), último recurso. **Una contradicción
+no se resuelve** (revisión del 18/11): ISIN de un bono y código / ficha de la
+raíz de otro, o la cartera dice que paga en pesos y la ficha es hard-dollar
+(y al revés) → sin ficha, con el motivo en /admin; alguna de las dos fuentes
+está mal y no se elige por ella. Un código con ficha propia no pasa por ahí
+(`AL30D`, `GD30`, `BA37D`). `routes/posiciones._calc(h)` es
+el código de la ficha para categoría / vencimiento / perfil de flujos, y
+`_fila_precio`: fondo en DÓLARES (`positions.fondo_moneda`, columna `Moneda`
+de Delta_Fondos.txt; sin ella, el sufijo) → fila de la nativa con su ticker;
+fondo en PESOS → la especie en pesos (el ticker de la base si tiene ficha,
+si no `leg="ARS"` de la nativa, y la nativa si ahí no hay precio — en ese
+último caso el Last queda VACÍO: nunca un precio en dólares contra una
+valuación en pesos, el "Ret. día" daba −33 %; TIR y duration se conservan).
+**Un solo dólar por fondo** (regla del desk, 18/11): ESCO contabiliza cada
+fondo en UN dólar (`Moneda` USD = cable, USB = MEP) → `_con_canje`: fondo
+cable con un bono que cotiza en MEP = Last × MEP / CCL (se le saca el canje);
+fondo MEP con un bono cable = Last × CCL / MEP (se le suma); misma pata o
+fondo de moneda desconocida = nada. Vale también para un código con ficha
+propia (`AL30D` en un fondo cable). Usa el CCL / MEP implícito de
+`fx.get_fx(plazo)` (cacheado) vía `fx.normalize_price`; cambia SÓLO el Last
+de pantalla sobre una COPIA de la fila (la fila memoizada es compartida): la
+TIR / duration son las del precio de mercado del bono en su dólar. La columna
+de fuente lleva "canje" con el cálculo en el tooltip (`.pos-canje`), o "sin
+canje" si falta el FX (Last crudo). El perfil de vencimientos va en la moneda
+del fondo (`unidad` USD / ARS; antes dividía flujos en pesos por un PN en
+dólares), `position_for` no da total cuando los fondos mezclan pesos y
+dólares, y el feed suscribe los tickers de las fichas conciliadas
+(`positions.tickers_conciliados()` en `main._initial_symbols`: sin eso la
+nativa de un bono que sólo está en cartera no tenía precio). La fila
+muestra el código de ESCO con "→ TTCDC" (tooltip con vía, ISIN, pago y
+notas) y linkea a YAS con la ficha; `positions.position_for("TTCDC")` suma
+las tenencias conciliadas (`_agg_por_ficha`, memo por generación +
+`esco.token()`); "Especies faltantes" no las lista. `positions._load` lee la
+descripción de `Inversion` (el archivo real NO tiene `Especie`: el Nombre
+quedaba vacío y la clasificación por descripción no veía nada) y guarda
+`isin` / `pago` / `ticker` por tenencia. /admin · Especies faltantes suma
+`reporte_clasificacion()["esco"]` (`esco.diagnostico`): código → ficha por
+qué vía, bonos en dólares sin ficha con el motivo, y códigos con ficha
+propia cuyo ISIN en la cartera no es el de la ficha. **ISIN corregidos en
+`especies.py`** (18/11, con el OK explícito del desk, verificados contra el
+maestro de especies de ESCO): GD29 / GD29C llevaban el de GD30 → ahora
+`US040114HX11`; VSCXO / VSCXC llevaban el de VSCV → `USP9659RAD00`. Queda
+SIN tocar y avisado: RB66O lleva el ISIN de RB65O (`AR0910275855`; ESCO dice
+`AR0006343054`) y BPOA8 / BPOB8 / BPA8D / BPB8D comparten `AR0029227748`
+(ESCO no tiene esas especies para comparar). Medido warm
+`/posiciones/table` (32 tenencias, 89 KB): fondo dólar p50 8,4 · p95 9,7 ms;
+fondo pesos p50 9,9 · p95 14,2 ms. Regresión: `tests/test_posiciones_esco.py`.
 
 **Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las rutas de pestaña
 llevan `@_pestana_resiliente(...)` — una excepción responde 200 con

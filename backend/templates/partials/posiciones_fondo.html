@@ -80,7 +80,7 @@
                 data-tirea-proy="{{ r.tirea_proy if r.tirea_proy is not none and r.tirea_proy == r.tirea_proy else '' }}"
                 data-dur-proy="{{ r.duration_proy if r.duration_proy is not none and r.duration_proy == r.duration_proy else '' }}">
               <td class="u-left" style="color:var(--accent);font-weight:600">
-                {% if r.in_universe %}<a href="/yas?code={{ r.cod_delta }}" title="Abrir en YAS">{{ r.abrev }}</a>{% else %}{{ r.abrev }}{% endif %}
+                {% if r.in_universe %}<a href="/yas?code={{ r.ficha or r.cod_delta }}" title="Abrir en YAS">{{ r.abrev }}</a>{% else %}{{ r.abrev }}{% endif %}{% if r.ficha %} <span class="pos-ficha" title="{{ r.ficha_txt }}">→ {{ r.ficha }}</span>{% endif %}
               </td>
               <td class="u-left u-note u-ellipsis" style="max-width:210px" title="{{ r.nombre or '' }}">{{ r.nombre or "—" }}</td>
               <td class="u-left u-sm u-ellipsis" style="max-width:150px" title="{{ r.emisor or '' }}">{{ r.emisor or "—" }}</td>
@@ -114,7 +114,7 @@
               <td class="pos-dur-cell"><input class="pos-dur cell-edit" type="text" inputmode="decimal"
                      value="{{ r.duration | ar_num(2) if r.duration is not none and r.duration == r.duration else '' }}"
                      placeholder="✎" title="Duration en años (ej. 2,35) — editable; alimenta la Dur ponderada del fondo"></td>
-              <td class="u-xs muted">{{ r.price_source or "—" }}</td>
+              <td class="u-xs muted">{{ r.price_source or "—" }}{% if r.canje %} <span class="pos-canje" title="{{ r.canje_txt }}">{{ r.canje }}</span>{% endif %}</td>
             </tr>
           {% endfor %}
           {% endfor %}

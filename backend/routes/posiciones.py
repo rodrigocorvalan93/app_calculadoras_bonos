@@ -18,7 +18,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _row_for_code
-from backend.services import auth, bond_universe, clasificacion, delta_especies, positions, pricing, svg_charts
+from backend.services import auth, bond_universe, clasificacion, delta_especies, esco, positions, pricing, svg_charts
+from backend.services import fx as fx_svc
+from backend import locale_ar
 
 _TZ_BA = ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -37,6 +39,100 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 # ── categorización (lee atributos del Bono del universo) ───────────────────
 def _bono(code: Optional[str]):
     return bond_universe.get(code) if code else None
+
+
+def _calc(h: Dict[str, Any]) -> Optional[str]:
+    """Código de la FICHA que describe y valúa la tenencia: el suyo si tiene
+    ficha propia; si no, el que concilia `services.esco` (ESCO escribe un bono
+    en dólares como su ticker de pesos + "D": TTCDOD → TTCDC, GD30D → GD30C;
+    o con un código propio: YPF34 → YM34C). Sin conciliación, el código tal
+    cual (sin ficha, como siempre)."""
+    code = h.get("cod_delta")
+    if not code:
+        return None
+    f = esco.resolver_h(h)
+    return f.calc if f is not None else code
+
+
+def _fila_precio(h: Dict[str, Any], f, plazo: str, settle: Optional[str]):
+    """Fila de precio + métricas de la tenencia. Con ficha propia, la de
+    siempre. Conciliada por `esco`: la ficha nativa — en un fondo en DÓLARES
+    con su ticker nativo (precio en dólares, lo que pide el desk); en un fondo
+    en PESOS con la especie en pesos del mismo bono (el precio ÷ FX entra a la
+    misma ficha, así el Last queda en la moneda del Valor del fondo)."""
+    code = h.get("cod_delta")
+    if not code:
+        return None
+    mon = positions.fondo_moneda(h.get("cod_fondo"))
+    if f is None:
+        return _con_canje(_row_for_code(code, plazo, settle=settle), code, mon, plazo)
+    calc = f.calc
+    en_dolares = (mon in ("USD", "USB")) if mon else code.upper().strip()[-1:] in ("D", "C")
+    nativa = esco.es_dolar(calc) and calc[-1:] in ("C", "D")     # su ticker cotiza en dólares
+    if not esco.es_dolar(calc):
+        m, px_dolar = _row_for_code(calc, plazo, settle=settle), False
+    elif en_dolares:
+        m, px_dolar = _row_for_code(calc, plazo, settle=settle), nativa
+    else:
+        m, px_dolar = None, False
+        tk = h.get("ticker")
+        # la especie en pesos con ficha propia, SÓLO si es del mismo bono
+        if (tk and tk != calc and tk[-1:] not in ("C", "D") and esco.es_dolar(tk)
+                and (pricing.native_dollar_code(tk) or tk) == calc):
+            m = _row_for_code(tk, plazo, settle=settle)
+        if (m is None or not m.get("price_source")) and nativa:
+            m = _row_for_code(calc, plazo, leg="ARS", settle=settle)
+        if m is None or not m.get("price_source"):
+            m, px_dolar = _row_for_code(calc, plazo, settle=settle), nativa
+    # Nunca un Last en OTRA moneda que la del Valor del fondo: el "Ret. día"
+    # (Last vs precio de valuación, reescalado por potencias de 10) daba −33 %
+    # con un precio en dólares contra una valuación en pesos. TIR y duration
+    # valen igual; el precio de pantalla queda vacío.
+    if m is not None and px_dolar != en_dolares and m.get("last") is not None:
+        m = dict(m)                     # copia: la fila está memoizada y es compartida
+        m["last"] = None
+        m["price_source"] = None
+        return m
+    return _con_canje(m, calc, mon, plazo) if en_dolares else m
+
+
+_DOLAR_TXT = {"USD": "cable", "USB": "MEP"}
+
+
+def _con_canje(m, priced: Optional[str], mon: Optional[str], plazo: str):
+    """ESCO contabiliza UN solo dólar por fondo (regla del desk, 18/11): en un
+    fondo CABLE (USD) a un bono que cotiza en MEP se le saca el canje
+    (× MEP / CCL) y en un fondo MEP (USB) a un bono que cotiza en cable se le
+    suma (× CCL / MEP). `priced` = el código cuyo ticker dio el Last: su pata
+    es la Moneda de la ficha nativa (…C = USD, …D = USB). Sólo cambia el Last
+    de PANTALLA (el que se compara con el precio de valuación del fondo): la
+    TIR / duration son las del precio de mercado del bono en su dólar. Sin
+    CCL / MEP implícito el Last queda crudo y la fila lo dice."""
+    if m is None or mon not in _DOLAR_TXT or not priced or m.get("last") is None:
+        return m
+    if priced[-1:] not in ("C", "D"):
+        return m
+    pata = (pricing.bond_meta(priced) or {}).get("moneda")
+    if pata not in _DOLAR_TXT or pata == mon:
+        return m
+    last = m["last"]
+    conv = fx_svc.normalize_price(last, pata, mon, fx_svc.get_fx(plazo))
+    m = dict(m)                         # copia: la fila está memoizada y es compartida
+    de, a = _DOLAR_TXT[pata], _DOLAR_TXT[mon]
+    if conv is None:
+        m["canje"] = "sin canje"
+        m["canje_txt"] = ("El fondo contabiliza dólar " + a + " y " + priced + " cotiza en dólar "
+                          + de + ": falta el CCL / MEP implícito, el Last es el de " + priced
+                          + " sin ajustar por canje.")
+        return m
+    m["last"] = conv
+    m["canje"] = "canje"
+    m["canje_txt"] = ("El fondo contabiliza dólar " + a + ": Last de " + priced + " (" + de + ") "
+                      + locale_ar.fmt_num(last, 2) + (" × MEP / CCL" if mon == "USD" else " × CCL / MEP")
+                      + " = " + locale_ar.fmt_num(conv, 2)
+                      + (" (se le saca el canje)" if mon == "USD" else " (se le suma el canje)")
+                      + ". TIR y duration: las del precio de mercado.")
+    return m
 
 
 def _ficha_leg(code: Optional[str]):
@@ -266,7 +362,7 @@ def reporte_clasificacion() -> Dict[str, Any]:
     n_total = n_ficha = n_base = n_rv = 0
     for h in c["holdings"]:
         code = h.get("cod_delta")
-        cat, src = _clasif(h, _bono(code))
+        cat, src = _clasif(h, _bono(_calc(h)))
         n_total += 1
         if src == "ficha":
             n_ficha += 1
@@ -327,6 +423,8 @@ def reporte_clasificacion() -> Dict[str, Any]:
             # por qué no hay sectores si la hoja entera no se leyó (sin eso la
             # tarjeta mandaba a cargar filas que ya existen)
             "rv_error": _rv_error(),
+            # códigos de ESCO conciliados con una ficha (y los que no se pudo)
+            "esco": esco.diagnostico(c["holdings"], positions.fondo_label),
             "n_total": n_total, "n_ficha": n_ficha, "n_base": n_base}
 
 
@@ -413,7 +511,7 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float],
     for h in hs:
         valor = h.get("valor") or 0.0
         code = h.get("cod_delta")
-        obj = _bono(code)
+        obj = _bono(_calc(h))
         cat, cat_src = _clasif(h, obj)
         keys = {
             "Clase de Activo": h.get("clase") or "(sin clasif.)",
@@ -499,8 +597,10 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
 
     for h in hs:
         code = h.get("cod_delta")
-        obj = _bono(code)
-        m = _row_for_code(code, plazo, settle=settle) if code else None
+        fe = esco.resolver_h(h) if code else None    # código de ESCO → ficha (None = ficha propia / sin conciliar)
+        calc = fe.calc if fe is not None else code
+        obj = _bono(calc)
+        m = _fila_precio(h, fe, plazo, settle)
         # Especies fuera del universo de bonos (acciones, CEDEARs): el Last
         # sale directo del store del WS (lookup en memoria, ~µs) — antes estas
         # filas quedaban sin precio porque bond_meta(code) es vacío.
@@ -524,8 +624,8 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
         # Abreviatura (ticker del desk) + nombre completo aparte — igual que la
         # matriz: prevalece el nombre de la cartera; sin él, el de la ficha.
         nombre = h.get("especie") if h.get("especie") != code else None
-        if not nombre and code:
-            nombre = (pricing.bond_meta(code) or {}).get("nombre") or None
+        if not nombre and calc:
+            nombre = (pricing.bond_meta(calc) or {}).get("nombre") or None
         tirea = (m or {}).get("tirea")
         duration = (m or {}).get("duration")
         # Versión PROYECTADA (para el switch del chip TIR/Dur del fondo —
@@ -539,15 +639,15 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
         #   duration, (1+tir)·(1+tea_fut)−1 — la MISMA fórmula que los
         #   sintéticos de Futuros. La duration del bono no cambia.
         tirea_p, dur_p = tirea, duration
-        if code and m is not None:
-            if bond_universe.get(code + "j") is not None:
-                mj = _row_for_code(code + "j", plazo, settle=settle)
+        if calc and m is not None:
+            if bond_universe.get(calc + "j") is not None:
+                mj = _row_for_code(calc + "j", plazo, settle=settle)
                 if mj is not None:
                     if mj.get("tirea") is not None:
                         tirea_p = mj["tirea"]
                     if mj.get("duration") is not None:
                         dur_p = mj["duration"]
-            elif (pricing._bond_index_kind(code) == "a3500"
+            elif (pricing._bond_index_kind(calc) == "a3500"
                   and tirea is not None and tirea == tirea):
                 tea = _tea_rofex(duration)
                 if tea is not None:
@@ -562,13 +662,21 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             **h,
             "abrev": code or "—",
             "nombre": nombre or "",
+            # ficha con la que se valúa cuando el código de ESCO no es el del
+            # mercado (TTCDOD → TTCDC): link a YAS y aclaración en la celda
+            "ficha": fe.calc if fe is not None else None,
+            "ficha_txt": ("Código de ESCO " + str(code) + ": se valúa con la ficha " + fe.calc
+                          + " (" + esco.VIAS.get(fe.via, fe.via)
+                          + (", ISIN " + fe.isin if fe.isin else "")
+                          + (", paga " + fe.pago if fe.pago else "") + ")"
+                          + (". Ojo: " + fe.nota if fe.nota else "")) if fe is not None else "",
             # renta variable: sector de la hoja 'Base RV' (agrupa la tabla y
             # la composición en los fondos de acciones; tooltip en el resto)
             "es_rv": es_rv,
             "sector": sector,
             "in_universe": m is not None,
             "pct_pn": (valor / denom) if (valor is not None and denom) else None,
-            "emisor": _emisor_for(code, obj),
+            "emisor": _emisor_for(code, obj) or (_emisor_for(calc, obj) if calc != code else None),
             "categoria": cat,
             # de dónde salió la categoría (tooltip): ficha / base / texto / clase / sin_regla
             "cat_src": cat_src,
@@ -587,6 +695,9 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             "vencimiento": _venc_date(obj if obj is not None else _ficha_leg(code)),
             "last": last_val,
             "price_source": (m or {}).get("price_source") if m is not None else eq_src,
+            # un solo dólar por fondo: Last ajustado por canje (cable ↔ MEP)
+            "canje": (m or {}).get("canje"),
+            "canje_txt": (m or {}).get("canje_txt") or "",
         })
     rows.sort(key=lambda r: (r.get("valor") or 0.0), reverse=True)
     return rows
@@ -783,7 +894,7 @@ def _perfil_vencimientos(selected: Optional[int],
     al bucket "sin vencimiento" (acciones, CEDEARs, FCI, liquidez).
     """
     vacio = {"bars": [], "otros_pct": None, "otros_ars": 0.0,
-             "total_ars": 0.0, "nombre": "", "fondo": selected}
+             "total_ars": 0.0, "nombre": "", "fondo": selected, "unidad": "ARS"}
     if selected is None:
         return vacio
     hs = positions.holdings(selected, visibles)
@@ -799,11 +910,18 @@ def _perfil_vencimientos(selected: Optional[int],
 
     from backend.services import fx as fx_svc
     fxs = fx_svc.get_fx("24hs")
+    # Los flujos van en la moneda del FONDO (la del Valor y el PN): en un fondo
+    # en dólares los pesos se dividen por su FX y los dólares quedan como
+    # están. Antes todo iba a pesos y se dividía por un PN en dólares (barras
+    # de miles de % en los fondos en dólares).
+    mon_fondo = positions.fondo_moneda(selected)
+    fondo_dolar = mon_fondo in ("USD", "USB")
+    fx_fondo = ((fxs.usb or fxs.ccl) if mon_fondo == "USB" else (fxs.ccl or fxs.usb)) if fondo_dolar else None
 
-    flujos: Dict[str, List[float]] = {}      # bucket → [renta, amortización] ARS
+    flujos: Dict[str, List[float]] = {}      # bucket → [renta, amortización] en la moneda del fondo
     otros = 0.0
     for h in hs:
-        code, cant, valor = h.get("cod_delta"), h.get("cantidad"), (h.get("valor") or 0.0)
+        code, cant, valor = _calc(h), h.get("cantidad"), (h.get("valor") or 0.0)
         obj = pricing._bond_obj_copy(code) if code else None
         if obj is None or not hasattr(obj, "generate_cashflows") or not cant:
             otros += valor
@@ -811,11 +929,14 @@ def _perfil_vencimientos(selected: Optional[int],
         pricing.aplicar_fx_dlk(obj, code)   # DLK: flujos en pesos al FX aplicable de hoy
         mon = (getattr(obj, "moneda", "") or "").upper()
         rate = 1.0
-        if mon == "USD":
+        if fondo_dolar:
+            if mon not in ("USD", "USB"):               # flujo en pesos → dólares del fondo
+                rate = (1.0 / fx_fondo) if fx_fondo else 0.0
+        elif mon == "USD":
             rate = fxs.ccl or fxs.usb or 0.0
         elif mon == "USB":
             rate = fxs.usb or fxs.ccl or 0.0
-        if not rate:                    # ficha en dólares sin FX: no inventar
+        if not rate:                    # sin FX para convertir: no inventar
             otros += valor
             continue
         try:
@@ -871,6 +992,7 @@ def _perfil_vencimientos(selected: Optional[int],
            "otros_ars": otros,
            "total_ars": sum(b["ars"] for b in bars),
            "nombre": positions.fondo_label(selected),
+           "unidad": "USD" if fondo_dolar else "ARS",
            "fondo": selected}
     with _perfil_lock:
         if len(_perfil_cache) > 64:     # fondos × días: nunca crece de verdad
