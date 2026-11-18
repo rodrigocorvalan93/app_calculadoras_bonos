@@ -64,20 +64,33 @@ def _fila_precio(h: Dict[str, Any], f, plazo: str, settle: Optional[str]):
     if f is None:
         return _row_for_code(code, plazo, settle=settle)
     calc = f.calc
-    if not esco.es_dolar(calc):
-        return _row_for_code(calc, plazo, settle=settle)
     mon = positions.fondo_moneda(h.get("cod_fondo"))
-    en_dolares = (mon in ("USD", "USB")) if mon else code.upper()[-1:] in ("D", "C")
-    if not en_dolares:
+    en_dolares = (mon in ("USD", "USB")) if mon else code.upper().strip()[-1:] in ("D", "C")
+    nativa = esco.es_dolar(calc) and calc[-1:] in ("C", "D")     # su ticker cotiza en dólares
+    if not esco.es_dolar(calc):
+        m, px_dolar = _row_for_code(calc, plazo, settle=settle), False
+    elif en_dolares:
+        m, px_dolar = _row_for_code(calc, plazo, settle=settle), nativa
+    else:
+        m, px_dolar = None, False
         tk = h.get("ticker")
-        if tk and tk != calc and tk[-1:] not in ("C", "D") and esco.es_dolar(tk):
-            m = _row_for_code(tk, plazo, settle=settle)       # especie en pesos con ficha propia
-            if m is not None and m.get("price_source"):
-                return m
-        m = _row_for_code(calc, plazo, leg="ARS", settle=settle)
-        if m is not None and m.get("price_source"):
-            return m
-    return _row_for_code(calc, plazo, settle=settle)
+        # la especie en pesos con ficha propia, SÓLO si es del mismo bono
+        if (tk and tk != calc and tk[-1:] not in ("C", "D") and esco.es_dolar(tk)
+                and (pricing.native_dollar_code(tk) or tk) == calc):
+            m = _row_for_code(tk, plazo, settle=settle)
+        if (m is None or not m.get("price_source")) and nativa:
+            m = _row_for_code(calc, plazo, leg="ARS", settle=settle)
+        if m is None or not m.get("price_source"):
+            m, px_dolar = _row_for_code(calc, plazo, settle=settle), nativa
+    # Nunca un Last en OTRA moneda que la del Valor del fondo: el "Ret. día"
+    # (Last vs precio de valuación, reescalado por potencias de 10) daba −33 %
+    # con un precio en dólares contra una valuación en pesos. TIR y duration
+    # valen igual; el precio de pantalla queda vacío.
+    if m is not None and px_dolar != en_dolares and m.get("last") is not None:
+        m = dict(m)                     # copia: la fila está memoizada y es compartida
+        m["last"] = None
+        m["price_source"] = None
+    return m
 
 
 def _ficha_leg(code: Optional[str]):
@@ -836,7 +849,7 @@ def _perfil_vencimientos(selected: Optional[int],
     al bucket "sin vencimiento" (acciones, CEDEARs, FCI, liquidez).
     """
     vacio = {"bars": [], "otros_pct": None, "otros_ars": 0.0,
-             "total_ars": 0.0, "nombre": "", "fondo": selected}
+             "total_ars": 0.0, "nombre": "", "fondo": selected, "unidad": "ARS"}
     if selected is None:
         return vacio
     hs = positions.holdings(selected, visibles)
@@ -852,8 +865,15 @@ def _perfil_vencimientos(selected: Optional[int],
 
     from backend.services import fx as fx_svc
     fxs = fx_svc.get_fx("24hs")
+    # Los flujos van en la moneda del FONDO (la del Valor y el PN): en un fondo
+    # en dólares los pesos se dividen por su FX y los dólares quedan como
+    # están. Antes todo iba a pesos y se dividía por un PN en dólares (barras
+    # de miles de % en los fondos en dólares).
+    mon_fondo = positions.fondo_moneda(selected)
+    fondo_dolar = mon_fondo in ("USD", "USB")
+    fx_fondo = ((fxs.usb or fxs.ccl) if mon_fondo == "USB" else (fxs.ccl or fxs.usb)) if fondo_dolar else None
 
-    flujos: Dict[str, List[float]] = {}      # bucket → [renta, amortización] ARS
+    flujos: Dict[str, List[float]] = {}      # bucket → [renta, amortización] en la moneda del fondo
     otros = 0.0
     for h in hs:
         code, cant, valor = _calc(h), h.get("cantidad"), (h.get("valor") or 0.0)
@@ -864,11 +884,14 @@ def _perfil_vencimientos(selected: Optional[int],
         pricing.aplicar_fx_dlk(obj, code)   # DLK: flujos en pesos al FX aplicable de hoy
         mon = (getattr(obj, "moneda", "") or "").upper()
         rate = 1.0
-        if mon == "USD":
+        if fondo_dolar:
+            if mon not in ("USD", "USB"):               # flujo en pesos → dólares del fondo
+                rate = (1.0 / fx_fondo) if fx_fondo else 0.0
+        elif mon == "USD":
             rate = fxs.ccl or fxs.usb or 0.0
         elif mon == "USB":
             rate = fxs.usb or fxs.ccl or 0.0
-        if not rate:                    # ficha en dólares sin FX: no inventar
+        if not rate:                    # sin FX para convertir: no inventar
             otros += valor
             continue
         try:
@@ -924,6 +947,7 @@ def _perfil_vencimientos(selected: Optional[int],
            "otros_ars": otros,
            "total_ars": sum(b["ars"] for b in bars),
            "nombre": positions.fondo_label(selected),
+           "unidad": "USD" if fondo_dolar else "ARS",
            "fondo": selected}
     with _perfil_lock:
         if len(_perfil_cache) > 64:     # fondos × días: nunca crece de verdad

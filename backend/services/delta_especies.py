@@ -304,7 +304,14 @@ def _load() -> Dict[str, Any]:
 
 
 def ensure_loaded() -> Dict[str, Any]:
+    # Fast-path SIN lock (lectura de referencia, atómica por el GIL): refresh()
+    # sostiene `_lock` durante la lectura del Excel (segundos) y los lectores
+    # viven en caminos calientes (`esco.token()` desde `position_for`, por fila
+    # del libro) — con el lock incondicional quedaban frenados detrás.
     global _cache
+    c = _cache
+    if c is not None:
+        return c
     with _lock:
         if _cache is None:
             _cache = _load()
@@ -312,10 +319,13 @@ def ensure_loaded() -> Dict[str, Any]:
 
 
 def refresh() -> Dict[str, Any]:
+    """Carga FUERA del lock y swap adentro: mientras tanto los lectores siguen
+    con la versión anterior."""
     global _cache
+    nuevo = _load()
     with _lock:
-        _cache = _load()
-        return _cache
+        _cache = nuevo
+        return nuevo
 
 
 def status() -> Dict[str, Any]:

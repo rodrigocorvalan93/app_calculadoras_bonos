@@ -286,3 +286,125 @@ async def test_http_admin_lista_los_codigos_conciliados(carteras, tmp_path, monk
             assert "ISIN de la ficha" in t and "US040114HX11" in t              # GD29: ISIN distinto al de la ficha
     finally:
         auth.refresh()
+
+
+# ── revisión independiente del 18/11 ────────────────────────────────────────
+def test_contradicciones_no_se_resuelven() -> None:
+    """Cuando la cartera y las fichas se contradicen, una de las dos está mal:
+    no se elige por ella. Queda sin ficha y /admin dice por qué."""
+    bond_universe.ensure_loaded()
+
+    def sin(code, isin=None, pago=None, ticker=None, texto="contradicción"):
+        h = {"cod_delta": code, "isin": isin, "pago": pago, "ticker": ticker}
+        assert esco.resolver_h(h) is None, (code, esco.resolver_h(h))
+        assert texto in esco.motivo(h), esco.motivo(h)
+
+    # el código dice GD29 y el ticker GD30, dentro del ISIN que comparten: ninguno
+    sin("GD29D", ISIN_GD30, "USD", "GD30", texto="varias fichas")
+    # el código es la especie de OTRO bono que el ISIN
+    sin("TTCDOD", ISIN_YM34, "USD")
+    # ISIN válido que ninguna ficha tiene + ticker de otro papel: el ticker no vale
+    sin("CO27D", "USP79171AF45", "USD", "CO32D", texto="USP79171AF45")
+    # pesos vs dólares: la cartera dice que paga en pesos y la ficha es hard-dollar
+    if bond_universe.get("PZCGD") is not None and bond_universe.get("PZCGO") is None:
+        isin = esco.isin_ok(bond_universe.get("PZCGD").isin)
+        sin("PZCGO", isin, "en Pesos")
+        sin("PZCGO", isin, "ARS")
+        assert _r("PZCGO", isin).calc == "PZCGD"            # sin dato de pago no hay contradicción
+    # …y al revés: paga dólares según la cartera y la única ficha es en pesos
+    sin("XXCERD", "AR0585812156", "USB")
+
+
+def test_nativa_dirty_y_codigos_con_espacio() -> None:
+    bond_universe.ensure_loaded()
+    if bond_universe.get("CO32DC") is not None:
+        # CO32D termina en "D" pero es la referencia CLEAN: valúa la DIRTY, con o sin pago
+        for pago in (None, "USD", "USB", "en Dólares"):
+            assert _r("CO32", "USP79171AG28", pago).calc == "CO32DC", pago
+    assert _r("TTCDO D", ISIN_TTCD, "USD").calc == "TTCDC"
+    assert _r("GD29 D").calc == "GD29C"                       # el sufijo con espacio (como 'GN47O C')
+
+
+def test_el_last_nunca_va_en_otra_moneda_que_la_del_fondo(carteras, monkeypatch) -> None:
+    """Fondo en pesos con un papel conciliado y SIN precio de la especie en
+    pesos: antes mostraba el precio en dólares de la nativa contra una
+    valuación en pesos (Ret. día −33 %). TIR y duration se conservan; el Last
+    queda vacío. La fila memoizada no se muta."""
+    from backend.routes import posiciones as P
+
+    nativa = {"last": 100.0, "price_source": "LA", "tirea": 0.08, "duration": 2.0}
+
+    def fake(code, plazo, leg="native", settle=None, **kw):
+        if leg == "ARS" or code[-1:] not in ("C", "D"):
+            return {"last": None, "price_source": None, "tirea": None}      # sin precio en pesos
+        return nativa
+
+    monkeypatch.setattr(P, "_row_for_code", fake)
+    h = {"cod_fondo": 15, "cod_delta": "YPF34", "isin": ISIN_YM34, "pago": "USD", "ticker": "YM34O"}
+    m = P._fila_precio(h, esco.resolver_h(h), "24hs", None)
+    assert m["last"] is None and m["price_source"] is None and m["tirea"] == 0.08
+    assert nativa["last"] == 100.0 and m is not nativa
+    # el mismo papel en el fondo en dólares: el precio nativo va tal cual
+    hd = {"cod_fondo": 26, "cod_delta": "YM34OD", "isin": ISIN_YM34, "pago": "USD", "ticker": "YM34D"}
+    assert P._fila_precio(hd, esco.resolver_h(hd), "24hs", None) is nativa
+    # el ticker de la base de OTRO bono no se usa para valuar
+    pedidos = []
+    monkeypatch.setattr(P, "_row_for_code", lambda code, plazo, leg="native", settle=None, **kw: (
+        pedidos.append((code, leg)) or {"last": 150000.0, "price_source": "LA", "tirea": 0.07}))
+    ht = {"cod_fondo": 15, "cod_delta": "YPF34", "isin": ISIN_YM34, "pago": "USD", "ticker": "TTCDO"}
+    P._fila_precio(ht, esco.resolver_h(ht), "24hs", None)
+    assert pedidos == [("YM34C", "ARS")]
+
+
+def test_perfil_de_vencimientos_de_un_fondo_en_dolares(carteras) -> None:
+    """Los flujos van en la moneda del fondo: en uno en dólares los bonos en
+    dólares no se pasan a pesos para dividirlos por un PN en dólares (daba
+    barras de miles de %)."""
+    from backend.routes import posiciones as P
+
+    P._perfil_cache.clear()
+    v = P._perfil_vencimientos(26)
+    assert v["unidad"] == "USD" and v["bars"]
+    # 1,8 M de nominales de bonos al ~7-9 % contra un PN de 2 M: del orden del PN, no miles de veces
+    assert 0.5 < sum(b["pct"] for b in v["bars"]) < 2.5
+    assert all(b["pct"] < 1.5 for b in v["bars"])
+    assert P._perfil_vencimientos(15)["unidad"] == "ARS"
+
+
+def test_tenencia_por_ficha_no_suma_pesos_con_dolares(carteras, monkeypatch) -> None:
+    c = dict(positions._cache)
+    c["holdings"] = list(c["holdings"]) + [
+        {"cod_fondo": 26, "cod_delta": "YM34OD", "especie": "ON YPF D", "cantidad": 1000.0, "valor": 1100.0,
+         "clase": "Renta Fija", "es_especie": True, "isin": ISIN_YM34, "pago": "USD", "ticker": "YM34D"},
+        {"cod_fondo": 26, "cod_delta": "YPF34", "especie": "ON YPF", "cantidad": 500.0, "valor": 550.0,
+         "clase": "Renta Fija", "es_especie": True, "isin": ISIN_YM34, "pago": "USD", "ticker": "YM34O"}]
+    monkeypatch.setattr(positions, "_cache", c)
+    monkeypatch.setattr(positions, "_por_ficha", (None, {}))
+    pos = positions.position_for("YM34C")
+    # el fondo 26 tiene el papel bajo dos códigos: aparece UNA vez, sumado
+    assert sorted((f["cod_fondo"], f["cantidad"]) for f in pos["funds"]) == [(15, 400000.0), (26, 1500.0)]
+    assert pos["n_fondos"] == 2 and pos["total_valor"] is None          # pesos + dólares: sin total
+    assert positions.position_for("YM34C", visibles=[26])["total_valor"] == pytest.approx(1650.0)
+    assert positions.position_for("YM34C 24hs") is not None and positions.position_for("ym34c CI") is not None
+    monkeypatch.setattr(positions, "_por_ficha", (None, {}))
+
+
+def test_tickers_del_feed_clasificacion_y_reporte(carteras) -> None:
+    """El símbolo del código de ESCO no existe en el mercado: se suscriben el
+    ticker de la ficha, su especie en pesos y el de la base."""
+    from backend.services import clasificacion as C
+
+    tk = set(positions.tickers_conciliados())
+    assert {"TTCDC", "TTCDO", "GD30C", "GD30", "YM34C", "YM34O", "MGCQD", "TTCDD"} <= tk
+    assert "TTCDOD" not in tk and "CO27D" not in tk and "NC" not in tk
+    from backend.main import _initial_symbols
+    from backend.services import symbols as syms
+    seed = set(_initial_symbols())
+    assert syms.md_symbol("TTCDC", "24hs") in seed and syms.md_symbol("YM34O", "CI") in seed
+    # una renta variable no es un FCI por decir "FCI" en la descripción
+    assert C.clasificar("GLD AR / FCI SPDR Gold Trust CEDEAR", "Renta Variable", None, "GLD")[0] == "Renta Variable"
+    assert C.clasificar("FCI CERRADO INFRA", "Renta Fija", None, "FCIC1")[0] == "FCI Cerrados"   # lo demás, igual
+    # el reporte no lista la caja como "bono en dólares sin ficha"
+    d = esco.diagnostico([{"cod_fondo": 26, "cod_delta": "USD", "especie": "Dólares", "valor": 5.0,
+                           "isin": None, "pago": "USD", "ticker": None}])
+    assert d["sin_resolver"] == []

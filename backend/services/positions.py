@@ -553,6 +553,35 @@ def _conciliada(h: Dict[str, Any]) -> bool:
         return False
 
 
+def tickers_conciliados() -> List[str]:
+    """Tickers de mercado que valúan a las tenencias cuyo código de ESCO se
+    concilió con una ficha (`services.esco`): la ficha, su especie en pesos y
+    el ticker de la base (CAFCI_BYMA). Para suscribirlos al feed: el símbolo
+    del código de ESCO no existe y la fila quedaba sin precio."""
+    out: set = set()
+    try:
+        from . import esco, pricing
+        for h in ensure_loaded()["holdings"]:
+            if not h["cod_delta"]:
+                continue
+            f = esco.resolver_h(h)
+            if f is None:
+                continue
+            out.add(f.calc)
+            if esco.es_dolar(f.calc):
+                sib = pricing.pesos_sibling_code(f.calc)
+                if sib:
+                    out.add(sib)
+                base = f.calc[:-1] if f.calc[-1:] in ("C", "D") else f.calc
+                out.add(base + "O")
+            tk = h.get("ticker")
+            if tk and " " not in tk:
+                out.add(tk)
+    except Exception:  # noqa: BLE001 — el seed del feed nunca rompe por esto
+        logger.exception("[positions] tickers conciliados")
+    return sorted(out)
+
+
 def _equity_tickers_conocidos() -> set:
     """Tickers de acciones/CEDEARs que la app conoce (paneles curados + vivos
     + universo CEDEAR): para que el reporte de faltantes no marque una acción
@@ -614,6 +643,20 @@ def especies_faltantes() -> Dict[str, Any]:
 _por_ficha: tuple = (None, {})
 
 
+def _un_fondo_una_vez(funds: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Un fondo que tiene el mismo papel bajo dos códigos (el de pesos y el
+    "…D" de ESCO) cuenta UNA vez, con cantidad y valor sumados."""
+    por: Dict[int, Dict[str, Any]] = {}
+    for f in funds:
+        d = por.get(f["cod_fondo"])
+        if d is None:
+            por[f["cod_fondo"]] = dict(f)
+        else:
+            d["cantidad"] = (d["cantidad"] or 0.0) + (f["cantidad"] or 0.0)
+            d["valor"] = (d["valor"] or 0.0) + (f["valor"] or 0.0)
+    return list(por.values())
+
+
 def _agg_por_ficha() -> Dict[str, Dict[str, Any]]:
     """Ficha del universo → posición agregada de las tenencias cuyo código de
     ESCO se concilia con ella (`services.esco`). Se arma una vez por carga de
@@ -637,6 +680,8 @@ def _agg_por_ficha() -> Dict[str, Dict[str, Any]]:
             agg["total_cantidad"] += (h["cantidad"] or 0.0)
             agg["total_valor"] += (h["valor"] or 0.0)
             agg["funds"].append({"cod_fondo": h["cod_fondo"], "cantidad": h["cantidad"], "valor": h["valor"]})
+        for agg in out.values():
+            agg["funds"] = _un_fondo_una_vez(agg["funds"])
         _por_ficha = (tok, out)
         return out
     except Exception:  # noqa: BLE001 — la tenencia en YAS nunca rompe por esto
@@ -670,13 +715,15 @@ def position_for(code: Optional[str],
         agg = by.get(key)
     # Tenencias que ESCO trae con OTRO código y se concilian con esta ficha
     # (TTCDOD / YPF34 → la ficha nativa): se suman a las del código exacto.
-    extra = _agg_por_ficha().get(str(code).strip())
+    por_ficha = _agg_por_ficha()
+    limpio = _strip_plazo(str(code).strip().upper())   # mismo trato que el código directo: sin plazo ni mayúsculas
+    extra = por_ficha.get(limpio)
     if extra:
         agg = extra if not agg else {
             "especie": agg["especie"],
             "total_cantidad": agg["total_cantidad"] + extra["total_cantidad"],
             "total_valor": agg["total_valor"] + extra["total_valor"],
-            "funds": agg["funds"] + extra["funds"]}
+            "funds": _un_fondo_una_vez(agg["funds"] + extra["funds"])}
     if not agg:
         return None
     vis = set(visibles) if visibles is not None else None
@@ -700,6 +747,14 @@ def position_for(code: Optional[str],
     else:                             # totales SOLO de lo visible (no filtrar el agregado)
         total_cantidad = sum((f["cantidad"] or 0.0) for f in funds)
         total_valor = sum((f["valor"] or 0.0) for f in funds)
+    # El Valor de cada fondo está en SU moneda: con fondos en pesos y en
+    # dólares teniendo el mismo papel la suma no significa nada (3.223 M de
+    # pesos + 1,4 M de dólares) → sin total; el detalle por fondo sigue.
+    monedas = ensure_loaded().get("monedas") or {}
+    clases = {("dolar" if monedas.get(f["cod_fondo"]) in ("USD", "USB") else "pesos")
+              for f in funds if monedas.get(f["cod_fondo"])}
+    if len(clases) > 1:
+        total_valor = None
     return {
         "code": key,
         "total_cantidad": total_cantidad,

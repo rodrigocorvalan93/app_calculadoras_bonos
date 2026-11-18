@@ -151,6 +151,12 @@ def _initial_symbols() -> list[str]:
         for code in positions.especies_universe():
             seed.add(syms.md_symbol(code, "24hs"))
             seed.add(syms.md_symbol(code, "CI"))
+        # Códigos de ESCO conciliados con una ficha (TTCDOD → TTCDC): el
+        # símbolo del código de ESCO no existe en el mercado; hay que suscribir
+        # el ticker de la ficha, su especie en pesos y el ticker de la base.
+        for code in positions.tickers_conciliados():
+            seed.add(syms.md_symbol(code, "24hs"))
+            seed.add(syms.md_symbol(code, "CI"))
     except Exception:  # noqa: BLE001
         logger.exception("[main] positions seed failed")
     # Acciones + CEDEARs (panel Mercado y barra superior): precio puro, sin TIR.

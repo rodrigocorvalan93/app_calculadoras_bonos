@@ -341,7 +341,14 @@ def _clasificar(especie: Any, clase: Any, info: Optional[Dict[str, Any]],
     cat_tasa = categoria_ajuste_tasa(info.get("Ajuste"), info.get("Tasa"))
     liquidez = " LIQUIDEZ " in t_clase
     todo = t_base + t_desc + t_clase
+    # Renta variable (por la Clase de Activo del Excel): la descripción de un
+    # CEDEAR de ETF dice "FCI" ("GLD AR / FCI SPDR Gold Trust CEDEAR") y no es
+    # un fondo — el tipo por texto de la descripción no aplica.
+    es_rv = (" RENTA VARIABLE " in t_clase or " CEDEAR" in t_clase
+             or " ACCION" in t_clase or " EQUITY " in t_clase)
     for txt, fuente in ((t_base, "base"), (t_desc, "texto"), (t_clase, "clase")):
+        if es_rv and fuente == "texto":
+            continue
         tipo = tipo_instrumento(txt)
         if tipo:
             lab = etiqueta_tipo(tipo, todo, cat_tasa, liquidez, txt_tasa=t_base + t_desc)
