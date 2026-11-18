@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import ssl
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -41,6 +42,39 @@ _HEAD_TIMEOUT = 15.0           # segundos para recibir el head completo
 _CHUNK = 65536
 _PIPE_TIMEOUT = 120.0          # techo TOTAL de una conexión (1 request por conexión)
 _MAX_CONNS = 64                # conexiones concurrentes (anti fuga de FDs/tasks)
+# Diagnóstico del add-in (18/11, "las celdas quedan ocupadas"): un request de
+# /excel/* sano dura milisegundos. Si tarda `_LENTO_S` o más, termina en 502 /
+# 503 o toca el techo del pipe, queda UNA línea (throttle por motivo + ruta)
+# con la ruta SIN query (el manifest per-usuario lleva ?token=).
+_LENTO_S = 5.0
+_AVISO_CADA_S = 10.0
+_avisos: "dict[tuple, float]" = {}
+
+
+def _ruta(head: bytes) -> str:
+    """'POST /excel/v1/calc' del head, sin query y sólo ASCII imprimible."""
+    try:
+        linea = head.split(b"\r\n", 1)[0].decode("latin-1")
+        partes = linea.split(" ")
+        metodo, destino = partes[0], (partes[1] if len(partes) > 1 else "")
+        txt = metodo[:8] + " " + destino.split("?", 1)[0][:80]
+        return "".join(ch if " " <= ch <= "~" else "·" for ch in txt)
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def _avisar(motivo: str, ruta: str, detalle: str) -> None:
+    if "/excel/" not in ruta:          # la web por https (SSE, descargas) puede durar: no es el add-in
+        return
+    ahora = time.monotonic()
+    clave = (motivo, ruta)
+    ultimo = _avisos.get(clave)
+    if ultimo is not None and ahora - ultimo < _AVISO_CADA_S:
+        return
+    if len(_avisos) > 256:
+        _avisos.clear()
+    _avisos[clave] = ahora
+    logger.warning("[tls] %s: %s — %s", motivo, ruta, detalle)
 
 # Headers que el puente PISA (los del cliente se descartan): forwarded* para
 # que nadie inyecte scheme/ip, connection para forzar el modelo 1-request.
@@ -167,6 +201,7 @@ class TlsBridge:
         if self._sem.locked():
             # Lleno: rechazo inmediato en vez de encolar (el add-in reintenta
             # solo al próximo poll; encolar sólo alargaría la degradación).
+            _avisar("503", "* /excel/", f"puente lleno: {_MAX_CONNS} conexiones abiertas a la vez")
             try:
                 cw.write(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n"
                          b"Content-Length: 0\r\n\r\n")
@@ -194,9 +229,12 @@ class TlsBridge:
             nuevo = _rewrite_head(head)
             if nuevo is None:
                 return
+            ruta, t0 = _ruta(head), time.monotonic()
             try:
                 tr, tw = await asyncio.open_connection(self.target_host, self.target_port)
-            except OSError:
+            except OSError as exc:
+                _avisar("502", ruta, f"no pude conectar con la app en {self.target_host}:"
+                                     f"{self.target_port} ({type(exc).__name__})")
                 cw.write(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n"
                          b"Content-Length: 0\r\n\r\n")
                 await cw.drain()
@@ -213,7 +251,11 @@ class TlsBridge:
                 # requests del add-in son cortos (1 por conexión); 120 s sobra.
                 await asyncio.wait_for(_pump(tr, cw), _PIPE_TIMEOUT)
             except asyncio.TimeoutError:
-                logger.debug("[tls] conexión superó %.0fs; se cierra", _PIPE_TIMEOUT)
+                _avisar("corte", ruta, f"la conexión superó {_PIPE_TIMEOUT:.0f} s y se cerró")
+            else:
+                dur = time.monotonic() - t0
+                if dur >= _LENTO_S:
+                    _avisar("lento", ruta, f"{dur:.1f} s entre el pedido y el fin de la respuesta")
             finally:
                 c2t.cancel()
                 try:

@@ -636,6 +636,39 @@ la serie (límite de rentafija, igual que el YAS). Regresión:
 `test_excel_api.test_calc_cashflow_pendientes_todos_y_settle`, casos `cf_*`
 de `excel_getters_harness.cjs`, `test_excel_getters.test_cashflow_en_metadata_docs_y_panel`.
 
+## Add-in de Excel — cálculos con plazo y reintento (18/11, v27)
+
+Desk: "OMS.TIREA se queda ocupado mucho tiempo, a veces anda, a veces no",
+con 1 a 4 celdas. El server no era (≈ 3 ms por celda, lote de 40 repetido
+p95 4 ms; `_calc_batch` en el executor, sin locks compartidos con el camino
+live): `OMSCalc.sendChunk` hacía un `fetch` SIN plazo ni reintento. Un POST
+que se colgaba entre Excel y el puente https (webview suspendido por Office,
+conexión que no termina) dejaba la celda en #¡OCUPADO! hasta los 120 s del
+puente y, peor, `pending[k]` vivo para siempre: cada F9 de la MISMA fórmula
+se colgaba del pedido muerto hasta recargar el complemento. Ahora
+`postCalc(items, ms)` = carrera fetch + cuerpo contra un plazo con
+`AbortController` (mismo patrón que `fetchBody` / `histFn`),
+`CALC_TIMEOUTS_MS = [10000, 20000]`: plazo vencido, red caída, 5xx o cuerpo
+cortado → UN reintento a los 400 ms (el cálculo es puro, repetirlo es seguro,
+y el server ya cacheó lo que alcanzó a hacer); 401 / 4xx son definitivos. Si
+tampoco responde, la celda sale #N/D con "El servidor no respondió el cálculo
+(…, 2 intentos)" y `settle` libera `pending`: la fórmula se puede re-pedir.
+Dedup en vuelo, batch de 80 ms y memo intactos. **Diagnóstico** (para saber
+DÓNDE se va el tiempo la próxima vez, todo al log / ring de /admin): beacons
+`calc-lento` (≥ 3 s), `calc-reintento`, `calc-reintento-ok`, `calc-fallo`
+(`[addin functions|shared] …`); server `[excel calc] lento: N item(s) · espera
+del pool X ms · cálculo Y ms · más lento: <tipo> <code>` desde
+`_CALC_LENTO_S` (1 s; `_calc_batch_medido` mide por item, mismo resultado que
+`_calc_batch`); puente `[tls] lento | corte | 502 | 503: <MÉTODO /ruta>` sólo
+para `/excel/*`, con throttle de 10 s por (motivo, ruta) y la ruta SIN query
+(el manifest per-usuario lleva `?token=`). Cómo leerlo: `calc-reintento` sin
+`[excel calc] lento` ni `[tls] lento` = el pedido no llegó al server (Excel /
+webview / red local); `[tls] lento` sin `[excel calc] lento` = el tiempo se
+fue entre el puente y uvicorn (event loop ocupado); `espera del pool` alta =
+el executor default estaba tomado por otra cosa. El add-in cacheado de cada
+Excel toma el `functions.js` nuevo al reabrir Excel (`OMS.PING()` = v27).
+Regresión: `tests/test_excel_calc_reintento.py` + `tests/excel_calc_harness.cjs`.
+
 ## Add-in de Excel — patas calculadas en minúscula (15/10)
 
 Las fichas calculadas llevan sufijo en MINÚSCULA (`…v` = pata TAMAR de los

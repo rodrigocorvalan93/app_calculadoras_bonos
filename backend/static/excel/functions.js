@@ -11,7 +11,7 @@
 // Sello de build: OMS.PING() lo devuelve. Sirve para confirmar que Excel cargó
 // el functions.js ACTUAL y no una copia vieja cacheada (la causa #1 del #¡VALOR!
 // que no se va con los reinstalar). Subir esta fecha en cada cambio del add-in.
-var OMS_BUILD = "v26 · 2026-11-03 (OMS.CASHFLOW: cuadro de flujos de la ficha en spill — fecha de cupón y de pago hábil, intereses, amortización, ajuste y total; 'cpn' / 'pmt' elige qué fecha va primero, 'pendientes' (por cobrar, default) / 'todos' (cronograma completo), plazo o fecha de liquidación, fechas como texto o serial de Excel, nominales opcionales para la columna Monto. Antes v25: OMS.MACRO EN VIVO: la celda se actualiza sola cuando la app refresca el dato del BCRA — a3500 / badlar / tamar / cer / uva / inflamom / tamar5 / badlar5 viajan en la sección 'macro' del snapshot, como OMS.FX('a3500'); ya no hace falta tocar la celda ni Ctrl+Alt+F9; fila MACRO|<serie> en la hoja OMS_DATA del modo cruda. Antes: OMS.TABLA('rofex_min') / ('futuros_min') = futuros minoristas, canal 'minorista'/'mayorista' en OMS.ROFEX; ayuda completa en el panel + botón Recalcular puntuales; OMS.FX('a3500') = A3500 OFICIAL con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
+var OMS_BUILD = "v27 · 2026-11-18 (las funciones de cálculo — OMS.TIREA / PRECIO / TNA / MARGEN / DURATION / TR / CASHFLOW — ya no pueden quedar en #OCUPADO: cada pedido tiene plazo, se reintenta solo una vez y si tampoco responde la celda muestra el motivo; un pedido colgado ya no deja trabada la misma fórmula hasta recargar el complemento. Antes v26: OMS.CASHFLOW: cuadro de flujos de la ficha en spill — fecha de cupón y de pago hábil, intereses, amortización, ajuste y total; 'cpn' / 'pmt' elige qué fecha va primero, 'pendientes' (por cobrar, default) / 'todos' (cronograma completo), plazo o fecha de liquidación, fechas como texto o serial de Excel, nominales opcionales para la columna Monto. Antes v25: OMS.MACRO EN VIVO: la celda se actualiza sola cuando la app refresca el dato del BCRA — a3500 / badlar / tamar / cer / uva / inflamom / tamar5 / badlar5 viajan en la sección 'macro' del snapshot, como OMS.FX('a3500'); ya no hace falta tocar la celda ni Ctrl+Alt+F9; fila MACRO|<serie> en la hoja OMS_DATA del modo cruda. Antes: OMS.TABLA('rofex_min') / ('futuros_min') = futuros minoristas, canal 'minorista'/'mayorista' en OMS.ROFEX; ayuda completa en el panel + botón Recalcular puntuales; OMS.FX('a3500') = A3500 OFICIAL con 'a3500_fecha' / 'a3500_ant' / 'a3500_var', 'cierre' = cierre anterior del mayorista del feed; OMS.DURATION; OMS.VENCIMIENTO; OMS.MARGEN; poller con timeout hasta el cuerpo, un sondeo en vuelo con backoff, refresco cada 30 s)";
 
 // Telemetría al log del server — activa donde window.OMS_BEACON esté definida:
 // functions.html (runtime clásico headless, p=functions) y taskpane.html
@@ -609,6 +609,17 @@ var OMSCalc = (function () {
   // desde la mañana seguía mostrando el valor pre-publicación del índice todo
   // el día (y con TZ ≠ BA, el TIREA de ayer horas después del rollover).
   var MEMO_TTL_MS = 5 * 60 * 1000;
+  // Plazo TOTAL de cada POST /excel/v1/calc (cuerpo incluido) por intento: el
+  // primero corto, el reintento con más aire. Antes el fetch no tenía plazo
+  // ni reintento: un pedido que se colgaba entre Excel y el puente https (o un
+  // webview que Office suspendió a mitad de la respuesta) dejaba la celda en
+  // #¡OCUPADO! y, peor, `pending[k]` vivo para siempre — cada F9 de la MISMA
+  // fórmula se colgaba del pedido muerto hasta recargar el complemento ("a
+  // veces anda, a veces no", desk 18/11). El cálculo es puro (no cursa nada):
+  // repetirlo es seguro, y el server ya tiene cacheado lo que alcanzó a hacer.
+  var CALC_TIMEOUTS_MS = [10000, 20000];
+  var CALC_RETRY_PAUSE_MS = 400;
+  var CALC_LENTO_MS = 3000;        // un cálculo sano tarda ms: de acá para arriba se reporta
   var memo = {}, memoN = 0;
   var noMemo = {};         // keys "a precio de mercado": re-resolver en cada recálculo
   var pending = {};        // key → [{resolve, reject}]
@@ -678,25 +689,75 @@ var OMSCalc = (function () {
     }
   }
 
-  function sendChunk(entries) {
-    var items = entries.map(function (e) { return e.it; });
-    OMSFeed.loadToken().then(function (t) {
-      return fetch("/excel/v1/calc", {
+  // Un POST con plazo total. Rechaza con `reintentable` cuando el pedido no
+  // llegó a una respuesta útil (plazo vencido, red, 5xx del puente / server,
+  // cuerpo cortado); un 401 / 4xx es definitivo.
+  function postCalc(items, ms) {
+    var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var tm = null;
+    function transitorio(msg) { var e = new Error(msg); e.reintentable = true; return e; }
+    var guard = new Promise(function (_resolve, reject) {
+      tm = setTimeout(function () {
+        try { if (ctrl) { ctrl.abort(); } } catch (e) { /* noop */ }
+        reject(transitorio("sin respuesta en " + Math.round(ms / 1000) + " s"));
+      }, ms);
+    });
+    var work = OMSFeed.loadToken().then(function (t) {
+      var opts = {
         method: "POST",
         headers: { "X-OMS-Token": t, "Content-Type": "application/json" },
         body: JSON.stringify({ items: items }),
         cache: "no-store"
-      });
+      };
+      if (ctrl) { opts.signal = ctrl.signal; }
+      return fetch("/excel/v1/calc", opts);
     }).then(function (r) {
       if (r.status === 401) { throw naError("Token de Excel inválido"); }
+      if (r.status >= 500) { throw transitorio("HTTP " + r.status); }
       if (!r.ok) { throw naError("HTTP " + r.status); }
-      return r.json();
-    }).then(function (data) {
+      return r.json().then(null, function (e) {
+        throw transitorio("respuesta cortada (" + String((e && e.message) || e) + ")");
+      });
+    }, function (e) {                       // fetch rechazó: sin red / server caído / abort
+      throw transitorio(String((e && e.message) || e));
+    });
+    return Promise.race([work, guard]).then(function (v) {
+      clearTimeout(tm); return v;
+    }, function (e) {
+      clearTimeout(tm); throw e;
+    });
+  }
+
+  function descChunk(entries) {
+    var it = entries[0].it;
+    return entries.length + " item(s), 1º " + String(it.tipo || it.modo || "calc") + " " + String(it.code || "");
+  }
+
+  function sendChunk(entries, intento) {
+    intento = intento || 0;
+    var items = entries.map(function (e) { return e.it; });
+    var t0 = Date.now();
+    var ms = CALC_TIMEOUTS_MS[Math.min(intento, CALC_TIMEOUTS_MS.length - 1)];
+    postCalc(items, ms).then(function (data) {
+      var dt = Date.now() - t0;
+      if (intento > 0) { _beacon("calc-reintento-ok", descChunk(entries) + " en " + dt + " ms"); }
+      else if (dt >= CALC_LENTO_MS) { _beacon("calc-lento", descChunk(entries) + " en " + dt + " ms"); }
       var res = (data && data.results) || [];
       for (var i = 0; i < entries.length; i++) {
         settle(entries[i].k, res[i] || { error: "sin resultado" }, null);
       }
-    }).catch(function (e) {
+    }, function (e) {
+      var msg = String((e && e.message) || e);
+      if (e && e.reintentable && intento + 1 < CALC_TIMEOUTS_MS.length) {
+        _beacon("calc-reintento", descChunk(entries) + " — " + msg);
+        setTimeout(function () { sendChunk(entries, intento + 1); }, CALC_RETRY_PAUSE_MS);
+        return;
+      }
+      if (e && e.reintentable) {
+        _beacon("calc-fallo", descChunk(entries) + " — " + msg + " (" + (intento + 1) + " intentos)");
+        e = naError("El servidor no respondió el cálculo (" + msg + ", " + (intento + 1) +
+                    " intentos). Revisá que la app esté corriendo y recalculá la celda.");
+      }
       for (var j = 0; j < entries.length; j++) { settle(entries[j].k, null, e); }
     });
   }

@@ -913,6 +913,31 @@ def _calc_batch(items: list) -> list:
     return out
 
 
+# Un batch de cálculo sano tarda milisegundos. Cuando el desk ve una celda
+# "ocupada" hay que poder decir DÓNDE se fue el tiempo: esperando un worker del
+# pool (pool ocupado por otra cosa) o calculando (qué item). De `_CALC_LENTO_S`
+# para arriba queda una línea en el log (ring de /admin incluido).
+_CALC_LENTO_S = 1.0
+
+
+def _calc_batch_medido(items: list, t_encolado: float) -> Tuple[list, float, float, str]:
+    """`_calc_batch` + (espera en el pool, tiempo de cálculo, item más lento)."""
+    t0 = time.perf_counter()
+    espera = t0 - t_encolado
+    peor_dt, peor = 0.0, ""
+    out: list = []
+    for it in items:
+        ti = time.perf_counter()
+        out.extend(_calc_batch([it]))
+        dt = time.perf_counter() - ti
+        if dt > peor_dt:
+            peor_dt = dt
+            peor = (f"{_beacon_txt(str(it.get('tipo') or it.get('modo') or 'calc'), 16)} "
+                    f"{_beacon_txt(str(it.get('code') or ''), 24)} {dt * 1000:.0f} ms"
+                    if isinstance(it, dict) else f"item inválido {dt * 1000:.0f} ms")
+    return out, espera, time.perf_counter() - t0, peor
+
+
 @router.post("/v1/calc")
 async def excel_calc(request: Request) -> Response:
     """Batch de cálculos YAS para el add-in. Body: {"items":[{"code","modo",
@@ -936,7 +961,13 @@ async def excel_calc(request: Request) -> Response:
         return Response(
             content=json.dumps({"error": f"máximo {_CALC_MAX_ITEMS} items por batch"}),
             media_type="application/json", status_code=400)
-    results = await asyncio.get_running_loop().run_in_executor(None, _calc_batch, items)
+    t_in = time.perf_counter()
+    results, espera, calculo, peor = await asyncio.get_running_loop().run_in_executor(
+        None, _calc_batch_medido, items, t_in)
+    if espera + calculo >= _CALC_LENTO_S:
+        _addin_log.warning(
+            "[excel calc] lento: %d item(s) · espera del pool %.0f ms · cálculo %.0f ms · más lento: %s",
+            len(items), espera * 1000, calculo * 1000, peor)
     return Response(content=json.dumps({"results": results}, ensure_ascii=False,
                                        separators=(",", ":"), default=str),
                     media_type="application/json")
