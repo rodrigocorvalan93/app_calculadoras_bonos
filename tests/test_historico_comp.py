@@ -27,7 +27,7 @@ def _ruedas(n: int, fin: date = date(2026, 9, 11)) -> list:
 @pytest.fixture()
 def base_comp(tmp_path, monkeypatch):
     """Acciones (GGAL / YPFD / SPY / MERVAL, 130 ruedas), FX diario (CCL con un
-    hueco) y un bono (TX26) en el cierre completo SÓLO en ruedas alternadas de
+    hueco) y un bono (TX28) en el cierre completo SÓLO en ruedas alternadas de
     las últimas 60 — para probar la unión de fechas y los huecos."""
     monkeypatch.setenv("DELTA_HISTORICO_DIR", str(tmp_path))
     monkeypatch.delenv("DELTA_HISTORICO_PATH", raising=False)
@@ -52,7 +52,7 @@ def base_comp(tmp_path, monkeypatch):
     # bono en el cierre completo: ruedas alternadas de las últimas 60
     bono_dias = dias[-60::2]
     for i, d in enumerate(bono_dias):
-        df = pd.DataFrame([{"fecha_hoy": d, "symbol": "MERV - XMEV - TX26 - 24hs", "code": "TX26", "plazo": "24hs",
+        df = pd.DataFrame([{"fecha_hoy": d, "symbol": "MERV - XMEV - TX28 - 24hs", "code": "TX28", "plazo": "24hs",
                             "last": 1000.0 + 5.0 * i, "close": 1000.0 + 5.0 * (i - 1), "opero": True,
                             "tirea": 0.30 + i / 1000.0}])
         for col in ("symbol", "code", "plazo"):
@@ -70,19 +70,19 @@ def base_comp(tmp_path, monkeypatch):
 
 
 def test_parse_y_default_tickers() -> None:
-    assert comp.parse_tickers("GGAL, al30d TX26 ggal;SPY") == ["GGAL", "al30d", "TX26", "SPY"]
+    assert comp.parse_tickers("GGAL, al30d TX28 ggal;SPY") == ["GGAL", "al30d", "TX28", "SPY"]
     assert comp.parse_tickers("") == [] and comp.parse_tickers(None) == []
     assert len(comp.parse_tickers(" ".join(f"T{i}" for i in range(30)))) == comp.MAX_TICKERS
     assert comp.default_tickers(["AL30D", "GGAL", "MERVAL", "YPFD"]) == ["GGAL", "YPFD", "MERVAL"]
-    assert comp.default_tickers(["AL30D", "TX26", "ZZ"]) == ["AL30D", "TX26"]
+    assert comp.default_tickers(["AL30D", "TX28", "ZZ"]) == ["AL30D", "TX28"]
     assert comp.default_tickers(["A", "B", "C"]) == ["A", "B"] and comp.default_tickers([]) == []
 
 
 def test_comparar_base100_union_y_stats(base_comp) -> None:
     _, dias, bono_dias = base_comp
-    r = comp.comparar(["GGAL", "SPY", "TX26", "NOEXISTE"], rango="3m")
+    r = comp.comparar(["GGAL", "SPY", "TX28", "NOEXISTE"], rango="3m")
     assert r["ok"] and r["faltantes"] == ["NOEXISTE"] and r["sin_rango"] == []
-    assert [s["ticker"] for s in r["series"]] == ["GGAL", "SPY", "TX26"]
+    assert [s["ticker"] for s in r["series"]] == ["GGAL", "SPY", "TX28"]
     assert r["modo"] == "base" and r["campo"] == "precio" and r["base"] == "ars"
     # unión de ruedas: 92 días calendario hacia atrás desde la última rueda, todas con dato de acciones
     fin = dias[-1]
@@ -126,9 +126,9 @@ def test_comparar_modos_moneda_y_tir(base_comp) -> None:
     w = comp.comparar(["GGAL", "SPY"], rango="1m", desde=d0, hasta=d1)
     assert w["fechas"][0] == d0 and w["fechas"][-1] == d1 and w["n"] == 11
     # TIR (bonos): nivel en %, Δ en pp, sin ÷ FX ni vol; una acción no tiene TIR
-    t = comp.comparar(["TX26", "GGAL"], campo="tir", modo="base", base="ccl", rango="6m")
+    t = comp.comparar(["TX28", "GGAL"], campo="tir", modo="base", base="ccl", rango="6m")
     assert t["campo"] == "tir" and t["modo"] == "nivel" and t["base"] == "ars"
-    assert t["faltantes"] == ["GGAL"] and [s["ticker"] for s in t["series"]] == ["TX26"]
+    assert t["faltantes"] == ["GGAL"] and [s["ticker"] for s in t["series"]] == ["TX28"]
     st = t["series"][0]["stats"]
     assert st["inicio"] == pytest.approx(30.0 + 0.0) or st["inicio"] > 29.0        # 0.30 → 30 %
     assert st["delta_pp"] == pytest.approx(st["fin"] - st["inicio"]) and st["var_pct"] is None
@@ -151,7 +151,7 @@ async def test_http_comp_pestana_cuerpo_y_cache(base_comp) -> None:
         assert full.status_code == 200
         # controles + datalist con las especies con historia + cuerpo con el JSON embebido
         assert 'id="hc-comp-form"' in full.text and 'hx-get="/historicos/comp/body"' in full.text
-        assert '<datalist id="hc-comp-list">' in full.text and '<option value="TX26">' in full.text
+        assert '<datalist id="hc-comp-list">' in full.text and '<option value="TX28">' in full.text
         assert 'value="GGAL YPFD MERVAL"' in full.text                    # default: líderes + Merval
         m = re.search(r'<script type="application/json" id="hist-comp-data">(.*?)</script>', full.text, re.S)
         assert m, "falta el JSON embebido"
@@ -159,21 +159,21 @@ async def test_http_comp_pestana_cuerpo_y_cache(base_comp) -> None:
         assert j["ok"] and [s["ticker"] for s in j["series"]] == ["GGAL", "YPFD", "MERVAL"]
         assert 'id="comp-tbl"' in full.text and "comp-dot" in full.text
         # el cuerpo solo, con activos elegidos y un ticker sin historia
-        body = await ac.get("/historicos/comp/body", params={"tickers": "ggal, TX26 NOEXISTE", "modo": "pct", "rango": "3m"})
+        body = await ac.get("/historicos/comp/body", params={"tickers": "ggal, TX28 NOEXISTE", "modo": "pct", "rango": "3m"})
         assert body.status_code == 200 and "<datalist" not in body.text
         assert "Sin historia guardada para <b>NOEXISTE</b>" in body.text
         assert 'id="hist-comp-uplot"' in body.text and "Variación %" in body.text
         m2 = re.search(r'id="hist-comp-data">(.*?)</script>', body.text, re.S)
         j2 = json.loads(m2.group(1))
-        assert j2["modo"] == "pct" and [s["ticker"] for s in j2["series"]] == ["GGAL", "TX26"]
+        assert j2["modo"] == "pct" and [s["ticker"] for s in j2["series"]] == ["GGAL", "TX28"]
         assert "var-cell" in body.text                                     # Var % con barrita
         # TIR: columna Δ pp y sin Desde máx / Vol
-        tir = await ac.get("/historicos/comp/body", params={"tickers": "TX26", "campo": "tir"})
+        tir = await ac.get("/historicos/comp/body", params={"tickers": "TX28", "campo": "tir"})
         assert tir.status_code == 200 and "Δ pp" in tir.text and "Desde máx" not in tir.text
         # cache por parámetros normalizados (mismo set en otro orden de mayúsculas → mismo HTML)
-        again = await ac.get("/historicos/comp/body", params={"tickers": "GGAL TX26 NOEXISTE", "modo": "pct", "rango": "3m"})
+        again = await ac.get("/historicos/comp/body", params={"tickers": "GGAL TX28 NOEXISTE", "modo": "pct", "rango": "3m"})
         assert again.text == body.text
-        assert any(k[1] == "GGAL TX26 NOEXISTE" for k in rh._COMP_CACHE)
+        assert any(k[1] == "GGAL TX28 NOEXISTE" for k in rh._COMP_CACHE)
         # parámetros inválidos caen a defaults, nunca 500
         raro = await ac.get("/historicos/comp/body", params={"tickers": "GGAL", "modo": "x", "rango": "y", "base": "z", "desde": "ayer"})
         assert raro.status_code == 200 and "Base 100" in raro.text

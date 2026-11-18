@@ -137,9 +137,10 @@ def test_tasa_y_calificacion_sin_ficha() -> None:
     assert C.calificacion_base({}) is None and C.calificacion_base(None) is None
 
 
-def test_galileo_clasifica_ficha_se_lee_igual() -> None:
-    """Galileo: `clase` = Clasifica_Ficha / instrumento del reporte — las
-    mismas etiquetas finas que Delta (antes PF y caución eran 'Liquidez')."""
+def test_clase_con_etiqueta_fina_se_lee_igual() -> None:
+    """Una Clase de Activo que ya trae la etiqueta fina (cheques, plazo fijo,
+    caución, FCI cerrado, fideicomiso) se lee como tal aunque la descripción
+    no diga nada (antes PF y caución eran 'Liquidez')."""
     assert _cl("*BIS131000155", "Cheques Garantizados") == "Cheques Garantizados"
     assert _cl("PF BANCO X", "Plazo Fijo") == "Plazos Fijos"
     assert _cl("CAUCION", "Caución") == "Caución"
@@ -224,10 +225,10 @@ def test_composicion_estilo_delta_ahorro(monkeypatch) -> None:
 
 
 def test_reporte_que_pulir_en_la_base(monkeypatch) -> None:
-    """/admin: tenencias Delta cuya Categoría no salió de ficha ni de la base —
+    """/admin: tenencias cuya Categoría no salió de ficha ni de la base —
     con ticker (cargar Ajuste/Tasa/Subclase en Delta - Especies o la ficha) y
-    sin ticker sin regla (pasar la descripción). Acciones/CEDEARs, lo
-    reconocido por descripción sin ticker y Galileo quedan afuera."""
+    sin ticker sin regla (pasar la descripción). Acciones/CEDEARs y lo
+    reconocido por descripción sin ticker quedan afuera."""
     from backend.routes import posiciones as P
     from backend.services import delta_especies, positions
 
@@ -237,10 +238,9 @@ def test_reporte_que_pulir_en_la_base(monkeypatch) -> None:
 
     monkeypatch.setattr(P, "_bono", lambda c: _B() if c == "ONT1" else None)
     monkeypatch.setattr(delta_especies, "info", lambda c: {"Ajuste": "ARS", "Tasa": "TAMAR"} if c == "ZONT1" else None)
-    G = positions.GALILEO_OFFSET
     monkeypatch.setattr(positions, "_cache", {
         "loaded": True, "error": None, "paths": {}, "asof": "t", "by_code": {}, "pn": {},
-        "fondos": {2: "Ahorro", 13: "Ahorro Plus"}, "galileo_nombres": {},
+        "fondos": {2: "Ahorro", 13: "Ahorro Plus"},
         "holdings": [
             {"cod_fondo": 2, "cod_delta": "ONT1", "especie": "ON REAL", "valor": 100.0, "clase": "Renta Fija"},
             {"cod_fondo": 2, "cod_delta": "ZONT1", "especie": "ON BASE", "valor": 50.0, "clase": "Renta Fija"},
@@ -253,12 +253,11 @@ def test_reporte_que_pulir_en_la_base(monkeypatch) -> None:
             {"cod_fondo": 2, "cod_delta": None, "especie": "OTROS ACTIVOS NETOS", "valor": 7.0, "clase": "Otros Activos Netos"},
             {"cod_fondo": 2, "cod_delta": None, "especie": "COSA RARA", "valor": 6.0, "clase": "Renta Fija"},
             {"cod_fondo": 2, "cod_delta": "$", "especie": "CAJA PESOS", "valor": 4.0, "clase": "Liquidez"},
-            {"cod_fondo": G + 8, "cod_delta": None, "especie": "*BIS1", "valor": 5.0, "clase": "Cheques Garantizados",
-             "es_especie": False},
+            {"cod_fondo": 13, "cod_delta": None, "especie": "*BIS1", "valor": 5.0, "clase": "Cheques Garantizados"},
         ],
     })
     rep = P.reporte_clasificacion()
-    assert (rep["n_total"], rep["n_ficha"], rep["n_base"]) == (11, 1, 1)
+    assert (rep["n_total"], rep["n_ficha"], rep["n_base"]) == (12, 1, 1)
     con = {r["code"]: r for r in rep["con_ticker"]}
     assert list(con) == ["FFTX1", "ZZZZ9", "DELPESB"]                      # por valor desc
     assert con["FFTX1"]["categoria"] == "Fideicomisos TAMAR/BADLAR" and con["FFTX1"]["fuente_txt"] == "descripción"
@@ -267,7 +266,7 @@ def test_reporte_que_pulir_en_la_base(monkeypatch) -> None:
     assert con["ZZZZ9"]["categoria"] == "Renta Fija" and con["ZZZZ9"]["fuente_txt"] == "sin regla"
     assert con["DELPESB"]["categoria"] == "FCI Money Markets" and con["DELPESB"]["fuente_txt"] == "Clase de Activo"
     sin = [r["especie"] for r in rep["sin_ticker"]]
-    assert sin == ["COSA RARA"]           # PF reconocido, 'Otros Activos Netos' (contable) y Galileo: afuera
+    assert sin == ["COSA RARA"]           # PF / cheque reconocidos y 'Otros Activos Netos' (contable): afuera
     assert rep["n_con_ticker"] == 3 and rep["n_sin_ticker"] == 1
 
 
@@ -280,7 +279,7 @@ async def test_http_admin_muestra_que_pulir(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(positions, "_cache", {
         "loaded": True, "error": None, "paths": {}, "asof": "t", "by_code": {}, "pn": {},
-        "fondos": {2: "Ahorro"}, "galileo_nombres": {},
+        "fondos": {2: "Ahorro"},
         "holdings": [{"cod_fondo": 2, "cod_delta": "ZZZZ9", "especie": "ON RARO 2031", "valor": 30.0,
                       "clase": "Renta Fija", "es_especie": True}],
     })

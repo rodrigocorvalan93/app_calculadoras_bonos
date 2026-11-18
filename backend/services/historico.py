@@ -228,11 +228,87 @@ def macro_snapshot() -> List[Dict[str, Any]]:
     return out
 
 
+# ── Series PROYECTADAS (13/11) ───────────────────────────────────────────────
+# Las series con las que la app VALÚA (rentafija.inputs: observado + proyección
+# vigente de la pestaña Proyecciones / indices.py). No están en el backup del
+# BCRA (que guarda sólo lo observado): salen de memoria, memoizadas por el id
+# del frame (cambia con cada instalación de proyecciones y con cada refresh de
+# índices). key de la vista → (clave en inputs, columna, label, clave observada
+# para la fecha de corte).
+PROYECTADAS: Dict[str, Tuple[str, str, str, str]] = {
+    "cer_proy":      ("cer_proyectado",    "CER",          "CER proyectado",                     "CER"),
+    "uva_proy":      ("uva_proyectado",    "UVA",          "UVA proyectado",                     "UVA"),
+    "a3500_proy":    ("a3500_proyectado",  "tca3500",      "A3500 proyectado",                   "a3500"),
+    "tamar_proy":    ("tamar_proyectado",  "TAMAR",        "TAMAR proyectada (%)",               "tamar"),
+    "badlar_proy":   ("badlar_proyectado", "BADLAR",       "BADLAR proyectada (%)",              "badlar"),
+    "inflamom_proy": ("inflamom",          "inflacionmom", "Inflación mensual obs. + proy. (%)", "inflamom_observado"),
+}
+_proy_memo: Dict[str, Tuple[int, List[Tuple[str, float]], Optional[str]]] = {}
+
+
+def es_proyectada(key: str) -> bool:
+    return key in PROYECTADAS
+
+
+def _puntos_proyectada(key: str) -> Tuple[List[Tuple[str, float]], Optional[str]]:
+    """(puntos, corte ISO = última observación) de una serie proyectada, desde
+    rentafija.inputs. Memo por id del frame: el armado (11k fechas del CER)
+    cuesta ~10 ms y se repite sólo cuando cambió la serie."""
+    import rentafija
+    from backend.services.proyecciones import _a_date
+
+    ikey, col, _label, obs_key = PROYECTADAS[key]
+    df = rentafija.inputs.get(ikey)
+    if df is None or not len(df):
+        return [], None
+    memo = _proy_memo.get(key)
+    if memo is not None and memo[0] == id(df):
+        return memo[1], memo[2]
+    pts: List[Tuple[str, float]] = []
+    for ix, v in zip(df.index, df[col].to_numpy()):
+        d = _a_date(ix)
+        if d is None:
+            continue
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if fv == fv:
+            pts.append((d.isoformat(), fv))
+    pts.sort(key=lambda p: p[0])
+    corte = None
+    obs = rentafija.inputs.get(obs_key)
+    if obs is not None and len(obs):
+        d = _a_date(obs.index[-1])
+        corte = d.isoformat() if d else None
+    _proy_memo[key] = (id(df), pts, corte)
+    return pts, corte
+
+
+def series_list_proyectadas() -> List[Dict[str, Any]]:
+    return [{"key": k, "label": v[2]} for k, v in PROYECTADAS.items()]
+
+
 def series_points(key: str, days: Optional[int] = None,
                   desde: Optional[str] = None, hasta: Optional[str] = None) -> Dict[str, Any]:
     """Puntos de una serie. Si se pasan `desde`/`hasta` (ISO 'YYYY-MM-DD') se
     recorta a ese rango exacto (tienen prioridad sobre `days`); si no, `days`
-    recorta a los últimos N días calendario desde la última observación."""
+    recorta a los últimos N días calendario desde la última observación. Una
+    serie PROYECTADA (`PROYECTADAS`) trae además `corte` (última observación) y
+    con `days` muestra `days` hacia atrás Y hacia adelante del corte."""
+    if key in PROYECTADAS:
+        pts, corte = _puntos_proyectada(key)
+        if (desde or hasta) and pts:
+            pts = [p for p in pts if (not desde or p[0] >= desde) and (not hasta or p[0] <= hasta)]
+        elif days and pts and corte:
+            from datetime import date, timedelta
+            try:
+                c = date.fromisoformat(corte)
+                lo, hi = (c - timedelta(days=days)).isoformat(), (c + timedelta(days=days)).isoformat()
+                pts = [p for p in pts if lo <= p[0] <= hi]
+            except ValueError:
+                pass
+        return {"label": PROYECTADAS[key][2], "points": pts, "corte": corte}
     c = ensure_loaded()
     s = c["series"].get(key)
     if not s:

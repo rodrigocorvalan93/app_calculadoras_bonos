@@ -42,6 +42,10 @@ os.environ.setdefault("BNA_FX_PATH", os.path.join(tempfile.gettempdir(), "bonos_
 os.environ.setdefault("PIZARRA_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_pizarra_"), "pizarra.json"))
 # Prefs de interfaz por usuario (glow-up D): nunca el data/prefs.json real.
 os.environ.setdefault("PREFS_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_prefs_"), "prefs.json"))
+# Proyecciones (inflación / A3500) editables: archivo compartido en un tmp (sin
+# archivo = las tablas de indices.py) y sin el vigilante de otras PCs.
+os.environ.setdefault("PROYECCIONES_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_proy_"), "proyecciones.json"))
+os.environ.setdefault("PROYECCIONES_WATCH", "0")
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")
 os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_auth_store.json"))
 # Bootstrap del superuser de la suite: valores SINTÉTICOS (nunca una cuenta

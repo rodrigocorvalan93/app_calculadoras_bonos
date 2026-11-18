@@ -811,17 +811,34 @@
         serie.fill = ACC; serie.width = 0;
         serie.paths = uPlot.paths.bars({ size: [0.7, 100] });
       }
+      // Serie proyectada (13/11): `corte` = última observación. El tramo
+      // observado va lleno y el proyectado PUNTEADO, mismo color; el punto
+      // del corte está en los dos para que el trazo no se corte.
+      var series = [{ value: function (uu, v) { return v == null ? "" : fmtDia(v); } }];
+      var data = [j.x];
+      if (j.corte != null && !barras) {
+        var obs = [], proy = [];
+        for (var i = 0; i < j.x.length; i++) {
+          obs.push(j.x[i] <= j.corte ? j.y[i] : null);
+          proy.push(j.x[i] >= j.corte ? j.y[i] : null);
+        }
+        var sObs = Object.assign({}, serie, { label: j.label + " · observado" });
+        var sProy = Object.assign({}, serie, { label: "proyectado", dash: [6, 4] });
+        series.push(sObs, sProy); data.push(obs, proy);
+      } else {
+        series.push(serie); data.push(j.y);
+      }
       var opts = {
         width: box.clientWidth || 900, height: 420,
         tzDate: utcTz,
         scales: { x: { time: true } },
         axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, values: ejeFechas },
                { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: 60 }],
-        series: [{ value: function (uu, v) { return v == null ? "" : fmtDia(v); } }, serie],
+        series: series,
         cursor: { focus: { prox: 24 } },
       };
       if (u) u.destroy();
-      u = new uPlot(opts, [j.x, j.y], box);
+      u = new uPlot(opts, data, box);
       if (window.chartCopyInject) window.chartCopyInject(box, "macro-" + (j.label || "serie"));
     }
 
@@ -833,7 +850,7 @@
       if (!body) return;
       var j = lastJ;
       if (!j || !j.n) { body.innerHTML = '<p class="muted" style="padding:6px">Sin datos.</p>'; return; }
-      var n = j.x.length, rows = [];
+      var n = j.x.length, rows = [], conTramo = (j.corte != null);
       for (var i = n - 1; i >= 0; i--) {
         var v = j.y[i], p = (i > 0) ? j.y[i - 1] : null;
         var d = (v != null && p != null) ? v - p : null;
@@ -842,13 +859,14 @@
         rows.push("<tr><td style=\"text-align:left;color:var(--accent);font-weight:600\">" + fmtDia(j.x[i]) + "</td>" +
                   "<td style=\"font-weight:600\">" + fmtNum(v) + "</td>" +
                   "<td class=\"" + cls + "\">" + (d == null ? "—" : (d > 0 ? "▲ " : (d < 0 ? "▼ " : "■ ")) + fmtNum(d)) + "</td>" +
-                  "<td class=\"" + cls + "\">" + (pc == null ? "—" : fmtPct(pc)) + "</td></tr>");
+                  "<td class=\"" + cls + "\">" + (pc == null ? "—" : fmtPct(pc)) + "</td>" +
+                  (conTramo ? "<td class=\"muted\">" + (j.x[i] > j.corte ? "proyectado" : "observado") + "</td>" : "") + "</tr>");
       }
       body.innerHTML =
         '<div class="card-title"><span>🗒 ' + (j.label || "Serie") + ' · datos</span>' +
         '<span class="card-title-aux"><button type="button" class="lnk" data-csv-of="#hm-datos-tbl" title="Descargar la tabla (CSV es-AR)">⤓ CSV</button> · ' + n + ' filas · más reciente primero</span></div>' +
         '<div class="card-body table-scroll" style="max-height:420px;overflow:auto"><table class="cashflows curve-table mercado-table" data-sortable id="hm-datos-tbl">' +
-        '<thead><tr><th style="text-align:left" data-sort>Fecha</th><th data-sort>Valor</th><th data-sort>Δ</th><th data-sort>Δ%</th></tr></thead>' +
+        '<thead><tr><th style="text-align:left" data-sort>Fecha</th><th data-sort>Valor</th><th data-sort>Δ</th><th data-sort>Δ%</th>' + (conTramo ? '<th data-sort>Tramo</th>' : '') + '</tr></thead>' +
         '<tbody>' + rows.join("") + '</tbody></table></div>';
       if (window.htmx) window.htmx.process(body);
       document.body.dispatchEvent(new CustomEvent("tables:injected", { detail: { root: body } }));
@@ -859,6 +877,10 @@
     var hmGen = 0;
     function load() {
       var mine = ++hmGen;
+      // El link ⤓ CSV sigue a los controles (misma serie y rango del gráfico).
+      // `typeof document`: live_engine_harness corre este load() en un VM sin DOM.
+      var csvLink = (typeof document !== "undefined") ? document.getElementById("hm-csv") : null;
+      if (csvLink) csvLink.href = "/historicos/macro.csv?" + paramsOf(ctrls);
       fetch("/historicos/data?" + paramsOf(ctrls)).then(function (r) { return r.json(); }).then(function (j) {
         if (mine !== hmGen) return;
         lastJ = j;
@@ -1208,7 +1230,64 @@
     if (b && b._u) b._u.setSize({ width: b.clientWidth || 900, height: COMP_H });
   });
 
-  function boot() { initGraficos(); initHistMacro(); initHistFechas(); initHistComp(); }
+  // ── Proyecciones (13/11): CER / A3500 / inflación mensual, vigente vs borrador ──
+  // Cada [data-proy-chart] trae su JSON (x epoch, y, corte, barras, y ref_x /
+  // ref_y = la vigente cuando se previsualiza). Observado lleno, proyectado
+  // punteado, referencia en gris. Se redibuja tras cada swap de #proy-preview.
+  function initProyecciones() {
+    var boxes = document.querySelectorAll("[data-proy-chart]");
+    if (!boxes.length || typeof uPlot === "undefined") return;
+    var MUT = cssVar("--text-muted", "#8a8a8a"), BORD = cssVar("--border", "#333"), ACC = cssVar("--accent", "#e0843c");
+    boxes.forEach(function (box) {
+      var j;
+      try { j = JSON.parse(box.getAttribute("data-proy-chart") || "{}"); } catch (e) { return; }
+      if (box.__u) { box.__u.destroy(); box.__u = null; }
+      box.innerHTML = "";
+      if (!j.x || !j.x.length) { box.innerHTML = '<p class="muted" style="font-size:12px">' + (j.label || "") + ': sin datos.</p>'; return; }
+      var series = [{ value: function (uu, v) { return v == null ? "" : utcDia(v); } }], data = [j.x];
+      var fmt = function (uu, v) { return fmtNum(v); };
+      if (j.barras) {
+        series.push({ label: j.label, stroke: ACC, fill: ACC, width: 0, paths: uPlot.paths.bars({ size: [0.6, 100] }), value: fmt });
+        data.push(j.y);
+      } else {
+        var obs = [], proy = [];
+        for (var i = 0; i < j.x.length; i++) {
+          obs.push(j.corte != null && j.x[i] <= j.corte ? j.y[i] : null);
+          proy.push(j.corte == null || j.x[i] >= j.corte ? j.y[i] : null);
+        }
+        series.push({ label: j.label + " observado", stroke: ACC, width: 1.6, points: { show: false }, value: fmt },
+                    { label: "proyectado", stroke: ACC, width: 1.6, dash: [6, 4], points: { show: false }, value: fmt });
+        data.push(obs, proy);
+      }
+      if (j.ref_x && j.ref_x.length) {
+        // La referencia (vigente) puede tener otras x: se alinea por unión del eje.
+        var xs = j.x.slice(), extra = j.ref_x.filter(function (x) { return j.x.indexOf(x) < 0; });
+        if (extra.length) {
+          xs = xs.concat(extra).sort(function (a, b) { return a - b; });
+          data = data.map(function (col, ci) {
+            if (ci === 0) return xs;
+            var m = {}; j.x.forEach(function (x, k) { m[x] = col[k]; });
+            return xs.map(function (x) { return (x in m) ? m[x] : null; });
+          });
+        }
+        var rm = {}; j.ref_x.forEach(function (x, k) { rm[x] = j.ref_y[k]; });
+        data.push(xs.map(function (x) { return (x in rm) ? rm[x] : null; }));
+        series.push({ label: "vigente", stroke: MUT, width: 1.2, dash: j.barras ? undefined : [2, 3],
+                      points: { show: false }, value: fmt,
+                      paths: j.barras ? uPlot.paths.bars({ size: [0.3, 100] }) : undefined, fill: j.barras ? MUT : undefined });
+      }
+      box.__u = new uPlot({
+        width: Math.max(box.clientWidth || 300, 260), height: 220, tzDate: utcTz,
+        scales: { x: { time: true } },
+        axes: [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, values: ejeFechas },
+               { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: 60 }],
+        series: series, cursor: { focus: { prox: 24 } }, legend: { show: true },
+      }, data, box);
+      if (window.chartCopyInject) window.chartCopyInject(box, "proy-" + (j.serie || "serie"));
+    });
+  }
+
+  function boot() { initGraficos(); initHistMacro(); initHistFechas(); initHistComp(); initProyecciones(); }
   if (document.readyState !== "loading") boot();
   else document.addEventListener("DOMContentLoaded", boot);
   // Las pestañas "Tasas por curva" / "Curva por fecha" / "Comparar" se cargan
@@ -1217,6 +1296,7 @@
     if (e.target && e.target.id === "hist-curva") initHistCurva();
     if (e.target && e.target.id === "hist-fechas") initHistFechas();
     if (e.target && (e.target.id === "hist-comp" || e.target.id === "hist-comp-body")) initHistComp();
+    if (e.target && e.target.id === "proy-preview") initProyecciones();
   });
 })();
 
@@ -1258,12 +1338,18 @@
       // Merge: eje x = xs de la curva + las durations de los bonos resaltados.
       var xs = d.xs.slice();
       var ars = d.ars.slice(), usd = d.usd.slice(), nss = (d.nss || []).slice();
+      // Códigos de la curva alineados a xs (los spliceamos igual que ars/usd):
+      // etiquetas tenues sobre cada punto + tooltip al pasar el mouse (pedido
+      // del desk 13/11: "para tener referencia"). Los resaltados llevan su
+      // propio código en `hlCodes`.
+      var codes = (d.codes && d.codes.length === d.xs.length) ? d.codes.slice() : xs.map(function () { return null; });
       var hls = pts.map(function () { return xs.map(function () { return null; }); });
+      var hlCodes = xs.map(function () { return null; });
       pts.forEach(function (p, i) {
         var j = xs.findIndex(function (x) { return x >= p.d; });
         if (j === -1) j = xs.length;
         xs.splice(j, 0, p.d);
-        ars.splice(j, 0, null); usd.splice(j, 0, null);
+        ars.splice(j, 0, null); usd.splice(j, 0, null); codes.splice(j, 0, null); hlCodes.splice(j, 0, p.c);
         if (nss.length) nss.splice(j, 0, null);
         hls.forEach(function (h, k) { h.splice(j, 0, k === i ? p.t : null); });
       });
@@ -1313,17 +1399,83 @@
         meta.textContent = metaTxt;
         el.appendChild(meta);
       }
+      // Series "scatter" con código por índice: ARS (1) y USD (2) llevan los de
+      // la curva; cada resaltado, el suyo. La NSS no tiene código.
+      var scat = [{ si: 1, cds: codes }, { si: 2, cds: codes }];
+      var hlBase = nss.length ? 4 : 3;
+      pts.forEach(function (p, i) { scat.push({ si: hlBase + i, cds: hlCodes }); });
+      el.style.position = "relative";
+      var tip = document.createElement("div");
+      tip.className = "locate-tip";
+      tip.style.cssText = "position:absolute;pointer-events:none;background:var(--bg);border:1px solid var(--border);" +
+        "border-radius:6px;padding:3px 8px;font-size:11px;line-height:1.35;display:none;z-index:6;white-space:nowrap;color:var(--text)";
+      var MUT = cssVar("--text-muted", "#8a8a8a");
+      var fmtDur = function (v) { return v.toFixed(2).replace(".", ","); };
       el.__u = new uPlot({
         width: Math.max(el.clientWidth || 600, 320), height: 240,
         legend: { show: true },
         scales: { x: { time: false } },
+        cursor: { points: { size: 9 }, focus: { prox: 24 } },
         axes: [
           { label: "Duration (años)", stroke: cssVar("--text-muted", "#999"), grid: { stroke: cssVar("--border-soft", "#222") } },
           { label: "TIREA %", stroke: cssVar("--text-muted", "#999"), grid: { stroke: cssVar("--border-soft", "#222") },
             values: function (u, vals) { return vals.map(fmtPct); } },
         ],
         series: series,
+        hooks: {
+          draw: [function (uu) {
+            // Código tenue sobre cada punto de la curva (mismo criterio que el
+            // chart de Gráficos: anti-superposición a 26×11 px; los resaltados
+            // van primero para que nunca pierdan su etiqueta, en su color).
+            var ctx = uu.ctx; ctx.save();
+            ctx.font = "10px system-ui,-apple-system,sans-serif"; ctx.textBaseline = "bottom"; ctx.textAlign = "left";
+            var X0 = uu.data[0], drawn = [];
+            var orden = scat.slice(2).concat(scat.slice(0, 2));
+            for (var s = 0; s < orden.length; s++) {
+              var e = orden[s], arr = uu.data[e.si], ser = uu.series[e.si];
+              if (!arr || !ser || !ser.show) continue;
+              ctx.fillStyle = (e.cds === hlCodes) ? (ser.stroke || MUT) : MUT;
+              ctx.globalAlpha = (e.cds === hlCodes) ? 1 : 0.75;
+              for (var i = 0; i < X0.length; i++) {
+                var yv = arr[i];
+                if (yv == null || !e.cds[i]) continue;
+                var X = uu.valToPos(X0[i], "x", true), Y = uu.valToPos(yv, "y", true), ok = true;
+                for (var k = 0; k < drawn.length; k++) {
+                  if (Math.abs(drawn[k][0] - X) < 26 && Math.abs(drawn[k][1] - Y) < 11) { ok = false; break; }
+                }
+                if (!ok) continue;
+                drawn.push([X, Y]);
+                ctx.fillText(e.cds[i], X + 5, Y - 3);
+              }
+            }
+            ctx.restore();
+          }],
+          setCursor: [function (uu) {
+            var i = uu.cursor.idx;
+            if (i == null) { tip.style.display = "none"; return; }
+            var cy = uu.cursor.top, best = null, bestD = Infinity;
+            for (var s = 0; s < scat.length; s++) {
+              var e = scat[s], ser = uu.series[e.si];
+              if (!ser || !ser.show) continue;
+              var yv = uu.data[e.si][i];
+              if (yv == null || !e.cds[i]) continue;
+              var dd = (cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy);
+              if (dd < bestD) { bestD = dd; best = { e: e, yv: yv }; }
+            }
+            if (!best) { tip.style.display = "none"; return; }
+            var X0c = uu.data[0];
+            tip.innerHTML = "<b>" + best.e.cds[i] + "</b>" + (best.e.cds === hlCodes ? " · a tu precio" : "") +
+              "<br>" + (d.ylabel || "TIREA") + " " + fmtPct(best.yv) + " · Dur " + fmtDur(X0c[i]);
+            tip.style.display = "block";
+            var L = uu.valToPos(X0c[i], "x"), T = uu.valToPos(best.yv, "y");
+            var bw = el.clientWidth, bh = el.clientHeight, tw = tip.offsetWidth, th = tip.offsetHeight;
+            var left = L + 12; if (left + tw > bw - 4) { left = L - tw - 12; } if (left < 2) { left = 2; }
+            var top = T - th - 8; if (top < 2) { top = T + 16; } if (top + th > bh - 2) { top = bh - th - 2; }
+            tip.style.left = left + "px"; tip.style.top = top + "px";
+          }],
+        },
       }, data, el);
+      el.appendChild(tip);
       if (window.chartCopyInject) window.chartCopyInject(el, "curva-" + curve);
     }).catch(function () { /* red caída: sin chart, sin ruido */ });
   }

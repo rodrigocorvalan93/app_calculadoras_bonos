@@ -184,6 +184,31 @@ def test_main_usa_consola_y_los_launchers_estan_ordenados() -> None:
     assert "\r" not in cmd                                              # CRLF rompe el shebang en zsh
 
 
+def test_el_bat_no_compila_dependencias_y_prefiere_un_python_con_wheels() -> None:
+    """02/11: la PC de Carlos tenía Python 3.15 recién salido; `py -3` lo eligió
+    y pyyaml (que entraba sólo por `uvicorn[standard]` y la app no usa) no tiene
+    wheel para 3.15 en Windows → pip lo compilaba y moría pidiendo "Microsoft
+    Visual C++ 14.0". Ahora: sin pyyaml, pip con `--only-binary=:all:` (en el
+    desk nunca hay MSVC: mejor un "No matching distribution" explicado que un
+    build fallido), un venv NUEVO prefiere 3.12 / 3.13 / 3.14 antes que `py -3`
+    y el error dice qué hacer (3.12 + borrar el venv)."""
+    req = (ROOT / "backend" / "requirements.txt").read_text(encoding="utf-8")
+    deps = "\n".join(l for l in req.splitlines() if l.strip() and not l.lstrip().startswith("#"))
+    assert "uvicorn[standard]" not in deps and "pyyaml" not in deps.lower()
+    for dep in ("uvicorn>=", "httptools>=", "watchfiles>=", "websockets>=", 'colorama>=0.4; sys_platform == "win32"',
+                'uvloop>=0.15.1; sys_platform != "win32"'):
+        assert dep in req, dep
+    bat = (ROOT / "run_backend (CORRER APP).bat").read_text(encoding="utf-8")
+    assert "setlocal EnableDelayedExpansion" in bat                     # !PYVER! del mensaje de error
+    assert 'pip install -r "backend\\requirements.txt" --only-binary=:all:' in bat
+    i_pref, i_any = bat.index("for %%v in (3.12 3.13 3.14) do ("), bat.index('set "PYBASE=py -3"')
+    assert i_pref < i_any
+    i_pip = bat.index("--only-binary=:all:")
+    assert "Microsoft Visual C++ 14.0" in bat[i_pip:] and "No matching distribution" in bat[i_pip:]
+    assert "Python.Python.3.12" in bat[i_pip:] and 'rmdir /s /q "%VENVDIR%"' in bat[i_pip:]
+    assert bat.isascii()
+
+
 def test_quiet_polls_calla_paneles_live_solo_en_2xx() -> None:
     """`main._QuietPolls`: el access-log de los paneles live (md-update) y las
     sondas no entra al log — una pestaña de Curvas sola escribía ~430

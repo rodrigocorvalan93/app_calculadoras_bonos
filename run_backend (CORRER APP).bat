@@ -11,7 +11,7 @@ REM  Navegador:       http://127.0.0.1:8000
 REM  Add-in de Excel: https://localhost:8443  (puente TLS: Office
 REM                   exige HTTPS para las funciones =OMS.*)
 REM ============================================================
-setlocal
+setlocal EnableDelayedExpansion
 
 REM Carpeta donde vive este .bat (raiz del proyecto)
 cd /d "%~dp0"
@@ -40,9 +40,21 @@ echo ============================================================
 echo   Carpeta : %CD%
 
 REM --- 1) Python base: py launcher (instalador oficial) o python del PATH ---
+REM Primero una version con wheels publicados para TODAS las dependencias
+REM (3.12 = la del CI, 3.13, 3.14); "py -3" a secas elige la MAS NUEVA instalada
+REM y un Python recien salido (3.15, 02/11) deja a pip compilando C para lo que
+REM todavia no tiene wheel (pedia "Microsoft Visual C++ 14.0"; PC de Carlos).
 set "PYBASE="
-py -3 --version >nul 2>&1
-if not errorlevel 1 set "PYBASE=py -3"
+for %%v in (3.12 3.13 3.14) do (
+  if not defined PYBASE (
+    py -%%v --version >nul 2>&1
+    if not errorlevel 1 set "PYBASE=py -%%v"
+  )
+)
+if not defined PYBASE (
+  py -3 --version >nul 2>&1
+  if not errorlevel 1 set "PYBASE=py -3"
+)
 if not defined PYBASE (
   python --version >nul 2>&1
   if not errorlevel 1 set "PYBASE=python"
@@ -80,9 +92,12 @@ REM --- Archivos a peticion de OneDrive (carpeta del codigo sincronizada) ---
 REM Un archivo NUEVO del repo llega a las otras PCs como marcador "solo en la
 REM nube" y, si OneDrive no lo entrega al leerlo, Python muere al importar con
 REM "OSError: [Errno 22] Invalid argument" (Pablo, 13/10). Esto baja lo que
-REM falte (requirements.txt incluido: pip lo lee en el paso siguiente), deja la
-REM carpeta "Mantener siempre en este dispositivo" y corta con un mensaje claro
-REM si OneDrive no responde. Fuera de OneDrive no hace nada. Solo usa la
+REM falte DEL CODIGO (lo que git versiona + certs/ data/ secrets.txt;
+REM requirements.txt incluido: pip lo lee en el paso siguiente), deja
+REM "Mantener siempre en este dispositivo" solo sobre las carpetas del codigo
+REM (backend/, tests/, .git/...) -- lo vecino (proyecto_cauciones_ml,
+REM exportaciones sueltas) queda en la nube (11/11) -- y corta con un mensaje
+REM claro si OneDrive no responde. Fuera de OneDrive no hace nada. Solo usa la
 REM biblioteca estandar: corre aunque las dependencias no esten instaladas.
 "%PY%" -m backend.tools.onedrive
 if errorlevel 4 if not errorlevel 5 (
@@ -109,13 +124,52 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM --- Clon sano (12/11): lo que OneDrive dejo distinto al repo vuelve a ser el repo ---
+REM Dos PCs arrancaron con un especies.py que OneDrive dejo a medias (NameError:
+REM S13N6) y una copia en conflicto especies-DAM-NB-RC.py al lado: la app quedo
+REM sin universo de bonos. Esto restaura los archivos VERSIONADOS que difieren
+REM del repo (git checkout), salvo especies.py (lo edita el desk a mano) y lo que
+REM la app reescribe; borra copias en conflicto identicas al repo; y chequea
+REM especies.py ANTES de importarlo. Si especies.py esta roto, pregunta si
+REM restaurarlo desde el repo (el actual se guarda en %LOCALAPPDATA%\bonos\conflictos).
+REM REPO_SANO=0 en secrets.txt lo apaga; REPO_AUTOPULL=1 ademas trae la rama.
+"%PY%" -m backend.tools.repo_sano
+if errorlevel 4 if not errorlevel 5 (
+  echo.
+  echo [ERROR] El especies.py de esta PC esta roto ^(ver arriba^): asi la app arranca sin bonos.
+  echo         Si nadie cargo fichas a mano en esta PC, conviene restaurarlo desde el repo.
+  echo         El archivo actual se guarda en %%LOCALAPPDATA%%\bonos\conflictos por si hace falta.
+  choice /C SN /N /T 60 /D N /M "Restaurar especies.py desde el repo? [S/N] (N en 60 s) "
+  REM solo con S (errorlevel 1) se restaura: N = 2, Ctrl+C / Ctrl+Pausa = 0, choice roto = 255
+  if not errorlevel 1 (
+    echo   Cancelado.
+    echo.
+    pause
+    exit /b 4
+  )
+  if errorlevel 2 (
+    echo   Queda como esta. Para arreglarlo a mano: git diff especies.py / git checkout -- especies.py
+    echo.
+    pause
+    exit /b 4
+  )
+  "%PY%" -m backend.tools.repo_sano --restaurar-especies
+  if errorlevel 1 (
+    echo [ERROR] No se pudo restaurar especies.py, o el del repo tambien esta roto ^(ver arriba^).
+    pause
+    exit /b 4
+  )
+)
+
 REM --- Carpetas de DATOS sincronizadas por OneDrive (Delta Bases / Carteras / CAFCI) ---
 REM En una PC nueva la biblioteca "Inversiones - Documentos" llega entera como
 REM marcadores "solo en la nube": la app arrancaba con cientos de "[Errno 22]"
-REM y Posiciones / Matriz vacias (04/11). Esto deja esas carpetas "Mantener
-REM siempre en este dispositivo" (lo nuevo llega ya bajado, Storage Sense no
-REM las vacia) y baja AHORA lo que la app necesita al arrancar; el resto lo
-REM baja OneDrive en segundo plano. Nunca corta el arranque: solo avisa.
+REM y Posiciones / Matriz vacias (04/11). Esto deja "Mantener siempre en este
+REM dispositivo" SOLO sobre lo que la app lee (archivos de la raiz de Delta
+REM Bases, cierres\, Carteras; la historia CAFCI y las exportaciones viejas
+REM quedan en la nube: 11/11, antes bajaba 34 GB a cada PC) y baja AHORA lo
+REM que la app necesita al arrancar. ONEDRIVE_PIN_DATOS=0 en secrets.txt =
+REM sin pin; =todo = la biblioteca entera. Nunca corta el arranque: solo avisa.
 "%PY%" -m backend.tools.onedrive --datos
 if errorlevel 4 if not errorlevel 5 (
   echo.
@@ -132,9 +186,23 @@ fc /b "backend\requirements.txt" "%VENVDIR%\requirements.instalado" >nul 2>&1
 if errorlevel 1 (
   echo Instalando/actualizando dependencias ^(1-3 min la primera vez^)...
   "%PY%" -m pip install --upgrade pip >nul 2>&1
-  "%PY%" -m pip install -r "backend\requirements.txt"
+  REM --only-binary: nunca compilar C en la PC del desk (no hay MSVC). Si una
+  REM dependencia no tiene wheel para este Python, pip corta con "No matching
+  REM distribution" y abajo se explica: es un Python demasiado nuevo.
+  "%PY%" -m pip install -r "backend\requirements.txt" --only-binary=:all:
   if errorlevel 1 (
+    for /f "delims=" %%v in ('"%PY%" --version') do set "PYVER=%%v"
+    echo.
     echo [ERROR] La instalacion de dependencias fallo. Revisar la salida de pip.
+    echo   Entorno: %VENVDIR%  ^(!PYVER!^)
+    echo   Si dice "No matching distribution" o "Microsoft Visual C++ 14.0 or greater
+    echo   is required", ese Python es demasiado nuevo y alguna dependencia todavia
+    echo   no publica el paquete compilado para esa version. NO hace falta instalar
+    echo   Visual Studio / Build Tools. Solucion:
+    echo     1^) instalar Python 3.12:   winget install -e --id Python.Python.3.12
+    echo     2^) borrar el entorno viejo: rmdir /s /q "%VENVDIR%"
+    echo     3^) volver a abrir este .bat ^(lo recrea con 3.12^).
+    echo.
     pause
     exit /b 1
   )

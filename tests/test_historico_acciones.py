@@ -141,7 +141,7 @@ def test_analizar_dividido_por_fx(base_acciones, monkeypatch) -> None:
     assert not r["ok"] and "÷ CCL" in r["motivo"]
 
 
-def _particiones_bono(env_dir, dias, code: str = "TX26", p0: float = 1500.0, t0: float = 0.30) -> None:
+def _particiones_bono(env_dir, dias, code: str = "TZX27", p0: float = 1500.0, t0: float = 0.30) -> None:
     """Particiones del cierre completo para un bono: precio lineal (+2 por
     rueda) y TIREA lineal (+0,1 pp por rueda), con nominal."""
     from backend.services import cierres
@@ -161,14 +161,14 @@ def test_bonos_precio_y_tir(base_acciones, monkeypatch) -> None:
     tmp, dias = base_acciones
     _particiones_bono(tmp, dias[-40:])
     try:
-        pa = price_action.analizar("TX26", "ars", "precio", 30)
+        pa = price_action.analizar("TZX27", "ars", "precio", 30)
         assert pa["ok"] and pa["fuente"] == "cierres" and pa["panel"] == "B" and not pa["es_tir"]
         assert pa["n"] == 30 and pa["nivel"]["ultimo"] == pytest.approx(1500.0 + 39 * 2.0)
         assert pa["cmp"] is None                                   # bonos: sin Merval
         assert pa["tabla"][0]["volumen"] == pytest.approx(5e5 + 39)
         assert pa["nivel"]["mdd"] is not None and pa["u_delta"] == "%"
         # TIR: nivel en %, Δ en pp, sin ÷ FX, sin drawdown, pendiente en pp/rueda
-        pt = price_action.analizar("TX26", "ccl", "retornos", 30, campo="tir")
+        pt = price_action.analizar("TZX27", "ccl", "retornos", 30, campo="tir")
         assert pt["ok"] and pt["es_tir"] and pt["base"] == "ars" and pt["u_delta"] == " pp" and pt["u_nivel"] == "%"
         assert pt["nivel"]["ultimo"] == pytest.approx((0.30 + 39 * 0.001) * 100)
         assert pt["nivel"]["ret_ventana"] == pytest.approx(29 * 0.1)
@@ -325,13 +325,13 @@ async def test_http_pestana_acciones(base_acciones, monkeypatch) -> None:
         _particiones_bono(base_acciones[0], base_acciones[1][-40:])
         rh._GRUPOS_CACHE = ()
         rh._AC_CACHE.clear()
-        rb = await ac.get("/historicos/acciones", params={"ticker": "TX26", "campo": "tir", "dias": "30"})
-        assert rb.status_code == 200 and "Bonos ·" in rb.text and 'value="TX26" selected' in rb.text
+        rb = await ac.get("/historicos/acciones", params={"ticker": "TZX27", "campo": "tir", "dias": "30"})
+        assert rb.status_code == 200 and "Bonos ·" in rb.text and 'value="TZX27" selected' in rb.text
         assert 'name="campo"' in rb.text and 'value="tir" selected' in rb.text
-        for frag in ("TX26 · TIR", "Δ TIR en la ventana", " pp", "no aplica a bonos", "canal de tendencia"):
+        for frag in ("TZX27 · TIR", "Δ TIR en la ventana", " pp", "no aplica a bonos", "canal de tendencia"):
             assert frag in rb.text, frag
-        rp = await ac.get("/historicos/acciones", params={"ticker": "TX26", "dias": "30"})
-        assert rp.status_code == 200 and "TX26 · último" in rp.text and "precio ARS" in rp.text
+        rp = await ac.get("/historicos/acciones", params={"ticker": "TZX27", "dias": "30"})
+        assert rp.status_code == 200 and "TZX27 · último" in rp.text and "precio ARS" in rp.text
         # sin archivos → aviso con el backfill, sin form
         rh._AC_CACHE.clear()
         rh._GRUPOS_CACHE = ()

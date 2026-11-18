@@ -75,6 +75,8 @@ def _ctx(request: Request, msg: Optional[str] = None, error: Optional[str] = Non
          # — nunca leer Excel acá adentro, que esto corre en el event loop.
          "fondos_all": positions.fondos() if positions.is_loaded() else [],
          "fondos_fuentes": positions.fuentes() if positions.is_loaded() else [],
+         # el viejo Galileo_Composicion.xlsx sigue en la carpeta (no se lee)
+         "galileo_viejo": bool(positions.is_loaded() and positions.status().get("galileo_viejo")),
          "excel_bases": _excel_bases(request),
          "msg": msg, "error": error},
     )
@@ -277,11 +279,9 @@ def _sec(fn) -> dict:
 
 @router.get("/especies-faltantes", response_class=HTMLResponse)
 async def admin_especies_faltantes(request: Request) -> HTMLResponse:
-    """Reporte del panel de control: especies de las carteras (Delta +
-    Galileo) que FALTAN en la base — bonos sin ficha en especies.py, tickers
-    que la app no conoce — y filas de Galileo aún SIN normalizar a un ticker
-    (candidatas a cargar la ficha con el flujo de carga de bonos, o a un
-    alias en positions._GALILEO_ALIAS_ISIN). On-demand al abrir /admin: cero
+    """Reporte del panel de control: tickers de las carteras que FALTAN en
+    la base — bonos sin ficha en especies.py (candidatos al flujo de carga de
+    bonos) o tickers que la app no conoce. On-demand al abrir /admin: cero
     costo en el hot path; el cómputo (sets en memoria) corre en el pool."""
     if not _guard(request):
         return HTMLResponse("<h1>403</h1>", status_code=403)

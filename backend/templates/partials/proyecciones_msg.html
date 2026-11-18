@@ -1,0 +1,2 @@
+{% from "partials/_icons.html" import icon %}
+<div class="alert {{ 'alert-ok' if ok else 'alert-error' }} u-mb8">{{ icon('check' if ok else 'warning') }} {{ texto }}</div>

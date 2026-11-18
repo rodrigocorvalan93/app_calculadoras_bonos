@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
+{% block title %}Proyecciones{% endblock %}
+{% block tab_proyecciones %}active{% endblock %}
+
+{% block content %}
+<section class="curves proy" x-data="proyForm()">
+  <header class="yas-header">
+    <h1>Proyecciones — inflación mensual y A3500</h1>
+    <p class="muted">Las dos tablas con las que la app proyecta el <b>CER / UVA</b> (CER PROYECTADO, patas <i>j</i>, Escenario,
+      Total Return) y el <b>A3500</b> (deva del dólar oficial). <b>Previsualizar</b> recalcula las series sin tocar nada;
+      <b>Aplicar</b> las deja vigentes para TODAS las PCs (archivo compartido <code>data/{{ ruta }}</code>) y las TIR se
+      recomputan solas en el próximo tick. Los meses en gris son datos publicados (INDEC / BCRA): mandan sobre la proyección.</p>
+  </header>
+
+  <div id="proy-msg">
+    {% if ok %}<div class="alert alert-ok u-mb8">{{ icon("check") }} Escenario aplicado. Las TIR se recalculan solas; las otras PCs lo toman en lo que tarde OneDrive en sincronizar el archivo.</div>{% endif %}
+  </div>
+
+  <div class="card u-mb12">
+    <div class="card-title"><span>{{ icon("settings") }} Escenario vigente</span>
+      <span class="card-title-aux">
+        {% if meta.origen == 'archivo' %}archivo compartido · {{ meta.accion or 'aplicado' }} por <b>{{ meta.autor or '?' }}</b> el {{ meta.ts[:16].replace('T', ' ') if meta.ts else '?' }}{% if meta.nota %} · “{{ meta.nota }}”{% endif %}
+        {% else %}tablas del código (<code>indices.py</code>): todavía nadie aplicó un escenario desde la app{% endif %}
+      </span></div>
+    <div class="card-body proy-meta">
+      <div class="kv-grid">
+        <div><span class="muted">Último CER publicado</span><b>{{ ultimos.cer_valor | ar_num(4) }} · {{ ultimos.cer | ar_date }}</b></div>
+        <div><span class="muted">Última inflación INDEC</span><b>{{ filas_infl | selectattr('obs') | map(attribute='label') | list | last or '—' }}</b></div>
+        <div><span class="muted">Último A3500 publicado</span><b>{{ ultimos.a3500_valor | ar_num(2) }} · {{ ultimos.a3500 | ar_date }}</b></div>
+        <div><span class="muted">Hoy (BA)</span><b>{{ hoy | ar_date }}</b></div>
+      </div>
+      {% if puede_editar %}
+      <div class="proy-acciones u-mt8">
+        <button type="button" class="btn" hx-post="/proyecciones/deshacer" hx-target="#proy-msg" hx-swap="innerHTML"
+                hx-confirm="¿Reponer el escenario ANTERIOR al último cambio del historial? Queda vigente para todas las PCs."
+                {% if not historial %}disabled title="Todavía no hay cambios en el historial"{% endif %}>↶ Deshacer último cambio</button>
+        <button type="button" class="btn" hx-post="/proyecciones/restablecer" hx-target="#proy-msg" hx-swap="innerHTML"
+                hx-confirm="¿Volver a las tablas del código (indices.py)? Queda vigente para todas las PCs.">Volver al escenario del código</button>
+      </div>
+      {% else %}
+      <p class="muted u-note u-mt8">{{ icon("lock") }} Tu rol puede previsualizar y bajar series, no aplicar (feature «proyecciones», la habilita el superuser en /admin).</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <form id="proy-form" hx-post="/proyecciones/preview" hx-target="#proy-preview" hx-swap="innerHTML" hx-indicator="#proy-spin"
+        @submit="limpiarVacias()">
+    <div class="proy-grid">
+      {# ── Inflación mensual ─────────────────────────────────────────────── #}
+      <div class="card">
+        <div class="card-title"><span>{{ icon("chart-bar") }} Inflación mensual proyectada (% m/m)</span>
+          <span class="card-title-aux"><button type="button" class="lnk" @click="agregarMes()" title="Agrega el mes siguiente al último de la tabla">+ mes</button> ·
+            <button type="button" class="lnk" @click="quitarUltimo('infl')">− último</button></span></div>
+        <div class="card-body table-scroll proy-tbl-wrap">
+          <table class="cashflows proy-tbl" id="proy-infl">
+            <thead><tr><th>Mes</th><th>INDEC</th><th>Proyección %</th></tr></thead>
+            <tbody>
+            {% for f in filas_infl %}
+              {% if f.obs %}
+              <tr class="obs"><td>{{ f.label }}</td><td>{{ f.valor | ar_num(2) }}</td><td class="muted">publicado</td></tr>
+              {% else %}
+              <tr data-mes="{{ f.mes }}" {% if f.pisado %}class="pisado" title="Hay dato publicado para este mes: la app usa el real, esta celda no se usa"{% endif %}>
+                <td>{{ f.label }}</td><td class="muted">{% if f.pisado %}publicado{% else %}—{% endif %}</td>
+                <td><input type="text" inputmode="decimal" name="i_{{ f.mes }}" value="{{ f.valor | ar_num(2) }}" @paste="pegar($event, 'infl')"></td></tr>
+              {% endif %}
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted u-note" style="padding:0 12px 8px">Pegar una columna de Excel sobre la primera celda llena hacia abajo (y agrega meses si faltan). Hasta el día 15 el CER corre con el IPC de dos meses atrás; después, con el del mes anterior.</p>
+      </div>
+
+      {# ── A3500 ────────────────────────────────────────────────────────── #}
+      <div class="card">
+        <div class="card-title"><span>{{ icon("dollar") }} A3500 proyectado (fin de mes)</span>
+          <span class="card-title-aux"><button type="button" class="lnk" @click="traerFuturos()" title="El precio de cada futuro DLR (mayorista) en su fin de mes">⤵ traer de los futuros</button> ·
+            <button type="button" class="lnk" @click="agregarFecha()">+ fila</button> ·
+            <button type="button" class="lnk" @click="quitarUltimo('a3500')">− última</button></span></div>
+        <div class="card-body table-scroll proy-tbl-wrap">
+          <table class="cashflows proy-tbl" id="proy-a3500">
+            <thead><tr><th>Fecha</th><th>A3500</th><th>Deva vs anterior</th></tr></thead>
+            <tbody>
+              <tr class="obs"><td>{{ ultimos.a3500 | ar_date }}</td><td>{{ ultimos.a3500_valor | ar_num(2) }}</td><td class="muted">publicado</td></tr>
+            {% for f in filas_a3500 %}
+              <tr data-n="{{ loop.index }}" {% if f.pisado %}class="pisado" title="Fecha anterior o igual al último A3500 publicado: este punto no se usa (borralo o corré la fecha)"{% endif %}>
+                <td><input type="date" name="df_{{ loop.index }}" value="{{ f.fecha }}" @change="devas()"></td>
+                <td><input type="text" inputmode="decimal" name="dv_{{ loop.index }}" value="{{ f.valor | ar_num(2) }}" @input="devas()" @paste="pegar($event, 'a3500')"></td>
+                <td class="muted deva">—</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted u-note" style="padding:0 12px 8px">Entre puntos la serie diaria interpola geométricamente desde el último A3500 publicado. Una fecha anterior al último publicado se ignora. <span x-show="futMsg" x-text="futMsg"></span></p>
+      </div>
+    </div>
+
+    <div class="row-fields u-mt12" style="align-items:center">
+      <label class="field" style="min-width:280px;flex:1"><span>Nota (queda en el historial)</span>
+        <input type="text" name="nota" maxlength="200" placeholder="p. ej. REM de noviembre · ROFEX 13/11"></label>
+      <button type="submit" class="btn">{{ icon("refresh") }} Previsualizar</button>
+      {% if puede_editar %}
+      <button type="button" class="btn-primary" hx-post="/proyecciones/aplicar" hx-include="#proy-form" hx-target="#proy-msg" hx-swap="innerHTML"
+              hx-confirm="¿Aplicar este escenario? Queda vigente para todas las PCs y las TIR de los bonos CER proyectado / UVA / escenarios se recalculan con él.">{{ icon("save") }} Aplicar</button>
+      {% endif %}
+      <span id="proy-spin" class="htmx-indicator muted">calculando…</span>
+      <span class="muted u-sm">Bajar el borrador:
+        <button type="button" class="lnk" @click="csv('cer')">CER</button> ·
+        <button type="button" class="lnk" @click="csv('uva')">UVA</button> ·
+        <button type="button" class="lnk" @click="csv('a3500')">A3500</button> ·
+        <button type="button" class="lnk" @click="csv('inflamom')">inflación</button>
+        <span class="muted">(CSV es-AR; las vigentes están en <a href="/historicos?serie=cer_proy">Históricos · Macro</a>)</span></span>
+    </div>
+  </form>
+
+  <div id="proy-preview" class="u-mt12">
+    {% with modo=preview.modo, resumen=preview.resumen, charts=preview.charts, esc_resumen=preview.esc_resumen %}
+      {% include "partials/proyecciones_preview.html" %}
+    {% endwith %}
+  </div>
+
+  <details class="card u-mt12">
+    <summary class="card-title" style="cursor:pointer;list-style:none"><span>{{ icon("clock") }} Historial de cambios</span>
+      <span class="card-title-aux">{{ historial | length }} más recientes · compartido entre PCs</span></summary>
+    <div class="card-body table-scroll">
+      {% if historial %}
+      <table class="cashflows">
+        <thead><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Escenario</th><th>Nota</th></tr></thead>
+        <tbody>{% for h in historial %}
+          <tr><td>{{ (h.ts or '')[:16].replace('T', ' ') }}</td><td>{{ h.autor or '?' }}</td><td>{{ h.accion }}</td>
+              <td class="muted">{{ h.resumen }}</td><td class="muted">{{ h.nota or '' }}</td></tr>
+        {% endfor %}</tbody>
+      </table>
+      {% else %}<p class="muted">Todavía no hay cambios aplicados desde la app.</p>{% endif %}
+    </div>
+  </details>
+</section>
+
+<script>
+// Helpers de la pestaña (Alpine): filas, pegado desde Excel, futuros, CSV del
+// borrador. Todo client-side; los cálculos los hace el server en Previsualizar.
+function proyForm() {
+  var MESES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  function mesLabel(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return MESES[m - 1] + "-" + String(y % 100).padStart(2, "0"); }
+  function mesSig(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); m += 1; if (m > 12) { m = 1; y += 1; } return y + "-" + String(m).padStart(2, "0"); }
+  function finDeMes(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); var d = new Date(Date.UTC(y, m, 0)); return d.toISOString().slice(0, 10); }
+  function arNum(v, dec) { return (v == null || isNaN(v)) ? "" : v.toFixed(dec).replace(".", ","); }
+  function num(s) { s = String(s || "").trim(); if (!s) return null; if (s.indexOf(",") >= 0) s = s.replace(/\./g, "").replace(",", "."); var f = parseFloat(s); return isNaN(f) ? null : f; }
+  return {
+    futMsg: "",
+    agregarMes: function () {
+      var tb = document.querySelector("#proy-infl tbody"), rows = tb.querySelectorAll("tr[data-mes]");
+      var ult = rows.length ? rows[rows.length - 1].dataset.mes : "{{ mes_nuevo or '' }}";
+      var mes = rows.length ? mesSig(ult) : (ult || finDeMes(new Date().toISOString().slice(0, 10)).slice(0, 7));
+      var prev = rows.length ? rows[rows.length - 1].querySelector("input").value : "";
+      var tr = document.createElement("tr"); tr.dataset.mes = mes;
+      tr.innerHTML = "<td>" + mesLabel(mes) + "</td><td class=\"muted\">—</td><td><input type=\"text\" inputmode=\"decimal\" name=\"i_" + mes + "\" value=\"" + prev + "\"></td>";
+      tr.querySelector("input").addEventListener("paste", function (e) { this.pegar(e, "infl"); }.bind(this));
+      tb.appendChild(tr); return tr;
+    },
+    agregarFecha: function () {
+      var tb = document.querySelector("#proy-a3500 tbody"), rows = tb.querySelectorAll("tr[data-n]");
+      var n = rows.length + 1, prevF = rows.length ? rows[rows.length - 1].querySelector("input[type=date]").value : null;
+      var fecha = prevF ? finDeMes(mesSig(prevF.slice(0, 7)) + "-01") : "{{ fecha_nueva }}";
+      var prevV = rows.length ? rows[rows.length - 1].querySelector("input[type=text]").value : "";
+      var tr = document.createElement("tr"); tr.dataset.n = n;
+      tr.innerHTML = "<td><input type=\"date\" name=\"df_" + n + "\" value=\"" + fecha + "\"></td><td><input type=\"text\" inputmode=\"decimal\" name=\"dv_" + n + "\" value=\"" + prevV + "\"></td><td class=\"muted deva\">—</td>";
+      var inp = tr.querySelector("input[type=text]");
+      inp.addEventListener("input", this.devas.bind(this)); inp.addEventListener("paste", function (e) { this.pegar(e, "a3500"); }.bind(this));
+      tr.querySelector("input[type=date]").addEventListener("change", this.devas.bind(this));
+      tb.appendChild(tr); this.devas(); return tr;
+    },
+    quitarUltimo: function (kind) {
+      var sel = kind === "infl" ? "#proy-infl tbody tr[data-mes]" : "#proy-a3500 tbody tr[data-n]";
+      var rows = document.querySelectorAll(sel); if (rows.length) rows[rows.length - 1].remove(); this.devas();
+    },
+    pegar: function (evt, kind) {
+      // Varias líneas pegadas = una columna de Excel: llena hacia abajo desde
+      // la celda, agregando filas si hacen falta. Una sola línea: pegado normal.
+      var txt = (evt.clipboardData || window.clipboardData).getData("text") || "";
+      var vals = txt.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(function (s) { return s !== ""; });
+      if (vals.length < 2) return;
+      evt.preventDefault();
+      var sel = kind === "infl" ? "#proy-infl tbody tr[data-mes]" : "#proy-a3500 tbody tr[data-n]";
+      var rows = Array.prototype.slice.call(document.querySelectorAll(sel));
+      var cur = evt.target.closest("tr"), i0 = rows.indexOf(cur);
+      for (var k = 0; k < vals.length; k++) {
+        var row = rows[i0 + k];
+        if (!row) { row = kind === "infl" ? this.agregarMes() : this.agregarFecha(); rows.push(row); }
+        var inp = row.querySelector("input[type=text]"); var f = num(vals[k]);
+        inp.value = f == null ? vals[k] : arNum(f, 2);
+      }
+      this.devas();
+    },
+    devas: function () {
+      // Columna informativa: variación % de cada punto contra el anterior.
+      var rows = document.querySelectorAll("#proy-a3500 tbody tr");
+      var prev = null;
+      var ultPub = "{{ ultimos.a3500.isoformat() if ultimos.a3500 else '' }}";
+      rows.forEach(function (tr) {
+        var inp = tr.querySelector("input[type=text]"), cell = tr.querySelector(".deva"), fi = tr.querySelector("input[type=date]");
+        var v = inp ? num(inp.value) : num(tr.children[1].textContent);
+        var pisado = !!(fi && ultPub && fi.value && fi.value <= ultPub);     // anterior al publicado: no se usa
+        if (fi) tr.classList.toggle("pisado", pisado);
+        if (cell) cell.textContent = pisado ? "no se usa" : ((v != null && prev) ? ((v / prev - 1) * 100).toFixed(2).replace(".", ",") + " %" : "—");
+        if (v != null && !pisado) prev = v;
+      });
+    },
+    traerFuturos: function () {
+      var self = this; self.futMsg = "trayendo futuros…";
+      fetch("/proyecciones/futuros").then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.n) { self.futMsg = "Sin futuros con precio ahora (feed frío)."; return; }
+        document.querySelectorAll("#proy-a3500 tbody tr[data-n]").forEach(function (tr) { tr.remove(); });
+        j.rows.forEach(function (r) {
+          var tr = self.agregarFecha();
+          tr.querySelector("input[type=date]").value = r.fecha;
+          tr.querySelector("input[type=text]").value = arNum(r.valor, 2);
+        });
+        self.devas();
+        self.futMsg = j.n + " contratos DLR traídos (" + (j.rows[0].fuente) + "). Previsualizá antes de aplicar.";
+      }).catch(function () { self.futMsg = "No pude traer los futuros."; });
+    },
+    limpiarVacias: function () {},
+    csv: function (serie) {
+      // POST del formulario entero → el server recalcula el borrador y devuelve el CSV.
+      var fd = new FormData(document.getElementById("proy-form")); fd.append("serie", serie);
+      fetch("/proyecciones/csv", { method: "POST", body: fd }).then(function (r) {
+        if (!r.ok) { return r.text().then(function (t) { alert("No pude armar el CSV: " + t); }); }
+        var name = (r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/);
+        return r.blob().then(function (b) {
+          var a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name ? name[1] : serie + ".csv";
+          document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+        });
+      });
+    },
+    init: function () { this.devas(); },
+  };
+}
+</script>
+{% endblock %}

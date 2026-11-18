@@ -12,7 +12,7 @@ import functools
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -275,15 +275,16 @@ async def historicos_page(
         await loop.run_in_executor(None, historico.refresh)
         await loop.run_in_executor(None, historico_byma.refresh)
     series = historico.series_list()
-    keys = {s["key"] for s in series}
+    proyectadas = historico.series_list_proyectadas()
+    keys = {s["key"] for s in series} | {s["key"] for s in proyectadas}
     selected = serie if serie in keys else (series[0]["key"] if series else None)
     chart = _line_chart(selected, rango, desde, hasta) if selected else {"n": 0}
     # La pestaña Curvas se carga lazy (htmx) la primera vez que se abre, para no
     # pagar la lectura del Excel histórico en cada visita a Macro.
     return _render(
         request, "historicos.html",
-        series=series, selected=selected, rango=rango, desde=desde or "", hasta=hasta or "",
-        chart=chart, status=historico.status(),
+        series=series, proyectadas=proyectadas, selected=selected, rango=rango,
+        desde=desde or "", hasta=hasta or "", chart=chart, status=historico.status(),
     )
 
 
@@ -712,8 +713,19 @@ def _historicos_data_body(serie: str, days: Optional[int],
             continue
         xs.append(u)
         ys.append(v)
-    return json.dumps({"label": data["label"], "n": len(xs), "x": xs, "y": ys},
-                      ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+    body: Dict[str, Any] = {"label": data["label"], "n": len(xs), "x": xs, "y": ys}
+    if data.get("corte"):                 # serie proyectada: desde acá el trazo va punteado
+        body["corte"] = _unix(data["corte"])
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+
+
+def _macro_ver(serie: str, carga: Dict[str, Any]) -> Any:
+    """Versión de la fuente de una serie macro para los memos: la carga del
+    backup (observadas) o la huella de las proyecciones instaladas."""
+    if historico.es_proyectada(serie):
+        from backend.services import proyecciones
+        return ("proy",) + proyecciones.token()
+    return carga.get("ver") or id(carga)
 
 
 @router.get("/historicos/data")
@@ -722,7 +734,7 @@ async def historicos_data(serie: str = "", rango: str = "1a",
     """Serie macro en JSON para uPlot: x = epoch (s), y = valor."""
     days = None if (desde or hasta) else _RANGOS.get(rango, 365)
     carga = historico.ensure_loaded()
-    key = (serie, days, desde or "", hasta or "", carga.get("ver") or id(carga))
+    key = (serie, days, desde or "", hasta or "", _macro_ver(serie, carga))
     body = _DATA_MEMO.get(key)
     if body is None:
         body = await asyncio.get_running_loop().run_in_executor(
@@ -731,6 +743,70 @@ async def historicos_data(serie: str = "", rango: str = "1a",
             _DATA_MEMO.clear()
         _DATA_MEMO[key] = body
     return Response(content=body, media_type="application/json")
+
+
+def _macro_csv_bytes(serie: str, days: Optional[int], desde: Optional[str], hasta: Optional[str]) -> Tuple[bytes, str]:
+    from backend.services import proyecciones
+    data = historico.series_points(serie, days, desde, hasta)
+    label = data.get("label") or serie
+    return proyecciones.csv_serie(data["points"], data.get("corte"), label, dec=6), f"macro_{serie}.csv"
+
+
+_MACRO_XLSX_MEMO: Dict[tuple, bytes] = {}
+
+
+def _macro_xlsx_bytes() -> bytes:
+    """Todas las series macro (observadas del BCRA + proyectadas con las que
+    valúa la app), una hoja por serie: Fecha · Valor · Tramo. ~1 s por el
+    openpyxl (CER diario a 30 años): memo por versión de ambas fuentes."""
+    import io
+
+    import pandas as pd
+
+    from backend.services import proyecciones
+    carga = historico.ensure_loaded()
+    key = (carga.get("ver") or id(carga), proyecciones.token())
+    hit = _MACRO_XLSX_MEMO.get(key)
+    if hit is not None:
+        return hit
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        hojas = [(s["key"], s["label"]) for s in historico.series_list()] + \
+                [(s["key"], s["label"]) for s in historico.series_list_proyectadas()]
+        for k, label in hojas:
+            data = historico.series_points(k)
+            corte = data.get("corte")
+            df = pd.DataFrame({"Fecha": [pd.Timestamp(p[0]) for p in data["points"]],
+                               "Valor": [p[1] for p in data["points"]]})
+            if corte:
+                df["Tramo"] = ["proyectado" if p[0] > corte else "observado" for p in data["points"]]
+            df.to_excel(xw, sheet_name=k[:31], index=False)
+    out = buf.getvalue()
+    _MACRO_XLSX_MEMO.clear()
+    _MACRO_XLSX_MEMO[key] = out
+    return out
+
+
+@router.get("/historicos/macro.csv")
+async def historicos_macro_csv(serie: str = "", rango: str = "1a",
+                               desde: Optional[str] = None, hasta: Optional[str] = None) -> Response:
+    """Una serie macro (observada o proyectada) como CSV es-AR (`;` + coma
+    decimal + BOM) con la columna Tramo (observado / proyectado)."""
+    days = None if (desde or hasta) else _RANGOS.get(rango, 365)
+    cuerpo, nombre = await asyncio.get_running_loop().run_in_executor(
+        None, _macro_csv_bytes, serie, days, desde, hasta)
+    return Response(content=cuerpo, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{nombre}"',
+                             "Content-Encoding": "identity", "Cache-Control": "no-store"})
+
+
+@router.get("/historicos/macro.xlsx")
+async def historicos_macro_xlsx() -> Response:
+    cuerpo = await asyncio.get_running_loop().run_in_executor(None, _macro_xlsx_bytes)
+    return Response(content=cuerpo,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="series_macro.xlsx"',
+                             "Content-Encoding": "identity", "Cache-Control": "no-store"})
 
 
 @router.get("/historicos/curva/data")

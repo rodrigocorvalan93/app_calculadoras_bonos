@@ -2,13 +2,14 @@
 <div class="card comp-card">
   <div class="card-title">
     <span>Composición por categoría</span>
-    <span class="card-title-aux">{% if pn %}PN {{ pn | ar_int }} · {% endif %}<span class="muted">tocá una fila para ver la torta{% if "Categoría" in summary %} · una porción de Categoría te lleva al grupo en la tabla{% endif %}</span></span>
+    <span class="card-title-aux">{% if pn %}PN {{ pn | ar_int }} · {% endif %}<span class="muted">tocá una fila para ver la torta{% if "Sector" in summary %} · una porción de Sector te lleva a ese sector en la tabla{% elif "Categoría" in summary %} · una porción de Categoría te lleva al grupo en la tabla{% endif %}</span></span>
   </div>
   <div class="card-body">
     <div class="resumen-grid">
       {# Itera los grupos que arme _composicion_summary (orden de inserción):
          Clase / Categoría / Tasa / Calificación / Vencimiento (+ Activos infra
-         sólo en el fondo de infraestructura). Cada bloque lleva su dona
+         sólo en el fondo de infraestructura; + Sector, después de Categoría,
+         sólo en un fondo de acciones: renta variable > 60 %). Cada bloque lleva su dona
          (svg_charts.donut, server-side) oculta: tocar una fila la abre con esa
          porción resaltada — todo client-side (app.js), cero requests. #}
       {% for label in summary %}
@@ -19,8 +20,10 @@
           <thead><tr><th class="u-left">Categoría</th><th>Monto</th><th>% PN</th></tr></thead>
           <tbody>
             {% for r in summary[label] %}
+            {# "Resto de la cartera" (lo que no es renta variable) va último y
+               puede ser grande: color propio, fuera del ciclo de 8 tonos #}
             <tr class="comp-row" data-i="{{ loop.index0 }}" data-cat="{{ r.cat }}" title="Ver la torta">
-              <td class="u-left"><span class="comp-sw comp-c{{ loop.index0 % 8 }}"></span>{{ r.cat }}</td>
+              <td class="u-left"><span class="comp-sw comp-c{{ loop.index0 % 8 }}{{ ' comp-resto' if label == 'Sector' and r.cat == 'Resto de la cartera' }}"></span>{{ r.cat }}</td>
               <td>{{ r.monto | ar_int }}</td>
               <td>{{ (r.pct * 100) | ar_pct_pp(2) if r.pct is not none else "—" }}</td>
             </tr>
@@ -33,7 +36,7 @@
              dona de 150 px tapaba el centro) #}
           <svg class="comp-svg" viewBox="0 0 {{ dona.size }} {{ dona.size }}" width="{{ dona.size }}" height="{{ dona.size }}" aria-label="{{ label }}: torta por participación">
             {% for s in dona.slices %}
-            <path class="comp-slice comp-c{{ s.i % 8 }}" data-i="{{ s.i }}" data-cat="{{ s.label }}" d="{{ s.d }}">
+            <path class="comp-slice comp-c{{ s.i % 8 }}{{ ' comp-resto' if label == 'Sector' and s.label == 'Resto de la cartera' }}" data-i="{{ s.i }}" data-cat="{{ s.label }}" d="{{ s.d }}">
               <title>{{ s.label }} · {{ (s.frac * 100) | ar_pct_pp(1) }} de lo invertido{% if s.pct is not none %} · {{ (s.pct * 100) | ar_pct_pp(1) }} del PN{% endif %} · {{ s.monto | ar_int }}</title>
             </path>
             {% endfor %}
@@ -41,7 +44,7 @@
             <text class="comp-center-sub" x="{{ dona.cx }}" y="{{ dona.cy + 17 }}" text-anchor="middle">{{ "grupo" if dona.n == 1 else "grupos" }}</text>
           </svg>
           <div class="comp-legend">
-            {% for s in dona.slices %}<div class="comp-lg" data-i="{{ s.i }}"><span class="comp-sw comp-c{{ s.i % 8 }}"></span><b>{{ (s.frac * 100) | ar_pct_pp(1) }}</b> {{ s.label }}</div>{% endfor %}
+            {% for s in dona.slices %}<div class="comp-lg" data-i="{{ s.i }}" data-cat="{{ s.label }}"><span class="comp-sw comp-c{{ s.i % 8 }}{{ ' comp-resto' if label == 'Sector' and s.label == 'Resto de la cartera' }}"></span><b>{{ (s.frac * 100) | ar_pct_pp(1) }}</b> {{ s.label }}</div>{% endfor %}
           </div>
         </div>
         {% endif %}

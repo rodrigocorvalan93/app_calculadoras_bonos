@@ -5,7 +5,8 @@ Manual de la **Categoría** de cada tenencia en la pestaña Posiciones (cuadro
 Es la referencia de lo que hace el código (`backend/services/clasificacion.py`
 y `routes/posiciones._clasif`); si cambia una regla, cambia este archivo.
 
-Cada tenencia de la cartera (Delta o Galileo) tiene un **ticker** (`Cod_Delta`,
+Cada tenencia de la cartera (`Delta_Composicion.xlsx`; los fondos Galileo
+viven ahí como fondos Delta comunes) tiene un **ticker** (`Cod_Delta`,
 puede ser `NC`), una **descripción** (columna `Especie`) y una **Clase de
 Activo** del Excel. La Categoría se decide en este orden; **el primer match
 gana**. La celda Categoría de la tabla muestra como tooltip cuál de las
@@ -122,6 +123,45 @@ Sin dato de emisor, la categoría queda sin prefijo ("ARS TAMAR").
 Las categorías de instrumento (plazos fijos, caución, cheques, pagarés,
 fideicomisos, FCI) **nunca** llevan prefijo de emisor.
 
+## Renta variable: hoja `Base RV` y sector
+
+Un ticker **sin ficha y sin fila en la Base RF** que está en la hoja `Base RV`
+de `Delta - Especies` es renta variable por dato:
+
+- **Categoría** = columna `Instrumento`: `ACCIONES` → "Acciones", `CEDEARs` →
+  "CEDEARs", `ADRs` → "ADRs", `ETFs` → "ETFs"; cualquier otro valor → "Renta
+  Variable". Fuente: *hoja Base RV*. La ficha de `especies.py` y la Base RF
+  siempre mandan: una fila de renta fija nunca se lee como acción.
+- **Sector** = columna `Sector Delta` (el del desk, en castellano); si la fila
+  no lo tiene, el GICS `Sector`. Una acción que todavía no está en la hoja
+  (renta variable sólo por la Clase de Activo de la cartera) queda en
+  "(sin sector)".
+- **Emisor** = `Emisor / Sponsor` de la misma fila.
+
+La fila se busca por la columna `BYMA` (el ticker de pantalla). Si `BYMA` está
+vacío sirve `Cod_Delta` — entero (`VIST US`) o sin el sufijo de la cartera
+(`GGAL AR` → `GGAL`, `CENCOSUD CI` → `CENCOSUD`) —, pero un `BYMA` siempre
+tiene prioridad. `VIST US` no vale para una tenencia `VIST`: cada listado
+(CEDEAR, ADR) necesita su fila. Si un `BYMA` está en dos filas vale la
+primera; la segunda se sigue encontrando por su `Cod_Delta` completo.
+
+**Fondo de acciones**: cuando la renta variable pasa del **60 %** la pantalla
+cambia para ese fondo. El peso se mide contra el mayor entre el PN y lo
+invertido: con el PN al día es el % del PN de siempre, y un PN viejo o sin
+cargar no cambia el resultado.
+
+- la tabla de tenencias agrupa la renta variable **por sector** (el grupo
+  lleva la etiqueta `sector` y cada fila lo repite al lado de la Categoría,
+  así el filtro de texto y el CSV también lo ven); lo que no es renta
+  variable sigue por Categoría;
+- la composición suma el cuadro **Sector** con su torta: cada sector y, al
+  final, "Resto de la cartera" (todo lo que no es renta variable). Tocar una
+  porción lleva al sector en la tabla.
+
+En el resto de los fondos nada cambia: las acciones siguen en su grupo
+"Acciones" / "CEDEARs" y el sector se ve al pasar el mouse por la Categoría.
+Con 60 % justo el fondo **no** es de acciones (tiene que superarlo).
+
 ## Tasa y Calificación (los otros cuadros)
 
 - **Tasa**, con ficha: Dual → la etiqueta dual; `step_up` → "Step Up";
@@ -149,10 +189,24 @@ ticker (columna `BYMA`) tiene que tener:
 | `Emisor / Sponsor` | razón social | Columna Emisor |
 
 La tarjeta **"Especies faltantes · qué pulir en la base"** de `/admin` lista
-las tenencias Delta cuya Categoría no salió de ficha ni de la base: con
+las tenencias cuya Categoría no salió de ficha ni de la base: con
 ticker (cargar lo de arriba, o la ficha en `especies.py`) y sin ticker sin
 regla (pasar la descripción para sumar un token). Plazos fijos, cauciones,
 cheques y pagarés no tienen ticker: sólo se clasifican por su descripción.
+
+### Renta variable (hoja Base RV)
+
+| Columna | Valores | Para qué |
+|---|---|---|
+| `BYMA` | ticker de pantalla (`GGAL`, `AAPL`) | Clave de la fila |
+| `Instrumento` | `ACCIONES`, `CEDEARs`, `ADRs`, `ETFs` | Categoría |
+| `Sector Delta` | el sector del desk (`Bancos y Servicios Financieros`, `Petroleo & Gas`…) | Sector (tabla y torta de los fondos de acciones) |
+| `Sector` | GICS (sale solo de `Sub Industria`) | Sector, si falta `Sector Delta` |
+| `Emisor / Sponsor` | razón social | Columna Emisor |
+
+La misma tarjeta de `/admin` lista la **renta variable sin sector**: acciones
+o CEDEARs en cartera que no tienen fila en la hoja, o la tienen sin `Sector
+Delta`.
 
 ## Ejemplos
 
@@ -169,7 +223,7 @@ cheques y pagarés no tienen ticker: sólo se clasifican por su descripción.
 | DELPESB · "DELTA PESOS CLASE B" · Liquidez | FCI Money Markets | Clase de Activo |
 | $ · "CAJA PESOS" · Liquidez | Liquidez | sin regla |
 | NC · "OTROS ACTIVOS NETOS" · Otros Activos Netos | Otros Activos Netos | sin regla |
-| Galileo · Clasifica_Ficha "Cheques Garantizados" | Cheques Garantizados | Clase de Activo |
+| NC · "*BIS131000155" · Cheques Garantizados | Cheques Garantizados | Clase de Activo |
 
 ## Límites conocidos
 

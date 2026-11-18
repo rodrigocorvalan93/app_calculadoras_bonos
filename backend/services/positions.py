@@ -9,22 +9,17 @@ Archivos (paths desde env, que OMSsecrets carga del secrets.txt):
   - Delta_Composicion.xlsx    (DELTA_COMPOSICION_PATH | DELTA_BASES_DIR)
   - Delta_PN.xlsx             (DELTA_PN_PATH          | DELTA_BASES_DIR)
   - Delta_Fondos.txt          (DELTA_FONDOS_PATH)  → CodFondo → Nombre (opcional)
-  - Galileo_Composicion.xlsx  (GALILEO_COMPOSICION_PATH | junto a la de Delta)
-  - Galileo_PN.xlsx           (GALILEO_PN_PATH          | ídem)
 
 Esquema Delta (igual que OMSposiciones.py legacy):
   Composición: CodFondo, Cod_Delta, Cantidad, Valor, (Clase de Activo, Vto…)
   PN:          CodFondo, PN
   %PN = Valor / PN.  Cod_Delta (upper/strip) matchea el ticker del universo.
 
-Esquema Galileo (reporte propio): CodFondo, fondo (nombre), descripcion,
-isin, cantidad, valor, Clasifica_Ficha… Identifica por ISIN (se mapea al
-ticker BYMA vía el universo cuando el papel es local). Sus CodFondo son una
-numeración INDEPENDIENTE que colisiona con la de Delta (el 5 existe en ambas)
-→ se namespacean sumando GALILEO_OFFSET (siguen siendo ints: allowlists de
-visibilidad, ?fondo=, matriz y admin funcionan sin cambios, y un usuario
-restringido NO ve los fondos nuevos hasta que se los tilden). Best-effort:
-un puesto sin los archivos Galileo sigue exactamente igual que antes.
+Galileo (17/11): los fondos Galileo viven en Delta_Composicion.xlsx / Delta_PN.xlsx
+como fondos Delta comunes. Los viejos Galileo_Composicion.xlsx / Galileo_PN.xlsx
+NO se leen (duplicaban fondos con las tenencias del último día en que se
+bajaban); si el archivo sigue en la carpeta, la carga lo avisa una vez
+(`status()["galileo_viejo"]`) y nada más.
 """
 from __future__ import annotations
 
@@ -42,42 +37,8 @@ logger = logging.getLogger("backend.positions")
 _COMPOSICION_FILE = "Delta_Composicion.xlsx"
 _PN_FILE = "Delta_PN.xlsx"
 
-# Fondos GALILEO: namespace por offset sobre el CodFondo (numeración
-# independiente de la de Delta — el 5 existe en ambas familias). 10000 deja
-# aire de sobra (Delta usa < 100) y mantiene todo en ints.
-GALILEO_OFFSET = 10_000
-_GALILEO_COMP_FILE = "Galileo_Composicion.xlsx"
-_GALILEO_PN_FILE = "Galileo_PN.xlsx"
-
-
-def es_galileo(cod: int) -> bool:
-    return cod >= GALILEO_OFFSET
-
-
-# Instrumentos del reporte Galileo que NO son especies de mercado (cash,
-# cheques, plazos fijos, FCI…): no se normalizan a ticker ni cuentan como
-# "faltantes" en el panel de control — sólo viven en la vista del fondo.
-_GALILEO_NO_ESPECIE = {
-    "Cheques Garantizados", "Disponibilidades", "Otros Activos Netos",
-    "Plazo Fijo", "FCI", "FCI Cerrados", "Caución", "FUTUROS",
-    "Fideicomisos Financieros",
-}
-
-# Alias SEMIDEFINITIVOS por ISIN → ticker BYMA, para lo que ni el universo ni
-# las reglas de descripción resuelven (acciones cuya descripción no trae el
-# ticker). Editable a mano; el reporte "Especies faltantes" de /admin muestra
-# lo que siga sin mapear para ir completando esta tabla.
-_GALILEO_ALIAS_ISIN: Dict[str, str] = {
-    "ARBOLG010010": "BOLT",   # Boldt Gaming SA
-    "ARP577611352": "INTR",   # Compañía Introductora de Buenos Aires
-    "ARGASB010027": "GBAN",   # Gas Natural Ban
-}
-
-# Normalización al esquema Delta de las descripciones de Galileo:
-# "BBAR AR / BBVA BANCO FRANCES SA" → ticker local "BBAR AR" (lo que pidió el
-# desk: sólo la pata local); "CONSULTATIO (CTIO)" → ticker entre paréntesis.
-_DESC_TICKER_AR = re.compile(r"^([A-Z][A-Z0-9]{1,5}) AR\b")
-_DESC_TICKER_PARENS = re.compile(r"\(([A-Z][A-Z0-9]{1,5})\)\s*$")
+# Archivo viejo de la familia Galileo: ya no se lee, sólo se avisa si sigue ahí.
+_GALILEO_VIEJO_FILE = "Galileo_Composicion.xlsx"
 
 # Fallback CodFondo → Nombre (de OMSposiciones). Se usa si Delta_Fondos.txt
 # no está disponible / no parsea, así nunca se muestran sólo números.
@@ -263,173 +224,6 @@ def _fondo_names() -> Dict[int, str]:
     return dict(_FONDO_NOMBRES_FALLBACK)
 
 
-# ── Galileo ────────────────────────────────────────────────────────────────
-def _resolve_junto(filename: str, env_override: str, junto_a: Optional[str]) -> Optional[str]:
-    """Como _resolve, pero además busca en la MISMA carpeta que otro archivo
-    ya resuelto (los Galileo_* viven junto a Delta_Composicion en la carpeta
-    de carteras, que no siempre es DELTA_BASES_DIR). Case-insensitive."""
-    p = deltapaths.expand(os.getenv(env_override), want="file")
-    if p and os.path.isfile(p):
-        return p
-    if junto_a:
-        hit = _find_ci(os.path.dirname(junto_a), filename)
-        if hit:
-            return hit
-    base = deltapaths.expand(os.getenv("DELTA_BASES_DIR"), want="dir")
-    if base:
-        hit = _find_ci(base, filename)
-        if hit:
-            return hit
-    return None
-
-
-_isin_map_cache: Optional[Dict[str, str]] = None
-
-
-def _isin_a_ticker() -> Dict[str, str]:
-    """ISIN → ticker BYMA 'base' del universo (sin sufijo C/D, sin variantes
-    de calc j/v, sin espacios) — la misma forma que usa Cod_Delta. Para mapear
-    la composición de Galileo (que identifica por ISIN) a las especies de la
-    app: así un AL30 de Galileo se agrega a la MISMA posición que el de Delta.
-    Un ISIN internacional sin ficha queda sin mapear (sólo vista del fondo).
-    El universo es estático por proceso → se arma una vez."""
-    global _isin_map_cache
-    if _isin_map_cache is not None:
-        return _isin_map_cache
-    out: Dict[str, str] = {}
-    try:
-        from backend.services import bond_universe
-        bond_universe.ensure_loaded()
-        # Agrupar por ISIN reteniendo el vencimiento: especies.py arrastra
-        # ISINs copy-pasteados entre bonos DISTINTOS (GD29/GD30, RB65O/RB66O,
-        # el placeholder "PENDIENTE" compartido por 3 letras…). Mapear uno de
-        # esos sería agregar la posición al bono EQUIVOCADO en silencio, así
-        # que un ISIN cuyo grupo mezcla vencimientos queda AFUERA del mapa:
-        # esas filas caen a "sin normalizar" en el reporte de /admin, que es
-        # donde se ve y se corrige (ISIN real en la ficha → mapeo automático).
-        grupos: Dict[str, List[tuple]] = {}
-        for c in bond_universe.all_codes():
-            if " " in c:
-                continue                    # refs Bloomberg ("YPFDAR 27") afuera
-            obj = bond_universe.get(c)
-            isin = getattr(obj, "isin", None) if obj is not None else None
-            if not isin:
-                continue
-            key = str(isin).strip().upper()
-            if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}\d", key):
-                continue                    # "PENDIENTE" y placeholders afuera
-            grupos.setdefault(key, []).append(
-                (c, str(getattr(obj, "vencimiento", None))))
-        for key, items in grupos.items():
-            if len({v for _, v in items}) > 1:
-                continue                    # ISIN compartido por bonos distintos
-            # Mismo ISIN y MISMO venc pero más de una especie BASE: papeles
-            # distintos que comparten ISIN en la ficha (BOPREAL IV Clase A
-            # BPOA8 y Clase B BPOB8, ambos 31/10/2028). Mapear elegiría uno
-            # arbitrario y sumaría la tenencia al bono equivocado — a "sin
-            # normalizar", que es donde se ve. Las familias legítimas tienen
-            # UNA base (AL30/AL30D/AL30C → AL30; BPOC7/BPC7D → BPOC7).
-            if len({c for c, _ in items if c[-1:] not in ("C", "D", "j", "v")}) > 1:
-                continue
-            # preferencia: especie base (pesos) > C/D > variantes j/v; corto gana
-            out[key] = min((c for c, _ in items),
-                           key=lambda c: (c[-1:] in ("C", "D"), c[-1:] in ("j", "v"), len(c), c))
-    except Exception as exc:  # noqa: BLE001 — sin universo no hay mapeo, no error
-        logger.warning("[positions] mapa ISIN→ticker no disponible: %s", exc)
-    _isin_map_cache = out
-    return out
-
-
-def _cargar_galileo(pd, junto_a: Optional[str]) -> Dict[str, Any]:
-    """Composición + PN de los fondos GALILEO (best-effort: sin archivos o
-    ilegibles → vacío y Delta sigue como siempre). CodFondo namespaceado con
-    GALILEO_OFFSET; el nombre del fondo sale de la propia columna `fondo`."""
-    res: Dict[str, Any] = {"holdings": [], "pn": {}, "nombres": {}, "paths": {}}
-    comp = _resolve_junto(_GALILEO_COMP_FILE, "GALILEO_COMPOSICION_PATH", junto_a)
-    pnp = _resolve_junto(_GALILEO_PN_FILE, "GALILEO_PN_PATH", junto_a)
-    res["paths"] = {"composicion": comp, "pn": pnp}
-    if comp is None:
-        return res
-    try:
-        dfc = pd.read_excel(comp, sheet_name="Sheet1")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[positions] Galileo composición ilegible (%s): %s", comp, exc)
-        return res
-    if "CodFondo" not in dfc.columns:
-        logger.warning("[positions] Galileo composición sin columna 'CodFondo' — ignorada")
-        return res
-    dfc = dfc.dropna(subset=["CodFondo"]).copy()
-    dfc["CodFondo"] = pd.to_numeric(dfc["CodFondo"], errors="coerce")
-    dfc = dfc.dropna(subset=["CodFondo"])
-    for col in ("cantidad", "valor"):
-        if col in dfc.columns:
-            dfc[col] = pd.to_numeric(dfc[col], errors="coerce")
-    isin_map = _isin_a_ticker()
-
-    def _s(v: Any) -> Optional[str]:
-        if v is None or v != v:            # NaN-safe
-            return None
-        s = str(v).strip()
-        return s or None
-
-    for _, r in dfc.iterrows():
-        cod = GALILEO_OFFSET + int(r["CodFondo"])
-        instrumento = _s(r.get("instrumento"))
-        es_especie = instrumento not in _GALILEO_NO_ESPECIE
-        isin = _s(r.get("isin"))
-        desc = _s(r.get("descripcion"))
-        cod_delta = None
-        especie = desc
-        nombre_largo = None
-        if es_especie:
-            # Cascada de normalización al esquema Delta (semidefinitiva, en la
-            # carga — cero costo por request): 1) ISIN → ficha del universo,
-            # 2) alias fijo por ISIN, 3) "XXX AR / …" → pata local,
-            # 4) "(XXX)" al final de la descripción.
-            if isin:
-                iu = isin.upper()
-                cod_delta = isin_map.get(iu) or _GALILEO_ALIAS_ISIN.get(iu)
-            if not cod_delta and desc:
-                m = _DESC_TICKER_AR.match(desc)
-                if m:
-                    cod_delta = m.group(1)
-                    especie = f"{m.group(1)} AR"      # "sólo BBAR AR"
-                    if "/" in desc:                   # razón social → col. Nombre
-                        nombre_largo = desc.split("/", 1)[1].strip() or None
-                else:
-                    m = _DESC_TICKER_PARENS.search(desc)
-                    if m:
-                        cod_delta = m.group(1)
-                        nombre_largo = desc
-        venc = r.get("vencimiento")
-        res["holdings"].append({
-            "cod_fondo": cod,
-            "cod_delta": cod_delta,
-            "especie": especie or cod_delta or isin or "—",
-            "cantidad": _f(r.get("cantidad")),
-            "valor": _f(r.get("valor")),
-            "clase": _s(r.get("Clasifica_Ficha")) or instrumento,
-            "es_especie": es_especie,
-            "isin": isin,
-            "nombre": nombre_largo,
-            # vencimiento ISO (para sugerir fichas candidatas en el reporte)
-            "venc": venc.date().isoformat() if hasattr(venc, "date") and venc == venc else None,
-        })
-        nom = _s(r.get("fondo"))
-        if nom and cod not in res["nombres"]:
-            res["nombres"][cod] = nom
-    if pnp:
-        try:
-            dfp = pd.read_excel(pnp, sheet_name="Sheet1")
-            dfp["CodFondo"] = pd.to_numeric(dfp["CodFondo"], errors="coerce")
-            dfp["PN"] = pd.to_numeric(dfp["PN"], errors="coerce")
-            for _, r in dfp.dropna(subset=["CodFondo", "PN"]).iterrows():
-                res["pn"][GALILEO_OFFSET + int(r["CodFondo"])] = float(r["PN"])
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[positions] Galileo PN ilegible: %s", exc)
-    return res
-
-
 # ── carga ──────────────────────────────────────────────────────────────────
 def _file_asof(path: Optional[str]) -> Optional[str]:
     """Fecha/hora de última modificación del archivo → 'DD/MM/AAAA HH:MM'
@@ -442,10 +236,32 @@ def _file_asof(path: Optional[str]) -> Optional[str]:
         return None
 
 
+def _galileo_viejo_presente(comp_path: str) -> bool:
+    """¿Sigue el viejo Galileo_Composicion.xlsx donde el loader anterior lo
+    buscaba? (GALILEO_COMPOSICION_PATH de un secrets.txt viejo, la carpeta de
+    Delta_Composicion y DELTA_BASES_DIR). Sólo un listado de carpeta / un
+    stat por carga: el archivo no se abre."""
+    env = os.getenv("GALILEO_COMPOSICION_PATH")
+    if env:
+        try:
+            if os.path.isfile(deltapaths.expand(env, want="file")):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+    carpetas = [os.path.dirname(comp_path)]
+    base = os.getenv("DELTA_BASES_DIR")
+    if base:
+        try:
+            carpetas.append(deltapaths.expand(base, want="dir").rstrip("\\/"))
+        except Exception:  # noqa: BLE001
+            pass
+    return any(_find_ci(d, _GALILEO_VIEJO_FILE) for d in carpetas)
+
+
 def _load() -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "loaded": False, "error": None, "holdings": [], "pn": {}, "fondos": {},
-        "paths": {}, "asof": None,
+        "paths": {}, "asof": None, "galileo_viejo": False,
     }
     comp_path = _resolve(_COMPOSICION_FILE, "DELTA_COMPOSICION_PATH")
     pn_path = _resolve(_PN_FILE, "DELTA_PN_PATH")
@@ -455,6 +271,12 @@ def _load() -> Dict[str, Any]:
         out["error"] = ("No se encontró Delta_Composicion.xlsx — configurá "
                         "DELTA_BASES_DIR o DELTA_COMPOSICION_PATH en secrets.txt.")
         return out
+    # El viejo archivo Galileo NO se abre (los fondos Galileo ya son fondos
+    # Delta): sólo se avisa, una vez por carga, si sigue en la carpeta.
+    if _galileo_viejo_presente(comp_path):
+        out["galileo_viejo"] = True
+        logger.info("[positions] %s sigue en la carpeta de carteras: se ignora "
+                    "(los fondos Galileo ya viven en %s)", _GALILEO_VIEJO_FILE, _COMPOSICION_FILE)
 
     try:
         import pandas as pd
@@ -514,35 +336,7 @@ def _load() -> Dict[str, Any]:
             logger.warning("[positions] PN load failed: %s",
                            nube.remedio(pn_path) if nube.ilegible_por_nube(pn_path, exc) else exc)
 
-    # Fondos Galileo (best-effort): jamás voltean la carga de Delta.
-    try:
-        gal = _cargar_galileo(pd, comp_path)
-    except Exception:  # noqa: BLE001
-        logger.exception("[positions] carga Galileo falló — sigo sólo con Delta")
-        gal = {"holdings": [], "pn": {}, "nombres": {}, "paths": {}}
     out["fondos"] = _fondo_names()
-    # Guardia (06/11): el desk unificó las bases EN LOS ARCHIVOS (los fondos
-    # Galileo pasaron a Delta_Composicion.xlsx). Si el archivo Galileo sigue en
-    # Delta Bases, un fondo que ya está en Delta con el mismo nombre NO se
-    # carga dos veces; queda listado en `galileo_ignorados` (/admin lo muestra).
-    cods_delta = {h["cod_fondo"] for h in holdings}
-    nombres_delta = {_nombre_norm(n) for cod, n in out["fondos"].items() if cod in cods_delta}
-    ignorados: List[Dict[str, Any]] = []
-    for cod, nom in list(gal["nombres"].items()):
-        if _nombre_norm(nom) in nombres_delta:
-            ignorados.append({"cod": cod, "nombre": nom})
-    if ignorados:
-        dup = {d["cod"] for d in ignorados}
-        gal["holdings"] = [h for h in gal["holdings"] if h["cod_fondo"] not in dup]
-        gal["pn"] = {k: v for k, v in gal["pn"].items() if k not in dup}
-        logger.info("[positions] Galileo: %d fondo(s) ya están en Delta_Composicion con el mismo nombre — ignorados: %s",
-                    len(ignorados), ", ".join(d["nombre"] for d in ignorados))
-    holdings.extend(gal["holdings"])
-    pn.update(gal["pn"])
-    out["paths"]["galileo"] = gal["paths"]
-    out["galileo_nombres"] = gal["nombres"]
-    out["galileo_ignorados"] = ignorados
-
     out["holdings"] = holdings
     out["pn"] = pn
     # Índice por Cod_Delta → posición agregada (O(1) en position_for).
@@ -601,51 +395,32 @@ def refresh() -> Dict[str, Any]:
         return nuevo
 
 
-def _nombre_norm(s: Any) -> str:
-    """Nombre de fondo normalizado para comparar entre archivos: mayúsculas,
-    sin acentos ni puntuación, espacios colapsados ("Galileo Ahorro" ==
-    "GALILEO  AHORRO")."""
-    import re
-    import unicodedata
-    t = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode()
-    return " ".join(re.sub(r"[^A-Za-z0-9 ]+", " ", t).upper().split())
-
-
 def status() -> Dict[str, Any]:
     c = ensure_loaded()
-    n_gal = len({h["cod_fondo"] for h in c["holdings"] if es_galileo(h["cod_fondo"])})
     return {"loaded": c["loaded"], "error": c["error"], "paths": c["paths"],
             "n_holdings": len(c["holdings"]), "n_fondos_pn": len(c["pn"]),
-            "n_fondos_galileo": n_gal, "asof": c.get("asof"),
-            "galileo_ignorados": list(c.get("galileo_ignorados") or [])}
+            "asof": c.get("asof"),
+            # True = el viejo Galileo_Composicion.xlsx sigue en la carpeta (no se lee)
+            "galileo_viejo": bool(c.get("galileo_viejo"))}
 
 
 def fuentes() -> List[Dict[str, Any]]:
-    """De qué archivo salió cada fondo (diagnóstico de /admin tras la
-    unificación de las bases): código, nombre, archivo, tenencias, PN. Los
-    Galileo ignorados por estar ya en Delta van al final, marcados."""
+    """De qué archivo salió cada fondo (diagnóstico de /admin): código,
+    nombre, archivo, tenencias, PN. Todos salen de Delta_Composicion.xlsx;
+    `ignorado` queda siempre False (lo espera el template)."""
     c = ensure_loaded()
     if not c["loaded"]:
         return []
     conteo: Dict[int, int] = {}
     for h in c["holdings"]:
         conteo[h["cod_fondo"]] = conteo.get(h["cod_fondo"], 0) + 1
-    out = [{"cod": cod, "nombre": fondo_label(cod), "n": n, "pn": c["pn"].get(cod),
-            "archivo": _GALILEO_COMP_FILE if es_galileo(cod) else _COMPOSICION_FILE, "ignorado": False}
-           for cod, n in sorted(conteo.items())]
-    for d in c.get("galileo_ignorados") or []:
-        out.append({"cod": d["cod"], "nombre": f"G{d['cod'] - GALILEO_OFFSET} — {d['nombre']}", "n": 0, "pn": None,
-                    "archivo": _GALILEO_COMP_FILE, "ignorado": True})
-    return out
+    return [{"cod": cod, "nombre": fondo_label(cod), "n": n, "pn": c["pn"].get(cod),
+             "archivo": _COMPOSICION_FILE, "ignorado": False}
+            for cod, n in sorted(conteo.items())]
 
 
 def fondo_label(cod: int) -> str:
-    c = ensure_loaded()
-    if es_galileo(cod):
-        real = cod - GALILEO_OFFSET
-        nombre = (c.get("galileo_nombres") or {}).get(cod)
-        return f"G{real} — {nombre}" if nombre else f"G{real} — Fondo Galileo"
-    nombre = c["fondos"].get(cod)
+    nombre = ensure_loaded()["fondos"].get(cod)
     return f"{cod} — {nombre}" if nombre else f"Fondo {cod}"
 
 
@@ -705,63 +480,37 @@ def _equity_tickers_conocidos() -> set:
 
 
 def especies_faltantes() -> Dict[str, Any]:
-    """Reporte para el panel de control: qué especies de las carteras NO
-    están en la base (especies.py para bonos; paneles/CEDEARs para acciones)
-    y qué filas de Galileo siguen SIN normalizar a un ticker (para cargar la
-    ficha o sumar un alias en _GALILEO_ALIAS_ISIN). Corre sobre el cache de
-    holdings + sets en memoria — O(n) lookups, sub-ms, sin I/O."""
+    """Reporte para el panel de control: qué tickers de las carteras NO
+    están en la base (especies.py para bonos; paneles/CEDEARs para acciones).
+    Corre sobre el cache de holdings + sets en memoria — O(n) lookups, sub-ms,
+    sin I/O."""
     c = ensure_loaded()
     bonos: set = set()
-    venc_idx: Dict[str, List[str]] = {}
     try:
         from backend.services import bond_universe
         bond_universe.ensure_loaded()
-        for x in bond_universe.all_codes():
-            bonos.add(str(x).strip().upper())
-            # índice vencimiento → fichas (para SUGERIR candidatas en las filas
-            # sin normalizar — nunca se mapea solo por vencimiento: dos letras
-            # distintas pueden vencer el mismo día, ej. T15E7 boncap y D15E7
-            # dual — la elección es del usuario, acá sólo se le acercan).
-            if " " in x or x[-1:] in ("j", "v"):
-                continue
-            obj = bond_universe.get(x)
-            v = getattr(obj, "vencimiento", None) if obj is not None else None
-            if v is not None:
-                key = (v.date() if hasattr(v, "date") else v).isoformat()
-                venc_idx.setdefault(key, []).append(x)
+        bonos = {str(x).strip().upper() for x in bond_universe.all_codes()}
     except Exception:  # noqa: BLE001
         pass
     eq = _equity_tickers_conocidos()
+    try:                                    # renta variable de la hoja Base RV (ADRs, 'VIST US'…)
+        from backend.services import delta_especies
+        en_rv = delta_especies.info_rv
+    except Exception:  # noqa: BLE001
+        en_rv = lambda _c: None             # noqa: E731
     faltantes: Dict[str, Dict[str, Any]] = {}
-    sin_map: Dict[str, Dict[str, Any]] = {}
     for h in c["holdings"]:
-        if not h.get("es_especie", h["cod_delta"] is not None):
-            continue                        # cash / cheques / FCI: no son especies
-        fam = "Galileo" if es_galileo(h["cod_fondo"]) else "Delta"
         code = h["cod_delta"]
-        if code:
-            if code in bonos or code in eq:
-                continue
-            d = faltantes.setdefault(code, {
-                "code": code, "especie": h["especie"], "isin": h.get("isin"),
-                "familias": set(), "n_filas": 0, "valor": 0.0})
-        else:
-            d = sin_map.setdefault(h["especie"], {
-                "especie": h["especie"], "isin": h.get("isin"),
-                "clase": h.get("clase"), "familias": set(), "n_filas": 0, "valor": 0.0,
-                "candidatos": ", ".join(venc_idx.get(h.get("venc") or "", [])[:4])})
-        d["familias"].add(fam)
+        if not code or not h.get("es_especie", True):
+            continue                        # sin ticker (NC / cash): no es especie
+        if code in bonos or code in eq or en_rv(code) is not None:
+            continue
+        d = faltantes.setdefault(code, {
+            "code": code, "especie": h["especie"], "n_filas": 0, "valor": 0.0})
         d["n_filas"] += 1
         d["valor"] += (h["valor"] or 0.0)
-
-    def _fin(dd: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
-        rows = sorted(dd.values(), key=lambda x: -(x["valor"] or 0.0))
-        for r in rows:
-            r["familias"] = " + ".join(sorted(r["familias"]))
-        return rows
-
-    return {"faltantes": _fin(faltantes), "sin_map": _fin(sin_map),
-            "n_faltantes": len(faltantes), "n_sin_map": len(sin_map)}
+    rows = sorted(faltantes.values(), key=lambda x: -(x["valor"] or 0.0))
+    return {"faltantes": rows, "n_faltantes": len(rows)}
 
 
 def position_for(code: Optional[str],

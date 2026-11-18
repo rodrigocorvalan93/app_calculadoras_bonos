@@ -1,0 +1,36 @@
+{% from "partials/_icons.html" import icon %}
+{# Vista previa / vigente: resumen + gráficos (charts.js initProyecciones dibuja
+   cada [data-proy-chart] con su JSON embebido: cero requests extra). #}
+{% if error %}
+<div class="alert alert-error">{{ icon("warning") }} No se pudo previsualizar: {{ error }}</div>
+{% else %}
+<div class="card">
+  <div class="card-title">
+    <span>{{ icon("chart-line") }} {% if modo == 'borrador' %}Vista previa del borrador{% else %}Escenario vigente{% endif %}</span>
+    <span class="card-title-aux">{{ esc_resumen }}{% if modo == 'borrador' %} · la vigente va en gris para comparar{% endif %}</span>
+  </div>
+  <div class="card-body">
+    <div class="metrics-grid proy-metrics">
+      {% for h in resumen.horizontes %}
+      <div class="metric">
+        <div class="metric-label">A {{ h.meses }} meses</div>
+        <div class="metric-value">{% if h.cer %}CER {{ h.cer.valor | ar_num(2) }}{% else %}—{% endif %}</div>
+        <div class="muted u-sm">{% if h.cer_var is defined %}inflación anualizada {{ h.cer_var | ar_num(2) }} %{% endif %}
+          {% if h.a3500 %}<br>A3500 {{ h.a3500.valor | ar_num(2) }}{% if h.deva is defined %} · deva anual {{ h.deva | ar_num(2) }} %{% endif %}{% endif %}</div>
+      </div>
+      {% endfor %}
+      <div class="metric">
+        <div class="metric-label">Inflación de la tabla</div>
+        <div class="metric-value">{% if resumen.inflacion_media is not none %}{{ resumen.inflacion_media | ar_num(2) }} % m/m{% else %}—{% endif %}</div>
+        <div class="muted u-sm">{% for a in resumen.anual %}{{ a.anio }}: {{ a.acum | ar_num(1) }} %{% if a.meses < 12 %} ({{ a.meses }} m){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+      </div>
+    </div>
+    <div class="proy-charts u-mt12">
+      <div class="proy-chart" data-proy-chart='{{ charts.cer }}'></div>
+      <div class="proy-chart" data-proy-chart='{{ charts.a3500 }}'></div>
+      <div class="proy-chart" data-proy-chart='{{ charts.inflamom }}'></div>
+    </div>
+    <p class="muted u-note u-mt8">Lleno = observado hasta la última publicación; punteado = proyección. Los gráficos muestran el último dato de cada mes (la serie diaria completa se baja en CSV).</p>
+  </div>
+</div>
+{% endif %}

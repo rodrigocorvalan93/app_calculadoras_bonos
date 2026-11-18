@@ -173,7 +173,69 @@ def _clasif(h: Dict[str, Any], obj) -> Tuple[str, str]:
         tipo = clasificacion.tipo_emisor_ficha(getattr(obj, "clasificacion", None))
         return clasificacion.con_emisor(_categoria(obj), tipo), "ficha"
     code = h.get("cod_delta")
-    return clasificacion.clasificar(h.get("especie"), h.get("clase"), _info(code), code)
+    info = _info(code)
+    if info is None and code:
+        # Renta variable: la hoja 'Base RV' de Delta - Especies dice qué es
+        # (acción / CEDEAR / ADR / ETF) por DATO. Sólo si el ticker no está en
+        # la Base RF: una fila de renta fija nunca se lee como acción.
+        rv = delta_especies.info_rv(code)
+        if rv is not None:
+            inst = str(rv.get("Instrumento") or "").strip().upper()
+            return _CAT_INSTRUMENTO_RV.get(inst, "Renta Variable"), "base_rv"
+    return clasificacion.clasificar(h.get("especie"), h.get("clase"), info, code)
+
+
+# ── Renta variable: sector por la hoja 'Base RV' (17/11) ────────────────────
+# Un fondo es "de acciones" cuando la renta variable pasa del 60 % del PN (sin
+# PN, de lo invertido): ahí las tenencias de RV se agrupan por SECTOR en la
+# tabla y la composición suma la dimensión Sector. En el resto de los fondos
+# nada cambia (las acciones siguen en su grupo Acciones / CEDEARs).
+_CAT_INSTRUMENTO_RV = {
+    "ACCIONES": "Acciones", "ACCION": "Acciones", "ACCIÓN": "Acciones",
+    "CEDEARS": "CEDEARs", "CEDEAR": "CEDEARs",
+    "ADRS": "ADRs", "ADR": "ADRs", "ETFS": "ETFs", "ETF": "ETFs",
+}
+_CATS_RV = frozenset({"acciones", "cedears", "adrs", "etfs", "renta variable"})
+_UMBRAL_FONDO_RV = 0.60
+_SIN_SECTOR = "(sin sector)"
+_NO_RV = "Resto de la cartera"
+
+
+def _es_rv(cat: Optional[str], src: Optional[str]) -> bool:
+    """¿La tenencia es renta variable? Por la Base RV, o por la categoría que
+    dejó la Clase de Activo de la cartera (Acciones / CEDEARs / 'Renta
+    Variable' cruda) cuando el ticker todavía no está en la base."""
+    return src == "base_rv" or str(cat or "").strip().lower() in _CATS_RV
+
+
+def _sector_for(code: Optional[str]) -> str:
+    """Sector del desk ('Sector Delta'; si falta, el GICS) — lookup µs."""
+    return delta_especies.sector_rv(code) or _SIN_SECTOR
+
+
+def _pct_rv(rows: List[Dict[str, Any]], pn: Optional[float]) -> Optional[float]:
+    """Peso de la renta variable del fondo: Σ valor RV sobre el MAYOR entre el
+    PN y lo invertido. Con el PN al día son lo mismo; con un PN viejo o más
+    chico que la cartera (activos brutos) el peso contra el PN solo se
+    inflaba y un fondo con 7 % de acciones pasaba a "fondo de acciones"."""
+    total = sum((r.get("valor") or 0.0) for r in rows)
+    denom = max(pn if (pn and pn > 0) else 0.0, total if total > 0 else 0.0)
+    if not denom:
+        return None
+    return sum((r.get("valor") or 0.0) for r in rows if r.get("es_rv")) / denom
+
+
+def _rv_error() -> Optional[str]:
+    """Motivo por el que la hoja 'Base RV' no aportó nada, o None si se leyó."""
+    try:
+        st = delta_especies.status()
+    except Exception as exc:  # noqa: BLE001
+        return str(exc)
+    if not st.get("loaded"):
+        return st.get("error") or "Delta - Especies.xlsx no se cargó."
+    if st.get("error_rv"):
+        return st["error_rv"]
+    return None if st.get("n_rv") else "La hoja 'Base RV' no tiene filas con ticker."
 
 
 def _cat_for(h: Dict[str, Any], obj) -> str:
@@ -188,9 +250,8 @@ _SIN_NADA_QUE_CARGAR = frozenset({"Acciones", "CEDEARs", "Liquidez", "Otros Acti
 
 def reporte_clasificacion() -> Dict[str, Any]:
     """Para /admin: qué pulir en 'Delta - Especies' para que Posiciones
-    clasifique por DATO y no por texto. Recorre las tenencias Delta (Galileo
-    tiene su propio reporte de fichas) y junta, por ticker, las que NO salieron
-    de una ficha ni de la base:
+    clasifique por DATO y no por texto. Recorre las tenencias y junta, por
+    ticker, las que NO salieron de una ficha ni de la base:
       - `con_ticker`: categoría por descripción / Clase de Activo / sin regla →
         cargar Ajuste + Tasa (y Subclase para fideicomisos / FCI) en la base, o
         la ficha en especies.py. Acciones, CEDEARs, caja y 'Otros Activos
@@ -201,16 +262,33 @@ def reporte_clasificacion() -> Dict[str, Any]:
     c = positions.ensure_loaded()
     con_ticker: Dict[str, Dict[str, Any]] = {}
     sin_ticker: Dict[str, Dict[str, Any]] = {}
-    n_total = n_ficha = n_base = 0
+    sin_sector: Dict[str, Dict[str, Any]] = {}
+    n_total = n_ficha = n_base = n_rv = 0
     for h in c["holdings"]:
-        if positions.es_galileo(h["cod_fondo"]):
-            continue
         code = h.get("cod_delta")
         cat, src = _clasif(h, _bono(code))
         n_total += 1
         if src == "ficha":
             n_ficha += 1
             continue
+        if _es_rv(cat, src):
+            # renta variable: lo que hay para cargar es la fila de la hoja
+            # 'Base RV' (Instrumento + Sector Delta), no Ajuste / Tasa
+            n_rv += 1
+            if code and delta_especies.sector_rv(code) is None:
+                d = sin_sector.setdefault(code, {
+                    "code": code, "especie": h.get("especie"), "clase": h.get("clase"),
+                    "categoria": cat, "fuente": src, "n_filas": 0, "valor": 0.0, "fondos": set(),
+                    "en_base": src == "base_rv"})
+                d["n_filas"] += 1
+                d["valor"] += h.get("valor") or 0.0
+                d["fondos"].add(h["cod_fondo"])
+            if src == "base_rv":
+                n_base += 1
+            if code or src != "sin_regla":
+                continue
+            # sin ticker y con la Clase cruda ('Renta Variable'): no hay fila
+            # de la Base RV que cargar — sigue a `sin_ticker`, como antes
         if src == "base":
             n_base += 1
             continue
@@ -243,6 +321,12 @@ def reporte_clasificacion() -> Dict[str, Any]:
 
     return {"con_ticker": _fin(con_ticker), "sin_ticker": _fin(sin_ticker),
             "n_con_ticker": len(con_ticker), "n_sin_ticker": len(sin_ticker),
+            # renta variable sin sector: falta la fila en la hoja 'Base RV' (o
+            # su 'Sector Delta') — un fondo de acciones las deja en "(sin sector)"
+            "sin_sector": _fin(sin_sector), "n_sin_sector": len(sin_sector), "n_rv": n_rv,
+            # por qué no hay sectores si la hoja entera no se leyó (sin eso la
+            # tarjeta mandaba a cargar filas que ya existen)
+            "rv_error": _rv_error(),
             "n_total": n_total, "n_ficha": n_ficha, "n_base": n_base}
 
 
@@ -266,6 +350,8 @@ def _emisor_for(code: Optional[str], obj) -> Optional[str]:
     ficha ahí → 'Tesoro Nacional'."""
     from backend.services import delta_especies
     em = (delta_especies.info(code) or {}).get("Emisor / Sponsor") if code else None
+    if not em and code and obj is None:              # acción / CEDEAR: hoja Base RV
+        em = (delta_especies.info_rv(code) or {}).get("Emisor / Sponsor")
     if not em and obj is not None and "Soberano" in (getattr(obj, "clasificacion", "") or ""):
         em = "Tesoro Nacional"
     return em
@@ -313,18 +399,22 @@ def _infra_bucket(code: Optional[str]) -> str:
 
 
 def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float],
-                         infra: bool = False) -> Dict[str, List[Dict[str, Any]]]:
-    groups: Dict[str, Dict[str, float]] = {
-        "Clase de Activo": {}, "Categoría": {}, "Tasa": {}, "Calificación": {},
-        "Vencimiento": {},
-    }
+                         infra: bool = False, sector: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+    """`sector=True` (fondo de acciones) suma la dimensión Sector después de
+    Categoría: cada tenencia de renta variable en su sector de la Base RV y
+    todo lo demás junto en 'Resto de la cartera' (la dimensión cierra al 100 %
+    de lo invertido, como las otras)."""
+    groups: Dict[str, Dict[str, float]] = {"Clase de Activo": {}, "Categoría": {}}
+    if sector:
+        groups["Sector"] = {}
+    groups.update({"Tasa": {}, "Calificación": {}, "Vencimiento": {}})
     if infra:
         groups["Activos infra"] = {}
     for h in hs:
         valor = h.get("valor") or 0.0
         code = h.get("cod_delta")
         obj = _bono(code)
-        cat = _cat_for(h, obj)
+        cat, cat_src = _clasif(h, obj)
         keys = {
             "Clase de Activo": h.get("clase") or "(sin clasif.)",
             "Categoría": cat,
@@ -335,6 +425,8 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float],
         }
         if infra:
             keys["Activos infra"] = _infra_bucket(code)
+        if sector:
+            keys["Sector"] = _sector_for(code) if _es_rv(cat, cat_src) else _NO_RV
         for g, k in keys.items():
             groups[g][k] = groups[g].get(k, 0.0) + valor
     out: Dict[str, List[Dict[str, Any]]] = {}
@@ -349,6 +441,8 @@ def _composicion_summary(hs: List[Dict[str, Any]], pn: Optional[float],
             rows.sort(key=lambda r: _venc_sort_key(r["cat"]))        # cronológico
         elif g == "Activos infra":
             rows.sort(key=lambda r: _INFRA_ORDEN.index(r["cat"]))    # orden fijo
+        elif g == "Sector":
+            rows.sort(key=lambda r: (r["cat"] == _NO_RV, -abs(r["monto"])))   # lo que no es RV, al final
         else:
             rows.sort(key=lambda r: -abs(r["monto"]))
         out[g] = rows
@@ -429,7 +523,7 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
         px_val = _px_val_like_last(px_val, last_val)
         # Abreviatura (ticker del desk) + nombre completo aparte — igual que la
         # matriz: prevalece el nombre de la cartera; sin él, el de la ficha.
-        nombre = h.get("nombre") or (h.get("especie") if h.get("especie") != code else None)
+        nombre = h.get("especie") if h.get("especie") != code else None
         if not nombre and code:
             nombre = (pricing.bond_meta(code) or {}).get("nombre") or None
         tirea = (m or {}).get("tirea")
@@ -459,17 +553,26 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
                 if tea is not None:
                     tirea_p = (1.0 + tirea) * (1.0 + tea) - 1.0
         cat, cat_src = _clasif(h, obj)
+        es_rv = _es_rv(cat, cat_src)
+        sector = _sector_for(code) if es_rv else None
+        cat_src_txt = clasificacion.FUENTES.get(cat_src, "")
+        if es_rv:
+            cat_src_txt = (cat_src_txt + " · " if cat_src_txt else "") + "Sector: " + sector
         rows.append({
             **h,
             "abrev": code or "—",
             "nombre": nombre or "",
+            # renta variable: sector de la hoja 'Base RV' (agrupa la tabla y
+            # la composición en los fondos de acciones; tooltip en el resto)
+            "es_rv": es_rv,
+            "sector": sector,
             "in_universe": m is not None,
             "pct_pn": (valor / denom) if (valor is not None and denom) else None,
             "emisor": _emisor_for(code, obj),
             "categoria": cat,
             # de dónde salió la categoría (tooltip): ficha / base / texto / clase / sin_regla
             "cat_src": cat_src,
-            "cat_src_txt": clasificacion.FUENTES.get(cat_src, ""),
+            "cat_src_txt": cat_src_txt,
             "rating": _calif(obj) if obj is not None
             else (clasificacion.calificacion_base(_info(code)) or "—"),
             "px_val": px_val,
@@ -519,16 +622,20 @@ async def posiciones_page(
     ))
 
 
-def _agrupar_tenencias(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _agrupar_tenencias(rows: List[Dict[str, Any]], por_sector: bool = False) -> List[Dict[str, Any]]:
     """Tenencias agrupadas por Categoría — el cuadro con 'ramas' del Excel de
     carteras, pero con NUESTRO agrupamiento (el mismo de composición). Grupos
     ordenados por Σ valor desc; las filas adentro conservan su orden (valor
-    desc). El subtotal de % PN sólo se muestra si alguna fila lo tiene."""
-    by: Dict[str, Dict[str, Any]] = {}
+    desc). El subtotal de % PN sólo se muestra si alguna fila lo tiene.
+    `por_sector` (fondo de acciones): la renta variable se abre por SECTOR
+    (el grupo lleva `sector: True`); lo demás sigue por Categoría. Un sector
+    que se llamara igual que una categoría no se mezcla con ella."""
+    by: Dict[Any, Dict[str, Any]] = {}
     for r in rows:
-        cat = r.get("categoria") or "(sin clasif.)"
-        g = by.setdefault(cat, {"cat": cat, "valor": 0.0, "pct_pn": 0.0,
-                                "pct_any": False, "n": 0, "rows": []})
+        es_sector = bool(por_sector and r.get("es_rv"))
+        cat = (r.get("sector") or _SIN_SECTOR) if es_sector else (r.get("categoria") or "(sin clasif.)")
+        g = by.setdefault((es_sector, cat), {"cat": cat, "sector": es_sector, "valor": 0.0, "pct_pn": 0.0,
+                                             "pct_any": False, "n": 0, "rows": []})
         g["rows"].append(r)
         g["n"] += 1
         g["valor"] += r.get("valor") or 0.0
@@ -558,10 +665,15 @@ def _fondo_ctx(selected: Optional[int], plazo: str,
     nombre = positions.fondo_label(selected)
     # Cuadro "Activos infra" SOLO para el fondo de infraestructura (Crecimiento
     # — el del KPI regulatorio del legacy): para el resto ni se computa.
-    summary = _composicion_summary(hs, pn, infra="CRECIMIENTO" in nombre.upper())
+    # Fondo de acciones (renta variable > 60 %): tabla y composición por sector.
+    pct_rv = _pct_rv(rows, pn)
+    fondo_rv = pct_rv is not None and pct_rv > _UMBRAL_FONDO_RV
+    summary = _composicion_summary(hs, pn, infra="CRECIMIENTO" in nombre.upper(), sector=fondo_rv)
     return {
         "rows": rows,
-        "grupos": _agrupar_tenencias(rows),
+        "grupos": _agrupar_tenencias(rows, por_sector=fondo_rv),
+        "fondo_rv": fondo_rv,
+        "pct_rv": pct_rv,
         "summary": summary,
         # Una dona por dimensión de la composición (torta al tocar una fila;
         # svg_charts.donut es geometría pura, µs): misma data que la tabla.
@@ -780,8 +892,8 @@ async def posiciones_vencimientos(request: Request, fondo: Optional[str] = None)
 
 # ── Matriz de tenencias (pestaña aparte) ───────────────────────────────────
 
-# HTML de la matriz cacheado por (generación de carteras, familia, vista,
-# fondos visibles del usuario): la data cambia sólo con refresh() — típicamente
+# HTML de la matriz cacheado por (generación de carteras, vista, fondos
+# visibles del usuario): la data cambia sólo con refresh() — típicamente
 # 1×/día — y el render de ~340 filas × ~50 fondos costaba 20-100 ms por
 # request. La key incluye la allowlist exacta → sin fugas entre usuarios.
 # La PÁGINA /matriz embebe estos mismos bytes (tabla ~800 KB): antes rendía la
@@ -791,17 +903,16 @@ async def posiciones_vencimientos(request: Request, fondo: Optional[str] = None)
 _MATRIZ_CACHE: Dict[tuple, bytes] = {}
 
 
-def _matriz_table_bytes(request: Request, visibles: Optional[frozenset],
-                        familia: str, view: str) -> bytes:
+def _matriz_table_bytes(request: Request, visibles: Optional[frozenset], view: str) -> bytes:
     """Bytes del partial de la matriz, cacheados. Sync — llamar en executor."""
     gen = positions.generation()
-    key = (gen, familia, view, visibles)
+    key = (gen, view, visibles)
     body = _MATRIZ_CACHE.get(key)
     if body is not None:
         return body
     bond_universe.ensure_loaded()
     resp = _render(request, "partials/matriz_table.html", view=view, status=positions.status(),
-                   **_matriz_ctx(visibles, familia, view))
+                   **_matriz_ctx(visibles, view))
     body = bytes(resp.body)
     if _MATRIZ_CACHE and next(iter(_MATRIZ_CACHE))[0] != gen:
         _MATRIZ_CACHE.clear()               # carteras releídas → render viejo afuera
@@ -811,32 +922,30 @@ def _matriz_table_bytes(request: Request, visibles: Optional[frozenset],
 
 
 @router.get("/matriz", response_class=HTMLResponse)
-async def matriz_page(request: Request, view: str = "vn", familia: str = "todos",
-                      refresh: bool = False) -> HTMLResponse:
+async def matriz_page(request: Request, view: str = "vn", refresh: bool = False) -> HTMLResponse:
+    # Un link viejo con ?familia=… (el selector Delta / Galileo ya no existe)
+    # sigue respondiendo: FastAPI ignora el parámetro que no se declara.
     loop = asyncio.get_running_loop()
     if refresh:
         await loop.run_in_executor(None, positions.refresh)   # relee Excels (I/O)
     body = await loop.run_in_executor(
-        None, _matriz_table_bytes, request, auth.visible_fondos_for(request), familia, view)
-    return _render(request, "matriz.html", view=view, familia=familia,
+        None, _matriz_table_bytes, request, auth.visible_fondos_for(request), view)
+    return _render(request, "matriz.html", view=view,
                    status=positions.status(), table_html=body.decode("utf-8"))
 
 
 @router.get("/matriz/table", response_class=HTMLResponse)
-async def matriz_table(request: Request, view: str = "vn", familia: str = "todos") -> HTMLResponse:
+async def matriz_table(request: Request, view: str = "vn") -> HTMLResponse:
     body = await asyncio.get_running_loop().run_in_executor(
-        None, _matriz_table_bytes, request, auth.visible_fondos_for(request), familia, view)
+        None, _matriz_table_bytes, request, auth.visible_fondos_for(request), view)
     return HTMLResponse(body)
 
 
-def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos",
-                view: str = "vn") -> Dict[str, Any]:
-    """Matriz especies × fondos. SÓLO especies de mercado: los cheques
-    garantizados / cash / plazos fijos / FCI de Galileo no son filas — metían
-    ~1.100 filas únicas × todos los fondos ≈ 3 MB de HTML por render (la
-    lentitud reportada). `familia` filtra columnas Y filas (todos | delta |
-    galileo). El orden prioriza el esquema Delta: primero las especies con
-    presencia en fondos Delta (por valor), después las sólo-Galileo.
+def _matriz_ctx(visibles: Optional[frozenset] = None, view: str = "vn") -> Dict[str, Any]:
+    """Matriz especies × fondos. SÓLO especies de mercado (filas con ticker):
+    cash / cheques / plazos fijos sin código no son filas — metían ~1.100
+    filas únicas × todos los fondos ≈ 3 MB de HTML por render (la lentitud
+    reportada). Orden: por valor total, de mayor a menor.
 
     Además de `cells` (crudo), cada fila trae `txt` — el texto ya formateado
     de la vista pedida ("" = sin tenencia) — y el contexto trae los anchos de
@@ -845,17 +954,12 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos",
     tenga que medir las ~17k celdas en cada layout (ver matriz_table.html)."""
     c = positions.ensure_loaded()
     fs = positions.fondos(visibles)
-    if familia == "delta":
-        fs = [f for f in fs if not positions.es_galileo(f["cod"])]
-    elif familia == "galileo":
-        fs = [f for f in fs if positions.es_galileo(f["cod"])]
-    # Un fondo oculto (o de otra familia) no aporta ni columna ni fila: una
-    # especie que SÓLO está en fondos no visibles no debe aparecer.
+    # Un fondo oculto no aporta ni columna ni fila: una especie que SÓLO está
+    # en fondos no visibles no debe aparecer.
     permitidos = {f["cod"] for f in fs}
     esps: Dict[str, Dict[int, Dict[str, float]]] = {}
-    con_delta: set = set()
     con_ticker: set = set()             # keys que son ABREVIATURA (cod_delta)
-    nombres: Dict[str, str] = {}        # key → nombre completo (Delta primero)
+    nombres: Dict[str, str] = {}        # key → nombre completo (el primero que aparece)
     for h in c["holdings"]:
         if h["cod_fondo"] not in permitidos:
             continue
@@ -870,15 +974,11 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos",
         cell["valor"] += (h.get("valor") or 0.0)
         if h.get("cod_delta"):
             con_ticker.add(e)
-        nom = h.get("nombre") or h.get("especie")
-        if nom and nom != e and e not in nombres:   # Delta carga primero → prevalece
+        nom = h.get("especie")
+        if nom and nom != e and e not in nombres:
             nombres[e] = nom
-        if not positions.es_galileo(h["cod_fondo"]):
-            con_delta.add(e)
     rows = []
-    orden = sorted(esps.items(),
-                   key=lambda kv: (kv[0] not in con_delta,
-                                   -sum(c2["valor"] for c2 in kv[1].values())))
+    orden = sorted(esps.items(), key=lambda kv: -sum(c2["valor"] for c2 in kv[1].values()))
     for e, byf in orden:
         cells = []
         for f in fs:
@@ -887,15 +987,14 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos",
             cells.append({"vn": cell["vn"] if cell else None,
                           "valor": cell["valor"] if cell else None, "pct": pct})
         # Abreviatura (el ticker que usa el desk) + nombre completo aparte:
-        # el nombre sale de la cartera Delta si está, si no de la ficha, si no
-        # de la descripción Galileo. Sin ticker → sólo el nombre.
+        # el nombre sale de la cartera si está, si no de la ficha. Sin ticker
+        # → sólo el nombre.
         if e in con_ticker:
             abrev = e
             nombre = nombres.get(e) or (pricing.bond_meta(e) or {}).get("nombre") or ""
         else:
             abrev, nombre = "—", e
-        rows.append({"especie": e, "abrev": abrev, "nombre": nombre,
-                     "cells": cells, "solo_galileo": e not in con_delta})
+        rows.append({"especie": e, "abrev": abrev, "nombre": nombre, "cells": cells})
 
     # Texto por celda + ancho por columna (px) a partir del texto más largo.
     # ~7,6 px/carácter a 12,5 px sobrestima un 10-20 % los dígitos tabulares
@@ -926,7 +1025,7 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos",
         for i, t in enumerate(txt):
             if len(t) > maxlen[i]:
                 maxlen[i] = len(t)
-        n_esp = max(n_esp, len(r["abrev"]) + (3 if r["solo_galileo"] else 0))
+        n_esp = max(n_esp, len(r["abrev"]))
         n_nom = max(n_nom, len(r["nombre"]))
     w_esp = max(80, 28 + int(7.6 * n_esp))
     w_nom = max(80, min(288, 28 + int(6.6 * n_nom)))
@@ -935,6 +1034,6 @@ def _matriz_ctx(visibles: Optional[frozenset] = None, familia: str = "todos",
     w_cols = [max(72, 28 + int(7.6 * n),
                   28 + int(6.6 * max((len(w) for w in str(f["nombre"]).split()), default=0)))
               for n, f in zip(maxlen, fs)]
-    return {"fondos": fs, "rows": rows, "familia": familia,
+    return {"fondos": fs, "rows": rows,
             "w_esp": w_esp, "w_nom": w_nom, "w_cols": w_cols,
             "w_total": w_esp + w_nom + sum(w_cols)}
