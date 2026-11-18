@@ -1205,6 +1205,7 @@ th[data-sort].sort-desc::after { content: " ▼"; opacity: 0.9; color: var(--acc
 #pos-tbl .pos-sector { color: var(--text-muted); font-size: var(--fs-xs); }
 /* código de ESCO conciliado con otra ficha (TTCDOD → TTCDC) */
 #pos-tbl .pos-ficha { color: var(--text-muted); font-size: var(--fs-xs); font-weight: 400; cursor: help; }
+#pos-tbl .pos-canje { color: var(--cyan); font-size: var(--fs-xs); cursor: help; white-space: nowrap; }
 #pos-tbl tr.grp-hide { display: none; }
 .var-up { color: var(--green); }
 .var-down { color: var(--red); }

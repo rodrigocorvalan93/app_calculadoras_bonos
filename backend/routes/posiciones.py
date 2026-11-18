@@ -19,6 +19,8 @@ from fastapi.responses import HTMLResponse
 
 from backend.routes.curves import _row_for_code
 from backend.services import auth, bond_universe, clasificacion, delta_especies, esco, positions, pricing, svg_charts
+from backend.services import fx as fx_svc
+from backend import locale_ar
 
 _TZ_BA = ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -61,10 +63,10 @@ def _fila_precio(h: Dict[str, Any], f, plazo: str, settle: Optional[str]):
     code = h.get("cod_delta")
     if not code:
         return None
-    if f is None:
-        return _row_for_code(code, plazo, settle=settle)
-    calc = f.calc
     mon = positions.fondo_moneda(h.get("cod_fondo"))
+    if f is None:
+        return _con_canje(_row_for_code(code, plazo, settle=settle), code, mon, plazo)
+    calc = f.calc
     en_dolares = (mon in ("USD", "USB")) if mon else code.upper().strip()[-1:] in ("D", "C")
     nativa = esco.es_dolar(calc) and calc[-1:] in ("C", "D")     # su ticker cotiza en dólares
     if not esco.es_dolar(calc):
@@ -90,6 +92,46 @@ def _fila_precio(h: Dict[str, Any], f, plazo: str, settle: Optional[str]):
         m = dict(m)                     # copia: la fila está memoizada y es compartida
         m["last"] = None
         m["price_source"] = None
+        return m
+    return _con_canje(m, calc, mon, plazo) if en_dolares else m
+
+
+_DOLAR_TXT = {"USD": "cable", "USB": "MEP"}
+
+
+def _con_canje(m, priced: Optional[str], mon: Optional[str], plazo: str):
+    """ESCO contabiliza UN solo dólar por fondo (regla del desk, 18/11): en un
+    fondo CABLE (USD) a un bono que cotiza en MEP se le saca el canje
+    (× MEP / CCL) y en un fondo MEP (USB) a un bono que cotiza en cable se le
+    suma (× CCL / MEP). `priced` = el código cuyo ticker dio el Last: su pata
+    es la Moneda de la ficha nativa (…C = USD, …D = USB). Sólo cambia el Last
+    de PANTALLA (el que se compara con el precio de valuación del fondo): la
+    TIR / duration son las del precio de mercado del bono en su dólar. Sin
+    CCL / MEP implícito el Last queda crudo y la fila lo dice."""
+    if m is None or mon not in _DOLAR_TXT or not priced or m.get("last") is None:
+        return m
+    if priced[-1:] not in ("C", "D"):
+        return m
+    pata = (pricing.bond_meta(priced) or {}).get("moneda")
+    if pata not in _DOLAR_TXT or pata == mon:
+        return m
+    last = m["last"]
+    conv = fx_svc.normalize_price(last, pata, mon, fx_svc.get_fx(plazo))
+    m = dict(m)                         # copia: la fila está memoizada y es compartida
+    de, a = _DOLAR_TXT[pata], _DOLAR_TXT[mon]
+    if conv is None:
+        m["canje"] = "sin canje"
+        m["canje_txt"] = ("El fondo contabiliza dólar " + a + " y " + priced + " cotiza en dólar "
+                          + de + ": falta el CCL / MEP implícito, el Last es el de " + priced
+                          + " sin ajustar por canje.")
+        return m
+    m["last"] = conv
+    m["canje"] = "canje"
+    m["canje_txt"] = ("El fondo contabiliza dólar " + a + ": Last de " + priced + " (" + de + ") "
+                      + locale_ar.fmt_num(last, 2) + (" × MEP / CCL" if mon == "USD" else " × CCL / MEP")
+                      + " = " + locale_ar.fmt_num(conv, 2)
+                      + (" (se le saca el canje)" if mon == "USD" else " (se le suma el canje)")
+                      + ". TIR y duration: las del precio de mercado.")
     return m
 
 
@@ -653,6 +695,9 @@ def _enrich(hs: List[Dict[str, Any]], pn: Optional[float], plazo: str) -> List[D
             "vencimiento": _venc_date(obj if obj is not None else _ficha_leg(code)),
             "last": last_val,
             "price_source": (m or {}).get("price_source") if m is not None else eq_src,
+            # un solo dólar por fondo: Last ajustado por canje (cable ↔ MEP)
+            "canje": (m or {}).get("canje"),
+            "canje_txt": (m or {}).get("canje_txt") or "",
         })
     rows.sort(key=lambda r: (r.get("valor") or 0.0), reverse=True)
     return rows

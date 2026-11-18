@@ -2579,7 +2579,7 @@ CUAP = {
 GD29 = {
     "Nombre Security": "BONO USD 2029 Accrued ley ny",
     "Código": "GD29",
-    "ISIN": "US040114HS26",
+    "ISIN": "US040114HX11",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -3067,7 +3067,7 @@ GD46 = {
 GD29C = {
     "Nombre Security": "BONO USD 2029 Accrued ley ny C",
     "Código": "GD29C",
-    "ISIN": "US040114HS26",
+    "ISIN": "US040114HX11",
     "Calificación": "CCC-",
     "País": "Argentina",
     "Clasificación": "Soberano",
@@ -11074,7 +11074,7 @@ A partir del 10/06/2028, la Sociedad podrá efectuar rescates programados anuale
 VSCXO = {
     "Nombre Security": "ON Vista Oil & Gas Argentina S.A.U. Clase XXXI Vto 08 04 2038",
     "Código": "VISTAA 38",
-    "ISIN": "USP9659RAB44",
+    "ISIN": "USP9659RAD00",
     "Calificación": "BB-",
     "País": "Argentina",
     "Clasificación": "Corporativo Hard Dolar",
@@ -11149,7 +11149,7 @@ VSCXO = {
 VSCXC = {
     "Nombre Security": "ON Vista Oil & Gas Argentina S.A.U. Clase XXXI Vto 08 04 2038 C",
     "Código": "VSCXC",
-    "ISIN": "USP9659RAB44",
+    "ISIN": "USP9659RAD00",
     "Calificación": "BB-",
     "País": "Argentina",
     "Clasificación": "Corporativo Hard Dolar",

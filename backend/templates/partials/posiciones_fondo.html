@@ -114,7 +114,7 @@
               <td class="pos-dur-cell"><input class="pos-dur cell-edit" type="text" inputmode="decimal"
                      value="{{ r.duration | ar_num(2) if r.duration is not none and r.duration == r.duration else '' }}"
                      placeholder="✎" title="Duration en años (ej. 2,35) — editable; alimenta la Dur ponderada del fondo"></td>
-              <td class="u-xs muted">{{ r.price_source or "—" }}</td>
+              <td class="u-xs muted">{{ r.price_source or "—" }}{% if r.canje %} <span class="pos-canje" title="{{ r.canje_txt }}">{{ r.canje }}</span>{% endif %}</td>
             </tr>
           {% endfor %}
           {% endfor %}

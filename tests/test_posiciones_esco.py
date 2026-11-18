@@ -20,7 +20,9 @@ import pytest
 from backend.services import bond_universe, esco, positions
 
 ISIN_TTCD = "USP90187AT55"       # Tecpetrol 2030: TTCDO (ref) / TTCDC (nativa, cable)
-ISIN_GD30 = "US040114HS26"       # en especies.py lo comparten GD29 y GD30
+ISIN_GD30 = "US040114HS26"       # Global 2030 (hasta el 18/11 especies.py lo tenía también en GD29)
+ISIN_GD29 = "US040114HX11"       # Global 2029, el de ESCO
+ISIN_VSCX = "USP9659RAD00"       # Vista Clase XXXI 2038 (la ficha llevaba el de la Clase XXIX)
 ISIN_YM34 = "USP989MJBY67"       # YPF 2034: YM34O / YM34C
 ISIN_MGCQ = "AR0519406398"       # Pampa 2028: sólo MGCQD (MEP)
 ISIN_BPA8 = "AR0029227748"       # BOPREAL: BPA8D y BPB8D comparten todo
@@ -54,17 +56,47 @@ def test_un_codigo_con_ficha_propia_no_se_toca() -> None:
     assert _r(None) is None and _r("") is None
 
 
-def test_isin_repetido_entre_series_se_separa_por_bono_y_nunca_se_adivina() -> None:
-    """especies.py tiene el ISIN de GD30 también en GD29: el grupo se parte
-    por vencimiento y se elige el bono que comparte raíz con el código."""
+@pytest.fixture()
+def isin_arrastrado(monkeypatch):
+    """Simula el error de carga que tuvo especies.py hasta el 18/11: GD29 /
+    GD29C con el ISIN de GD30 (copiar una ficha y no cambiar el ISIN)."""
     bond_universe.ensure_loaded()
+    idx = {k: list(v) for k, v in esco._indice().items()}
+    idx[ISIN_GD30] = sorted(set(idx[ISIN_GD30]) | {"GD29", "GD29C"})
+    idx.pop(ISIN_GD29, None)
+    monkeypatch.setattr(esco, "_indice", lambda: idx)
+    monkeypatch.setattr(esco, "_memo", (None, {}))
+    yield idx
+    esco._memo = (None, {})
+
+
+def test_isin_corregidos_en_especies_gd29_y_vista_2038() -> None:
+    """especies.py (18/11, con el OK del desk): GD29 / GD29C llevaban el ISIN
+    de GD30 y VSCXO / VSCXC el de VSCV. Con el ISIN de ESCO cada código va a
+    su bono por ISIN, sin pasar por el sufijo."""
+    bond_universe.ensure_loaded()
+    idx = esco._indice()
+    assert set(idx[ISIN_GD30]) == {"GD30", "GD30C"} and set(idx[ISIN_GD29]) == {"GD29", "GD29C"}
+    assert set(idx[ISIN_VSCX]) == {"VSCXO", "VSCXC"} and "VSCXC" not in idx["USP9659RAB44"]
+    f = _r("GD29D", ISIN_GD29, "USD", "GD29D")
+    assert (f.calc, f.via) == ("GD29C", "isin")
+    f = _r("VSCXD", ISIN_VSCX, "USD", "VSCXD")
+    assert (f.calc, f.via) == ("VSCXC", "isin")
+    assert _r("GD30D", ISIN_GD30, "USD").calc == "GD30C"
+    assert _r("VSCVC", "USP9659RAB44", "USD") is None           # ficha propia: no se toca
+
+
+def test_isin_repetido_entre_series_se_separa_por_bono_y_nunca_se_adivina(isin_arrastrado) -> None:
+    """Si un ISIN queda repetido entre dos bonos (pasó con GD29 / GD30): el
+    grupo se parte por vencimiento y se elige el bono que comparte raíz con el
+    código; sin raíz que decida, no se adivina."""
     assert set(esco._indice()[ISIN_GD30]) >= {"GD29", "GD29C", "GD30", "GD30C"}
     assert _r("GD30D", ISIN_GD30, "USD").calc == "GD30C"
     h = {"cod_delta": "ZZZ9", "isin": ISIN_GD30, "pago": "USD", "ticker": None}
     assert esco.resolver_h(h) is None and "varias fichas" in esco.motivo(h)
-    # con el ISIN real de GD29 (que ninguna ficha tiene) cae al sufijo de ESCO
-    f = _r("GD29D", "US040114HX11", "USD", "GD29D")
-    assert (f.calc, f.via) == ("GD29C", "sufijo") and "US040114HX11" in f.nota
+    # con el ISIN real de GD29 (que en ese estado ninguna ficha tiene) cae al sufijo de ESCO
+    f = _r("GD29D", ISIN_GD29, "USD", "GD29D")
+    assert (f.calc, f.via) == ("GD29C", "sufijo") and ISIN_GD29 in f.nota
     assert _r("GD29D").calc == "GD29C"                     # sin ningún dato: igual
 
 
@@ -100,7 +132,8 @@ _FILAS = [
     (26, "USP79171AF45", "CO27D", "USD", "Título de Deuda Provincia de Córdoba al 7,125%", "Renta Fija", "CO27D", 100_000.0, 9.0e4),
     (15, ISIN_TTCD, "TTCDO", "USD", "ON Tecpetrol S.A. Clase 12 Vto 03 11 2030", "Renta Fija", "TTCDO", 200_000.0, 3.0e8),
     (15, ISIN_YM34, "YPF34", "USD", "ON YPF S.A. Clase XXXIV Vto 17 01 2034", "Renta Fija", "YM34O", 400_000.0, 6.0e8),
-    (15, "US040114HX11", "GD29", "USD", "Bonos Globales Rep Arg en USD 2029", "Renta Fija", "GD29", 100_000.0, 1.3e8),
+    # ISIN mal cargado EN LA CARTERA a propósito (el de GD30): /admin lo tiene que avisar
+    (15, ISIN_GD30, "GD29", "USD", "Bonos Globales Rep Arg en USD 2029", "Renta Fija", "GD29", 100_000.0, 1.3e8),
     (15, "Sin_Isin_FCI", "NC", "en Pesos", "Pionero Pesos Plus Clase B", "Liquidez", "NC", 1000.0, 5.0e6),
 ]
 _FONDOS = ("CodFondo,NumFondo,CodCAFCI,Nombre,NombreCorto,CodTpFondo,Clasif,Apertura,Moneda\n"
@@ -209,7 +242,7 @@ def test_tenencia_por_ficha_faltantes_y_reporte_de_admin(carteras) -> None:
     assert res["YPF34"]["ficha"] == "YM34C" and res["MGCQOD"]["nota"]
     assert [r["code"] for r in d["sin_resolver"]] == ["CO27D"] and "USP79171AF45" in d["sin_resolver"][0]["motivo"]
     # GD29 tiene ficha, pero el ISIN de la cartera no es el de la ficha: se avisa
-    assert [(r["code"], r["isin"], r["isin_ficha"]) for r in d["isin_distinto"]] == [("GD29", "US040114HX11", ISIN_GD30)]
+    assert [(r["code"], r["isin"], r["isin_ficha"]) for r in d["isin_distinto"]] == [("GD29", ISIN_GD30, ISIN_GD29)]
 
 
 def test_base_rf_por_codigo_de_esco_es_el_respaldo(tmp_path, monkeypatch) -> None:
@@ -299,8 +332,8 @@ def test_contradicciones_no_se_resuelven() -> None:
         assert esco.resolver_h(h) is None, (code, esco.resolver_h(h))
         assert texto in esco.motivo(h), esco.motivo(h)
 
-    # el código dice GD29 y el ticker GD30, dentro del ISIN que comparten: ninguno
-    sin("GD29D", ISIN_GD30, "USD", "GD30", texto="varias fichas")
+    # el código dice GD29 y el ISIN es el de GD30: ninguno
+    sin("GD29D", ISIN_GD30, "USD", "GD30")
     # el código es la especie de OTRO bono que el ISIN
     sin("TTCDOD", ISIN_YM34, "USD")
     # ISIN válido que ninguna ficha tiene + ticker de otro papel: el ticker no vale
@@ -408,3 +441,70 @@ def test_tickers_del_feed_clasificacion_y_reporte(carteras) -> None:
     d = esco.diagnostico([{"cod_fondo": 26, "cod_delta": "USD", "especie": "Dólares", "valor": 5.0,
                            "isin": None, "pago": "USD", "ticker": None}])
     assert d["sin_resolver"] == []
+
+
+# ── un solo dólar por fondo: canje cable ↔ MEP (18/11) ──────────────────────
+def test_un_solo_dolar_por_fondo_el_last_lleva_el_canje(carteras, monkeypatch) -> None:
+    """Regla del desk: ESCO contabiliza UN dólar por fondo. Fondo CABLE (USD)
+    con un bono que cotiza en MEP → al Last se le saca el canje (× MEP / CCL);
+    fondo MEP (USB) con un bono que cotiza en cable → se le suma (× CCL / MEP).
+    Misma pata = sin cambio. La TIR / duration no se tocan (son las del precio
+    de mercado), la fila memoizada tampoco, y sin CCL / MEP implícito el Last
+    queda crudo y la fila lo dice."""
+    from backend.routes import posiciones as P
+    from backend.services import fx as fx_svc
+
+    fila = {"last": 100.0, "price_source": "LA", "tirea": 0.08, "duration": 2.0}
+    monkeypatch.setattr(P, "_row_for_code", lambda code, plazo, leg="native", settle=None, **kw: fila)
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx_svc.FxSnapshot(ccl=1030.0, usb=1000.0))
+    mgcq = {"cod_fondo": 26, "cod_delta": "MGCQOD", "isin": ISIN_MGCQ, "pago": "USD", "ticker": "MGCQD"}
+    gd30 = {"cod_fondo": 26, "cod_delta": "GD30D", "isin": ISIN_GD30, "pago": "USD", "ticker": "GD30D"}
+    al30 = {"cod_fondo": 26, "cod_delta": "AL30D", "isin": None, "pago": "USB", "ticker": "AL30D"}
+
+    # fondo CABLE (26 = USD): el MEP pierde el canje, el cable va tal cual
+    m = P._fila_precio(mgcq, esco.resolver_h(mgcq), "24hs", None)
+    assert m["last"] == pytest.approx(100.0 * 1000.0 / 1030.0) and m["canje"] == "canje"
+    assert "saca el canje" in m["canje_txt"] and "MGCQD" in m["canje_txt"]
+    assert m["tirea"] == 0.08 and m["duration"] == 2.0
+    assert fila["last"] == 100.0 and "canje" not in fila            # la fila compartida no se muta
+    assert P._fila_precio(gd30, esco.resolver_h(gd30), "24hs", None) is fila
+    # ficha propia (AL30D, MEP) en el fondo cable: la misma regla
+    assert esco.resolver_h(al30) is None
+    assert P._fila_precio(al30, None, "24hs", None)["last"] == pytest.approx(100.0 * 1000.0 / 1030.0)
+
+    # fondo MEP (USB): al cable se le suma el canje, el MEP va tal cual
+    monkeypatch.setattr(positions, "fondo_moneda", lambda cod: "USB")
+    m = P._fila_precio(gd30, esco.resolver_h(gd30), "24hs", None)
+    assert m["last"] == pytest.approx(100.0 * 1030.0 / 1000.0) and "suma el canje" in m["canje_txt"]
+    assert P._fila_precio(mgcq, esco.resolver_h(mgcq), "24hs", None) is fila
+    assert P._fila_precio(al30, None, "24hs", None) is fila
+
+    # sin FX implícito: Last crudo, avisado
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx_svc.FxSnapshot())
+    m = P._fila_precio(gd30, esco.resolver_h(gd30), "24hs", None)
+    assert m["last"] == 100.0 and m["canje"] == "sin canje" and "sin ajustar" in m["canje_txt"]
+
+    # fondo en pesos o de moneda desconocida: nada de canje
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx_svc.FxSnapshot(ccl=1030.0, usb=1000.0))
+    for mon in ("ARS", None):
+        monkeypatch.setattr(positions, "fondo_moneda", lambda cod, mon=mon: mon)
+        assert P._fila_precio(al30, None, "24hs", None) is fila
+
+
+@pytest.mark.asyncio
+async def test_http_posiciones_marca_el_last_con_canje(carteras, monkeypatch) -> None:
+    import httpx
+    from backend.main import create_app
+    from backend.routes import posiciones as P
+    from backend.services import fx as fx_svc
+
+    monkeypatch.setattr(P, "_row_for_code", lambda code, plazo, leg="native", settle=None, **kw: (
+        {"last": 103.0, "price_source": "LA", "tirea": 0.08, "duration": 2.0}))
+    monkeypatch.setattr(fx_svc, "get_fx", lambda plazo="24hs": fx_svc.FxSnapshot(ccl=1030.0, usb=1000.0))
+    app = create_app()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/posiciones/table", params={"fondo": 26})
+    assert r.status_code == 200
+    html = r.text
+    assert html.count('class="pos-canje"') == 1                    # sólo el MEP (MGCQD) del fondo cable
+    assert "se le saca el canje" in html and 'value="100,00"' in html

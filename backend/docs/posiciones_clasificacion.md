@@ -29,13 +29,35 @@ ficha de `especies.py` se valúa cada tenencia:
   el código; si no puede elegir una sola, **no asigna ninguna**.
 - Sin ISIN utilizable prueba el ticker de la base (`CAFCI_BYMA`) y, como
   último recurso, el código de pesos con ficha más la "D" de ESCO.
+- Si los datos **se contradicen** (el ISIN es de un bono y el código de otro,
+  o la cartera dice que paga en pesos y la ficha es en dólares), **no asigna
+  ninguna** y `/admin` muestra el motivo: una de las dos fuentes está mal.
 
 En la tabla la tenencia conserva el código de ESCO y al lado dice con qué
 ficha se valúa (`TTCDOD → TTCDC`); al pasar el mouse explica por qué.
 
 **Precio que muestra.** En un fondo en dólares, el del ticker nativo (en
-dólares). En un fondo en pesos, el de la especie en pesos del mismo bono. La
-moneda del fondo sale de la columna `Moneda` de `Delta_Fondos.txt`.
+dólares). En un fondo en pesos, el de la especie en pesos del mismo bono; si
+esa especie no tiene precio, el Last queda vacío (nunca un precio en dólares
+contra una valuación en pesos). La moneda del fondo sale de la columna
+`Moneda` de `Delta_Fondos.txt`.
+
+**Un solo dólar por fondo (canje).** ESCO contabiliza cada fondo en un único
+dólar: `USD` = cable, `USB` = MEP. El Last se lleva a ese dólar con el canje
+implícito del momento:
+
+| Fondo | Bono que cotiza en | Last que muestra |
+|---|---|---|
+| Cable (`USD`) | cable (`…C`) | el del ticker, tal cual |
+| Cable (`USD`) | MEP (`…D`) | precio MEP × MEP / CCL (se le saca el canje) |
+| MEP (`USB`) | MEP (`…D`) | el del ticker, tal cual |
+| MEP (`USB`) | cable (`…C`) | precio cable × CCL / MEP (se le suma el canje) |
+
+La fila lo marca con "canje" en la columna de fuente; el tooltip muestra la
+cuenta. Si falta el CCL o el MEP implícito dice "sin canje" y deja el precio
+del ticker. La TIR y la duration no cambian: son las del precio de mercado
+del bono en su propio dólar. El perfil de vencimientos de un fondo en dólares
+va en dólares.
 
 **Para revisar.** La tarjeta "Especies faltantes" de `/admin` lista cada
 código conciliado con su ficha, los bonos en dólares que quedaron sin ficha
