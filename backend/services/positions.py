@@ -224,6 +224,72 @@ def _fondo_names() -> Dict[int, str]:
     return dict(_FONDO_NOMBRES_FALLBACK)
 
 
+_MONEDAS_FONDO = {"ARS": "ARS", "$": "ARS", "PESOS": "ARS", "USD": "USD", "USB": "USB"}
+
+
+def _parse_fondos_moneda(path: str) -> Dict[int, str]:
+    """CodFondo → moneda de la contabilidad del fondo (ARS / USD / USB) desde
+    la columna `Moneda` de Delta_Fondos.txt (CSV de ESCO con cabecera
+    `CodFondo,NumFondo,…,Moneda`). Sin esa columna, {} (el parser de nombres
+    es tolerante a archivos sin cabecera; acá no se adivina)."""
+    raw: Optional[str] = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+        try:
+            with open(path, "r", encoding=enc) as f:
+                raw = f.read()
+            break
+        except (UnicodeDecodeError, OSError):
+            continue
+    lines = [ln for ln in (raw or "").splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    if len(lines) < 2:
+        return {}
+    delim = max(["\t", "|", ";", ","], key=lambda d: lines[0].count(d))
+    header = [c.strip().strip('"').lower() for c in lines[0].split(delim)]
+    if "moneda" not in header:
+        return {}
+    col_m = header.index("moneda")
+    col_c = next((i for i, h in enumerate(header) if h in ("codfondo", "cod_fondo", "cod fondo")), 0)
+    out: Dict[int, str] = {}
+    for ln in lines[1:]:
+        r = [c.strip().strip('"') for c in ln.split(delim)]
+        if len(r) <= max(col_c, col_m):
+            continue
+        try:
+            cod = int(float(r[col_c]))
+        except (TypeError, ValueError):
+            continue
+        m = _MONEDAS_FONDO.get(r[col_m].upper())
+        if m:
+            out[cod] = m
+    return out
+
+
+def _fondo_monedas() -> Dict[int, str]:
+    path = _fondos_path()
+    if not path:
+        return {}
+    try:
+        return _parse_fondos_moneda(path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[positions] monedas de los fondos: %s", exc)
+        return {}
+
+
+# Celdas "sin dato" del pipeline de carteras (no son un ISIN / ticker / moneda).
+_SIN_DATO = frozenset({"", "NC", "NAN", "NONE", "NCP", "SIN_DATOS", "-"})
+
+
+def _celda(v: Any) -> Optional[str]:
+    """Texto de una celda de la composición, o None si viene vacía / 'NC' /
+    'Sin_Isin_FCI' y similares."""
+    if v is None or v != v:
+        return None
+    s = " ".join(str(v).split())
+    if s.upper() in _SIN_DATO or s.upper().startswith("SIN_"):
+        return None
+    return s
+
+
 # ── carga ──────────────────────────────────────────────────────────────────
 def _file_asof(path: Optional[str]) -> Optional[str]:
     """Fecha/hora de última modificación del archivo → 'DD/MM/AAAA HH:MM'
@@ -308,19 +374,32 @@ def _load() -> Dict[str, Any]:
 
     holdings: List[Dict[str, Any]] = []
     has_cd = "Cod_Delta" in dfc.columns
-    has_esp = "Especie" in dfc.columns
+    # Descripción de la tenencia: el archivo real de carteras la trae en
+    # `Inversion` (18/11: la app leía `Especie`, que ese archivo no tiene — el
+    # Nombre quedaba vacío y la clasificación por descripción no veía nada).
+    col_desc = next((c for c in ("Especie", "Inversion", "Inversión") if c in dfc.columns), None)
     has_clase = "Clase de Activo" in dfc.columns
+    # Datos de la base de especies que el archivo ya trae por fila: ISIN,
+    # moneda de pago (USD cable / USB MEP) y ticker con el que el desk lo
+    # valúa. Con eso se concilia el código de ESCO con la ficha (services.esco).
+    col_isin = next((c for c in ("IsinCode", "ISIN", "Isin") if c in dfc.columns), None)
+    col_pago = "Pago" if "Pago" in dfc.columns else None
+    col_tk = next((c for c in ("CAFCI_BYMA", "BYMA") if c in dfc.columns), None)
     for _, r in dfc.iterrows():
         cod_delta = _norm_code(r.get("Cod_Delta")) if has_cd else None
+        desc = _celda(r.get(col_desc)) if col_desc else None
         holdings.append({
             "cod_fondo": int(r["CodFondo"]),
             "cod_delta": cod_delta,
-            "especie": (str(r.get("Especie")).strip() if has_esp and r.get("Especie") == r.get("Especie") else None) or cod_delta or "—",
+            "especie": desc or cod_delta or "—",
             "cantidad": _f(r.get("Cantidad")),
             "valor": _f(r.get("Valor")),
             "clase": (str(r.get("Clase de Activo")).strip() if has_clase and r.get("Clase de Activo") == r.get("Clase de Activo") else None),
             # En Delta, especie de mercado = fila con ticker (NC/None = cash).
             "es_especie": cod_delta is not None,
+            "isin": (_celda(r.get(col_isin)) or "").upper() or None if col_isin else None,
+            "pago": (_celda(r.get(col_pago)) or "").upper() or None if col_pago else None,
+            "ticker": (_celda(r.get(col_tk)) or "").upper() or None if col_tk else None,
         })
 
     pn: Dict[int, float] = {}
@@ -337,6 +416,7 @@ def _load() -> Dict[str, Any]:
                            nube.remedio(pn_path) if nube.ilegible_por_nube(pn_path, exc) else exc)
 
     out["fondos"] = _fondo_names()
+    out["monedas"] = _fondo_monedas()
     out["holdings"] = holdings
     out["pn"] = pn
     # Índice por Cod_Delta → posición agregada (O(1) en position_for).
@@ -419,6 +499,14 @@ def fuentes() -> List[Dict[str, Any]]:
             for cod, n in sorted(conteo.items())]
 
 
+def fondo_moneda(cod: Optional[int]) -> Optional[str]:
+    """Moneda de la contabilidad del fondo (ARS / USD / USB) según
+    Delta_Fondos.txt, o None si el archivo no la trae."""
+    if cod is None:
+        return None
+    return (ensure_loaded().get("monedas") or {}).get(cod)
+
+
 def fondo_label(cod: int) -> str:
     nombre = ensure_loaded()["fondos"].get(cod)
     return f"{cod} — {nombre}" if nombre else f"Fondo {cod}"
@@ -455,6 +543,14 @@ def especies_universe() -> List[str]:
     """Cod_Delta únicos (para el warmup de la matriz especies×fondos)."""
     c = ensure_loaded()
     return sorted({h["cod_delta"] for h in c["holdings"] if h["cod_delta"]})
+
+
+def _conciliada(h: Dict[str, Any]) -> bool:
+    try:
+        from . import esco
+        return esco.resolver_h(h) is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _equity_tickers_conocidos() -> set:
@@ -505,12 +601,47 @@ def especies_faltantes() -> Dict[str, Any]:
             continue                        # sin ticker (NC / cash): no es especie
         if code in bonos or code in eq or en_rv(code) is not None:
             continue
+        if _conciliada(h):                  # código de ESCO con ficha por ISIN (TTCDOD → TTCDC)
+            continue
         d = faltantes.setdefault(code, {
             "code": code, "especie": h["especie"], "n_filas": 0, "valor": 0.0})
         d["n_filas"] += 1
         d["valor"] += (h["valor"] or 0.0)
     rows = sorted(faltantes.values(), key=lambda x: -(x["valor"] or 0.0))
     return {"faltantes": rows, "n_faltantes": len(rows)}
+
+
+_por_ficha: tuple = (None, {})
+
+
+def _agg_por_ficha() -> Dict[str, Dict[str, Any]]:
+    """Ficha del universo → posición agregada de las tenencias cuyo código de
+    ESCO se concilia con ella (`services.esco`). Se arma una vez por carga de
+    carteras / universo; después es un lookup."""
+    global _por_ficha
+    try:
+        from . import esco
+        c = ensure_loaded()
+        tok = (_generation, esco.token())
+        if _por_ficha[0] == tok:
+            return _por_ficha[1]
+        out: Dict[str, Dict[str, Any]] = {}
+        for h in c["holdings"]:
+            if not h["cod_delta"]:
+                continue
+            f = esco.resolver_h(h)
+            if f is None:
+                continue
+            agg = out.setdefault(f.calc, {"especie": h["especie"], "total_cantidad": 0.0,
+                                          "total_valor": 0.0, "funds": []})
+            agg["total_cantidad"] += (h["cantidad"] or 0.0)
+            agg["total_valor"] += (h["valor"] or 0.0)
+            agg["funds"].append({"cod_fondo": h["cod_fondo"], "cantidad": h["cantidad"], "valor": h["valor"]})
+        _por_ficha = (tok, out)
+        return out
+    except Exception:  # noqa: BLE001 — la tenencia en YAS nunca rompe por esto
+        logger.exception("[positions] tenencias por ficha conciliada")
+        return {}
 
 
 def position_for(code: Optional[str],
@@ -537,6 +668,15 @@ def position_for(code: Optional[str],
         base = _strip_plazo(str(code).strip())       # conserva el case del sufijo j/v
         key = syms.calc_to_md_code(base).upper()
         agg = by.get(key)
+    # Tenencias que ESCO trae con OTRO código y se concilian con esta ficha
+    # (TTCDOD / YPF34 → la ficha nativa): se suman a las del código exacto.
+    extra = _agg_por_ficha().get(str(code).strip())
+    if extra:
+        agg = extra if not agg else {
+            "especie": agg["especie"],
+            "total_cantidad": agg["total_cantidad"] + extra["total_cantidad"],
+            "total_valor": agg["total_valor"] + extra["total_valor"],
+            "funds": agg["funds"] + extra["funds"]}
     if not agg:
         return None
     vis = set(visibles) if visibles is not None else None

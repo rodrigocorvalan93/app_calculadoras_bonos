@@ -662,7 +662,8 @@ USD/USB → ARS Fija/TAMAR/BADLAR/Step Up). SIN ficha entra
 `services/clasificacion.py` (stdlib puro, ~µs por fila), primer match gana:
 (1) **tipo de instrumento por texto** — fila de `Delta - Especies` si el ticker
 está (Subclase / Clase de Activo / Industria / Sector Delta), descripción de
-la cartera (columna `Especie`) y Clase de Activo del Excel: Plazos Fijos ·
+la cartera (columna `Inversion` del archivo real; `Especie` si existiera) y
+Clase de Activo del Excel: Plazos Fijos ·
 Caución · Cheques (No) Garantizados · Pagarés (No) Garantizados ·
 Fideicomisos TAMAR/BADLAR | CER/UVA | Tasa Fija | USD-Linked | USD |
 Financieros · FCI Money Markets | FCI Cerrados | FCI; (2) **Ajuste × Tasa de
@@ -758,6 +759,49 @@ Especies faltantes lista la renta variable SIN sector (`reporte_clasificacion()
 ["sin_sector"]`: falta la fila o el `Sector Delta` en la Base RV). Si agregás
 columnas de la Base RV, van en `delta_especies._KEEP_RV`. Regresión:
 `tests/test_posiciones_renta_variable.py`.
+
+**Código de ESCO → ficha (18/11, delicado)**: ESCO no nombra a los bonos
+como el mercado. Un bono en dólares va con su ticker de PESOS y una "D" atrás
+cuando la contabilidad del fondo es en dólares (`GD30` / `GD30D`, `TTCDO` /
+`TTCDOD`; el "…D" es una especie aparte en ESCO, mismo ISIN, NO la pata MEP),
+no distingue USB de USD y a veces ni usa el ticker (`YPF34` = `YM34O`). La
+app valúa con UNA ficha nativa (`GD30C`, `TTCDC`) y las letras cambian de
+orden (`RCC1OD` → `RC1CC`, `BPOC7D` → `BPC7D`): Delta Renta Dólares Plus no
+reconocía `TTCDOD`. `services/esco.py` concilia por DATO, nunca por sufijo a
+ciegas: (1) **ISIN** — la composición lo trae por fila (`IsinCode`, con
+`Pago` y `CAFCI_BYMA`; respaldo: la fila del código en la Base RF,
+`delta_especies.info_cod`, índice por `Cod_Delta` aparte de `info()` que es
+por BYMA) → fichas del universo con ese ISIN sin las patas `j` / `v`; como
+`especies.py` arrastra ISINs repetidos entre series (GD29 / GD30, VSCV /
+VSCX) el grupo se parte por vencimiento + cupón y se elige el bono que
+comparte raíz con el código o el ticker de la base — si no queda UNO, no se
+resuelve; dentro del bono va la NATIVA, y con varias decide el pago de la
+base (USB → …D, USD → …C), después el ticker de la base y al final el
+parecido (`BPOA8D` → `BPA8D`, con nota); (2) **ticker de la base** con ficha
+cuando no hay ISIN útil; (3) **sufijo** sobre una especie en pesos CON ficha
+en dólares (`GD29D` → `GD29C`), último recurso. Un código con ficha propia
+no pasa por ahí (`AL30D`, `GD30`, `BA37D`). `routes/posiciones._calc(h)` es
+el código de la ficha para categoría / vencimiento / perfil de flujos, y
+`_fila_precio`: fondo en DÓLARES (`positions.fondo_moneda`, columna `Moneda`
+de Delta_Fondos.txt; sin ella, el sufijo) → fila de la nativa con su ticker;
+fondo en PESOS → la especie en pesos (el ticker de la base si tiene ficha,
+si no `leg="ARS"` de la nativa, y la nativa si ahí no hay precio). La fila
+muestra el código de ESCO con "→ TTCDC" (tooltip con vía, ISIN, pago y
+notas) y linkea a YAS con la ficha; `positions.position_for("TTCDC")` suma
+las tenencias conciliadas (`_agg_por_ficha`, memo por generación +
+`esco.token()`); "Especies faltantes" no las lista. `positions._load` lee la
+descripción de `Inversion` (el archivo real NO tiene `Especie`: el Nombre
+quedaba vacío y la clasificación por descripción no veía nada) y guarda
+`isin` / `pago` / `ticker` por tenencia. /admin · Especies faltantes suma
+`reporte_clasificacion()["esco"]` (`esco.diagnostico`): código → ficha por
+qué vía, bonos en dólares sin ficha con el motivo, y códigos con ficha
+propia cuyo ISIN en la cartera no es el de la ficha (ISIN mal cargado en
+`especies.py`: hoy GD29 lleva el de GD30 y VSCX el de VSCV — NO se tocó,
+regla de especies.py). En un fondo USB con un bono que paga cable el Last es
+el del ticker cable (regla del desk: ticker natural por moneda de pago) y el
+"Ret. día" contra el precio de valuación incluye el canje. Medido warm
+`/posiciones/table` (32 tenencias, 89 KB): fondo dólar p50 8,4 · p95 9,7 ms;
+fondo pesos p50 9,9 · p95 14,2 ms. Regresión: `tests/test_posiciones_esco.py`.
 
 **Pestañas lazy de Históricos** (`hx-trigger="reveal"`): las rutas de pestaña
 llevan `@_pestana_resiliente(...)` — una excepción responde 200 con

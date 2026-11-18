@@ -13,6 +13,37 @@ gana**. La celda Categoría de la tabla muestra como tooltip cuál de las
 fuentes decidió: *ficha · Delta - Especies · descripción · Clase de Activo ·
 sin regla*.
 
+## Antes de clasificar: el código de ESCO y la ficha
+
+ESCO no nombra a los bonos como el mercado, así que primero se busca con qué
+ficha de `especies.py` se valúa cada tenencia:
+
+- Si el código de la cartera **tiene ficha propia** (`AL30D`, `GD30`,
+  `TTCDO`, `BA37D`), es esa.
+- Si no, se concilia **por ISIN**: el archivo de carteras trae el ISIN de cada
+  tenencia (`IsinCode`) y la app busca la ficha que tiene ese mismo ISIN. Para
+  un bono en dólares usa la ficha nativa: la que termina en `C` si paga cable,
+  en `D` si paga MEP. Ejemplos: `TTCDOD` → `TTCDC`, `GD30D` → `GD30C`,
+  `RCC1OD` → `RC1CC`, `BPOC7D` → `BPC7D`, `YPF34` → `YM34C`.
+- Si dos series comparten el ISIN en `especies.py`, elige la que coincide con
+  el código; si no puede elegir una sola, **no asigna ninguna**.
+- Sin ISIN utilizable prueba el ticker de la base (`CAFCI_BYMA`) y, como
+  último recurso, el código de pesos con ficha más la "D" de ESCO.
+
+En la tabla la tenencia conserva el código de ESCO y al lado dice con qué
+ficha se valúa (`TTCDOD → TTCDC`); al pasar el mouse explica por qué.
+
+**Precio que muestra.** En un fondo en dólares, el del ticker nativo (en
+dólares). En un fondo en pesos, el de la especie en pesos del mismo bono. La
+moneda del fondo sale de la columna `Moneda` de `Delta_Fondos.txt`.
+
+**Para revisar.** La tarjeta "Especies faltantes" de `/admin` lista cada
+código conciliado con su ficha, los bonos en dólares que quedaron sin ficha
+(con el motivo) y los códigos cuyo ISIN en la cartera no es el de su ficha.
+
+Una tenencia conciliada se clasifica igual que cualquier otra con ficha
+(sección A).
+
 ## A. El ticker tiene ficha en `especies.py`
 
 1. **Dual**: la `Industria` de la ficha contiene "Dual" y "Tamar" → "Dual CER /
@@ -39,7 +70,7 @@ o número pasa a espacio — de tres fuentes, que se prueban en este orden:
 | Orden | Fuente | Qué texto se mira |
 |---|---|---|
 | 1 | Fila de `Delta - Especies` (si el ticker está en la hoja Base RF) | `Subclase de Activo`, `Clase de Activo`, `Industria`, `Sub Industria`, `Sector Delta` |
-| 2 | Descripción de la cartera | columna `Especie` |
+| 2 | Descripción de la cartera | columna `Inversion` |
 | 3 | Excel de cartera | columna `Clase de Activo` |
 
 ### B1. Tipo de instrumento por texto
