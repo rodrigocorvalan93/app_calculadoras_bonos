@@ -2291,3 +2291,37 @@ button:disabled, .btn:disabled, .btn-primary:disabled, .btn[aria-disabled="true"
 @media (max-width: 1100px) { .proy-charts { grid-template-columns: 1fr; } }
 .proy-chart { min-height: 220px; position: relative; }
 .proy-metrics .metric-value { font-size: var(--fs-lg); }
+
+/* ── Curvas: what-if del Last + gráfico (19/11) ─────────────────────────── */
+.curve-table td.c-last { font-weight: 600; }
+#curve-tbl td.c-last { cursor: text; }
+#curve-tbl td.c-last:hover { box-shadow: inset 0 -1px 0 var(--accent); }
+#curve-tbl td.c-last input.cv-wi-inp {
+  width: 100%; min-width: 0; box-sizing: border-box; text-align: right;
+  font: inherit; font-weight: 650; padding: 0 3px; margin: -1px 0;
+}
+#curve-tbl tr.wi-row td { background: rgba(239, 68, 68, 0.07); }
+#curve-tbl td.wi-cell { font-weight: 650; font-style: italic; }
+#curve-tbl td.wi-cell.c-last { box-shadow: inset 2px 0 0 var(--red); }
+#curve-tbl td.wi-err { color: var(--text-muted); text-decoration: line-through; }
+.cv-wi-bar { margin-left: 8px; font-size: var(--fs-sm); color: var(--red); white-space: nowrap; }
+.cv-wi-bar[hidden] { display: none; }
+.cv-chart-box { position: relative; }
+.cv-tip {
+  position: absolute; pointer-events: none; display: none; z-index: 6; white-space: nowrap;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 8px; font-size: var(--fs-sm); line-height: 1.35;
+}
+
+/* ── Gráficos: todas las curvas en un cuadro (superuser) ─────────────────── */
+.gm-grid { display: grid; gap: 10px; grid-template-columns: repeat(var(--gm-cols, 3), minmax(0, 1fr)); }
+.gm-cell { min-width: 0; border: 1px solid var(--border-soft, var(--border)); border-radius: 8px; padding: 6px 6px 2px; }
+.gm-t { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-md); margin: 0 2px 2px; }
+.gm-t a { color: var(--accent); font-weight: 600; cursor: pointer; text-decoration: none; }
+.gm-t a:hover { text-decoration: underline; }
+.gm-t .muted { font-size: var(--fs-xs); }
+.gm-c { position: relative; min-height: 200px; }
+.gm-cols .lnk.on { color: var(--accent); font-weight: 650; }
+@media (max-width: 1100px) { .gm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px)  { .gm-grid { grid-template-columns: minmax(0, 1fr); } }
+

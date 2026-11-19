@@ -623,6 +623,86 @@ async def curve_table_partial(
         ))
 
 
+# ── Curvas · what-if del Last (19/11) ────────────────────────────────────────
+# El desk edita el Last de una fila y quiere ver qué rinde a ese precio. El
+# precio se tipea en la unidad de la columna (el ticker de la pata elegida) y
+# se valúa con la MISMA ficha, conversión y liquidación que la fila
+# (`_row_for_code`): la TIR what-if es comparable con la de mercado. Las
+# métricas salen del cache de `metrics_for_market_price` (un precio ya visto =
+# µs); la tabla en vivo NO se toca en el server — el cliente pinta el what-if
+# sobre las filas después de cada swap.
+_WHATIF_MAX = 80
+
+
+def _whatif_uno(code: str, plazo: str, leg: str, px: float, settle: str | None, fx=None) -> dict | None:
+    meta = pricing.bond_meta(code)
+    if not meta:
+        return None
+    store = marketdata_store.get_store()
+    _sym, leg_basis = _leg_symbol(code, plazo, leg, store)
+    native = meta.get("moneda") or "USD"
+    calc = pricing.native_dollar_code(code) or code
+    p = px
+    if leg_basis and leg_basis != native:
+        p = fx_svc.normalize_price(px, leg_basis, native, fx or fx_svc.get_fx(plazo))
+        if p is None:
+            return {"error": "sin FX para convertir el precio"}
+    m = pricing.metrics_for_market_price(calc, p, settle) or {}
+    tirea, dur = m.get("tirea"), m.get("duration")
+    if tirea is None or tirea != tirea:
+        return {"error": m.get("error") or "no valúa a ese precio"}
+    par, mar = m.get("paridad"), m.get("margen_tna")
+    ok_dur = dur is not None and dur == dur
+    return {
+        "px": fmt_num(px, 2), "pxn": px,
+        "t": tirea * 100.0, "d": float(dur) if ok_dur else None,
+        "tir": fmt_pct(tirea, 2), "tna": fmt_pct(m.get("tna"), 2),
+        "tna_lbl": m.get("tna_convention_label") or "",
+        "tem": fmt_pct(m.get("tem"), 2),
+        "dur": fmt_num(dur, 2) if ok_dur else "—",
+        "par": (fmt_num(par * 100.0, 1) + "%") if (par is not None and par == par) else "—",
+        "mar": fmt_pct(mar, 2) if (mar is not None and mar == mar) else "—",
+    }
+
+
+@router.get("/whatif")
+async def curve_whatif(
+    request: Request,
+    curve: str = "",
+    plazo: str = "24hs",
+    leg: str = "native",
+) -> JSONResponse:
+    """Métricas what-if por bono: `price_<CODE>=<precio>` (es-AR o con punto)
+    → {rows: {CODE: {px, tir, tna, tem, dur, par, mar, t, d} | {error}}}.
+    Sólo códigos de la curva pedida; tope `_WHATIF_MAX` por pedido."""
+    plazo = "CI" if str(plazo).upper().startswith("CI") else "24hs"
+    if curve.startswith("mix:"):
+        validos = set(curves.mix_codes([k for k in curve[4:].split(",") if k]))
+    else:
+        validos = set(curves.build_curve_codes().get(curve, []))
+    ovs = {c: p for c, p in _price_overrides(request).items() if c in validos}
+    if len(ovs) > _WHATIF_MAX:
+        ovs = dict(itertools.islice(ovs.items(), _WHATIF_MAX))
+    settle = pricing.settlement_date_str(plazo)
+    if not ovs:
+        return JSONResponse({"settle": settle, "rows": {}})
+    fx = fx_svc.get_fx(plazo) if leg != "native" else None
+
+    def _calc() -> dict:
+        out: dict = {}
+        for code, px in ovs.items():
+            try:
+                r = _whatif_uno(code, plazo, leg, px, settle, fx)
+            except Exception as exc:  # noqa: BLE001 — un bono roto no voltea el resto
+                r = {"error": f"{type(exc).__name__}: {exc}"}
+            if r is not None:
+                out[code] = r
+        return out
+
+    rows = await asyncio.get_running_loop().run_in_executor(_row_pool, _calc)
+    return JSONResponse({"settle": settle, "rows": rows})
+
+
 # ── Mercado (monitor de book / blotter) ───────────────────────────────────
 # Reusa la partición de curvas y el motor de filas, pero con columnas de
 # mercado (book + sizes + VWAP + TIREA por punta + variación) y book=True
@@ -1842,6 +1922,32 @@ def _graf_pts_cafci(curve_key: str, metric: str, dmin, dmax, exclude: set):
     return out
 
 
+def _x_unicos(pts: list) -> list:
+    """Misma lista de puntos con la duration (x) ÚNICA dentro de la curva.
+
+    El payload del gráfico alinea las series por x (`ars_at[d]`, `code_at[d]`):
+    dos bonos con la MISMA duration — dos bullets que vencen el mismo día,
+    M30A7 (TAMAR) y la LECAP del 30/04/2027 en "Todos ARS" — se pisaban y uno
+    desaparecía del gráfico, de la tabla y del hover (desk 19/11). Al repetido
+    se le corre la x al float siguiente (`math.nextafter`: ~1e-16 años, el
+    mismo píxel), así cada bono conserva su punto, su código y sus puntas.
+    El orden de entrada se respeta; sin repetidos devuelve la misma lista."""
+    vistos: set = set()
+    out = None
+    for i, p in enumerate(pts):
+        d = p[1]
+        if d in vistos:
+            if out is None:
+                out = list(pts[:i])
+            while d in vistos:
+                d = math.nextafter(d, math.inf)
+            p = (p[0], d) + tuple(p[2:])
+        vistos.add(d)
+        if out is not None:
+            out.append(p)
+    return pts if out is None else out
+
+
 async def _graf_pts_for(curve_key: str, plazo: str, only_quoting: bool, leg: str,
                         metric: str, dmin, dmax, exclude: set,
                         fuente: str = "byma", book: bool = False):
@@ -1936,17 +2042,21 @@ async def graficos_data(
     exclude: str = "",
     fuente: str = "byma",
     curve2: str = "",
+    nss: bool = True,
 ) -> JSONResponse:
     """Datos JSON para el chart de Gráficos (uPlot): scatter ARS/USD por leg +
     la curva NSS evaluada en un grid fino. Eje x = Duration (años); eje y según
     `metric` (TIREA % o TEM %). `dmin`/`dmax` cortan el tramo (outliers /
     cambios de tendencia), `exclude` saca códigos, `fuente` elige precios BYMA
     o el vector CAFCI (corporativos poco operados), y `curve2` superpone una
-    segunda curva (scatter + su propia NSS) en el mismo gráfico."""
+    segunda curva (scatter + su propia NSS) en el mismo gráfico. `nss=0` (el
+    chart de la pestaña Curvas: sólo puntas y último) saltea el ajuste y la
+    grilla fina: sin scipy y con un payload de sólo los bonos."""
     import numpy as np
 
     from backend.services import nss as nss_svc
 
+    con_nss = bool(nss)
     metric = _graf_metric(metric)
     dminv, dmaxv = _parse_dmin(dmin), _parse_dmin(dmax)
     excl = _parse_exclude(exclude)
@@ -1968,7 +2078,8 @@ async def graficos_data(
     tasks += [_graf_pts_for(k, plazo, only_quoting, leg, metric,
                             dminv, dmaxv, excl, fuente) for k in comp_keys]
     all_pts = await asyncio.gather(*tasks)
-    pts, comp_pts = all_pts[0], list(all_pts[1:])
+    # x única por curva: dos bonos con la misma duration no se pisan (M30A7).
+    pts, comp_pts = _x_unicos(all_pts[0]), [_x_unicos(cp) for cp in all_pts[1:]]
 
     if not pts and not any(comp_pts):
         return JSONResponse({"n": 0, "xs": [], "ars": [], "usd": [], "nss": [], "codes": [],
@@ -1978,7 +2089,7 @@ async def graficos_data(
     def _grid(ps):
         bx = sorted({p[1] for p in ps})
         out = set(bx)
-        if len(ps) >= 4 and bx and bx[-1] > bx[0]:
+        if con_nss and len(ps) >= 4 and bx and bx[-1] > bx[0]:
             out |= {float(v) for v in np.linspace(bx[0], bx[-1], 80)}
         return out
 
@@ -1990,7 +2101,7 @@ async def graficos_data(
     loop = asyncio.get_running_loop()
 
     async def _nss(ps):
-        if len(ps) >= 4:
+        if con_nss and len(ps) >= 4:
             return await loop.run_in_executor(
                 None, nss_svc.eval_at, [p[1] for p in ps], [p[2] for p in ps], xs)
         return None
@@ -2047,3 +2158,142 @@ async def graficos_data(
         "cmps": cmps,
     }
     return JSONResponse(out)
+
+
+# ── Gráficos · todas las curvas en un cuadro (superuser, 19/11) ──────────────
+# UN pedido arma los puntos de TODAS las curvas: las filas salen del mismo
+# memo por símbolo que la tabla de Curvas (`_rows_for`, book=False: sin las
+# TIR de las puntas), en serie para no ocupar el pool. La línea de cada
+# gráfico chico es una TENDENCIA barata (cuadrática en ln(1 + duration) por
+# mínimos cuadrados, una pasada robusta por MAD: ~50 µs por curva), NO el
+# ajuste NSS: scipy re-ajustando 19 curvas en cada tick costaba 280 ms p50 /
+# 650 ms p95 con datos difíciles (medido) y tomaba el GIL del proceso que
+# sirve los paneles live. La NSS exacta queda en el gráfico grande (click en
+# el título). Payload compacto: sin meta por punto, números redondeados.
+_MULTI_GRID = 40
+
+
+def _multi_curva(c, rows: list, metric: str, dmin, dmax, exclude: set) -> dict | None:
+    xs: list = []
+    ys: list = []
+    cds: list = []
+    usd: list = []
+    for r in rows:
+        d = r.get("duration")
+        if d is None or d != d:
+            continue
+        d = float(d)
+        if (dmin is not None and d < dmin) or (dmax is not None and d > dmax):
+            continue
+        code = r.get("code") or ""
+        if exclude and code.upper() in exclude:
+            continue
+        if metric == "margen":
+            mv = r.get("margen_tna")
+            y = float(mv) * 100.0 if (mv is not None and mv == mv) else None
+        else:
+            y = _graf_y(r.get("tirea"), metric)
+        if y is None or not math.isfinite(y):
+            continue
+        xs.append(d)
+        ys.append(y)
+        cds.append(code)
+        usd.append(1 if (r.get("moneda") or "").upper() in ("USD", "USB") else 0)
+    if not xs:
+        return None
+    return {"k": c.key, "l": c.label, "n": len(xs), "_x": xs, "_y": ys, "c": cds, "u": usd}
+
+
+def _multi_tendencia(xs: list, ys: list, n: int = _MULTI_GRID) -> tuple:
+    """(gx, gy) de la tendencia de la curva en `n` puntos (sobre el rango de
+    duration de los bonos que entran al ajuste), o ([], []) si no hay con qué
+    (menos de 4 bonos, una sola duration, valores no finitos). Grado 2 con 6
+    bonos o más, recta con 4-5. `lstsq` a mano (no `polyfit`: su
+    RankWarning es un RuntimeWarning y rentafija los sube a error)."""
+    import numpy as np
+
+    try:
+        X = np.asarray(xs, dtype=np.float64)
+        Y = np.asarray(ys, dtype=np.float64)
+        ok = np.isfinite(X) & np.isfinite(Y) & (X > -1.0)
+        X, Y = X[ok], Y[ok]
+        if X.size < 4 or float(X.max()) <= float(X.min()):
+            return [], []
+        with np.errstate(all="ignore"):
+            # Los bonos "fuera de escala" (misma regla que el cliente: cuartiles
+            # ± 2,5 rangos intercuartiles) no entran al ajuste: un bono por
+            # vencer con una TIR disparatada, en la punta del eje, tiene tanta
+            # palanca que la curva pasaba por él y el MAD no lo veía.
+            if X.size >= 5:
+                q1, q3 = (float(v) for v in np.percentile(Y, [25.0, 75.0]))
+                iqr = q3 - q1
+                if iqr > 0.0:
+                    dentro = (Y >= q1 - 2.5 * iqr) & (Y <= q3 + 2.5 * iqr)
+                    if int(dentro.sum()) >= 4 and float(X[dentro].max()) > float(X[dentro].min()):
+                        X, Y = X[dentro], Y[dentro]
+            z = np.log1p(X)
+            grado = 2 if X.size >= 6 else 1
+
+            def _fit(zz, yy):
+                A = np.vander(zz, grado + 1)
+                return np.linalg.lstsq(A, yy, rcond=None)[0]
+
+            coef = _fit(z, Y)
+            res = Y - np.polyval(coef, z)
+            med = float(np.median(res))
+            mad = float(np.median(np.abs(res - med)))
+            if mad > 0.0:                               # una pasada robusta: fuera los outliers
+                m = np.abs(res - med) <= 3.0 * 1.4826 * mad
+                if int(m.sum()) >= max(4, grado + 2) and not bool(m.all()) and float(z[m].max()) > float(z[m].min()):
+                    coef = _fit(z[m], Y[m])
+            gx = np.linspace(float(X.min()), float(X.max()), n)
+            gy = np.polyval(coef, np.log1p(gx))
+        if not bool(np.all(np.isfinite(gy))):
+            return [], []
+        return [round(float(v), 4) for v in gx], [round(float(v), 3) for v in gy]
+    except Exception:  # noqa: BLE001 — una curva sin tendencia no voltea el cuadro
+        return [], []
+
+
+def _multi_cerrar(curvas: list) -> None:
+    """Tendencia + redondeo del payload de cada curva (in place)."""
+    for cv in curvas:
+        cv["gx"], cv["gy"] = _multi_tendencia(cv["_x"], cv["_y"])
+        cv["x"] = [round(x, 5) for x in cv.pop("_x")]
+        cv["y"] = [round(y, 3) for y in cv.pop("_y")]
+
+
+@seq_cached(ttl=5.0)
+async def _graficos_multi(request: Request, plazo: str, metric: str, only_quoting: bool,
+                          dminv, dmaxv, excl: set) -> JSONResponse:
+    table = curves.build_curve_codes()
+    curvas: list = []
+    for c in curves.list_curves():
+        if not table.get(c.key):
+            continue
+        rows, _m = await _rows_for(c.key, plazo, only_quoting, "native")
+        cv = _multi_curva(c, rows, metric, dminv, dmaxv, excl)
+        if cv is not None:
+            curvas.append(cv)
+    _multi_cerrar(curvas)                  # ~1 ms para todas: no vale un salto al pool
+    return JSONResponse({"metric": metric, "ylabel": _metric_label(metric), "curvas": curvas})
+
+
+@graficos_router.get("/graficos/multi")
+async def graficos_multi(
+    request: Request,
+    plazo: str = "24hs",
+    metric: str = "tirea",
+    only_quoting: bool = True,
+    dmin: str = "",
+    dmax: str = "",
+    exclude: str = "",
+) -> JSONResponse:
+    """Puntos de TODAS las curvas para el cuadro de gráficos chicos (2-3
+    columnas) de la pestaña Gráficos. Sólo superuser: el chequeo va ANTES del
+    cache por seq (la key del cache no lleva el usuario)."""
+    if not getattr(request.state, "is_superuser", False):
+        return JSONResponse({"error": "sólo superuser"}, status_code=403)
+    plazo = "CI" if str(plazo).upper().startswith("CI") else "24hs"
+    return await _graficos_multi(request, plazo, _graf_metric(metric), bool(only_quoting),
+                                 _parse_dmin(dmin), _parse_dmin(dmax), _parse_exclude(exclude))

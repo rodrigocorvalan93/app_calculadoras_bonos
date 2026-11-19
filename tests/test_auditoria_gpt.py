@@ -139,7 +139,7 @@ async def test_curvas_rerenderiza_solo_las_filas_que_cambiaron() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r1 = await ac.get("/curves/table?curve=cer&plazo=24hs")
         assert r1.status_code == 200 and "<tbody>" in r1.text
-        n = r1.text.count("<tr>") - 1                                     # menos el header
+        n = r1.text.count("<tr data-code=")                               # filas de bonos (19/11: llevan su código)
         assert n > 0
         primera = dict(rc._CROW_STATS)
         assert primera["render"] >= n and primera["hit"] == 0

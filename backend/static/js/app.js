@@ -482,6 +482,9 @@ window.lsSet = function (k, v) {
         if (key === ti + '|') continue;
         for (var j = 1; j < cells.length; j++) {
           if (++n > MAX_CELLS) return map;
+          // data-noflash (what-if de Curvas): el valor que pintó el usuario no
+          // es mercado — sin registro previo, el swap siguiente no flashea.
+          if (cells[j].hasAttribute('data-noflash')) continue;
           map[key + '|' + j] = (cells[j].textContent || '').trim();
         }
       }
@@ -2530,3 +2533,215 @@ window.lsSet = function (k, v) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { applyAll(document); });
   else applyAll(document);
 })();
+
+// ── Curvas: what-if del Last (19/11) ──────────────────────────────────────
+// Click en el Last de una fila → input; Enter / salir del campo = probar ese
+// precio. El server valúa (GET /curves/whatif: misma ficha, pata y liquidación
+// que la fila; cacheado por precio) y acá se PINTA sobre la fila: precio, TIR,
+// TNA, TEM, duration, paridad, margen y Δ bps contra el mercado, en verde /
+// rojo según suba o baje el precio. La tabla sigue en vivo: tras cada swap se
+// re-aplica (el HTML del server no cambia: el memo por fila se conserva) y
+// mientras se está tipeando la tabla NO se swapea (se perdería el foco). El
+// gráfico de abajo recibe los puntos por el evento `cv-whatif` (charts.js).
+// Vacío o el mismo precio de mercado = quita el what-if.
+(function () {
+  var wi = {};                 // code -> { txt, m }  (m = respuesta del server | null)
+  var editing = false, gen = 0;
+  var CELLS = ['c-last', 'c-dy', 'c-dur', 'c-tir', 'c-tna', 'c-tem', 'c-par', 'c-mar'];
+
+  function box() { return document.getElementById('curve-table'); }
+  function tbl() { return document.getElementById('curve-tbl'); }
+  function num(txt) {
+    var s = String(txt == null ? '' : txt).replace(/[%\s]/g, '').replace(/\./g, '').replace(',', '.');
+    var v = parseFloat(s);
+    return isNaN(v) ? null : v;
+  }
+  function cell(tr, cls) { return tr.querySelector('td.' + cls); }
+  function val(name) {
+    var el = document.querySelector('.curves [name="' + name + '"]');
+    return el ? el.value : '';
+  }
+  function bps(d) {
+    var s = Math.abs(d).toFixed(1).replace('.', ',');
+    return (d > 0 ? '+' : (d < 0 ? '−' : '')) + s;
+  }
+  // HTML original (mercado) de las celdas que el what-if pisa, por fila del DOM.
+  function guardar(tr) {
+    if (tr.__orig) return tr.__orig;
+    var o = {};
+    for (var i = 0; i < CELLS.length; i++) {
+      var td = cell(tr, CELLS[i]);
+      if (td) o[CELLS[i]] = { html: td.innerHTML, cls: td.className, title: td.getAttribute('title') };
+    }
+    tr.__orig = o;
+    return o;
+  }
+  function restaurar(tr) {
+    var o = tr.__orig;
+    if (!o) return;
+    for (var k in o) {
+      var td = cell(tr, k);
+      if (!td) continue;
+      td.innerHTML = o[k].html; td.className = o[k].cls;
+      td.removeAttribute('data-noflash');
+      if (o[k].title == null) td.removeAttribute('title'); else td.setAttribute('title', o[k].title);
+    }
+    tr.__orig = null;
+    tr.classList.remove('wi-row');
+  }
+  function poner(td, txt, dir, title) {
+    td.textContent = txt;
+    td.classList.remove('px-up', 'px-down', 'px-flat', 'wi-err');
+    td.classList.add('wi-cell');
+    if (dir) td.classList.add(dir);
+    td.setAttribute('data-noflash', '');
+    if (title) td.setAttribute('title', title);
+  }
+  function pintar(tr, w) {
+    var o = guardar(tr), last = cell(tr, 'c-last');
+    if (!last || last.querySelector('input')) return;
+    var mktTxt = o['c-last'] ? o['c-last'].html.replace(/<[^>]*>/g, '').trim() : '';
+    var mkt = num(mktTxt), m = w.m;
+    tr.classList.add('wi-row');
+    if (m && m.error) {
+      poner(last, w.txt, null, 'What-if: ' + m.error + ' · mercado ' + (mktTxt || '—'));
+      last.classList.add('wi-err');
+      return;
+    }
+    var px = m ? m.pxn : num(w.txt);
+    // Color por el PRECIO: más caro que el mercado = verde, más barato = rojo.
+    var dir = (mkt == null || px == null || px === mkt) ? null : (px > mkt ? 'px-up' : 'px-down');
+    poner(last, m ? m.px : w.txt, dir, 'What-if · mercado ' + (mktTxt || '—') + ' · click para cambiar, vacío para volver');
+    if (!m) return;
+    var tirMkt = o['c-tir'] ? num(o['c-tir'].html.replace(/<[^>]*>/g, '')) : null;
+    var set = { 'c-dur': m.dur, 'c-tir': m.tir, 'c-tem': m.tem, 'c-par': m.par, 'c-mar': m.mar };
+    for (var k in set) { var td = cell(tr, k); if (td) poner(td, set[k], k === 'c-tir' ? dir : null, 'What-if a ' + m.px); }
+    var tna = cell(tr, 'c-tna');
+    if (tna) {
+      poner(tna, m.tna, null, 'What-if a ' + m.px);
+      if (m.tna_lbl) {
+        var sp = document.createElement('span');
+        sp.className = 'conv'; sp.style.cssText = 'color:var(--cyan);font-size:9.5px';
+        sp.textContent = ' ' + m.tna_lbl; tna.appendChild(sp);
+      }
+    }
+    var dy = cell(tr, 'c-dy');
+    if (dy) {
+      if (tirMkt != null && m.t != null) poner(dy, bps((m.t - tirMkt) * 100), dir, 'TIR what-if − TIR de mercado, en bps');
+      else poner(dy, '—', null, 'Sin TIR de mercado para comparar');
+    }
+  }
+  function filas() {
+    var t = tbl();
+    return (t && t.tBodies[0]) ? t.tBodies[0].rows : [];
+  }
+  function barra() {
+    var bar = document.getElementById('cv-wi-bar'), n = document.getElementById('cv-wi-n');
+    var c = Object.keys(wi).length;
+    if (n) n.textContent = c;
+    if (bar) bar.hidden = !c;
+  }
+  // Puntos para el gráfico: sólo what-if de bonos que están en la tabla y valúan.
+  function emitir() {
+    var pts = [], rs = filas();
+    for (var i = 0; i < rs.length; i++) {
+      var code = rs[i].dataset.code, w = code && wi[code];
+      if (!w || !w.m || w.m.error || w.m.d == null || w.m.t == null) continue;
+      var o = rs[i].__orig, mk = (o && o['c-tir']) ? num(o['c-tir'].html.replace(/<[^>]*>/g, '')) : null;
+      pts.push({ c: code, d: w.m.d, t: w.m.t, px: w.m.px, tm: mk });
+    }
+    window.cvWhatif = pts;
+    document.body.dispatchEvent(new CustomEvent('cv-whatif', { detail: { pts: pts } }));
+  }
+  function aplicar() {
+    var rs = filas();
+    for (var i = 0; i < rs.length; i++) {
+      var code = rs[i].dataset.code;
+      if (!code) continue;
+      if (wi[code]) pintar(rs[i], wi[code]);
+      else if (rs[i].__orig) restaurar(rs[i]);
+    }
+    barra();
+    emitir();
+  }
+  function pedir() {
+    var codes = Object.keys(wi), mine = ++gen;
+    if (!codes.length) { aplicar(); return; }
+    var q = 'curve=' + encodeURIComponent(val('curve')) + '&plazo=' + encodeURIComponent(val('plazo') || '24hs') +
+            '&leg=' + encodeURIComponent(val('leg') || 'native');
+    for (var i = 0; i < codes.length; i++) q += '&price_' + encodeURIComponent(codes[i]) + '=' + encodeURIComponent(wi[codes[i]].txt);
+    fetch('/curves/whatif?' + q, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function (j) {
+        if (mine !== gen) return;                    // llegó tarde: ya hay otro pedido
+        var rows = (j && j.rows) || {};
+        for (var c in wi) wi[c].m = rows[c] || { error: 'el bono no está en esta curva' };
+        aplicar();
+      })
+      .catch(function () { /* sin red: queda el precio tipeado, sin métricas */ });
+  }
+  function refrescar() {
+    var b = box();
+    if (b && window.htmx) { b.__lastHtml = null; window.htmx.trigger(b, 'refresh'); }
+  }
+  function editar(td) {
+    var tr = td.closest('tr'), code = tr && tr.dataset.code;
+    if (!code || td.querySelector('input')) return;
+    var o = guardar(tr);
+    var mktTxt = o['c-last'].html.replace(/<[^>]*>/g, '').trim();
+    var inp = document.createElement('input');
+    inp.type = 'text'; inp.inputMode = 'decimal'; inp.autocomplete = 'off';
+    inp.className = 'cell-edit cv-wi-inp';
+    inp.value = wi[code] ? wi[code].txt : (mktTxt === '—' ? '' : mktTxt);
+    td.textContent = ''; td.appendChild(inp);
+    editing = true;
+    var hecho = false;
+    function cerrar(guardarlo) {
+      if (hecho) return;
+      hecho = true; editing = false;
+      var v = inp.value.trim();
+      if (inp.parentNode) inp.parentNode.removeChild(inp);
+      if (guardarlo) {
+        if (v === '' || v === mktTxt || (num(v) != null && num(v) === num(mktTxt))) delete wi[code];
+        else if (!wi[code] || wi[code].txt !== v) wi[code] = { txt: v, m: null };
+      }
+      restaurar(tr);
+      aplicar();
+      if (guardarlo) pedir();
+      refrescar();               // la tabla estuvo quieta mientras se tipeaba: ponerla al día
+    }
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); cerrar(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); cerrar(false); }
+    });
+    inp.addEventListener('blur', function () { cerrar(true); });
+    inp.focus(); inp.select();
+  }
+  document.body.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    if (t.id === 'cv-wi-clear') { wi = {}; gen++; aplicar(); return; }
+    var td = t.closest('td.c-last');
+    if (td && td.closest('#curve-tbl') && t.tagName !== 'INPUT') editar(td);
+  });
+  // Mientras se tipea: ni pedidos ni swaps de la tabla (el input se destruiría).
+  document.body.addEventListener('htmx:beforeRequest', function (e) {
+    if (editing && e.detail && e.detail.target === box()) e.preventDefault();
+  });
+  document.body.addEventListener('htmx:beforeSwap', function (e) {
+    if (!editing || !e.detail || e.detail.target !== box()) return;
+    e.detail.shouldSwap = false;
+    e.detail.target.__lastHtml = null;     // el skip de swaps idénticos no debe darlo por aplicado
+  });
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    var t = e.detail && e.detail.target;
+    if (t && t.id === 'curve-table') aplicar();
+  });
+  // Cambió curva / plazo / pata: la valuación del what-if depende de los tres.
+  document.body.addEventListener('change', function (e) {
+    var n = e.target && e.target.name;
+    if ((n === 'curve' || n === 'plazo' || n === 'leg') && e.target.closest && e.target.closest('.curves') &&
+        document.getElementById('curve-table') && Object.keys(wi).length) pedir();
+  });
+})();
+

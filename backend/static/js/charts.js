@@ -440,13 +440,17 @@
               // en un x propio a <1 px: el idx del cursor puede resolver al bono.
               // Para las ★ se miran también los índices vecinos (a ≤8 px) y, a
               // igual distancia, gana la ★ (es lo que el usuario tipeó para mirar).
-              var idxs = (e.kind === "emis") ? [i - 1, i, i + 1] : [i];
+              // Lo mismo, a ≤2 px, para dos BONOS con la misma duration (dos
+              // bullets que vencen el mismo día: M30A7 y la LECAP del 30/04):
+              // el server les da x contiguas y sin mirar los vecinos sólo uno
+              // tenía hover.
+              var esEmis = (e.kind === "emis"), idxs = esEmis ? [i - 1, i, i + 1] : [i - 2, i - 1, i, i + 1, i + 2];
               for (var q = 0; q < idxs.length; q++) {
                 var ii = idxs[q];
                 if (ii < 0 || ii >= X0c.length) continue;
                 var yv = uu.data[e.si][ii];
                 if (yv == null) continue;
-                if (ii !== i && cx != null && Math.abs(uu.valToPos(X0c[ii], "x") - cx) > 8) continue;
+                if (ii !== i && (cx == null || Math.abs(uu.valToPos(X0c[ii], "x") - cx) > (esEmis ? 8 : 2))) continue;
                 var dd = (cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy);
                 if (e.kind === "emis") dd = Math.max(0, dd - 8);
                 if (dd < bestD) { bestD = dd; best = { e: e, yv: yv, i: ii }; }
@@ -1453,17 +1457,22 @@
           setCursor: [function (uu) {
             var i = uu.cursor.idx;
             if (i == null) { tip.style.display = "none"; return; }
-            var cy = uu.cursor.top, best = null, bestD = Infinity;
-            for (var s = 0; s < scat.length; s++) {
-              var e = scat[s], ser = uu.series[e.si];
-              if (!ser || !ser.show) continue;
-              var yv = uu.data[e.si][i];
-              if (yv == null || !e.cds[i]) continue;
-              var dd = (cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy);
-              if (dd < bestD) { bestD = dd; best = { e: e, yv: yv }; }
+            var cy = uu.cursor.top, cxl = uu.cursor.left, best = null, bestD = Infinity;
+            var X0c = uu.data[0], i0 = i;
+            // vecinos a ≤2 px: dos bonos con la misma duration tienen x contiguas
+            for (var ii = Math.max(0, i0 - 2); ii <= Math.min(X0c.length - 1, i0 + 2); ii++) {
+              if (ii !== i0 && (cxl == null || Math.abs(uu.valToPos(X0c[ii], "x") - cxl) > 2)) continue;
+              for (var s = 0; s < scat.length; s++) {
+                var e = scat[s], ser = uu.series[e.si];
+                if (!ser || !ser.show) continue;
+                var yv = uu.data[e.si][ii];
+                if (yv == null || !e.cds[ii]) continue;
+                var dd = (cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy);
+                if (dd < bestD) { bestD = dd; best = { e: e, yv: yv, i: ii }; }
+              }
             }
             if (!best) { tip.style.display = "none"; return; }
-            var X0c = uu.data[0];
+            i = best.i;
             tip.innerHTML = "<b>" + best.e.cds[i] + "</b>" + (best.e.cds === hlCodes ? " · a tu precio" : "") +
               "<br>" + (d.ylabel || "TIREA") + " " + fmtPct(best.yv) + " · Dur " + fmtDur(X0c[i]);
             tip.style.display = "block";
@@ -1499,4 +1508,486 @@
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { scan(document); });
   } else { scan(document); }
+})();
+
+// ── Curvas en vivo (19/11): gráfico de la pestaña Curvas + cuadro de Gráficos ──
+// Dos pantallas, un mismo scatter chico sobre uPlot (`mk`):
+//   · Curvas: bid / último / offer de cada bono de la curva elegida y, en ROJO,
+//     los what-if del Last (app.js los manda por el evento `cv-whatif`). Datos
+//     de /graficos/data con nss=0 (sin ajuste ni grilla), cacheado por seq.
+//   · Gráficos (superuser): un gráfico por curva en un cuadro de 2-3 columnas,
+//     con UN pedido (/graficos/multi) para todas; recién cuando la sección
+//     entra en pantalla y a lo sumo cada 5 s. La línea es una tendencia barata
+//     que arma el server (la NSS exacta está en el gráfico grande).
+// Velocidad: refresco por setData (sin recrear el chart), throttle por tick,
+// nada con la pestaña oculta ni con el gráfico fuera de pantalla.
+(function () {
+  function cssVar(name, fb) {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fb;
+  }
+  function fPct(v) { return (v == null) ? "" : (v.toFixed(2).replace(".", ",") + "%"); }
+  function fNum(v) { return (v == null) ? "" : v.toFixed(2).replace(".", ","); }
+  function nulos(n) { var a = new Array(n); for (var i = 0; i < n; i++) a[i] = null; return a; }
+  function vacio(a) { for (var i = 0; i < a.length; i++) if (a[i] != null) return false; return true; }
+
+  // Scatter genérico. cfg = { xs, pts: [{label, color, size, hollow, vals, codes,
+  //   kind, lbl, lblColor, bold}], lines: [{label, color, dash, width, vals}], h, ylabel,
+  //   legend, compact, tip(code, kind, y, x), after(uu, cfg) }.
+  function mk(el) {
+    var st = { u: null, cfg: null, sig: "", zoom: false, self: false, tip: null };
+    function build() {
+      var cfg = st.cfg, MUT = cssVar("--text-muted", "#8a8a8a"), BORD = cssVar("--border-soft", "#2a2a2a");
+      var BG = cssVar("--bg", "#0b0e13");
+      var series = [{ label: "Dur", value: function (u, v) { return fNum(v); } }];
+      cfg.pts.forEach(function (p) {
+        series.push({ label: p.label, stroke: p.color, paths: function () { return null; },
+                      points: { show: true, size: p.size || 6, stroke: p.color, fill: p.hollow ? BG : p.color, width: p.hollow ? 1.5 : 1 },
+                      value: function (u, v) { return fPct(v); } });
+      });
+      cfg.lines.forEach(function (l) {
+        series.push({ label: l.label, stroke: l.color, width: l.width || 1.6, dash: l.dash || undefined,
+                      points: { show: false }, value: function (u, v) { return fPct(v); } });
+      });
+      return {
+        width: Math.max(el.clientWidth || 600, 240), height: cfg.h,
+        legend: { show: !!cfg.legend, isolate: true },
+        // `yr` (gráficos chicos): rango de y robusto a outliers — un bono por
+        // vencer con una TIR disparatada aplastaba toda la curva contra el eje.
+        scales: { x: { time: false },
+                  y: { range: function (u, mn, mx) {
+                    var r = st.cfg && st.cfg.yr;
+                    if (r) return r;
+                    return (typeof uPlot.rangeNum === "function") ? uPlot.rangeNum(mn, mx, 0.1, true) : [mn, mx];
+                  } } },
+        cursor: { points: { size: 8 }, focus: { prox: 24 } },
+        padding: cfg.compact ? [8, 12, 0, 0] : [12, 30, 0, 0],
+        axes: [
+          { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD },
+            label: cfg.compact ? undefined : "Duration (años)", labelSize: cfg.compact ? 0 : 28, size: cfg.compact ? 26 : undefined },
+          { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD },
+            label: cfg.compact ? undefined : cfg.ylabel, size: cfg.compact ? 52 : 56,
+            values: function (u, vals) {
+              return vals.map(function (v) { return (Math.abs(v) >= 1e5 ? v.toExponential(0) : v) + "%"; });
+            } },
+        ],
+        series: series,
+        hooks: {
+          setScale: [function (u, key) { if (key === "x" && !st.self) st.zoom = true; }],
+          draw: [function (uu) {
+            var c = st.cfg, ctx = uu.ctx; ctx.save();
+            ctx.textBaseline = "bottom"; ctx.textAlign = "left";
+            var X0 = uu.data[0], drawn = [], MUT2 = cssVar("--text-muted", "#8a8a8a");
+            // las series `bold` (what-if) primero: nunca pierden su etiqueta
+            var orden = [];
+            c.pts.forEach(function (p, i) { if (p.lbl && p.bold) orden.push(i); });
+            c.pts.forEach(function (p, i) { if (p.lbl && !p.bold) orden.push(i); });
+            for (var s = 0; s < orden.length; s++) {
+              var p = c.pts[orden[s]], arr = uu.data[1 + orden[s]], ser = uu.series[1 + orden[s]];
+              if (!arr || !ser || ser.show === false) continue;
+              ctx.font = (p.bold ? "bold " : "") + (c.compact ? "9px" : "10px") + " system-ui,-apple-system,sans-serif";
+              ctx.fillStyle = p.lblColor || MUT2;
+              ctx.globalAlpha = p.bold ? 1 : 0.8;
+              for (var i = 0; i < X0.length; i++) {
+                var yv = arr[i], cd = p.codes[i];
+                if (yv == null || !cd) continue;
+                var X = uu.valToPos(X0[i], "x", true), Y = uu.valToPos(yv, "y", true), ok = true;
+                for (var k = 0; k < drawn.length; k++) {
+                  if (Math.abs(drawn[k][0] - X) < 26 && Math.abs(drawn[k][1] - Y) < 11) { ok = false; break; }
+                }
+                if (!ok) continue;
+                drawn.push([X, Y]);
+                // Sobre el borde derecho la etiqueta va a la izquierda del punto
+                // (si no, el código del bono más largo quedaba cortado).
+                var tx = X + 5;
+                if (uu.bbox && ctx.measureText) {
+                  var tw = ctx.measureText(cd).width;
+                  if (tx + tw > uu.bbox.left + uu.bbox.width) tx = X - 5 - tw;
+                }
+                ctx.fillText(cd, tx, Y - 3);
+              }
+            }
+            ctx.globalAlpha = 1;
+            if (c.after) c.after(uu, c);
+            ctx.restore();
+          }],
+          setCursor: [function (uu) {
+            var c = st.cfg, tip = st.tip, i = uu.cursor.idx;
+            if (!tip) return;
+            if (i == null) { tip.style.display = "none"; return; }
+            var X0 = uu.data[0], cy = uu.cursor.top, cx = uu.cursor.left, best = null, bestD = Infinity;
+            // Vecinos a ≤ 8 px: dos bonos con la misma duration (o un what-if
+            // sobre su bono) caen en x casi iguales y el idx resuelve a uno solo.
+            for (var ii = Math.max(0, i - 4); ii <= Math.min(X0.length - 1, i + 4); ii++) {
+              var dx = (cx == null) ? 0 : Math.abs(uu.valToPos(X0[ii], "x") - cx);
+              if (ii !== i && dx > 8) continue;
+              for (var s = 0; s < c.pts.length; s++) {
+                var ser = uu.series[1 + s], yv = uu.data[1 + s][ii], cd = c.pts[s].codes[ii];
+                if (!ser || ser.show === false || yv == null || !cd) continue;
+                var dd = ((cy == null) ? 0 : Math.abs(uu.valToPos(yv, "y") - cy)) + 0.5 * dx;
+                if (c.pts[s].bold) dd = Math.max(0, dd - 6);          // el what-if gana el empate
+                if (dd < bestD) { bestD = dd; best = { s: s, i: ii, y: yv, code: cd }; }
+              }
+            }
+            if (!best) { tip.style.display = "none"; return; }
+            tip.innerHTML = c.tip ? c.tip(best.code, c.pts[best.s].kind, best.y, X0[best.i]) :
+              ("<b>" + best.code + "</b><br>" + fPct(best.y) + " · Dur " + fNum(X0[best.i]));
+            tip.style.display = "block";
+            var L = uu.valToPos(X0[best.i], "x"), T = uu.valToPos(best.y, "y");
+            var bw = el.clientWidth, bh = el.clientHeight, tw = tip.offsetWidth, th = tip.offsetHeight;
+            var left = L + 12; if (left + tw > bw - 4) { left = L - tw - 12; } if (left < 2) { left = 2; }
+            var top = T - th - 8; if (top < 2) { top = T + 16; } if (top + th > bh - 2) { top = bh - th - 2; }
+            tip.style.left = left + "px"; tip.style.top = top + "px";
+          }],
+        },
+      };
+    }
+    function limpiar() {
+      Array.prototype.slice.call(el.querySelectorAll(".uplot,.alert,p,.skel")).forEach(function (n) { n.remove(); });
+    }
+    return {
+      set: function (cfg) {
+        var sig = cfg.pts.map(function (p) { return p.label; }).join("|") + "#" +
+                  cfg.lines.map(function (l) { return l.label; }).join("|") + "#" + cfg.ylabel + "#" + cfg.h;
+        var data = [cfg.xs];
+        cfg.pts.forEach(function (p) { data.push(p.vals); });
+        cfg.lines.forEach(function (l) { data.push(l.vals); });
+        st.cfg = cfg;
+        if (!st.u || sig !== st.sig) {
+          if (st.u) { st.u.destroy(); st.u = null; }
+          limpiar();
+          st.sig = sig;
+          if (!st.tip) {
+            el.classList.add("cv-chart-box");
+            st.tip = document.createElement("div");
+            st.tip.className = "cv-tip";
+            el.addEventListener("dblclick", function () { st.zoom = false; });
+          }
+          st.self = true;
+          st.u = new uPlot(build(), data, el);
+          st.self = false; st.zoom = false;
+          el.appendChild(st.tip);
+        } else {
+          st.self = true;
+          st.u.setData(data, !st.zoom);
+          st.self = false;
+        }
+      },
+      msg: function (txt) {
+        if (st.u) { st.u.destroy(); st.u = null; st.sig = ""; }
+        limpiar();
+        var d = document.createElement("div"); d.className = "alert"; d.textContent = txt;
+        el.appendChild(d);
+      },
+      size: function () { if (st.u && st.cfg) st.u.setSize({ width: Math.max(el.clientWidth || 600, 240), height: st.cfg.h }); },
+      uplot: function () { return st.u; },
+    };
+  }
+
+  // ── Curvas: bid / último / offer + what-if ────────────────────────────────
+  var C_BID = "#22c55e", C_OFF = "#c084fc", C_WI = "#ef4444";
+
+  // (payload de /graficos/data, what-if [{c, d, t, px, tm}]) → cfg del scatter. Pura.
+  function cvChartCfg(j, wi) {
+    var xs = j.xs.slice(), n0 = xs.length;
+    var ars = (j.ars || nulos(n0)).slice(), usd = (j.usd || nulos(n0)).slice();
+    var bid = (j.bid || nulos(n0)).slice(), off = (j.off || nulos(n0)).slice();
+    var codes = (j.codes || nulos(n0)).slice();
+    var wv = nulos(n0), wc = nulos(n0), info = {};
+    (wi || []).slice().sort(function (a, b) { return a.d - b.d; }).forEach(function (p) {
+      if (p.d == null || p.t == null) return;
+      info[p.c] = p;
+      var k = 0;
+      while (k < xs.length && xs[k] < p.d) k++;
+      // Un bullet no cambia de duration con el precio: el what-if cae en la
+      // MISMA x que su bono → comparte el índice (otra serie).
+      if (k < xs.length && xs[k] === p.d && wv[k] == null) { wv[k] = p.t; wc[k] = p.c; return; }
+      var x = p.d;
+      if (k < xs.length && xs[k] === x) { x = xs[k] + 1e-9; k++; }
+      xs.splice(k, 0, x);
+      [ars, usd, bid, off, codes].forEach(function (a) { a.splice(k, 0, null); });
+      wv.splice(k, 0, p.t); wc.splice(k, 0, p.c);
+    });
+    var ORANGE = cssVar("--accent", "#e0843c"), CYAN = cssVar("--cyan", "#22b8cf"), meta = j.meta || {};
+    var pts = [];
+    if (!vacio(ars)) pts.push({ label: "Últ. ARS", color: ORANGE, size: 7, vals: ars, codes: codes, kind: "last", lbl: true });
+    if (!vacio(usd)) pts.push({ label: "Últ. USD", color: CYAN, size: 7, vals: usd, codes: codes, kind: "last", lbl: true });
+    pts.push({ label: "Bid", color: C_BID, size: 5, hollow: true, vals: bid, codes: codes, kind: "bid" });
+    pts.push({ label: "Offer", color: C_OFF, size: 5, hollow: true, vals: off, codes: codes, kind: "off" });
+    if (!vacio(wv)) pts.push({ label: "What-if", color: C_WI, size: 11, vals: wv, codes: wc, kind: "wi",
+                               lbl: true, lblColor: C_WI, bold: true });
+    return {
+      xs: xs, pts: pts, lines: [], h: 320, ylabel: (j.ylabel || "TIREA") + " (%)", legend: true,
+      tip: function (code, kind, y, x) {
+        if (kind === "wi") {
+          var w = info[code] || {}, o = "<b>" + code + "</b> · what-if";
+          o += "<br>precio " + (w.px || "—") + " → TIR " + fPct(y) + " · Dur " + fNum(x);
+          if (w.tm != null) {
+            var d = (y - w.tm) * 100;
+            o += "<br>vs últ. " + fPct(w.tm) + " → " + (d >= 0 ? "+" : "−") + Math.abs(d).toFixed(0) + " bps";
+          }
+          return o;
+        }
+        var m = meta[code] || {}, h = "<b>" + code + "</b>" + (m.mon ? " · " + m.mon : "");
+        if (kind === "bid") return h + "<br>bid " + fNum(m.bp) + " · TIR " + fPct(y);
+        if (kind === "off") return h + "<br>offer " + fNum(m.op) + " · TIR " + fPct(y);
+        var l2 = (m.p != null) ? (fNum(m.p) + (m.src ? " " + m.src : "") + (m.dt ? " · " + m.dt : "")) : (m.src || "");
+        return h + (l2 ? "<br>" + l2 : "") + "<br>TIR " + fPct(y) + " · Dur " + fNum(x);
+      },
+      // Punteada del último al what-if del mismo bono + aro del punto rojo.
+      after: function (uu, c) {
+        var wis = null, wiIdx = -1;
+        c.pts.forEach(function (p, i) { if (p.kind === "wi") { wis = p; wiIdx = i; } });
+        if (!wis || uu.series[1 + wiIdx].show === false) return;
+        var ctx = uu.ctx, X0 = uu.data[0];
+        for (var i = 0; i < X0.length; i++) {
+          if (wis.vals[i] == null) continue;
+          var WX = uu.valToPos(X0[i], "x", true), WY = uu.valToPos(wis.vals[i], "y", true);
+          for (var k = 0; k < X0.length; k++) {
+            if (codes[k] !== wis.codes[i]) continue;
+            var y0 = (ars[k] != null) ? ars[k] : usd[k];
+            if (y0 == null) continue;
+            ctx.strokeStyle = C_WI; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]);
+            ctx.beginPath(); ctx.moveTo(uu.valToPos(X0[k], "x", true), uu.valToPos(y0, "y", true));
+            ctx.lineTo(WX, WY); ctx.stroke(); ctx.setLineDash([]);
+            break;
+          }
+          ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(WX, WY, 7, 0, Math.PI * 2); ctx.stroke();
+        }
+      },
+    };
+  }
+  window.cvChartCfg = cvChartCfg;
+
+  // (curva del payload de /graficos/multi, ylabel) → cfg del gráfico chico. Pura.
+  function gmCfg(cv, ylabel) {
+    var xs = [], ars = [], usd = [], cds = [], nss = [];
+    var i = 0, g = 0, nx = cv.x.length, ng = (cv.gx || []).length, prev = -Infinity;
+    while (i < nx || g < ng) {
+      var esPt = (g >= ng) || (i < nx && cv.x[i] <= cv.gx[g]);
+      var x = esPt ? cv.x[i] : cv.gx[g];
+      if (x <= prev) x = prev + 1e-9;               // misma duration: cada bono su x
+      prev = x; xs.push(x);
+      if (esPt) {
+        var u = cv.u && cv.u[i];
+        ars.push(u ? null : cv.y[i]); usd.push(u ? cv.y[i] : null); cds.push(cv.c[i]); nss.push(null);
+        i++;
+      } else {
+        ars.push(null); usd.push(null); cds.push(null); nss.push(cv.gy[g]);
+        g++;
+      }
+    }
+    var pts = [];
+    if (!vacio(ars)) pts.push({ label: "ARS", color: cssVar("--accent", "#e0843c"), size: 5, vals: ars, codes: cds, kind: "last", lbl: true });
+    if (!vacio(usd)) pts.push({ label: "USD", color: cssVar("--cyan", "#22b8cf"), size: 5, vals: usd, codes: cds, kind: "last", lbl: true });
+    var lines = ng ? [{ label: "Tendencia", color: "#a78bfa", width: 1.4, vals: nss }] : [];
+    // Rango de y robusto: cuartiles ± 2,5 rangos intercuartiles, recortado a
+    // los datos. `fuera` = bonos que quedan fuera de escala (el título lo dice).
+    var yr = null, fuera = 0, ys = cv.y.slice().sort(function (a, b) { return a - b; }), n = ys.length;
+    if (n >= 5) {
+      var q1 = ys[Math.floor((n - 1) * 0.25)], q3 = ys[Math.ceil((n - 1) * 0.75)], iqr = q3 - q1;
+      if (iqr > 0) {
+        var lo = Math.max(ys[0], q1 - 2.5 * iqr), hi = Math.min(ys[n - 1], q3 + 2.5 * iqr), pad = (hi - lo) * 0.08 || 0.5;
+        for (var q = 0; q < n; q++) if (ys[q] < lo || ys[q] > hi) fuera++;
+        if (fuera) yr = [lo - pad, hi + pad];
+      }
+    }
+    return { xs: xs, pts: pts, lines: lines, h: 210, ylabel: ylabel || "TIREA", legend: false, compact: true,
+             yr: yr, fuera: fuera,
+             tip: function (code, kind, y, x) { return "<b>" + code + "</b><br>" + (ylabel || "TIREA") + " " + fPct(y) + " · Dur " + fNum(x); } };
+  }
+  window.gmCfg = gmCfg;
+
+  // ¿está en pantalla? (IntersectionObserver; sin soporte = siempre sí)
+  function enPantalla(el) {
+    var st = { v: true };
+    if (typeof IntersectionObserver !== "undefined") {
+      st.v = false;
+      new IntersectionObserver(function (es) { st.v = es[es.length - 1].isIntersecting; if (st.v && st.on) st.on(); },
+                               { rootMargin: "200px" }).observe(el);
+    }
+    return st;
+  }
+
+  function initCurvaChart() {
+    var el = document.querySelector("[data-curve-chart]");
+    if (!el || typeof uPlot === "undefined") return;
+    var sc = mk(el), lastJ = null, gen = 0, ctrl = null, lastLive = 0, pend = false;
+    var vis = enPantalla(el);
+    function val(name) {
+      var e = document.querySelector('.curves [name="' + name + '"]:not([type=hidden])');
+      if (!e) return "";
+      return (e.type === "checkbox") ? (e.checked ? "true" : "false") : e.value;
+    }
+    function render() {
+      if (!lastJ) return;
+      var wi = window.cvWhatif || [];
+      if (!lastJ.n && !wi.length) { sc.msg("Sin bonos con TIR y duration en esta curva (¿hay cotización?)."); return; }
+      sc.set(cvChartCfg(lastJ, wi));
+      if (window.chartCopyInject) window.chartCopyInject(el, "curva-" + (val("curve") || "curva"));
+    }
+    function load() {
+      var mine = ++gen;
+      if (ctrl) { try { ctrl.abort(); } catch (e) { /* noop */ } }
+      var c = (typeof AbortController !== "undefined") ? new AbortController() : null;
+      ctrl = c;
+      var tm = c ? setTimeout(function () { try { c.abort(); } catch (e) { /* noop */ } }, 20000) : null;
+      var q = "curve=" + encodeURIComponent(val("curve")) + "&plazo=" + encodeURIComponent(val("plazo") || "24hs") +
+              "&leg=" + encodeURIComponent(val("leg") || "native") + "&only_quoting=" + (val("only_quoting") || "true") + "&nss=0";
+      fetch("/graficos/data?" + q, c ? { signal: c.signal } : undefined)
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (mine !== gen) return; lastJ = j; render(); })
+        .catch(function () { /* sin red / abortado: queda el último */ })
+        .then(function () { if (tm) clearTimeout(tm); if (ctrl === c) ctrl = null; });
+    }
+    function live() {
+      if (document.hidden) return;
+      if (!vis.v) { pend = true; return; }             // fuera de pantalla: al volver
+      var now = Date.now();
+      if (now - lastLive < 2000) return;
+      lastLive = now; pend = false;
+      load();
+    }
+    vis.on = function () { if (pend || !lastJ) live(); };
+    document.body.addEventListener("md-update", live);
+    setInterval(live, 30000);
+    document.body.addEventListener("cv-whatif", render);          // sin pedido: sólo redibuja
+    document.body.addEventListener("change", function (e) {
+      var n = e.target && e.target.name;
+      if ((n === "curve" || n === "plazo" || n === "leg" || n === "only_quoting") &&
+          e.target.closest && e.target.closest(".curves")) { lastLive = Date.now(); load(); }
+    });
+    var rz = null;
+    window.addEventListener("resize", function () { clearTimeout(rz); rz = setTimeout(sc.size, 120); });
+    load();
+  }
+
+  function initGrafMulti() {
+    var grid = document.querySelector("[data-graf-multi]");
+    var form = document.getElementById("graf-controls");
+    if (!grid || !form || typeof uPlot === "undefined") return;
+    var card = document.getElementById("graf-multi-card"), body = document.getElementById("graf-multi-body");
+    var toggle = document.getElementById("graf-multi-toggle"), nEl = document.getElementById("graf-multi-n");
+    var cells = {}, gen = 0, ctrl = null, lastLive = 0, pend = true, cargado = false;
+    var vis = enPantalla(card || grid);
+    function abierto() { return !body || !body.hidden; }
+    function params() {
+      var p = {};
+      ["plazo", "metric", "dmin", "dmax", "exclude"].forEach(function (k) {
+        var e = form.querySelector('[name="' + k + '"]'); if (e) p[k] = e.value;
+      });
+      var oq = form.querySelector('input[type=checkbox][name="only_quoting"]');
+      p.only_quoting = (!oq || oq.checked) ? "true" : "false";
+      return new URLSearchParams(p).toString();
+    }
+    function verArriba(key) {
+      var sel = form.querySelector('[name="curve"]');
+      if (!sel) return;
+      sel.value = key;
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      var top = document.getElementById("grafico-uplot");
+      if (top && top.scrollIntoView) top.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    function celda(cv) {
+      var c = cells[cv.k];
+      if (c) return c;
+      var div = document.createElement("div"); div.className = "gm-cell";
+      var t = document.createElement("div"); t.className = "gm-t";
+      var a = document.createElement("a"); a.title = "Ver esta curva en el gráfico grande";
+      a.addEventListener("click", function () { verArriba(cv.k); });
+      var n = document.createElement("span"); n.className = "muted";
+      t.appendChild(a); t.appendChild(n);
+      var box = document.createElement("div"); box.className = "gm-c";
+      div.appendChild(t); div.appendChild(box);
+      c = cells[cv.k] = { div: div, a: a, n: n, sc: mk(box) };
+      return c;
+    }
+    function pintar(j) {
+      var vistos = {}, cola = [], bonos = 0;
+      (j.curvas || []).forEach(function (cv) {
+        var c = celda(cv);
+        vistos[cv.k] = 1; bonos += cv.n;
+        var cfg = gmCfg(cv, j.ylabel);
+        c.a.textContent = cv.l;
+        c.n.textContent = cv.n + " bono" + (cv.n === 1 ? "" : "s") + (cfg.fuera ? " · " + cfg.fuera + " fuera de escala" : "");
+        c.n.title = cfg.fuera ? "Bonos con una tasa muy lejos del resto (p. ej. por vencer): no se dibujan para no aplastar la curva. Se ven en el gráfico grande." : "";
+        grid.appendChild(c.div);                       // (re)ordena como el payload
+        cola.push([c, cfg]);
+      });
+      Object.keys(cells).forEach(function (k) {
+        if (!vistos[k]) { if (cells[k].div.parentNode) cells[k].div.parentNode.removeChild(cells[k].div); delete cells[k]; }
+      });
+      if (nEl) nEl.textContent = cola.length ? (cola.length + " curvas · " + bonos + " bonos · ") : "";
+      if (!cola.length) { grid.textContent = "Sin curvas con cotización."; return; }
+      // De a 4 por frame: crear ~20 charts de una frenaba el primer paint.
+      var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+      (function paso() {
+        for (var k = 0; k < 4 && cola.length; k++) { var e = cola.shift(); e[0].sc.set(e[1]); }
+        if (cola.length) raf(paso);
+      })();
+    }
+    function load() {
+      var mine = ++gen;
+      if (ctrl) { try { ctrl.abort(); } catch (e) { /* noop */ } }
+      var c = (typeof AbortController !== "undefined") ? new AbortController() : null;
+      ctrl = c;
+      var tm = c ? setTimeout(function () { try { c.abort(); } catch (e) { /* noop */ } }, 30000) : null;
+      fetch("/graficos/multi?" + params(), c ? { signal: c.signal } : undefined)
+        .then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+        .then(function (j) { if (mine !== gen) return; cargado = true; pintar(j); })
+        .catch(function () { /* queda lo último */ })
+        .then(function () { if (tm) clearTimeout(tm); if (ctrl === c) ctrl = null; });
+    }
+    function live(force) {
+      if (document.hidden || !abierto()) { pend = true; return; }
+      if (!vis.v) { pend = true; return; }
+      var now = Date.now();
+      if (!force && now - lastLive < 5000) return;
+      lastLive = now; pend = false;
+      load();
+    }
+    vis.on = function () { if (pend || !cargado) live(true); };
+    document.body.addEventListener("md-update", function () { live(false); });
+    setInterval(function () { live(false); }, 60000);
+    var deb = null;
+    ["plazo", "metric", "dmin", "dmax", "exclude", "only_quoting"].forEach(function (k) {
+      Array.prototype.forEach.call(form.querySelectorAll('[name="' + k + '"]'), function (e) {
+        e.addEventListener("change", function () { clearTimeout(deb); deb = setTimeout(function () { live(true); }, 250); });
+      });
+    });
+    function tam() { Object.keys(cells).forEach(function (k) { cells[k].sc.size(); }); }
+    function cols(n) {
+      n = (n === 2) ? 2 : 3;
+      grid.style.setProperty("--gm-cols", n);
+      Array.prototype.forEach.call(document.querySelectorAll("[data-gm-cols]"), function (b) {
+        b.classList.toggle("on", parseInt(b.getAttribute("data-gm-cols"), 10) === n);
+      });
+      try { localStorage.setItem("graf_multi_cols", String(n)); } catch (e) { /* noop */ }
+      (window.requestAnimationFrame || setTimeout)(tam);
+    }
+    Array.prototype.forEach.call(document.querySelectorAll("[data-gm-cols]"), function (b) {
+      b.addEventListener("click", function () { cols(parseInt(b.getAttribute("data-gm-cols"), 10)); });
+    });
+    function abrir(open) {
+      if (!body || !toggle) return;
+      body.hidden = !open;
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      var caret = toggle.querySelector(".graf-emis-caret");
+      if (caret) caret.textContent = open ? "▾" : "▸";
+      try { localStorage.setItem("graf_multi_open", open ? "1" : "0"); } catch (e) { /* noop */ }
+      if (open) { live(true); (window.requestAnimationFrame || setTimeout)(tam); }
+    }
+    var c0 = 3, o0 = "1";
+    try { c0 = parseInt(localStorage.getItem("graf_multi_cols") || "3", 10); o0 = localStorage.getItem("graf_multi_open") || "1"; } catch (e) { /* noop */ }
+    cols(c0);
+    if (toggle) toggle.addEventListener("click", function () { abrir(body.hidden); });
+    abrir(o0 === "1");
+    var rz = null;
+    window.addEventListener("resize", function () { clearTimeout(rz); rz = setTimeout(tam, 150); });
+  }
+
+  function boot() { initCurvaChart(); initGrafMulti(); }
+  if (document.readyState !== "loading") boot();
+  else document.addEventListener("DOMContentLoaded", boot);
 })();
