@@ -153,6 +153,31 @@ def _pv_vec(totals, t_years, tasa):
 
 #Last version 12.17 16/5
 #%%
+def uva_sin_publicar(fecha):
+    """UVA de una fecha que el BCRA todavía no publicó (liquidación 24 hs con
+    lag 0: la API llega hasta hoy). El UVA sigue al CER día a día, así que es
+    el último UVA publicado (<= fecha) por el crecimiento del CER entre las
+    dos fechas, con `cer_proyectado` (observado + proyectado con la inflación
+    ya publicada), redondeado a 2 decimales como lo publica el BCRA. NZC3O
+    liq. 20/11/2026: 2.201,98 (18/11) -> 2.205,18; 1816 usa 2.205,17. Tomar
+    el último publicado a secas daba 0,07 % menos por día sin publicar, y
+    `uva_proyectado` (CER x 2,5217) 0,07 % menos. Sin CER para esas fechas:
+    `uva_proyectado`; sin nada: KeyError como antes."""
+    uva = inputs['UVA']
+    cer = inputs.get('cer_proyectado')
+    previas = uva.index[uva.index <= fecha]
+    if len(previas):
+        t0 = previas[-1]
+        if cer is not None and t0 in cer.index and fecha in cer.index:
+            base = float(cer.loc[t0, 'CER'])
+            if base > 0:
+                return round(float(uva.loc[t0, 'UVA']) * float(cer.loc[fecha, 'CER']) / base, 2)
+    proy = inputs.get('uva_proyectado')
+    if proy is not None and fecha in proy.index:
+        return float(proy.loc[fecha, 'UVA'])
+    return uva.loc[fecha]['UVA']
+
+
 class Bono:
     def __init__(self, data):
         self.nombre_security = data.get("Nombre Security")
@@ -558,17 +583,15 @@ class Bono:
             ajuste_base = inputs['UVA'].loc[fecha_uva_base, 'UVA']
             self.ajuste_base = ajuste_base
             fecha_ajuste_si_no_hay_dato = n_dias_laborales(settlement_date, self.dias_lag_ajuste)
-            # UVA de la liquidación (con su lag). La serie observada se corta
-            # en HOY (indices.main): con lag 0 y liquidación 24 hs esa fecha
-            # todavía no está y antes esto era un KeyError. Ahí vale la serie
-            # completa (observada + proyectada con la inflación ya publicada);
-            # si la fecha está en la observada, el valor es el de siempre.
+            # UVA de la liquidación (con su lag). El BCRA publica hasta HOY y
+            # la serie observada se corta ahí (indices.main): con lag 0 y
+            # liquidación 24 hs esa fecha todavía no está (antes, KeyError).
+            # Ahí va el último UVA publicado llevado con el CER (ver
+            # `uva_sin_publicar`); con la fecha publicada, el de siempre.
             if fecha_ajuste_si_no_hay_dato in inputs['UVA'].index:
                 uva_liquidacion = inputs['UVA'].loc[fecha_ajuste_si_no_hay_dato]['UVA']
-            elif fecha_ajuste_si_no_hay_dato in inputs['uva_proyectado'].index:
-                uva_liquidacion = inputs['uva_proyectado'].loc[fecha_ajuste_si_no_hay_dato, 'UVA']
             else:
-                uva_liquidacion = inputs['UVA'].loc[fecha_ajuste_si_no_hay_dato]['UVA']
+                uva_liquidacion = uva_sin_publicar(fecha_ajuste_si_no_hay_dato)
             for i in range(self.cupones):
                 fecha_ajuste_actual = n_dias_laborales(self.fechas_cupon[i],self.dias_lag_ajuste)
                 ajuste_actual = inputs['UVA'].loc[fecha_ajuste_actual, 'UVA'] if fecha_ajuste_actual in inputs['UVA'].index else uva_liquidacion

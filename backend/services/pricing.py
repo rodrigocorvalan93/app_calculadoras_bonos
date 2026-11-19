@@ -370,10 +370,11 @@ def _dlk_fx_auto() -> Optional[float]:
 
 
 def _indice_de_liquidacion(obj, key_obs: str, key_proy: str, proyectado: bool):
-    """(fecha, valor, lag) del CER / UVA que rentafija aplica a los flujos
+    """(fecha, valor, lag, estimado) del CER / UVA que rentafija aplica a los flujos
     futuros: el de la liquidación corrida por el lag de la ficha (días
     hábiles). Misma búsqueda que `generate_cashflows`: serie observada y, si
-    la fecha todavía no está (o la ficha es PROYECTADO), la completa. None si
+    la fecha todavía no está (o la ficha es PROYECTADO), la completa;
+    `estimado` = el BCRA todavía no publicó esa fecha. None si
     el bono todavía no se valuó o falta el dato. Sólo lectura, µs."""
     import rentafija
 
@@ -384,12 +385,21 @@ def _indice_de_liquidacion(obj, key_obs: str, key_proy: str, proyectado: bool):
     try:
         f = rentafija.n_dias_laborales(settle, int(lag))
         col = "CER" if "CER" in key_obs.upper() else "UVA"
+        obs = rentafija.inputs.get(key_obs)
+        publicado = obs is not None and f in obs.index
+        # UVA sin publicar: el MISMO número que usó generate_cashflows
+        # (`rentafija.uva_sin_publicar`, lo deja en la copia).
+        if (col == "UVA" and not proyectado and not publicado
+                and getattr(obj, "fecha_ajuste_liquidacion", None) == f):
+            v = float(getattr(obj, "ajuste_liquidacion", float("nan")))
+            if np.isfinite(v):
+                return f, v, int(lag), True
         for key in ((key_proy,) if proyectado else (key_obs, key_proy)):
             df = rentafija.inputs.get(key)
             if df is not None and f in df.index:
                 v = float(df.loc[f, col])
                 if np.isfinite(v):
-                    return f, v, int(lag)
+                    return f, v, int(lag), not publicado
     except Exception:  # noqa: BLE001
         return None
     return None
@@ -427,7 +437,8 @@ def index_applied(obj) -> Dict[str, Any]:
         # índice INICIAL (emisión con su lag), el denominador del ajuste.
         apl = _indice_de_liquidacion(obj, kind, proy, "PROYECTADO" in ajuste)
         if apl is not None:
-            out.update({"value": apl[1], "fecha": apl[0], "lag": apl[2], "ultimo": val, "ultimo_fecha": fecha})
+            out.update({"value": apl[1], "fecha": apl[0], "lag": apl[2], "estimado": apl[3],
+                        "ultimo": val, "ultimo_fecha": fecha})
         base = getattr(obj, "ajuste_base", None)
         f_base = getattr(obj, "fecha_cer_base" if kind == "CER" else "fecha_uva_base", None)
         try:

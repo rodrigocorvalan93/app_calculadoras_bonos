@@ -1844,15 +1844,26 @@ PROYECTADO) devuelve el índice de la liquidación con el lag de la ficha
 para el tooltip) y el INICIAL (`base` / `base_fecha` / `base_label` /
 `base_lag`, de `ajuste_base` + `fecha_uva_base` / `fecha_cer_base` que deja
 rentafija); `yas_metrics.html` pinta la tarjeta "UVA inicial" al lado. Costo
-cero (lookups). **Lag 0 y liquidación 24 hs**: `indices.main()` corta la
-serie observada en HOY, así que el UVA de la liquidación todavía no está y
-la rama "UVA" de `rentafija.generate_cashflows` tiraba KeyError; ahora, si
-esa fecha no está en `inputs['UVA']`, toma `inputs['uva_proyectado']`
-(observada + proyección con la inflación ya publicada) y deja
-`fecha_ajuste_liquidacion` / `ajuste_liquidacion`; con la fecha en la
-observada es el valor de siempre. El lag de la ficha NO se tocó (especies.py
-necesita el OK del desk; el suplemento del BNA no se pudo abrir desde la
-sesión). Medido `/yas/recompute` NZC3O (avg · p50 · p95 · p99 ms): warm 4,8
+cero (lookups). **Lag 0 y liquidación 24 hs** (el desk pasó NZC3O / NZC3Oj
+a lag 0 / 0): el BCRA publica hasta HOY y `indices.main()` corta la serie
+observada ahí, así que el UVA de la liquidación todavía no está y la rama
+"UVA" de `rentafija.generate_cashflows` tiraba KeyError. Ahora, si esa fecha
+no está en `inputs['UVA']`, usa `rentafija.uva_sin_publicar(fecha)` = último
+UVA publicado × CER(fecha) / CER(esa fecha) con `cer_proyectado`, a 2
+decimales: NZC3O liq. 20/11 con el 18/11 publicado (2.201,98) → 2.205,18,
+1816 2.205,17. NO el último publicado a secas (0,07 % menos por día sin
+publicar: fue la primera idea del desk y la descartó el dato de 1816) ni
+`uva_proyectado` (CER × 2,5217: 0,07 % abajo y un salto en el empalme).
+Deja `fecha_ajuste_liquidacion` / `ajuste_liquidacion` en la copia y el card
+muestra ESE valor con "estimado" (`index_applied["estimado"]`, CSS
+`.metric-sub .warn-txt`); con la fecha publicada es el valor de siempre.
+Ojo: la serie de UVA del BCRA repite el valor algunos domingos / lunes y
+después de feriados (11/05 = 09/05; 06–11/11 planos) y 1816 usa esos mismos
+valores; la estimación no imita eso, así que una liquidación de lunes puede
+quedar 1-2 días de CER arriba. Si la API devolviera fechas FUTURAS (el BCRA
+conoce CER / UVA hasta el 6 del mes siguiente), lo exacto es pedirlas en
+`indices.py` (hoy pide y corta en `hoy`): sin verificar, el sandbox no llega
+a api.bcra.gob.ar. Medido `/yas/recompute` NZC3O (avg · p50 · p95 · p99 ms): warm 4,8
 · 4,6 · 5,8 · 6,6; valor nuevo por llamada 4,7 · 4,6 · 5,7 · 6,9. Regresión: `tests/test_indice_inicial_y_lag.py`.
 
 ## Revisión de eficiencia 22-23/10 — memo de flujos y warmup que cede el GIL
