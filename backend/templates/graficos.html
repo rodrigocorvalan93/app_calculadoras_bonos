@@ -188,5 +188,30 @@
       <p class="muted">Misma data que el gráfico (precio, TIR, TNA, TEM y duration de la fuente elegida; con <em>Vector CAFCI</em> la TIR y la mod. duration del vector, sin precio ni puntas). Orden: duration ascendente; las curvas comparadas van después, cada una en su bloque. El ⧉ copia el cuadro para pegarlo en Excel.</p>
     </div>
   </div>
+
+  {% if request.state.is_superuser %}
+  {# Todas las curvas en un cuadro (sólo superuser, 19/11): un gráfico chico por
+     curva, 2 o 3 columnas. UN pedido (/graficos/multi, cacheado por seq) trae
+     los puntos de todas; charts.js lo pide recién cuando la sección entra en
+     pantalla y la refresca cada 5 s con ticks. Usa el plazo / métrica / filtros
+     de arriba. Click en el título de una curva = verla en el gráfico grande. #}
+  <div class="card graf-multi-card" id="graf-multi-card" style="margin-top:14px">
+    <div class="card-title">
+      <button type="button" class="graf-emis-toggle" id="graf-multi-toggle" aria-expanded="true"
+              aria-controls="graf-multi-body" title="Mostrar / ocultar el cuadro de todas las curvas">
+        <span class="graf-emis-caret" aria-hidden="true">▾</span>
+        <span>Todas las curvas <small class="muted">(un gráfico por curva con su tendencia · click en el título para verla arriba con la NSS)</small></span>
+      </button>
+      <span class="card-title-aux"><span id="graf-multi-n" class="muted"></span>
+        <span class="gm-cols" role="group" aria-label="Columnas">
+          <button type="button" class="lnk" data-gm-cols="2">2 col</button> ·
+          <button type="button" class="lnk" data-gm-cols="3">3 col</button>
+        </span></span>
+    </div>
+    <div class="card-body" id="graf-multi-body">
+      <div id="graf-multi" class="gm-grid" data-graf-multi></div>
+    </div>
+  </div>
+  {% endif %}
 </section>
 {% endblock %}

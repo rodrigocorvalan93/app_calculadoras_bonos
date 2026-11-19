@@ -1478,6 +1478,85 @@ dispara `md-update` en `<body>` sólo cuando la secuencia del store avanzó
   constantes: `DEV_TICKS_FOCUS=S13N6 python backend/tools/dev_ticks.py 8765`
   (alterna un tick de sólo tamaños —flashea— con uno de precios).
 
+## Curvas con what-if y gráfico · Gráficos con todas las curvas (19/11)
+
+Tres pedidos del desk, con la velocidad como condición.
+
+- **Dos bonos con la misma duration se pisaban en Gráficos** (M30A7 no
+  aparecía en "Todos ARS"): `/graficos/data` alinea las series por x
+  (`ars_at[d]`, `code_at[d]`) y M30A7 (TAMAR bullet) vence el mismo día que la
+  LECAP T30A7 → misma duration, una pisaba a la otra (punto, tabla y hover).
+  `routes/curves._x_unicos(pts)` corre la x del repetido al float siguiente
+  (`math.nextafter`: mismo píxel) en la curva principal y en cada comparación;
+  el hover del gráfico grande y del widget `[data-locate]` mira también los
+  índices vecinos a ≤ 2 px (si no, sólo uno de los dos tenía tooltip). La
+  partición de curvas nunca estuvo mal. Si otro consumidor arma un payload
+  keyeado por duration, pasarlo por `_x_unicos`.
+- **Curvas · what-if del Last**: click en el Last de una fila → input; Enter
+  / salir = probar ese precio, Esc cancela, vacío o el precio de mercado lo
+  quita. `GET /curves/whatif?curve&plazo&leg&price_<CODE>=…` (sólo códigos de
+  la curva o de la `mix:`, tope `_WHATIF_MAX`; `_whatif_uno` = MISMA ficha
+  `calc`, conversión de pata y liquidación que `_row_for_code`, métricas del
+  cache de `metrics_for_market_price`) devuelve las celdas YA formateadas
+  es-AR + `t` / `d` numéricos. **El server no toca la tabla en vivo**: el memo
+  de HTML por fila queda igual (la fila sólo suma `data-code` y clases cortas
+  `c-last c-dy c-dur c-tir c-tna c-tem c-par c-mar`: si agregás una columna
+  que el what-if deba pisar, va con su clase y en `CELLS` de app.js) y
+  `app.js` ("Curvas: what-if del Last") PINTA encima después de cada swap:
+  fila `wi-row`, celdas `wi-cell` + `data-noflash`, verde / rojo por el
+  PRECIO contra el mercado (más caro = verde), Δyield = TIR what-if − TIR de
+  mercado en bps, y guarda el HTML de mercado por fila (`tr.__orig`) para
+  restaurar. Mientras se tipea, la tabla NO se pide ni se swapea
+  (`htmx:beforeRequest` cancelado, `beforeSwap` con `shouldSwap = false` y
+  `__lastHtml = null` para que el skip de swaps idénticos no lo dé por
+  aplicado) y al salir se dispara el trigger `refresh` de `#curve-table`. El
+  `snapshot()` del motor de flashes no registra celdas `data-noflash` (sin
+  eso el what-if flasheaba en cada tick). El estado vive en memoria de la
+  pestaña (chip "N what-if · limpiar").
+- **Curvas · gráfico debajo de la tabla** (`#curve-chart`, FUERA del swap):
+  bid / último / offer de cada bono y los what-if en ROJO (punto grande con
+  aro, código en negrita y punteada desde el último del mismo bono; la offer
+  va en violeta para no confundirse). Datos: `/graficos/data?…&nss=0` — el
+  flag saltea el ajuste NSS y la grilla fina (sin scipy, payload de sólo los
+  bonos). `app.js` manda los puntos por el evento `cv-whatif` (y
+  `window.cvWhatif`): redibuja SIN pedido. Un bullet no cambia de duration
+  con el precio → el what-if comparte la x de su bono (`cvChartCfg`).
+- **Gráficos · todas las curvas** (sólo superuser; `{% if
+  request.state.is_superuser %}` en la página y 403 en el endpoint — el
+  chequeo va ANTES del `seq_cached`, que no keyea por usuario): cuadro de 2 /
+  3 columnas (botones, `localStorage graf_multi_cols`; ≤ 1100 px 2, ≤ 700 px
+  1), un gráfico por curva, plegable (`graf_multi_open`). `GET
+  /graficos/multi` = UN pedido para todas: filas del memo por símbolo
+  (`_rows_for`, book=False, en serie), sin meta por punto, números
+  redondeados (26 KB / 19 curvas / 477 bonos). **La línea es una tendencia
+  barata, no la NSS** (`_multi_tendencia`: cuadrática en ln(1 + duration) por
+  `lstsq`, sin los bonos fuera de escala y con una pasada MAD; ~0,1 ms):
+  re-ajustar la NSS de 19 curvas por tick costaba 283 ms p50 / 655 ms p95 con
+  datos difíciles y tomaba el GIL del proceso que sirve los paneles live. La
+  NSS exacta está en el gráfico grande (click en el título de un gráfico chico
+  = elegir esa curva arriba). Usa plazo / métrica / Dur mín-máx / excluir de
+  la página. El cliente (`initGrafMulti`) pide recién cuando la sección entra
+  en pantalla (IntersectionObserver), refresca a lo sumo cada 5 s con ticks,
+  crea los charts de a 4 por frame y fija un rango de y robusto (cuartiles ±
+  2,5 IQR; el título dice "N fuera de escala").
+- **`charts.js` "Curvas en vivo"**: `mk(el)` = scatter genérico sobre uPlot
+  (setData sin recrear, zoom del usuario respetado, etiquetas con
+  anti-superposición que se dan vuelta sobre el borde derecho, hover con
+  vecinos a ≤ 8 px); `cvChartCfg(j, wi)` y `gmCfg(cv, ylabel)` son PURAS y
+  están en `window` para `tests/curvas_chart_harness.cjs`. Nada corre con la
+  pestaña oculta ni con el gráfico fuera de pantalla.
+- Medido (store sembrado, tick por request, 60 llamadas; avg · p50 · p95 ·
+  p99 ms): `/curves/table` todos ARS 5,5 · 5,5 · 6,4 · 8,2 (hit p95 2,3) y
+  corp_hdmep 9,6 · 9,4 · 12,4 · 15,9; `/graficos/data nss=0` todos ARS 3,8 ·
+  3,5 · 4,9 · 6,0 y corp_hdmep 9,8 · 10,3 · 12,0 · 16,4; `/graficos/multi`
+  23,7 · 23,6 · 27,9 · 29,8 (hit p95 2,6); `/curves/whatif` precio nuevo 4,1
+  · 4,0 · 4,9 · 5,1 y repetido p95 2,1.
+- Regresión: `tests/test_curvas_whatif_graficos.py` +
+  `tests/curvas_chart_harness.cjs`. Verificación en navegador (no corre en
+  CI): `CL_FIJO=1 python backend/tools/dev_ticks.py 8765` y un Playwright que
+  edite un Last con ticks cada 1 s (el input conserva el foco, el what-if
+  sobrevive a los swaps, "limpiar" vuelve al mercado).
+
 ## Forwards · Histórico del forward — punto what-if (22/10)
 
 El punto lleno (naranja) del gráfico es el forward de HOY del par con el

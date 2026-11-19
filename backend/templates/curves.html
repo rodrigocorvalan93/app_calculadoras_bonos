@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_estados.html" import skeleton %}
 {% block title %}Curvas{% endblock %}
 {% block tab_curves %}active{% endblock %}
 
@@ -6,7 +7,7 @@
 <section class="curves">
   <header class="yas-header">
     <h1>Curvas</h1>
-    <p class="muted">Bid / Last / Ask provienen del store en memoria alimentado por el WS al broker. En vivo: se actualiza con cada tick del feed (respaldo cada 30 s).</p>
+    <p class="muted">Bid / Last / Ask provienen del store en memoria alimentado por el WS al broker. En vivo: se actualiza con cada tick del feed (respaldo cada 30 s). <strong>What-if</strong>: click en un <strong>Last</strong> para probar otro precio — la fila muestra qué rinde y el punto aparece en rojo en el gráfico de abajo.</p>
   </header>
 
   <div class="curve-picker card">
@@ -96,6 +97,9 @@
     <input type="text" data-f-val placeholder="valor (ej 1M, 60)" autocomplete="off" style="width:96px">
     <button type="button" class="btn-primary u-sm" data-f-add>+ filtro</button>
     <span data-f-chips></span>
+    {# What-if del Last (app.js): cuántos precios hay editados + volver al mercado. #}
+    <span id="cv-wi-bar" class="cv-wi-bar" hidden>✎ <b id="cv-wi-n">0</b> what-if ·
+      <button type="button" class="lnk" id="cv-wi-clear" title="Volver todos los precios al mercado">limpiar</button></span>
   </div>
 
   {# ── Combinar curvas (armá la tuya) ──────────────────────────────────────
@@ -141,11 +145,25 @@
     id="curve-table"
     data-flash-scope
     hx-get="/curves/table"
-    hx-trigger="md-update from:body, every 30s"
+    hx-trigger="md-update from:body, every 30s, refresh"
     hx-swap="innerHTML"
     hx-include="[name=curve], [name=plazo], [name=only_quoting], [name=leg]"
   >
     {% include "partials/curve_table.html" %}
+  </div>
+
+  {# Gráfico de la curva elegida (charts.js, uPlot): bid / último / offer de cada
+     bono y, en rojo, los what-if del Last. Vive FUERA de #curve-table (la tabla
+     se re-swapea por tick; el chart sólo hace setData). Datos: /graficos/data
+     con nss=0 (sin ajuste ni grilla), cacheado por seq en el server. #}
+  <div class="card u-mt12" id="curve-chart-card">
+    <div class="card-title">
+      <span>Curva · bid / último / offer</span>
+      <span class="card-title-aux muted">what-if en rojo · arrastrá para zoom, doble click para volver</span>
+    </div>
+    <div class="card-body">
+      <div id="curve-chart" data-curve-chart style="min-height:320px">{{ skeleton(3, "Cargando gráfico…") }}</div>
+    </div>
   </div>
 </section>
 
