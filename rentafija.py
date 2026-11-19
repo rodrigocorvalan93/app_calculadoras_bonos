@@ -558,13 +558,26 @@ class Bono:
             ajuste_base = inputs['UVA'].loc[fecha_uva_base, 'UVA']
             self.ajuste_base = ajuste_base
             fecha_ajuste_si_no_hay_dato = n_dias_laborales(settlement_date, self.dias_lag_ajuste)
+            # UVA de la liquidación (con su lag). La serie observada se corta
+            # en HOY (indices.main): con lag 0 y liquidación 24 hs esa fecha
+            # todavía no está y antes esto era un KeyError. Ahí vale la serie
+            # completa (observada + proyectada con la inflación ya publicada);
+            # si la fecha está en la observada, el valor es el de siempre.
+            if fecha_ajuste_si_no_hay_dato in inputs['UVA'].index:
+                uva_liquidacion = inputs['UVA'].loc[fecha_ajuste_si_no_hay_dato]['UVA']
+            elif fecha_ajuste_si_no_hay_dato in inputs['uva_proyectado'].index:
+                uva_liquidacion = inputs['uva_proyectado'].loc[fecha_ajuste_si_no_hay_dato, 'UVA']
+            else:
+                uva_liquidacion = inputs['UVA'].loc[fecha_ajuste_si_no_hay_dato]['UVA']
             for i in range(self.cupones):
                 fecha_ajuste_actual = n_dias_laborales(self.fechas_cupon[i],self.dias_lag_ajuste)
-                ajuste_actual = inputs['UVA'].loc[fecha_ajuste_actual, 'UVA'] if fecha_ajuste_actual in inputs['UVA'].index else inputs['UVA'].loc[fecha_ajuste_si_no_hay_dato]['UVA']
+                ajuste_actual = inputs['UVA'].loc[fecha_ajuste_actual, 'UVA'] if fecha_ajuste_actual in inputs['UVA'].index else uva_liquidacion
                 ratio_aplicable = ajuste_actual #/ ajuste_base
                 ajuste_aplicable.append(ratio_aplicable)
 
             self.fecha_uva_base = fecha_uva_base
+            self.fecha_ajuste_liquidacion = fecha_ajuste_si_no_hay_dato
+            self.ajuste_liquidacion = uva_liquidacion
             self.ajuste_aplicable = ajuste_aplicable
 
         elif self.ajuste_sobre_capital == "A3500":
