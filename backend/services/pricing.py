@@ -369,6 +369,32 @@ def _dlk_fx_auto() -> Optional[float]:
     return None
 
 
+def _indice_de_liquidacion(obj, key_obs: str, key_proy: str, proyectado: bool):
+    """(fecha, valor, lag) del CER / UVA que rentafija aplica a los flujos
+    futuros: el de la liquidación corrida por el lag de la ficha (días
+    hábiles). Misma búsqueda que `generate_cashflows`: serie observada y, si
+    la fecha todavía no está (o la ficha es PROYECTADO), la completa. None si
+    el bono todavía no se valuó o falta el dato. Sólo lectura, µs."""
+    import rentafija
+
+    settle = getattr(obj, "fecha_settlement", None)
+    lag = getattr(obj, "dias_lag_ajuste", None)
+    if settle is None or lag is None:
+        return None
+    try:
+        f = rentafija.n_dias_laborales(settle, int(lag))
+        col = "CER" if "CER" in key_obs.upper() else "UVA"
+        for key in ((key_proy,) if proyectado else (key_obs, key_proy)):
+            df = rentafija.inputs.get(key)
+            if df is not None and f in df.index:
+                v = float(df.loc[f, col])
+                if np.isfinite(v):
+                    return f, v, int(lag)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def index_applied(obj) -> Dict[str, Any]:
     """Identifies the index that prices this bond and returns its current value.
 
@@ -386,18 +412,31 @@ def index_applied(obj) -> Dict[str, Any]:
 
     out = {"kind": None, "label": "", "value": float("nan"), "value_fmt_hint": "decimal", "fecha": None}
 
-    if "CER" in ajuste:
-        fecha, val = _last_series_value("CER", "CER")
+    if "CER" in ajuste or "UVA" in ajuste:
+        kind = "CER" if "CER" in ajuste else "UVA"
+        proy = "cer_proyectado" if kind == "CER" else "uva_proyectado"
+        # Último publicado (lo de siempre) …
+        fecha, val = _last_series_value(kind, kind)
         if not np.isfinite(val) or fecha is None:
-            fecha, val = _last_series_value("cer_proyectado", "CER")
-        out.update({"kind": "CER", "label": "CER aplicable", "value": val, "value_fmt_hint": "decimal", "fecha": fecha})
-        return out
-
-    if "UVA" in ajuste:
-        fecha, val = _last_series_value("UVA", "UVA")
-        if not np.isfinite(val) or fecha is None:
-            fecha, val = _last_series_value("uva_proyectado", "UVA")
-        out.update({"kind": "UVA", "label": "UVA aplicable", "value": val, "value_fmt_hint": "decimal", "fecha": fecha})
+            fecha, val = _last_series_value(proy, kind)
+        out.update({"kind": kind, "label": f"{kind} aplicable", "value": val,
+                    "value_fmt_hint": "decimal", "fecha": fecha})
+        # … pero el card muestra el índice que REALMENTE valuó el bono: el de
+        # la liquidación con el lag de la ficha (NZC3O: el card decía el UVA
+        # de hoy y el cashflow usaba el de 5 ruedas atrás). Y al lado el
+        # índice INICIAL (emisión con su lag), el denominador del ajuste.
+        apl = _indice_de_liquidacion(obj, kind, proy, "PROYECTADO" in ajuste)
+        if apl is not None:
+            out.update({"value": apl[1], "fecha": apl[0], "lag": apl[2], "ultimo": val, "ultimo_fecha": fecha})
+        base = getattr(obj, "ajuste_base", None)
+        f_base = getattr(obj, "fecha_cer_base" if kind == "CER" else "fecha_uva_base", None)
+        try:
+            base = float(base)
+        except (TypeError, ValueError):
+            base = float("nan")
+        if np.isfinite(base) and f_base is not None:
+            out.update({"base": base, "base_fecha": f_base, "base_label": f"{kind} inicial",
+                        "base_lag": getattr(obj, "dias_lag_ajuste_base", None)})
         return out
 
     if "A3500" in ajuste or moneda == "DLK":

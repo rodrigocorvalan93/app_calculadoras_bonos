@@ -1829,6 +1829,32 @@ p95 9,7 ms; vacío 2,5; `/yas/ficha` 2,0; `/yas/market` 1,9; `/yas` 5,0.
   `tests/locate_harness.cjs` (uPlot falso: etiquetas y tooltip).
 - Regresión: `tests/test_yas_layout.py`.
 
+## YAS — índice aplicado e índice inicial (CER / UVA, 19/11)
+
+NZC3O contra 1816: mismos intereses y amortización, ajuste distinto. 1816 usa
+el UVA SIN lag (emisión 11/05/2026 = 1.931,64, cada pago el de su fecha,
+valuación el de la liquidación) y la ficha tiene lag -5 / -5 ("default casa",
+el propio comentario dice "no confirmado"): la valuación tomaba el UVA de 5
+ruedas antes de la liquidación → precio 0,47 % abajo (= cociente de los dos
+UVA). El card "UVA aplicable" mostraba el ÚLTIMO publicado, no el que usaba
+el cashflow. Ahora `pricing.index_applied` (CER y UVA, también las patas
+PROYECTADO) devuelve el índice de la liquidación con el lag de la ficha
+(`_indice_de_liquidacion`: misma búsqueda que `generate_cashflows`; `value`
+/ `fecha` / `lag`, el último publicado queda en `ultimo` / `ultimo_fecha`
+para el tooltip) y el INICIAL (`base` / `base_fecha` / `base_label` /
+`base_lag`, de `ajuste_base` + `fecha_uva_base` / `fecha_cer_base` que deja
+rentafija); `yas_metrics.html` pinta la tarjeta "UVA inicial" al lado. Costo
+cero (lookups). **Lag 0 y liquidación 24 hs**: `indices.main()` corta la
+serie observada en HOY, así que el UVA de la liquidación todavía no está y
+la rama "UVA" de `rentafija.generate_cashflows` tiraba KeyError; ahora, si
+esa fecha no está en `inputs['UVA']`, toma `inputs['uva_proyectado']`
+(observada + proyección con la inflación ya publicada) y deja
+`fecha_ajuste_liquidacion` / `ajuste_liquidacion`; con la fecha en la
+observada es el valor de siempre. El lag de la ficha NO se tocó (especies.py
+necesita el OK del desk; el suplemento del BNA no se pudo abrir desde la
+sesión). Medido `/yas/recompute` NZC3O (avg · p50 · p95 · p99 ms): warm 4,8
+· 4,6 · 5,8 · 6,6; valor nuevo por llamada 4,7 · 4,6 · 5,7 · 6,9. Regresión: `tests/test_indice_inicial_y_lag.py`.
+
 ## Revisión de eficiencia 22-23/10 — memo de flujos y warmup que cede el GIL
 
 Análisis sobre `4799ad6` (bench in-process, barrido HTTP contra `dev_ticks`,

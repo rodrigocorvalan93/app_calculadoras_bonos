@@ -100,8 +100,15 @@
   <div class="metric">
     <span class="metric-label"><span class="conv">{{ idx_app.kind }}</span> {{ idx_app.label }}</span>
     <span class="metric-value">{% if idx_app.value_fmt_hint == "percent_pp" %}{{ idx_app.value | ar_pct_pp(4) }}{% else %}{{ idx_app.value | ar_num(4) }}{% endif %}</span>
-    {% if idx_app.fecha %}<span class="metric-sub">{{ idx_app.fecha | ar_date }}</span>{% endif %}
+    {% if idx_app.fecha %}<span class="metric-sub"{% if idx_app.get("lag") is not none %} title="Índice de la liquidación con el lag de la ficha ({{ idx_app.lag }} días hábiles): el que ajusta los flujos futuros.{% if idx_app.get("ultimo_fecha") %} Último publicado: {{ idx_app.ultimo | ar_num(4) }} · {{ idx_app.ultimo_fecha | ar_date }}.{% endif %}"{% endif %}>{{ idx_app.fecha | ar_date }}{% if idx_app.get("lag") is not none %} · lag {{ idx_app.lag }}{% endif %}</span>{% endif %}
   </div>
+  {% if idx_app.get("base_fecha") %}
+  <div class="metric">
+    <span class="metric-label"><span class="conv">{{ idx_app.kind }}</span> {{ idx_app.base_label }}</span>
+    <span class="metric-value">{{ idx_app.base | ar_num(4) }}</span>
+    <span class="metric-sub" title="Índice de la fecha de emisión con el lag de la ficha ({{ idx_app.base_lag }} días hábiles).">{{ idx_app.base_fecha | ar_date }}{% if idx_app.get("base_lag") is not none %} · lag {{ idx_app.base_lag }}{% endif %}</span>
+  </div>
+  {% endif %}
   {% endif %}
 </div>
 {% endif %}
