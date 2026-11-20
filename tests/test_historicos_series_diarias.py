@@ -77,10 +77,13 @@ async def test_http_series_diarias_linea_barras_y_hp(archivo_fx) -> None:
         assert "<svg" in r.text and "<path" in r.text          # modo línea
         assert "Tabla histórica (HP)" in r.text and "hp-series-tbl" in r.text
         assert "31,20%" in r.text                              # último VWAP es-AR
+        assert "pp (" not in r.text                            # una tasa: Δ en pp, sin % del %
         assert ">3D<" in r.text                                # plazo del viernes
         b = await ac.get("/historicos/series-diarias",
                          params={"serie": "ccl", "chart": "barras", "dias": "todo"})
         assert b.status_code == 200 and "<rect" in b.text      # modo barras
+        # título: Δ del último día en valor Y en % (1.478 → 1.481 = +0,20 %)
+        assert "3,00 (+0,20%)</b>" in b.text
         assert "<path" not in b.text                           # sin línea en barras
         # desde/hasta en el form y en el recorte (3 días en ventana; fechas inválidas se ignoran)
         d = await ac.get("/historicos/series-diarias",

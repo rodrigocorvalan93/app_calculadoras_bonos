@@ -69,7 +69,7 @@
       <span>{{ icon("chart-line") }} {{ meta.label }}</span>
       <span class="card-title-aux">
         Último <b>{{ val(last.valor, meta) }}</b> ({{ last.fecha }})
-        {% if last.var is not none %} · Δ <b class="{{ fx.vcls(last.var) }}">{{ fx.arrow(last.var) }} {{ last.var | ar_num(meta.dec) }}{{ " pp" if meta.unit == "%" else "" }}</b>{% endif %}
+        {% if last.var is not none %} · Δ <b class="{{ fx.vcls(last.var) }}">{{ fx.arrow(last.var) }} {{ last.var | ar_num(meta.dec) }}{{ " pp" if meta.unit == "%" else "" }}{% if meta.unit != "%" and last.var_pct is not none %} ({{ "+" if last.var_pct > 0 else "" }}{{ last.var_pct | ar_num(2) }}%){% endif %}</b>{% endif %}
         · {{ data.rows | length }} días en ventana
       </span>
     </div>
