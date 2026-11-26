@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% from "partials/_icons.html" import icon %}
+{% from "partials/_estados.html" import skeleton %}
+{% block title %}Fondos{% endblock %}
+
+{% block content %}
+{# Pestaña SÓLO superuser (main._SUPERUSER_ONLY). El tablero y el panel del
+   fondo son partials; los controles viven FUERA de los swaps. `data-grupo` /
+   lo lee el CSS (filtro de filas sin requests). #}
+<section class="curves fondos" id="fondos-root"
+         x-data="fondosUI({{ sel if sel else 'null' }})" x-init="init()"
+         :data-grupo="grupo">
+  <header class="yas-header">
+    <h1>Fondos — performance vs benchmark</h1>
+    <p class="muted">Cuotaparte, patrimonio y flujos de los fondos de la casa contra su benchmark, desde los archivos que el
+      proceso de la mañana deja en <code>Delta Bases\Text</code>. Tocá un fondo para ver su panel (ventana, riesgo, meses,
+      clases, flujos y atribución). La <b>★</b> arma «mis fondos». Sección reservada al superuser.</p>
+  </header>
+
+  <div class="curve-picker card">
+    <div class="card-body">
+      <div class="row-fields">
+        <div class="field">
+          <span>Fondos</span>
+          <div class="seg-btns" role="group" aria-label="Qué fondos mostrar">
+            <button type="button" class="seg-btn" :class="{ active: grupo==='seg' }" @click="setGrupo('seg')">★ Mis fondos</button>
+            <button type="button" class="seg-btn" :class="{ active: grupo==='todos' }" @click="setGrupo('todos')">Todos</button>
+            <button type="button" class="seg-btn" :class="{ active: grupo==='Delta' }" @click="setGrupo('Delta')">Delta</button>
+            <button type="button" class="seg-btn" :class="{ active: grupo==='Galileo' }" @click="setGrupo('Galileo')">Galileo</button>
+          </div>
+        </div>
+        <div class="field">
+          <span>Mostrar</span>
+          <div class="seg-btns" role="group" aria-label="Qué número mostrar">
+            {% for k, lbl in vistas %}
+            <button type="button" class="seg-btn" :class="{ active: ver==='{{ k }}' }" @click="setVer('{{ k }}')">{{ lbl }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <label class="field">
+          <span>Comparar contra</span>
+          <select x-model="vs" @change="recargar()">
+            {% for k, lbl in vs_opts %}<option value="{{ k }}">{{ lbl }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Buscar</span>
+          <input type="search" placeholder="fondo…" x-model="q" @input="filtrar()" autocomplete="off" style="width:150px">
+        </label>
+        <div class="field field-end">
+          <button type="button" class="btn" hx-post="/fondos/releer" hx-swap="none" hx-request='{"timeout":120000}'
+                  title="Vuelve a leer los archivos ahora. Lo normal es que se actualice solo cuando el proceso de la mañana los regenera.">↻ Releer</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# El tablero lo pide fondosUI.cargar() (htmx.ajax con vs / ver): al abrir,
+     al cambiar un control y con el evento `fondos-refresh` que mandan ★ y Releer. #}
+  <div id="fondos-tablero" class="u-mt12">
+    {{ skeleton(6, "Cargando fondos…") }}
+  </div>
+
+  <div id="fondos-detalle" class="u-mt12"></div>
+</section>
+
+<script>
+  // Estado de la pestaña (grupo / número mostrado / referencia / fondo elegido)
+  // en localStorage: se reabre como se dejó. El filtro de filas es CSS + un
+  // recorrido de ~60 filas: cero requests.
+  function fondosUI(sel) {
+    function leer(k, def) { try { return localStorage.getItem(k) || def; } catch (e) { return def; } }
+    function guardar(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+    return {
+      grupo: leer('fondos_grupo', 'seg'), ver: leer('fondos_ver', 'f'), vs: leer('fondos_vs', 'bm'), q: '',
+      sel: sel || parseInt(leer('fondos_sel', '0'), 10) || null,
+      init: function () {
+        var self = this, root = this.$el;
+        root.__fondos = this;
+        // una referencia guardada que ya no existe en el selector → benchmark
+        var ok = false, opts = root.querySelectorAll('select[x-model="vs"] option');
+        for (var i = 0; i < opts.length; i++) if (opts[i].value === this.vs) ok = true;
+        if (!ok) this.vs = 'bm';
+        document.body.addEventListener('htmx:afterSwap', function (e) {
+          if (e.target && e.target.id === 'fondos-tablero') { self.filtrar(); self.marcar(); }
+        });
+        document.body.addEventListener('fondos-refresh', function () { self.cargar(); if (self.sel) self.abrir(self.sel); });
+        // htmx y Alpine arrancan los dos en DOMContentLoaded: el primer pedido
+        // va un tick después para no depender del orden.
+        setTimeout(function () { self.cargar(); if (self.sel) self.abrir(self.sel); }, 0);
+      },
+      cargar: function () {
+        if (!window.htmx) return;
+        htmx.ajax('GET', '/fondos/tablero', { target: '#fondos-tablero', swap: 'innerHTML',
+                                               values: { vs: this.vs, ver: this.ver } });
+      },
+      setGrupo: function (g) { this.grupo = g; guardar('fondos_grupo', g); },
+      setVer: function (v) { this.ver = v; guardar('fondos_ver', v); this.cargar(); },
+      recargar: function () {
+        guardar('fondos_vs', this.vs);
+        this.cargar();
+        if (this.sel) this.abrir(this.sel);
+      },
+      filtrar: function () {
+        var q = (this.q || '').trim().toLowerCase();
+        var rows = document.querySelectorAll('#fondos-tbl tbody tr');
+        for (var i = 0; i < rows.length; i++) {
+          var t = (rows[i].getAttribute('data-txt') || '');
+          rows[i].classList.toggle('f-oculta', !!q && t.indexOf(q) < 0);
+        }
+      },
+      marcar: function () {
+        var rows = document.querySelectorAll('#fondos-tbl tbody tr');
+        for (var i = 0; i < rows.length; i++)
+          rows[i].classList.toggle('f-sel', String(this.sel) === rows[i].getAttribute('data-cafci'));
+      },
+      abrir: function (cafci, extra) {
+        this.sel = cafci; guardar('fondos_sel', String(cafci)); this.marcar();
+        var q = { f: cafci, vs: this.vs };
+        if (extra) for (var k in extra) q[k] = extra[k];
+        if (window.htmx) htmx.ajax('GET', '/fondos/detalle', { target: '#fondos-detalle', swap: 'innerHTML', values: q });
+      }
+    };
+  }
+  // Click en una fila del tablero (delegado: la tabla se reemplaza en cada swap).
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('[data-fondo-abrir]');
+    if (!a) return;
+    e.preventDefault();
+    var r = document.getElementById('fondos-root');
+    if (r && r.__fondos) {
+      r.__fondos.abrir(parseInt(a.getAttribute('data-fondo-abrir'), 10));
+      var det = document.getElementById('fondos-detalle');
+      if (det && det.scrollIntoView) setTimeout(function () { det.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 120);
+    }
+  });
+</script>
+{% endblock %}

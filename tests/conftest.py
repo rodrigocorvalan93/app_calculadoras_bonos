@@ -46,6 +46,10 @@ os.environ.setdefault("PREFS_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_
 # archivo = las tablas de indices.py) y sin el vigilante de otras PCs.
 os.environ.setdefault("PROYECCIONES_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_proy_"), "proyecciones.json"))
 os.environ.setdefault("PROYECCIONES_WATCH", "0")
+# Fondos (superuser): los fondos seguidos por usuario nunca van al
+# data/fondos_prefs.json real; los tests que cargan datos apuntan
+# FONDOS_BASES_DIR a su tmp_path.
+os.environ.setdefault("FONDOS_PREFS_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_fondos_"), "fondos_prefs.json"))
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")
 os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_auth_store.json"))
 # Bootstrap del superuser de la suite: valores SINTÉTICOS (nunca una cuenta

@@ -18,7 +18,9 @@ def test_cortes_de_periodo_usan_la_ultima_rueda_anterior() -> None:
     i = len(f) - 1                                   # viernes 20/11/2026
     assert str(f[fc.corte_periodo(f, i, "d1")]) == "2026-11-19"
     assert str(f[fc.corte_periodo(f, i, "mtd")]) == "2026-10-30"     # 31/10 es sábado
-    assert str(f[fc.corte_periodo(f, i, "ytd")]) == "2025-12-31" or fc.corte_periodo(f, i, "ytd") == -1
+    assert fc.corte_periodo(f, i, "ytd") == -1                       # la serie arranca en 2026: no hay base del año
+    g = _ruedas("2025-06-02", "2026-11-20")
+    assert str(g[fc.corte_periodo(g, len(g) - 1, "ytd")]) == "2025-12-31"
     assert str(f[fc.corte_periodo(f, i, "d7")]) == "2026-11-13"
     assert str(f[fc.corte_periodo(f, i, "d30")]) == "2026-10-21"
     # sin historia suficiente: no hay base

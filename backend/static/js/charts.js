@@ -1291,7 +1291,93 @@
     });
   }
 
-  function boot() { initGraficos(); initHistMacro(); initHistFechas(); initHistComp(); initProyecciones(); }
+  // ── Fondos (26/11): gráficos del panel de un fondo ──────────────────────
+  // Cada [data-fondos-chart] trae su JSON en un <script> hijo: {x: [epoch], series: [{label, y,
+  // color: acc | mut | red | signo, dash, area, bars, scale: "y2", hum}],
+  // ref: línea de referencia (100 / 0), dec, suf, hum}. Se redibuja tras cada
+  // swap de #fondos-detalle; un chart por caja, se destruye el anterior.
+  function initFondos() {
+    var boxes = document.querySelectorAll("[data-fondos-chart]");
+    if (!boxes.length || typeof uPlot === "undefined") return;
+    var MUT = cssVar("--text-muted", "#8a8a8a"), BORD = cssVar("--border", "#333"), ACC = cssVar("--accent", "#e0843c"),
+        RED = cssVar("--red", "#ef4444"), GRN = cssVar("--green", "#22c55e");
+    function hum(v) {
+      if (v == null) return "";
+      var a = Math.abs(v), d = [[1e12, "B"], [1e9, "MM"], [1e6, "M"], [1e3, "k"]];
+      for (var i = 0; i < d.length; i++) if (a >= d[i][0]) return fmtNum(v / d[i][0]).replace(/,(\d)\d*$/, ",$1") + d[i][1];
+      return fmtNum(v);
+    }
+    function rgba(hex, a) {
+      var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec((hex || "").trim());
+      return m ? "rgba(" + parseInt(m[1], 16) + "," + parseInt(m[2], 16) + "," + parseInt(m[3], 16) + "," + a + ")" : hex;
+    }
+    boxes.forEach(function (box) {
+      // El JSON viene en un <script type="application/json"> adentro de la caja
+      // (se lee una vez: dibujar la vacía).
+      var j = box.__j, tag = box.querySelector('script[type="application/json"]');
+      if (tag) { try { j = JSON.parse(tag.textContent || "{}"); } catch (e) { j = null; } box.__j = j; }
+      if (!j) return;
+      if (box.__u) { box.__u.destroy(); box.__u = null; }
+      box.innerHTML = "";
+      if (!j.x || j.x.length < 2 || !j.series || !j.series.length) {
+        box.innerHTML = '<p class="muted" style="font-size:12px;padding:8px 0">Sin datos suficientes en la ventana.</p>'; return;
+      }
+      var dec = j.dec == null ? 2 : j.dec, suf = j.suf || "";
+      function fv(v, h) { return v == null ? "" : (h ? hum(v) : (v.toFixed(dec).replace(".", ",") + suf)); }
+      var colores = { acc: ACC, mut: MUT, red: RED };
+      var series = [{ label: "Fecha", value: function (uu, v) { return v == null ? "" : utcDia(v); } }], data = [j.x], hayY2 = false;
+      j.series.forEach(function (s) {
+        var col = colores[s.color] || ACC, o = { label: s.label, stroke: col, width: 1.6, points: { show: false }, spanGaps: true,
+                                                  value: (function (h) { return function (uu, v) { return fv(v, h); }; })(!!s.hum) };
+        if (s.dash) o.dash = [5, 4];
+        if (s.area) o.fill = rgba(col, 0.14);
+        if (s.scale) { o.scale = s.scale; hayY2 = true; }
+        if (s.bars) {
+          o.width = 0; o.paths = uPlot.paths.bars({ size: [0.7, 60] });
+          if (s.color === "signo") {
+            // barras verdes (suscripción neta) / rojas (rescate neto)
+            o.stroke = GRN; o.fill = rgba(GRN, 0.55);
+            var ys = s.y;
+            o.paths = uPlot.paths.bars({ size: [0.7, 60], disp: { fill: { unit: 3, values: function () {
+              return ys.map(function (v) { return v != null && v < 0 ? rgba(RED, 0.6) : rgba(GRN, 0.55); }); } },
+              stroke: { unit: 3, values: function () { return ys.map(function (v) { return v != null && v < 0 ? RED : GRN; }); } } } });
+          } else o.fill = rgba(col, 0.5);
+        }
+        series.push(o); data.push(s.y);
+      });
+      var ejeY = { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: j.hum ? 62 : 56,
+                   values: function (uu, vals) { return vals.map(function (v) { return j.hum ? hum(v) : (fmtNum(v).replace(/,00$/, "") + suf); }); } };
+      var axes = [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, values: ejeFechas }, ejeY];
+      var scales = { x: { time: true } };
+      if (hayY2) {
+        scales.y2 = { auto: true };
+        axes.push({ scale: "y2", side: 1, stroke: MUT, grid: { show: false }, ticks: { stroke: BORD }, size: 62,
+                    values: function (uu, vals) { return vals.map(hum); } });
+      }
+      var ref = j.ref;
+      box.__u = new uPlot({
+        width: Math.max(box.clientWidth || 320, 280), height: 230, tzDate: utcTz,
+        scales: scales, axes: axes, series: series, cursor: { focus: { prox: 24 } }, legend: { show: true },
+        hooks: { draw: [function (u) {
+          if (ref == null) return;
+          var yr = u.valToPos(ref, "y", true);
+          if (!(yr >= u.bbox.top && yr <= u.bbox.top + u.bbox.height)) return;
+          var ctx = u.ctx; ctx.save();
+          ctx.strokeStyle = MUT; ctx.globalAlpha = 0.7; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+          ctx.beginPath(); ctx.moveTo(u.bbox.left, yr); ctx.lineTo(u.bbox.left + u.bbox.width, yr); ctx.stroke();
+          ctx.restore();
+        }] },
+      }, data, box);
+      if (window.chartCopyInject) window.chartCopyInject(box, "fondo-" + (j.nombre || "serie"));
+    });
+  }
+  window.addEventListener("resize", function () {
+    document.querySelectorAll("[data-fondos-chart]").forEach(function (b) {
+      if (b.__u) b.__u.setSize({ width: Math.max(b.clientWidth || 320, 280), height: 230 });
+    });
+  });
+
+  function boot() { initGraficos(); initHistMacro(); initHistFechas(); initHistComp(); initProyecciones(); initFondos(); }
   if (document.readyState !== "loading") boot();
   else document.addEventListener("DOMContentLoaded", boot);
   // Las pestañas "Tasas por curva" / "Curva por fecha" / "Comparar" se cargan
@@ -1301,6 +1387,7 @@
     if (e.target && e.target.id === "hist-fechas") initHistFechas();
     if (e.target && (e.target.id === "hist-comp" || e.target.id === "hist-comp-body")) initHistComp();
     if (e.target && e.target.id === "proy-preview") initProyecciones();
+    if (e.target && (e.target.id === "fondos-detalle" || e.target.id === "fondo-attr")) initFondos();
   });
 })();
 

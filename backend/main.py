@@ -32,6 +32,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from backend.config import settings
 from backend.locale_ar import JINJA_FILTERS
 from backend.routes.alertas import router as alertas_router
+from backend.routes.fondos import router as fondos_router
 from backend.routes.breakeven import router as breakeven_router
 from backend.routes.cafci import router as cafci_router
 from backend.routes.comparador import router as comparador_router
@@ -704,6 +705,7 @@ def create_app() -> FastAPI:
     app.include_router(market_router)
     app.include_router(tape_router)
     app.include_router(alertas_router)
+    app.include_router(fondos_router)
     app.include_router(excel_router)
 
     # /.well-known/microsoft-officeaddins-allowed.json: Office lo sondea al
@@ -736,7 +738,9 @@ def create_app() -> FastAPI:
     _SUPERUSER_ONLY = ("/admin", "/ordenes/live", "/ordenes/kill",
                        "/historicos/guardar-base", "/historicos/reconstruir-cierre",
                        "/historicos/ignorar-hueco", "/historicos/aceptar-base",
-                       "/historicos/reponer-journal", "/alertas")
+                       "/historicos/reponer-journal", "/alertas",
+                       # patrimonios, flujos y carteras de los fondos de la casa
+                       "/fondos")
     # Paths gateados por FEATURE (administrable desde /admin, a diferencia de
     # _SUPERUSER_ONLY que es fijo): superuser siempre pasa; premium/básico
     # sólo si el superuser les tildó la feature.
