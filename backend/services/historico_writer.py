@@ -200,7 +200,7 @@ def build_rows(plazo: str = "24hs") -> "Any":
             # pago. El precio guardado sigue siendo el de pantalla (ARS).
             meta = pricing.bond_meta(code) or {}
             calc, px, fx_val = code, ref_px, None
-            if meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
+            if pricing.es_especie_pesos(code):
                 fx = _fx()
                 calc = pricing.native_dollar_code(code) or code
                 px = fx_svc.normalize_price(ref_px, "ARS", meta.get("moneda"), fx)
@@ -2395,7 +2395,7 @@ def _fila_rc(code: str, symbol: str, close: float, close_ts: Any, dia: date, set
                 contadores["sin_fx"] += 1
                 return None
             fx_val = patas.fx_usado(fx, p.moneda)
-    elif meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
+    elif pricing.es_especie_pesos(code):
         fx = fx_getter()
         calc = pricing.native_dollar_code(code) or code
         px = fx_svc.normalize_price(close, "ARS", meta.get("moneda"), fx) if fx is not None else None

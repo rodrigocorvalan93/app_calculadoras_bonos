@@ -1,0 +1,209 @@
+{% from "partials/_icons.html" import icon %}
+{% from "partials/_estados.html" import empty, skeleton %}
+{# Panel de UN fondo. Todo llega pre-formateado de routes.fondos._detalle_ctx.
+   El form re-pide el panel al cambiar clase / referencia / ventana (un GET
+   de ms: numpy sobre matrices en memoria). Los gráficos son uPlot
+   (charts.js initFondos) con el JSON embebido en un <script
+   type="application/json"> (armado con routes.fondos._json: sin `<`): cero
+   requests extra y sin el costo de escapar 100 KB en un atributo. #}
+{% if not det %}
+  {{ empty("No encontré ese fondo", "El código CAFCI " ~ f ~ " no tiene cuotaparte en los archivos cargados.", "", "inbox", "neutro") }}
+{% else %}
+{% set fo = det.fo %}
+<div class="card fondo-det" id="fondo-det" data-cafci="{{ fo.cafci }}">
+  <div class="card-title">
+    <span>
+      <button type="button" class="f-star-btn{{ ' on' if det.seg else '' }}" hx-post="/fondos/seguir" hx-vals='{"f": {{ fo.cafci }}}'
+              hx-swap="none" title="{{ 'Quitar de mis fondos' if det.seg else 'Agregar a mis fondos' }}" aria-label="Seguir">{{ '★' if det.seg else '☆' }}</button>
+      <b>{{ fo.nombre }}</b>
+      <span class="chip">Clase {{ det.clase }}</span>
+      <span class="chip">{{ det.tipo_lbl }}</span>
+      <span class="chip">{{ fo.moneda }}</span>
+      {% if fo.grupo %}<span class="chip">{{ fo.grupo }}</span>{% endif %}
+      <span class="muted u-xs">CAFCI {{ fo.cafci }}{% if fo.cod is not none %} · ESCO {{ fo.cod }}{% endif %}</span>
+    </span>
+    <span class="card-title-aux">Cuotaparte <b>{{ det.vcp }}</b> · {{ det.fecha }} · patrimonio <b>{{ det.pn }}</b></span>
+  </div>
+
+  <div class="card-body">
+    <form class="fondo-form" hx-get="/fondos/detalle" hx-target="#fondos-detalle" hx-swap="innerHTML" hx-trigger="change" autocomplete="off">
+      <input type="hidden" name="f" value="{{ fo.cafci }}">
+      <div class="row-fields">
+        <label class="field">
+          <span>Clase</span>
+          <select name="clase">
+            {% for c in det.clases %}<option value="{{ c.clase }}"{{ ' selected' if c.elegida else '' }}>{{ c.clase }}{{ ' · emblema' if c.principal else '' }}{{ '' if c.viva else ' · cerrada' }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Comparar contra</span>
+          <select name="vs">
+            {% for k, lbl in det.vs_opts %}<option value="{{ k }}"{{ ' selected' if det.vs == k else '' }}>{{ lbl }}</option>{% endfor %}
+            <optgroup label="Otro fondo">
+              {% for c, corto in det.otros %}<option value="f:{{ c }}"{{ ' selected' if det.vs == 'f:' ~ c else '' }}>{{ corto }}</option>{% endfor %}
+            </optgroup>
+          </select>
+        </label>
+        <div class="field">
+          <span>Ventana</span>
+          <div class="seg-btns" role="radiogroup" aria-label="Ventana">
+            {% for k, lbl in det.rangos %}
+            <label class="seg-btn{{ ' active' if det.rango == k and not det.desde and not det.hasta else '' }}">
+              <input type="radio" name="rango" value="{{ k }}"{{ ' checked' if det.rango == k else '' }}
+                     onchange="this.form.desde.value='';this.form.hasta.value=''">{{ lbl }}</label>
+            {% endfor %}
+          </div>
+        </div>
+        <label class="field"><span>Desde</span><input type="date" name="desde" value="{{ det.desde }}"></label>
+        <label class="field"><span>Hasta</span><input type="date" name="hasta" value="{{ det.hasta }}"></label>
+        <div class="field field-end">
+          <a class="btn" href="/fondos/serie.csv?f={{ fo.cafci }}&clase={{ det.clase | urlencode }}&vs={{ det.vs | urlencode }}&desde={{ det.desde }}&hasta={{ det.hasta }}"
+             title="Serie diaria del fondo y la referencia (CSV es-AR). Sin Desde / Hasta baja toda la historia.">⤓ Serie CSV</a>
+        </div>
+      </div>
+    </form>
+
+    {# ── Ventana elegida ───────────────────────────────────────────────── #}
+    <div class="metrics-grid fondo-metrics u-mt12">
+      <div class="metric metric-highlight">
+        <span class="metric-label">Fondo <span class="conv">{{ det.ventana.desde }} → {{ det.ventana.hasta }}</span></span>
+        <span class="metric-value">{{ det.ventana.f }}</span>
+        <span class="metric-sub">{{ det.ventana.anual_lbl }} {{ det.ventana.f_anual }} · {{ det.ventana.dias }} días</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Referencia <span class="conv">{{ det.ref or "sin benchmark" }}</span></span>
+        <span class="metric-value">{{ det.ventana.b }}</span>
+        <span class="metric-sub">{% if det.ref %}{{ det.ventana.anual_lbl }} {{ det.ventana.b_anual }}{% else %}elegí un índice en «Comparar contra»{% endif %}</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">Exceso <span class="conv">fondo − referencia</span></span>
+        <span class="metric-value {{ det.ventana.x_cls }}">{{ det.ventana.x }}</span>
+        <span class="metric-sub">{{ det.ventana.ruedas }} ruedas</span>
+      </div>
+      {% if det.ventana.f_bruto %}
+      <div class="metric" title="La cuotaparte ya viene neta del honorario de administración de la clase ({{ det.ventana.fee }} anual). Bruto ≈ (1 + neto) × (1 + honorario / 365)^días − 1. No incluye otros gastos del fondo.">
+        <span class="metric-label">Bruto de honorarios <span class="conv">adm. {{ det.ventana.fee }}</span></span>
+        <span class="metric-value">{{ det.ventana.f_bruto }}</span>
+        <span class="metric-sub {{ det.ventana.x_bruto_cls }}">{% if det.ref %}exceso bruto {{ det.ventana.x_bruto }}{% else %}aprox.{% endif %}</span>
+      </div>
+      {% endif %}
+    </div>
+
+    {# ── Períodos estándar ─────────────────────────────────────────────── #}
+    <div class="table-scroll u-mt8">
+      <table class="cashflows fondo-per" id="fondo-per-tbl">
+        <thead><tr><th class="u-left"></th>{% for p in det.periodos %}<th title="{{ p.largo }}">{{ p.lbl }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          <tr><td class="u-left"><b>{{ fo.corto }} {{ det.clase }}</b></td>{% for p in det.periodos %}<td><b>{{ p.f }}</b></td>{% endfor %}</tr>
+          <tr><td class="u-left muted">{{ det.ref or "Referencia" }}</td>{% for p in det.periodos %}<td class="muted">{{ p.b }}</td>{% endfor %}</tr>
+          <tr><td class="u-left">Exceso</td>{% for p in det.periodos %}<td class="{{ p.cls }}">{{ p.x }}</td>{% endfor %}</tr>
+        </tbody>
+      </table>
+    </div>
+
+    {# ── Gráficos ──────────────────────────────────────────────────────── #}
+    <div class="fondo-charts u-mt12">
+      <div class="fondo-chart-box">
+        <div class="fondo-chart-t">Rendimiento base 100 <span class="muted">· {{ det.ventana.desde }} → {{ det.ventana.hasta }}</span></div>
+        <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ det.charts.perf | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
+      </div>
+      <div class="fondo-chart-box">
+        {% if det.charts.exc %}
+        <div class="fondo-chart-t">Exceso acumulado vs {{ det.ref }} <span class="muted">· % sobre la referencia</span></div>
+        <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ det.charts.exc | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
+        {% else %}
+        <div class="fondo-chart-t">Caída desde el máximo <span class="muted">· %</span></div>
+        <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ det.charts.dd | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
+        {% endif %}
+      </div>
+      {% if det.charts.pn %}
+      <div class="fondo-chart-box">
+        <div class="fondo-chart-t">Patrimonio y suscripciones netas
+          <span class="muted">· {{ "suscripciones y rescates de ESCO" if det.flujos.fuente == "syr" else ("flujo estimado (patrimonio − rendimiento)" if det.flujos.fuente == "estimado" else "sin flujos") }}</span></div>
+        <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ det.charts.pn | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
+      </div>
+      {% endif %}
+      {% if det.charts.exc %}
+      <div class="fondo-chart-box">
+        <div class="fondo-chart-t">Caída desde el máximo <span class="muted">· %</span></div>
+        <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ det.charts.dd | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="fondo-cols u-mt12">
+      {# ── Riesgo ──────────────────────────────────────────────────────── #}
+      <div>
+        <div class="fondo-sub">{{ icon("ruler") }} Riesgo en la ventana <span class="muted">· {{ det.n_ruedas }} ruedas{% if det.n_ruedas < 20 %} (pocas: tomar con pinzas){% endif %}</span></div>
+        <table class="cashflows fondo-kv">
+          <tbody>
+            {% for lbl, val, tip in det.riesgo %}<tr title="{{ tip }}"><td class="u-left muted">{{ lbl }}</td><td><b>{{ val }}</b></td></tr>{% endfor %}
+          </tbody>
+        </table>
+        {% if det.pesos_txt %}<p class="muted u-note u-mt8">Benchmark de la casa: {{ det.pesos_txt }}.</p>{% endif %}
+
+        <div class="fondo-sub u-mt12">{{ icon("dollar") }} Patrimonio y flujos <span class="muted">· {{ det.ventana.desde }} → {{ det.ventana.hasta }}</span></div>
+        <table class="cashflows fondo-kv">
+          <tbody>
+            <tr><td class="u-left muted">Patrimonio inicial</td><td>{{ det.flujos.pn_ini }}</td></tr>
+            <tr><td class="u-left muted">Patrimonio final</td><td><b>{{ det.flujos.pn_fin }}</b></td></tr>
+            <tr><td class="u-left muted">Variación</td><td class="{{ det.flujos.pn_var_cls }}">{{ det.flujos.pn_var }}</td></tr>
+            {% if det.flujos.fuente == "syr" %}
+            <tr><td class="u-left muted">Suscripciones</td><td>{{ det.flujos.susc }}</td></tr>
+            <tr><td class="u-left muted">Rescates</td><td>{{ det.flujos.resc }}</td></tr>
+            {% endif %}
+            <tr title="{{ 'Suscripciones − rescates de ESCO (Delta_SyR_Fondos).' if det.flujos.fuente == 'syr' else 'Estimado: lo que cambió el patrimonio y la cuotaparte no explica.' }}">
+              <td class="u-left muted">Suscripciones netas{{ '' if det.flujos.fuente == 'syr' else ' (est.)' }}</td><td class="{{ det.flujos.neto_cls }}"><b>{{ det.flujos.neto }}</b></td></tr>
+            <tr title="Variación del patrimonio que no viene de suscripciones ni rescates: el resultado de la cartera.">
+              <td class="u-left muted">Resultado de la cartera</td><td class="{{ det.flujos.mercado_cls }}">{{ det.flujos.mercado }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      {# ── Meses ───────────────────────────────────────────────────────── #}
+      <div>
+        <div class="fondo-sub">{{ icon("chart-bar") }} Mes a mes <span class="muted">· últimos 13 (el último, en curso)</span>
+          <button type="button" class="lnk" data-csv-of="#fondo-meses-tbl" title="CSV es-AR">⤓</button></div>
+        <table class="cashflows fondo-meses" id="fondo-meses-tbl">
+          <thead><tr><th class="u-left">Mes</th><th>Fondo</th><th>Referencia</th><th>Exceso</th></tr></thead>
+          <tbody>
+            {% for m in det.meses | reverse %}
+            <tr><td class="u-left">{{ m.mes }}</td><td><b>{{ m.f }}</b></td><td class="muted">{{ m.b }}</td>
+              <td class="f-bar {{ m.cls }}" style="--w:{{ m.w }}%">{{ m.x }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {# ── Clases ──────────────────────────────────────────────────────── #}
+      <div>
+        <div class="fondo-sub">{{ icon("pie") }} Clases <span class="muted">· {{ det.clases | length }}</span></div>
+        <div class="table-scroll">
+        <table class="cashflows fondo-clases" id="fondo-clases-tbl">
+          <thead><tr><th class="u-left">Clase</th><th title="Honorario de administración anual (Tabla_Fondos_Grupo Latin)">Adm.</th><th>Cuotaparte</th><th>Patrimonio</th><th>Día</th><th>MTD</th><th>30d</th><th>YTD</th><th>1 año</th></tr></thead>
+          <tbody>
+            {% for c in det.clases %}
+            <tr class="{{ 'f-sel' if c.elegida else '' }}{{ '' if c.viva else ' f-cerrada' }}">
+              <td class="u-left"><a href="#" data-clase="{{ c.clase }}" onclick="var f=document.querySelector('.fondo-form');f.clase.value=this.getAttribute('data-clase');htmx.trigger(f,'change');return false;">{{ c.clase }}</a>{% if c.principal %} <span class="chip" title="Clase emblema del fondo">emblema</span>{% endif %}{% if not c.viva %} <span class="muted u-xs">hasta {{ c.fecha }}</span>{% endif %}</td>
+              <td>{{ c.fee }}</td><td>{{ c.vcp }}</td><td>{{ c.pn }}</td>
+              {% for v in c.per %}<td>{{ v }}</td>{% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        <p class="muted u-note u-mt8">La diferencia de retorno entre clases es el honorario: misma cartera, distinto costo.</p>
+      </div>
+    </div>
+
+    {# ── Atribución (lazy: recién al abrirla se lee la historia de carteras) ── #}
+    <details class="fondo-attr u-mt12" id="fondo-attr-box">
+      <summary>{{ icon("scale") }} <b>Atribución del rendimiento</b> <span class="muted">· qué activos y categorías explican el resultado de la ventana</span></summary>
+      <div id="fondo-attr" hx-get="/fondos/atribucion?f={{ fo.cafci }}&clase={{ det.clase | urlencode }}&vs={{ det.vs | urlencode }}&rango={{ det.rango }}&desde={{ det.desde }}&hasta={{ det.hasta }}"
+           hx-trigger="toggle from:#fondo-attr-box once" hx-swap="innerHTML" hx-request='{"timeout":120000}'>
+        {{ skeleton(4, "Armando la atribución…") }}
+      </div>
+    </details>
+  </div>
+</div>
+{% endif %}

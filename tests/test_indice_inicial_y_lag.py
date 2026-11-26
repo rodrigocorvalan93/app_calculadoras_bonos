@@ -112,7 +112,9 @@ def test_cer_tambien_muestra_aplicado_e_inicial():
 async def test_http_yas_muestra_uva_aplicable_e_inicial():
     settle = _settle_en_serie().strftime("%d/%m/%Y")
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.post("/yas/recompute", data={"code": CODE, "mode": "tir", "value": "8", "settle": settle})
+        # el campo del form es `settle_custom` (con `settle` la ruta lo ignoraba y usaba 24 hs desde HOY:
+        # el test dependía de que el backup del BCRA estuviera al día — rompió el 26/11)
+        r = await c.post("/yas/recompute", data={"code": CODE, "mode": "tir", "value": "8", "settle_custom": settle})
     assert r.status_code == 200
     assert "UVA aplicable" in r.text and "UVA inicial" in r.text and "· lag " in r.text
     assert "estimado" not in r.text           # fecha publicada: no se marca

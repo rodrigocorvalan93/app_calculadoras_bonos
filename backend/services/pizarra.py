@@ -157,8 +157,10 @@ def _mutar(user: str, fn) -> Dict[str, Any]:
 
 
 def _codigo_valido(code: str) -> bool:
-    from backend.services import bond_universe
-    return bond_universe.get(code) is not None
+    """En el universo, o el ticker de una pata de un hard-dollar sin ficha
+    propia (GD30D, AL30C): el cuadro se valúa con la ficha nativa."""
+    from backend.services import bond_universe, patas
+    return bond_universe.get(code) is not None or patas.leg_de(code) is not None
 
 
 def agregar(user: str, code: str, tipo: str = "libro", plazo: str = "24hs") -> Dict[str, Any]:

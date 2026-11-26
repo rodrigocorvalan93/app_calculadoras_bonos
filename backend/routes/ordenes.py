@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse
 
 from backend.config import settings
 from backend.locale_ar import parse_ar_num
-from backend.services import marketdata_store as mds, oms, pricing, symbols as syms
+from backend.services import marketdata_store as mds, oms, patas, pricing, symbols as syms
 
 router = APIRouter(tags=["ordenes"])
 
@@ -40,7 +40,13 @@ def _last_ref(code: str, plazo: str) -> Optional[float]:
 
 
 def _moneda(code: str) -> str:
-    return (pricing.bond_meta(code) or {}).get("moneda") or "ARS"
+    """Moneda en la que se OPERA el ticker (tope de notional y ticket), no la
+    de la ficha: la especie en pesos de un hard-dollar (AL30, GD30, YM34O) es
+    ARS aunque su ficha esté en dólares, y una pata sin ficha propia (GD30D,
+    AL30C) es USB / USD. Con la moneda de la ficha, una compra de AL30 en
+    pesos de VN 10.000 daba "notional 11.600.000 USD supera el tope" y una de
+    GD30D por USD 17 millones pasaba como si fueran pesos."""
+    return patas.moneda_ticker(code)
 
 
 def _num_qty(s: Any) -> Optional[float]:
@@ -62,9 +68,16 @@ def _theo_ref(code: str) -> Optional[float]:
     `await _theo_ref_async(code)` desde los handlers — en el event loop
     congelaba /market/seq y los paneles live de todos."""
     try:
-        m = pricing.compute_metrics(code, "tir", 10.0)
+        # El valor técnico sale de la ficha que valúa el ticker (la nativa) y
+        # se lleva a la moneda en que cotiza: en pesos para AL30 / GD30 / …O
+        # (× MEP o CCL), con el canje para la otra pata dólar. Sin FX no hay
+        # referencia (el ticket pide confirmación), nunca una en otra moneda.
+        lg = patas.leg_de(code)
+        m = pricing.compute_metrics(lg.calc if lg else code, "tir", 10.0)
         vt = (m or {}).get("valor_tecnico")
-        return float(vt) if vt is not None and vt == vt and vt > 0 else None
+        if vt is None or not (vt == vt and vt > 0):
+            return None
+        return patas.desde_nativo(lg, vt) if lg is not None and lg.convierte else float(vt)
     except Exception:  # noqa: BLE001
         return None
 

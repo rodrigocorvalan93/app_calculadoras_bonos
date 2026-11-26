@@ -73,11 +73,12 @@ TABS: List[Tuple[str, str, str]] = [
     ("cafci",        "CAFCI",        "/cafci"),
     ("ordenes",      "Órdenes",      "/ordenes"),
     ("alertas",      "Alertas",      "/alertas"),
+    ("fondos",       "Fondos",       "/fondos"),
 ]
 # Tabs que NO entran en los defaults de ningún rol: son superuser-only por
 # middleware (main._SUPERUSER_ONLY); listarlas en la nav de premium/básico
 # sólo mostraría un link a un 403.
-_SUPERUSER_ONLY_TABS = ("alertas",)
+_SUPERUSER_ONLY_TABS = ("alertas", "fondos")
 # Tabs que ve TODO rol, siempre: no se guardan en `role_tabs` ni se ofrecen
 # como checkbox en /admin (Inicio es la página de aterrizaje de la app).
 ALWAYS_TABS: Tuple[str, ...] = ("home",)

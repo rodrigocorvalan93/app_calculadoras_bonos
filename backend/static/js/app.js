@@ -1261,6 +1261,25 @@ window.lsSet = function (k, v) {
   else reapply();
 })();
 
+// ── Pata dólar cruzada: TIR reconvertida (default) o al precio que entra ────
+// El selector `[data-leg-dir]` (Curvas / Mercado) no viaja solo: cambia el
+// VALOR de las opciones USD / USB del select de pata ("USB" ↔ "USB.dir") y
+// dispara su change. El modo va adentro de `leg`, así todo lo que ya manda la
+// pata (tabla, delta por filas, libro, what-if, gráfico) queda en el mismo modo.
+document.addEventListener('change', function (e) {
+  var sw = e.target;
+  if (!sw || !sw.matches || !sw.matches('select[data-leg-dir]')) return;
+  var sel = document.querySelector('select[name=leg]');
+  if (!sel) return;
+  var on = !!sw.value;
+  for (var i = 0; i < sel.options.length; i++) {
+    var b = sel.options[i].getAttribute('data-leg');
+    if (b) sel.options[i].value = on ? b + '.dir' : b;
+  }
+  var cur = sel.options[sel.selectedIndex];
+  if (cur && cur.getAttribute('data-leg')) sel.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
 // ── Posiciones: ramas por Categoría plegables (estilo Excel de carteras) ───
 // Click en el encabezado de grupo pliega/despliega sus filas. El estado se
 // guarda por nombre de grupo y se re-aplica tras cada swap de htmx (igual que

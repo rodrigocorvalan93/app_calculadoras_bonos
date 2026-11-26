@@ -24,9 +24,12 @@ _PESO = {"err": 3, "warn": 2, "off": 1, "ok": 0}
 
 
 def _item(key: str, titulo: str, estado: str, texto: str, detalle: str = "",
-          accion: Optional[Dict[str, str]] = None, tab: Optional[str] = None) -> Dict[str, Any]:
+          accion: Optional[Dict[str, str]] = None, tab: Optional[str] = None,
+          solo: Optional[str] = None) -> Dict[str, Any]:
+    """`solo="superuser"`: el ítem entero (no sólo su acción) es de ese rol;
+    `routes.salud` lo saca de la lista de los demás."""
     return {"key": key, "titulo": titulo, "estado": estado if estado in ESTADOS else "off",
-            "texto": texto, "detalle": detalle, "accion": accion, "tab": tab}
+            "texto": texto, "detalle": detalle, "accion": accion, "tab": tab, "solo": solo}
 
 
 def _feed() -> Dict[str, Any]:
@@ -106,6 +109,35 @@ def _carteras() -> Dict[str, Any]:
                  {"href": "/posiciones?refresh=1", "label": "Releer carteras"}, "posiciones")
 
 
+def _fondos() -> Optional[Dict[str, Any]]:
+    """Datos de la pestaña Fondos (sólo superuser). No lee disco ni dispara la
+    carga: si nadie abrió la pestaña en esta instancia, no hay ítem."""
+    from backend.services import fondos, fondos_attr
+    e = fondos.estado()
+    t = "Fondos (cuotapartes y benchmarks)"
+    acc = {"href": "/fondos", "label": "Ver fondos"}
+    if not e.get("cargado"):
+        if e.get("error"):
+            return _item("fondos", t, "err", "No se cargaron los datos de fondos", str(e["error"]), acc, "fondos", "superuser")
+        return None
+    fuentes = " · ".join(f"{f['archivo']}{' al ' + f['hasta'] if f.get('hasta') else ''}"
+                         for f in e.get("fuentes") or [] if f.get("archivo"))
+    a = fondos_attr.estado()
+    if a.get("cargando"):
+        p = a.get("progreso") or {}
+        fuentes += f" · armando la historia de carteras ({p.get('hechos', 0)} de {p.get('total', 0)} días)"
+    texto = f"{e.get('fondos', 0)} fondos · cuotaparte al {e.get('hasta')}"
+    avisos = list(e.get("avisos") or []) + ([str(a["error"])] if a.get("error") else [])
+    if avisos:
+        return _item("fondos", t, "warn", texto + f" · {len(avisos)} aviso(s)",
+                     (" | ".join(avisos) + " · " + fuentes)[:700], acc, "fondos", "superuser")
+    if (e.get("atraso_dias") or 0) > fondos._VIEJO_DIAS:
+        return _item("fondos", t, "warn", texto + " · atrasada",
+                     f"La última cuotaparte tiene {e['atraso_dias']} días: el proceso de la mañana no regeneró "
+                     "Delta_VCP.txt (o OneDrive no lo bajó en esta máquina). " + fuentes, acc, "fondos", "superuser")
+    return _item("fondos", t, "ok", texto, fuentes, acc, "fondos", "superuser")
+
+
 def _macro() -> Dict[str, Any]:
     from backend.services import historico
     h = historico.status()
@@ -176,7 +208,7 @@ def _errores() -> Dict[str, Any]:
                  {"href": "/admin", "label": "Ver el detalle"}, "admin")
 
 
-_FUENTES = ("_feed", "_cierre", "_datos", "_carteras", "_macro", "_mae", "_cafci", "_noticias", "_errores")
+_FUENTES = ("_feed", "_cierre", "_datos", "_carteras", "_fondos", "_macro", "_mae", "_cafci", "_noticias", "_errores")
 
 
 def resumen() -> List[Dict[str, Any]]:

@@ -42,6 +42,8 @@ def _sin_rutas(texto: str) -> str:
 
 def _filtrar_acciones(request: Request, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rol = _rol(request)
+    # ítems enteros de un rol (Fondos: patrimonios de la casa, sólo superuser)
+    items[:] = [it for it in items if not it.get("solo") or it["solo"] == rol]
     for it in items:
         if rol != "superuser":
             it["texto"], it["detalle"] = _sin_rutas(it.get("texto", "")), _sin_rutas(it.get("detalle", ""))

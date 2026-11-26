@@ -176,6 +176,72 @@ The native leg is a no-op, so the **basic curve is FX-free** (native ficha
 fallbacks. Implemented in
 `backend.services.fx.normalize_price(price, leg, native, fx)`.
 
+**Un TICKER suelto se resuelve en `patas.leg_de` (26/11)**. La vista por pata
+de Mercado / Curvas (nativa + `leg`) siempre convirtió bien; lo que entraba
+por ticker no: la pata cruzada no tiene ficha (`GD30D`, `AL30C` → libro de
+Órdenes sin TIR, "Bono no encontrado" en el add-in) y la de pesos tiene una
+ficha en DÓLARES (`GD30` clean, `AL30`) que el add-in y las alertas valuaban
+con el precio en pesos crudo (TIR −100 %) y que el ticket de Órdenes usaba
+como moneda de la orden (VN 10.000 de AL30 en pesos "superaba" el tope en
+USD; GD30D por USD 17 M pasaba como pesos). `patas.leg_de(ticker)` →
+`Leg(ticker, calc, basis, native, propia)`: ficha que lo valúa (la nativa
+DIRTY) y moneda en que cotiza ESE ticker; memo por universo, µs. Reglas
+únicas: `pricing.es_especie_pesos(code)` (ficha USD / USB cuyo ticker cotiza
+en pesos: sin sufijo de pata, o una RAÍZ que termina en C / D con su propia
+pata cargada — `CO32D` → `CO32DC`) y `pricing.dirty_a_cotizacion(code, px,
+settle)` (el precio de BYMA es DIRTY por VN original; una ficha CLEAN lo
+quiere en % del residual sin corridos: `GD30` a 62 daba −35 % en el autofill
+de YAS en vez del 3,4 % de `GD30C`). Lo usan `book_context` (libro de Mercado
+/ Órdenes / pizarra: título y refresh con el ticker pedido, nota
+`.book-valua` con la ficha, la conversión y el CCL / MEP), `_row_for_code`
+(fila de un ticker sin ficha), `ordenes._moneda` = `patas.moneda_ticker`
+(tope y ticket en la moneda en que se OPERA) y `_theo_ref` (valor técnico
+llevado a esa moneda), `routes/excel._calc_batch` (sin precio = mercado del
+ticker; con precio, la pata sin ficha lo lleva a la nativa; un código con
+ficha conserva el basis de SU ficha, `GD30` = clean como en YAS),
+`alertas.current_value` / `add`, `pizarra._codigo_valido`,
+`pricing.market_last_native` y el writer del histórico (misma regla, mismos
+datos). Si un endpoint nuevo recibe un ticker, pasa por `patas.leg_de`:
+nunca `bond_meta(code)["moneda"]` como moneda de cotización.
+
+**TIR de la pata cruzada: reconvertida o al precio que entra (26/11)**.
+Selector "TIR pata USD / USB" en Curvas y Mercado. Reconvertida (default): el
+precio de la pata se lleva al dólar de la ficha (canje) = la TIR del bono.
+Al precio que entra: el precio tal cual contra el flujo (lo que rinde
+comprar por esa pata; difiere en ≈ canje / duration; es la "TIR directa" que
+el histórico guarda para la pata cruzada). El modo viaja ADENTRO de `leg`
+(`USB.dir` / `USD.dir`; `curves._leg_modo`, `_convierte`): todo lo que ya
+lleva la pata —keys de los memos, delta por filas, link y refresh del libro,
+what-if, `/graficos/data`— lleva el modo, así tabla, delta y libro no pueden
+quedar en modos distintos. El selector no tiene `name`: `app.js` cambia el
+valor de las opciones `data-leg` del select de pata y dispara su `change`.
+La pata en PESOS no tiene lectura directa (siempre ÷ FX) y la pata propia
+tampoco cambia. La fila afectada lleva `tir_directa` (celda `.tir-dir`,
+subrayado punteado) y el título de la tabla lo dice. No se persiste: cada
+carga arranca reconvertida.
+
+**Vistas por pata con memo por fila (26/11)**: `_rows_for` memoiza también
+las filas de `leg` ≠ nativa. Key = (código, plazo, fuente, settle, ts MAE,
+pata, SÍMBOLO de la pata, libro, huella del índice); el FX con el que se
+convirtió (`(fx.ccl, fx.usb)`, None si la fila no convierte) va como VALOR a
+validar —no en la key: una entrada por fila, sin acumular una por cada FX— y
+en `_rk`, la identidad de los memos del HTML por fila. Antes cada tick
+re-armaba y re-renderizaba TODAS las filas (corp_hdmep `leg=ARS`: p50 19,0 ·
+p95 20,8 ms → 5,5 · 6,3; `leg=USD` 18,3 · 20,4 → 4,8 · 5,8). Cuando el FX
+cambia (a lo sumo cada 5 s, TTL de `fx.get_fx`, y sólo si operó el par de
+referencia) las filas convertidas se re-arman: peor caso medido con FX nuevo
+en CADA pedido, corp_hdmep `leg=ARS` p50 26 · p95 35 ms, Mercado "todas"
+30 · 35. `_CROW_MEMO` / `_MROW_MEMO` al tope podan la mitad más vieja
+(`_podar_mitad`) en vez de `clear()`. Medido (80 llamadas, tick por pedido,
+ms avg · p50 · p95 · p99): libro por ticker `GD30` 1,9 · 1,8 · 2,2 · 2,4 y
+`GD30D` 1,8 · 1,7 · 2,7 · 2,8; `/ordenes/quote?code=GD30D` 2,0 · 1,9 · 2,3 ·
+4,3; `/market/snapshot/GD30` 0,9 · 0,8 · 1,0 · 1,1; add-in, 6 tickers sin
+precio 1,7 · 1,6 · 2,1 · 2,6; Curvas globales `leg=USB.dir` 1,6 · 1,6 · 1,9
+· 2,0. La fila sigue en ~15 µs (el resolver no se nota). Regresión:
+`tests/test_patas_tickers.py`. Queda como está y avisado al desk: el
+histórico guarda la pata cruzada de los soberanos con la TIR directa
+(decisión del 13/10), no la reconvertida.
+
 ## Cierre completo (`cierres/`)
 
 Además de la base px/tasas (xlsx + parquet, sólo bonos de las curvas), el
@@ -1023,6 +1089,115 @@ Escenario; `routes/proyecciones.py`, `services/proyecciones.py`,
   PROYECTADO sube y deshacer la devuelve exacta, vigilante, Escenario sigue
   la vigente, Históricos corte/rango/CSV/xlsx, pestaña por HTTP, gate de la
   feature).
+
+## Fondos — performance vs benchmark y atribución (sólo superuser, 26/11)
+
+Pestaña **Fondos** (`auth.TABS` al final + `_SUPERUSER_ONLY_TABS`; `/fondos`
+entero en `main._SUPERUSER_ONLY`: 403 para los demás, ni el link en la nav, y
+el ítem de `/salud` lleva `solo="superuser"`). Son patrimonios y flujos de los
+fondos de la casa: **el repo es público — nada de nombres de portfolio
+managers ni AUM en el código, los tests o este archivo**; los fondos que se
+siguen de entrada son códigos CAFCI (`fondos.SEGUIDOS_DEFAULT`) y cada usuario
+los cambia con la ★ (`data/fondos_prefs.json`, compartido a propósito como la
+pizarra; `FONDOS_PREFS_PATH`).
+
+- **Fuente** = lo que el proceso de la mañana (~10:05 UTC) regenera en la
+  biblioteca compartida, bajo `deltapaths.historico_dir()` ("Delta Bases";
+  `FONDOS_BASES_DIR` lo pisa): `Text/Esco/Delta_VCP.txt` (cuotaparte y
+  patrimonio por fondo CAFCI / clase / rueda; 24 MB), `Text/Esco/Delta_Fondos.txt`
+  (CodFondo de ESCO ↔ CodCAFCI, tipo PF/RF/MI/RV/RFI, moneda),
+  `Text/Fondos/Delta_Benchmarks.txt` (índice del benchmark por fondo, `;`,
+  días CORRIDOS, con relleno a futuro en var 0 que no se toma),
+  `Text/Fondos/Delta_Indices.txt` (A3500, CER, Badlar, TAMAR, Merval, CCL… en
+  matriz ancha `year;month;day`; las tasas vienen en % TNA),
+  `Text/Fondos/Delta_SyR_Fondos.txt` (suscripciones / rescates; suele estar
+  atrasado) y tres Excel de `Fondos/`: `Tabla_Benchmarks.xlsx` (pesos del
+  benchmark), `Carteras_Diarias_Params.xlsx` hoja `Clasif` (grupo y CLASE
+  EMBLEMA) y `Tabla_Fondos_Grupo Latin.xlsx` hoja `Clases_Grupo Latin`
+  (honorario de administración por clase). Los `Csv/Delta_*.csv` son el
+  formato viejo (terminan en 2023): sólo respaldo. Hay TRES códigos de fondo:
+  `CodCAFCI` (VCP, benchmarks), `CodFondo` de ESCO (carteras, PN, SyR) y
+  `NumFondo` (sólo el cash flow); el maestro los cruza.
+- **Carga** (`services/fondos.py`): NUNCA en un request. `asegurar()` dispara
+  un thread single-flight que lee con pyarrow (≈ 0,7 s los 55 MB) y arma
+  matrices numpy ruedas × clases (`Datos`: `vcp`, `pn`, `bench` e `indices`
+  alineados a las ruedas); el request sólo lee memoria. En uso, cada 120 s se
+  comparan firmas mtime + tamaño y se recarga sola cuando la mañana regenera
+  algo (`Datos.version` keyea los memos de HTML). Sólo la cuotaparte es
+  obligatoria: un extra ilegible queda en `avisos` y se reintenta (bajar un
+  marcador de OneDrive no cambia la firma). Los archivos NO están en los
+  esenciales del pre-flight de OneDrive a propósito (son 55 MB por día que
+  sólo usa el superuser): se bajan al leerlos y, si OneDrive no los entrega,
+  la pestaña muestra `nube.remedio` y reintenta cada 20 s. `/inicio` llama a
+  `fondos.precargar()` cuando entra un superuser (thread; `FONDOS_PRECARGA=0`
+  lo apaga, la suite corre así): la pestaña abre con los datos en memoria.
+- **Cuentas** (`services/fondos_calc.py`, numpy puro): períodos Día · 7d · MTD
+  · 30d · 90d · 180d · YTD · 1 año · 2 años con base en la última rueda ≤ el
+  corte (`corte_periodo`; sin historia no hay base, no se inventa), TNA para
+  money market y TEA para el resto, riesgo (volatilidad, tracking error,
+  information ratio, beta, correlación, ruedas arriba, máxima caída), meses,
+  flujos estimados (ΔPN − rendimiento) cuando el archivo de ESCO no cubre la
+  ventana, y el benchmark compuesto (`benchmark_var_calendario`: las tasas
+  devengan peso × (TNA + spread) / 365 por día corrido, los niveles su
+  variación; verificado contra el archivo de la casa a < 0,5 bps en 5 meses).
+  La clase que se muestra es la EMBLEMA de la casa si cotiza; si no, la de
+  más patrimonio. "Bruto de honorarios" = (1 + neto) × (1 + fee / 365)^días − 1.
+  Referencia elegible: benchmark del fondo, un índice o `f:<cafci>[:<clase>]`.
+- **Rutas** (`routes/fondos.py`): `/fondos` (página; controles Alpine fuera
+  de los swaps, estado en `localStorage`, filtro de filas por CSS),
+  `/fondos/tablero?vs&ver`, `/fondos/detalle?f&clase&vs&rango&desde&hasta`,
+  `/fondos/atribucion`, `POST /fondos/seguir` (204 + `HX-Trigger:
+  fondos-refresh`), `POST /fondos/releer`, `/fondos/serie.csv`. HTML memoizado
+  por (versión de los datos, parámetros, seguidos). Los gráficos son uPlot
+  (`charts.js initFondos`) con el JSON en un `<script type="application/json">`
+  hijo de `[data-fondos-chart]` (armado con `routes.fondos._json`: sin `<`) y
+  la serie se muestrea a `MAX_PUNTOS` (800; los flujos suman por tramo): la
+  ventana «Máx» pasó de 330 KB / 61 ms p95 a 100 KB / 5 ms.
+- **Atribución** (`services/fondos_attr.py`): contribución_i(t) = peso al
+  ABRIR el día × retorno del activo, con las carteras diarias
+  `Carteras/AAAAMMDD/AAAAMMDD_Delta_Composicion.xlsx` + `_Delta_PN.xlsx`
+  (precio implícito = Valor ÷ Cantidad; los históricos en `Text/` no traen
+  cantidad y tienen huecos: no sirven). Se encadena con la cuotaparte hasta
+  t−1, así suma en puntos del retorno de la ventana; la diferencia con la
+  cuotaparte queda EXPLÍCITA (honorarios estimados + "otros sin explicar").
+  Lo que el precio no ve: **cobros** de cupón / amortización desde el
+  cronograma de la ficha (`pricing.cashflow_table`; se suman el día en que el
+  precio muestra el corte, buscado a ±3 días de la fecha de pago; sin corte
+  visible o sin ficha no se inventa nada; bono en dólares en fondo en pesos →
+  CCL de `Delta_Indices`), **vencimientos** (tasa del plazo fijo, descuento a
+  la par, pago final de un bono con ficha; una venta no tiene precio de
+  salida) y **saltos** de más de 35 % en un día (cambio de unidad / split:
+  no se atribuyen y se listan). Contra la referencia: aporte = peso ×
+  (retorno del activo − retorno de la referencia). Dimensiones: tipo de activo
+  (`Clasifica`), ajuste, instrumento, sector, moneda de pago; más lo que más
+  sumó / restó y dos gráficos (acumulado por grupo, cuotaparte vs cartera).
+- **Caché de carteras** (`backend/tools/fondos_carteras.py`, stdlib + pandas):
+  leer un año de esos Excel con openpyxl son ~10 min de CPU, así que la
+  conversión corre en un **PROCESO APARTE** que lanza `fondos_attr`
+  (`subprocess`, prioridad baja; nunca en el proceso de los paneles live) y
+  deja un parquet compacto por día en `estado_local` (`fondos_carteras/`,
+  `FONDOS_ATTR_CACHE`): incremental por firma del Excel, lo más nuevo
+  primero, ventana `FONDOS_ATTR_DIAS` (400), poda de lo viejo, un día ilegible
+  no corta la corrida. Lector rápido de xlsx (zip + una regex armada con las
+  letras de las 13 columnas que se usan: 0,24 s contra 2,4 s) con caída a
+  pandas si el formato no es el esperado. La página dispara el armado al
+  abrirse; la atribución de cada fondo se lee del caché a pedido (≈ 0,75 s la
+  primera vez, en el executor; `_MAX_FONDOS` en memoria) y mientras el caché
+  se arma el bloque se vuelve a pedir solo con el avance. `reset()` sube una
+  generación: un armado viejo no publica nada. `FONDOS_ATTR_SUBPROCESO=0` lo
+  corre en el mismo proceso (la suite; un test ejercita el proceso de verdad).
+- Queda afuera a propósito: ranking contra la industria (los archivos de
+  rendimientos de todos los fondos pesan 560–810 MB), dividendos de acciones
+  y Brinson clásico (los benchmarks son índices compuestos, no carteras).
+- Medido warm (60 llamadas, ms avg · p50 · p95 · p99): tablero 2,9 · 2,5 ·
+  4,0 · 5,1 (sin memo 4,4 · 4,3 · 5,7 · 13,5); panel YTD 1,8 · 1,7 · 2,3 ·
+  2,6; panel Máx 4,6 · 4,6 · 5,0 · 5,2; atribución 38,9 · 1,5 · 1,9 · 2.239
+  (el p99 es la PRIMERA lectura del fondo; sin memo de HTML 3,2 · 3,2 · 3,6 ·
+  4,0); página 2,6 · 2,5 · 2,9 · 2,9. A escala real (270 días × 6.500 filas):
+  primera lectura de un fondo 0,75 s, un fondo de cheques 2,1 s.
+- Regresión: `tests/test_fondos_calc.py`, `tests/test_fondos.py`,
+  `tests/test_fondos_attr.py` (carpeta "Delta Bases" sintética con el formato
+  real; la atribución se compara contra una cuenta independiente).
 
 ## Inicio y orden de pestañas (07/10)
 

@@ -1,0 +1,15 @@
+{% from "partials/_estados.html" import empty, skeleton %}
+{# Mientras el thread lee los archivos (≈1 s la primera vez) o si la carga
+   falló: se reintenta solo. `destino` = tablero | detalle. #}
+{% set url = "/fondos/tablero" if destino == "tablero" else "/fondos/detalle?f=" ~ (f or 0) %}
+{% if estado.error and not estado.cargando %}
+<div hx-get="{{ url }}" hx-trigger="load delay:20s" hx-target="this" hx-swap="outerHTML">
+  {{ empty("No pude cargar los datos de fondos", estado.error,
+           '<button type="button" class="btn" hx-post="/fondos/releer" hx-swap="none">Reintentar ahora</button>',
+           "warning", "error") }}
+</div>
+{% else %}
+<div hx-get="{{ url }}" hx-trigger="load delay:700ms" hx-target="this" hx-swap="outerHTML">
+  {{ skeleton(6 if destino == "tablero" else 4, "Leyendo cuotapartes y benchmarks…") }}
+</div>
+{% endif %}

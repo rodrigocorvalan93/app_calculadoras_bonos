@@ -22,15 +22,15 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from backend.config import settings
 from backend.locale_ar import fmt_num, fmt_pct, hoy_ba, parse_ar_num
 from backend.cache_seq import seq_cached
-from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_svc, historico_byma, instruments, mae as mae_svc, marketdata_store, positions, pricing, symbols as syms
+from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_svc, historico_byma, instruments, mae as mae_svc, marketdata_store, patas, positions, pricing, symbols as syms
 
 # Shared pool — the per-bond TIR compute is CPU-bound and the cache
 # hits keep the work small, but the first poll after a price tick still
 # benefits from fan-out across cores.
 _row_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="curve-rows")
 _bg_tasks: set = set()      # refs vivas de tasks fire-and-forget (create_task guarda débil)
-# (código, plazo, fuente, settle, ts MAE, versión 5D, huella del índice) →
-# (seq del símbolo, fila). Ver _rows_for.
+# (código, plazo, fuente, settle, ts MAE, versión 5D | pata + símbolo, libro,
+# huella del índice) → (seq del símbolo, fila, FX usado o None). Ver _rows_for.
 _ROW_MEMO: Dict[tuple, tuple] = {}
 _ROW_MEMO_MAX = 4096
 
@@ -41,8 +41,16 @@ def _podar_row_memo() -> None:
     pidió hace más). Antes `clear()`: con ~4000 entradas vivas (Curvas +
     Mercado + Inicio × plazos) cada tope re-armaba TODAS las curvas en el
     tick siguiente — un pico de cientos de ms cada tanto (revisión 22/10)."""
-    for k in list(itertools.islice(_ROW_MEMO, len(_ROW_MEMO) // 2)):
-        _ROW_MEMO.pop(k, None)
+    _podar_mitad(_ROW_MEMO)
+
+
+def _podar_mitad(memo: dict) -> None:
+    """Saca la mitad más vieja (orden de inserción). En los memos del HTML por
+    fila la key lleva la seq del símbolo, así que lo viejo es, casi todo, HTML
+    de ticks que ya pasaron; con `clear()` cada tope re-renderizaba TODAS las
+    tablas abiertas en el tick siguiente (26/11)."""
+    for k in list(itertools.islice(memo, len(memo) // 2)):
+        memo.pop(k, None)
 
 router = APIRouter(prefix="/curves", tags=["curves"])
 
@@ -58,8 +66,9 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 # La fila sale idéntica mientras no cambie su dict (`_rk` = key + seq del
 # símbolo en _ROW_MEMO) ni su fracción de volumen (relativa al máximo de la
 # tabla): se cachea el <tr> ya renderizado y compactado, y un tick re-renderiza
-# sólo las filas que cambiaron. Las filas sin `_rk` (leg no nativa, especie
-# pesos de un hard-dollar) se renderizan siempre.
+# sólo las filas que cambiaron. Las filas sin `_rk` (especie pesos de un
+# hard-dollar en la vista nativa, fuente MAE) se renderizan siempre; las de una
+# vista por pata llevan `_rk` con el FX que usaron (26/11).
 _CROW_MEMO: Dict[tuple, str] = {}
 _CROW_MAX = 8192
 _CROW_STATS: Dict[str, int] = {"render": 0, "hit": 0}
@@ -79,7 +88,7 @@ def _curve_rows_html(templates: Any, rows: list[dict], plazo: str) -> list[str]:
             _CROW_STATS["render"] += 1
             if k is not None:
                 if len(_CROW_MEMO) >= _CROW_MAX:
-                    _CROW_MEMO.clear()
+                    _podar_mitad(_CROW_MEMO)
                 _CROW_MEMO[k] = h
         else:
             _CROW_STATS["hit"] += 1
@@ -119,7 +128,7 @@ def _mercado_rows_html(templates: Any, rows: list[dict], plazo: str, leg: str,
             _MROW_STATS["render"] += 1
             if k is not None:
                 if len(_MROW_MEMO) >= _MROW_MAX:
-                    _MROW_MEMO.clear()
+                    _podar_mitad(_MROW_MEMO)
                 _MROW_MEMO[k] = h
         else:
             _MROW_STATS["hit"] += 1
@@ -148,7 +157,35 @@ def _pesos_de_dolar(code: str, meta: dict | None) -> bool:
     dividirse por el FX de la moneda de pago (MEP si USB, cable si USD) antes
     de cualquier cálculo. Crudo, el precio en pesos entraba a la calculadora
     del bono en dólares y la TIR daba -100% en todo el libro."""
-    return bool(meta) and meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D")
+    return bool(meta) and pricing.es_especie_pesos(code)
+
+
+# ── TIR de la pata cruzada: reconvertida o al precio que entra (26/11) ───────
+# Ver un global (ficha cable) en su pata MEP, o un bonar (ficha MEP) en su pata
+# cable, admite dos lecturas de la TIR:
+#   · RECONVERTIDA (default): el precio de la pata se lleva al dólar de la
+#     ficha (× MEP ÷ CCL o × CCL ÷ MEP: se le saca / suma el canje) → es la
+#     misma TIR del bono, se compare por la pata que se compare;
+#   · DIRECTA (`leg=USB.dir` / `USD.dir`): el precio de la pata entra TAL CUAL
+#     contra el flujo de la ficha → lo que rinde comprar por esa pata y cobrar
+#     los dólares del bono (difiere de la otra en ≈ canje / duration). Es la
+#     misma «TIR directa» que el histórico guarda para la pata cruzada.
+# El modo viaja ADENTRO del valor de `leg` a propósito: todo lo que ya lleva la
+# pata (keys de los memos, delta por filas, link del libro, what-if, gráfico)
+# lleva el modo sin tocar nada → tabla, delta y libro no pueden quedar en modos
+# distintos. La pata en PESOS no tiene lectura directa (pesos contra un flujo en
+# dólares): siempre ÷ FX.
+_LEG_DIR = ".dir"
+
+
+def _leg_modo(leg: str) -> tuple[str, bool]:
+    """('USB', True) para 'USB.dir'; (leg, False) para el resto. El modo
+    directo sólo existe sobre una pata dólar (USD / USB)."""
+    leg = leg or "native"
+    if leg.endswith(_LEG_DIR):
+        base = leg[: -len(_LEG_DIR)] or "native"
+        return base, base in _LEG_SUFFIX
+    return leg, False
 
 
 def _leg_symbol(code: str, plazo: str, leg: str, store) -> tuple[str, str]:
@@ -162,6 +199,7 @@ def _leg_symbol(code: str, plazo: str, leg: str, store) -> tuple[str, str]:
     (ISIN sibling when the root differs — BPC7D → BPOC7 — else base+"O"
     for corps / base for globales, whichever the store knows).
     """
+    leg = _leg_modo(leg)[0]                 # 'USB.dir' busca el mismo ticker que 'USB'
     base = code[:-1] if code[-1:] in ("C", "D") else code
     if leg in _LEG_SUFFIX:
         return syms.md_symbol(base + _LEG_SUFFIX[leg], plazo), leg
@@ -177,6 +215,14 @@ def _leg_symbol(code: str, plazo: str, leg: str, store) -> tuple[str, str]:
     if _pesos_de_dolar(code, pricing.bond_meta(code)):
         return syms.md_symbol(code, plazo), "ARS"   # especie pesos de un hard-dollar
     return syms.md_symbol(code, plazo), ""  # native
+
+
+def _convierte(leg_basis: str, native: str, directo: bool) -> bool:
+    """¿El precio de la pata se lleva al dólar de la ficha antes de la TIR?
+    Pesos → siempre (÷ FX). Otra pata dólar → sí (canje), salvo modo directo."""
+    if not leg_basis or leg_basis == native:
+        return False
+    return not (directo and leg_basis in _LEG_SUFFIX)
 
 
 def _depth_frac(levels):
@@ -242,7 +288,16 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     # pisan.
     meta = pricing.bond_meta(code)
     if not meta:
-        return None
+        # Ticker de una pata SIN ficha propia (GD30D de un global, AL30C de un
+        # bonar, AEC3O de una ON con sólo la nativa cargada): es la fila de la
+        # ficha nativa vista en esa pata — mismo símbolo, misma conversión.
+        lg = patas.leg_de(code) if leg == "native" else None
+        if lg is None or lg.propia or not lg.basis:
+            return None
+        r = _row_for_code(lg.calc, plazo, lg.basis, fx, book, fuente, settle)
+        if r is not None:
+            r["code"] = lg.ticker
+        return r
     store = marketdata_store.get_store()
     symbol, leg_basis = _leg_symbol(code, plazo, leg, store)
     snap = store.get(symbol)
@@ -273,14 +328,24 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     # referencia CLEAN — la TIR del precio de pantalla (DIRTY) sale de la ficha
     # NATIVA hermana (…D/…C), la misma que pricea la curva (cache compartido).
     calc = pricing.native_dollar_code(code) or code
-    if leg_basis and leg_basis != native and fx is None:
+    # ¿El precio se lleva al dólar de la ficha? Siempre que el basis difiera,
+    # salvo la pata dólar cruzada pedida «al precio que entra» (`….dir`).
+    convierte = _convierte(leg_basis, native, _leg_modo(leg)[1])
+    if convierte and fx is None:
         fx = fx_svc.get_fx(plazo)        # cacheado — cubre también leg=native sobre especie pesos
+    # Una ficha de cálculo CLEAN (referencia tipo Bloomberg SIN nativa cargada:
+    # PLC4O, YMCJO) no puede recibir el precio de pantalla, que es DIRTY por
+    # VN original: se pasa a su convención. Con nativa cargada (el caso normal)
+    # `calc` es DIRTY y esto no corre.
+    a_clean = bool(leg_basis) and str((pricing.bond_meta(calc) or {}).get("quote_price_cnv") or "").upper() == "CLEAN"
 
     def cp(px):
         if px is None:
             return None
-        if leg_basis and leg_basis != native:
-            return fx_svc.normalize_price(px, leg_basis, native, fx)
+        if convierte:
+            px = fx_svc.normalize_price(px, leg_basis, native, fx)
+        if a_clean and px is not None:
+            px = pricing.dirty_a_cotizacion(calc, px, settle)
         return px
 
     # Precio de referencia: last (LA) si operó hoy; si no, cierre previo (CL).
@@ -375,6 +440,8 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
             "symbol": symbol,
             "seq": int(getattr(snap, "seq", 0) or 0) if snap else 0,   # último update del símbolo
             "leg": leg,
+            # TIR de la pata cruzada SIN reconvertir (modo `….dir`): a la vista en la fila
+            "tir_directa": bool(leg_basis) and leg_basis != native and not convierte,
             "last": last, "bid": bid, "offer": offer,
             "close": close, "open": open_, "high": high, "low": low,
             "bid_size": bid_size, "offer_size": offer_size, "last_size": last_size,
@@ -405,7 +472,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
         # tirea_low/high/close son sólo para el panel del libro (un bono), NO
         # para cada fila de la tabla — se calculan en la route /mercado/book.
         # Cross-venue MAE (OTC): último/volumen del mismo bono en MAE (cache).
-        mae_q = mae_svc.match(code, leg)
+        mae_q = mae_svc.match(code, _leg_modo(leg)[0])
         row["mae"] = mae_q
         # Volumen total nominal = BYMA (NV) + MAE (volumenAcumulado VN).
         vols = [v for v in (nominal, (mae_q or {}).get("volumen")) if v is not None]
@@ -415,7 +482,7 @@ def _row_for_code(code: str, plazo: str, leg: str = "native", fx=None, book: boo
     # cierre/var/mín/máx/volumen) con TIR recalculada; sin libro (MAE no informa
     # puntas). Si el bono no tiene dato MAE, cae a BYMA (marca "BYMA*").
     if fuente == "mae":
-        mq = row.get("mae") if book else mae_svc.match(code, leg)
+        mq = row.get("mae") if book else mae_svc.match(code, _leg_modo(leg)[0])
         if mq and mq.get("last") is not None:
             mlast, mclose = mq["last"], mq.get("close")
             try:
@@ -501,31 +568,55 @@ async def _rows_for(
     # lleva `_rk` = (key, seq del símbolo), la identidad que usa el memo del
     # HTML por fila de la tabla de Curvas (_curve_rows_html).
     memo_ok = leg == "native" and fuente != "mae"
+    # Vistas por PATA (leg ARS / USD / USB, 26/11): la fila depende del
+    # snapshot del ticker de ESA pata y, si convierte, del FX implícito — que
+    # cambia a lo sumo cada 5 s (TTL de `fx.get_fx`) y sólo si operó el par de
+    # referencia. Hasta acá no se memoizaban: cada tick re-armaba y, sobre
+    # todo, re-renderizaba las 135 filas de una curva corporativa (medido:
+    # 20 ms por tick contra 5 de la vista nativa). El FX va como VALOR a
+    # validar (no en la key: una entrada por fila, sin acumular una por cada
+    # FX) y en `_rk`, la identidad que usan los memos del HTML por fila.
+    memo_leg = leg != "native" and fuente != "mae"
+    directo = _leg_modo(leg)[1]
+    fxk = (fx.ccl, fx.usb) if (memo_leg and fx is not None) else None
     # El snapshot MAE sólo entra a la fila con book=True (`row["mae"]`): en la
     # key de Curvas (book=False) invalidaba TODAS las filas memoizadas cada vez
     # que el poller MAE refrescaba (~20 s) sin que ninguna cambiara (revisión 22/10).
-    mae_ts = mae_svc.snapshot_ts() if (memo_ok and book) else None
+    mae_ts = mae_svc.snapshot_ts() if ((memo_ok or memo_leg) and book) else None
     ref5 = historico_byma.ref_5d_version() if memo_ok else None
     store = marketdata_store.get_store()
 
     def _build_all() -> list[dict]:
         out: list[dict] = []
         for c in codes:
-            if memo_ok and not _pesos_de_dolar(c, pricing.bond_meta(c)):
-                snap = store.get(syms.md_symbol(c, plazo))
-                sseq = int(getattr(snap, "seq", 0) or 0) if snap is not None else -1
-                key = (c, plazo, fuente, settle, mae_ts, ref5, book,
+            meta_c = pricing.bond_meta(c)
+            sym = fx_fila = None
+            if memo_ok:
+                if not _pesos_de_dolar(c, meta_c):
+                    sym = syms.md_symbol(c, plazo)
+                    key = (c, plazo, fuente, settle, mae_ts, ref5, book,
+                           pricing._index_fingerprint(pricing._bond_index_kind(c)))
+            elif memo_leg and meta_c:
+                sym, basis = _leg_symbol(c, plazo, leg, store)
+                # sólo la fila que de verdad convierte depende del FX (la pata
+                # propia y la cruzada en modo directo, no)
+                if _convierte(basis, meta_c.get("moneda") or "USD", directo):
+                    fx_fila = fxk
+                key = (c, plazo, fuente, settle, mae_ts, leg, sym, book,
                        pricing._index_fingerprint(pricing._bond_index_kind(c)))
+            if sym is not None:
+                snap = store.get(sym)
+                sseq = int(getattr(snap, "seq", 0) or 0) if snap is not None else -1
                 ent = _ROW_MEMO.get(key)
-                if ent is not None and ent[0] == sseq:
+                if ent is not None and ent[0] == sseq and ent[2] == fx_fila:
                     r = dict(ent[1]) if ent[1] is not None else None
                 else:
                     r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
                     if len(_ROW_MEMO) >= _ROW_MEMO_MAX:
                         _podar_row_memo()
-                    _ROW_MEMO[key] = (sseq, dict(r) if r is not None else None)
+                    _ROW_MEMO[key] = (sseq, dict(r) if r is not None else None, fx_fila)
                 if r is not None:
-                    r["_rk"] = (key, sseq)
+                    r["_rk"] = (key, sseq) if fx_fila is None else (key, sseq, fx_fila)
             else:
                 r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
             if r is not None:
@@ -643,10 +734,14 @@ def _whatif_uno(code: str, plazo: str, leg: str, px: float, settle: str | None, 
     native = meta.get("moneda") or "USD"
     calc = pricing.native_dollar_code(code) or code
     p = px
-    if leg_basis and leg_basis != native:
+    if _convierte(leg_basis, native, _leg_modo(leg)[1]):     # misma regla que la fila
         p = fx_svc.normalize_price(px, leg_basis, native, fx or fx_svc.get_fx(plazo))
         if p is None:
             return {"error": "sin FX para convertir el precio"}
+    if leg_basis and str((pricing.bond_meta(calc) or {}).get("quote_price_cnv") or "").upper() == "CLEAN":
+        p = pricing.dirty_a_cotizacion(calc, p, settle)
+        if p is None:
+            return {"error": "no pude llevar el precio a la convención de la ficha"}
     m = pricing.metrics_for_market_price(calc, p, settle) or {}
     tirea, dur = m.get("tirea"), m.get("duration")
     if tirea is None or tirea != tirea:
@@ -1087,6 +1182,13 @@ async def book_context(request: Request, code: str, plazo: str = "24hs", leg: st
     bond_universe.ensure_loaded()
     y = y if y in _BOOK_Y else "tirea"
     store = marketdata_store.get_store()
+    ticker, leg_pedido = code, leg                # lo que se pidió: título, refresh y tenencia
+    # Ticker de una pata sin ficha propia (GD30D, AL30C, AEC3O): el libro es
+    # el de ESE ticker y la TIR sale de la ficha nativa con el precio llevado
+    # a su dólar (`patas.leg_de`) — antes el libro de Órdenes salía sin TIR.
+    lg = patas.leg_de(code)
+    if leg == "native" and lg is not None and not lg.propia and lg.basis:
+        code, leg = lg.calc, lg.basis
     symbol, leg_basis = _leg_symbol(code, plazo, leg, store)
     snap = store.get(symbol)
     meta = pricing.bond_meta(code) or {}
@@ -1094,16 +1196,20 @@ async def book_context(request: Request, code: str, plazo: str = "24hs", leg: st
     # Especie pesos de un hard-dollar → basis ARS aunque leg sea native, y las
     # TIRs se calculan con la ficha nativa (…D/…C) al precio ÷ FX de pago.
     calc = pricing.native_dollar_code(code) or code
-    fx = fx_svc.get_fx(plazo) if (leg_basis and leg_basis != native) else None
+    convierte = _convierte(leg_basis, native, _leg_modo(leg)[1])   # `….dir` = al precio de la pata
+    fx = fx_svc.get_fx(plazo) if convierte else None
     settle = pricing.settlement_date_str(plazo)   # CI = hoy, 24hs = t+1 (fecha BA)
+    a_clean = bool(leg_basis) and str((pricing.bond_meta(calc) or {}).get("quote_price_cnv") or "").upper() == "CLEAN"
 
     def cp(px):
         # Mismo criterio que _row_for_code: convertir SIEMPRE que el basis de la
         # leg difiera del nativo (ARS y también el cruce MEP↔cable, × canje).
         if px is None:
             return None
-        if leg_basis and leg_basis != native:
-            return fx_svc.normalize_price(px, leg_basis, native, fx)
+        if convierte:
+            px = fx_svc.normalize_price(px, leg_basis, native, fx)
+        if a_clean and px is not None:
+            px = pricing.dirty_a_cotizacion(calc, px, settle)
         return px
 
     def with_yield(levels):
@@ -1159,20 +1265,32 @@ async def book_context(request: Request, code: str, plazo: str = "24hs", leg: st
         or (row or {}).get("tna_convention_label") or ""
     y_label = {"tirea": "TIREA", "tem": "TEM", "margen": "Margen",
                "tna": f"TNA {conv}".strip() if conv and conv != "—" else "TNA"}[y]
+    # Con qué ficha y qué conversión sale la TIR cuando el ticker no es el
+    # nativo (pesos ÷ CCL / MEP, la otra pata dólar × / ÷ canje): a la vista.
+    if leg_basis and leg_basis != native and not convierte:
+        valua = f"TIR con la ficha {calc} al precio de la pata, sin reconvertir por el canje (TIR directa)"
+    elif leg_basis and (leg_basis != native or calc != ticker):
+        valua = patas.como_se_valua(patas.Leg(ticker, calc, leg_basis, native, True))
+        if fx is not None and leg_basis != native:
+            valua += " · " + " · ".join(f"{k} {fmt_num(v, 2)}" for k, v in (("CCL", fx.ccl), ("MEP", fx.usb)) if v)
+    else:
+        valua = ""
     return dict(
-        code=code,
+        code=ticker,
+        calc=calc,
+        valua=valua,
         nombre=meta.get("nombre") or code,
         symbol=symbol,
         snap=snap,
         row=row,
         # tenencia (desplegable) — filtrada por los fondos visibles del usuario
-        position=positions.position_for(code, auth_svc.visible_fondos_for(request)),
+        position=positions.position_for(ticker, auth_svc.visible_fondos_for(request)),
         instr=await instruments.detail(symbol),                 # lámina mínima / tick / límites
         bids=bids,
         offers=offers,
         fuente=fuente,
         plazo=plazo,                                            # para el auto-refresh del book
-        leg=leg,
+        leg=leg_pedido,                                         # el refresh vuelve a resolver la pata
         y=y,                                                    # métrica por nivel elegida
         y_label=y_label,
         margen_ok=margen_ok,

@@ -86,6 +86,9 @@ async def _contexto() -> Dict[str, Any]:
 
 @router.get("/inicio", response_class=HTMLResponse)
 async def inicio_page(request: Request) -> HTMLResponse:
+    if getattr(request.state, "is_superuser", False):
+        from backend.services import fondos
+        fondos.precargar()               # la pestaña Fondos abre con los datos ya en memoria (thread; µs acá)
     ctx = await _contexto()
     prefs = await _prefs(request)
     piz = await _pizarra_ctx(request, prefs)
@@ -180,7 +183,9 @@ async def _pizarra_ctx(request: Request, prefs: Dict[str, Any]) -> Dict[str, Any
             meta = pricing.bond_meta(c["code"]) or {}
             items.append({"tipo": "cotizacion", "cuadro": c,
                           "ctx": {"row": filas.get(i), "code": c["code"],
-                                  "nombre": meta.get("nombre") or c["code"], "plazo": c["plazo"]}})
+                                  # una pata sin ficha propia (GD30D) toma el nombre de la nativa que la valúa
+                                  "nombre": meta.get("nombre") or (filas.get(i) or {}).get("nombre") or c["code"],
+                                  "plazo": c["plazo"]}})
     return {"cuadros": items, "y": y}
 
 

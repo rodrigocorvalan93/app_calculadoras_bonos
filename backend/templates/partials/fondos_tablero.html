@@ -1,0 +1,67 @@
+{% from "partials/_icons.html" import icon %}
+{# Tablero de fondos: una fila por fondo (clase emblema). `ver` decide el
+   número de cada período: f = retorno del fondo (▲▼ = le gana / pierde a la
+   referencia), x = exceso en puntos, b = la referencia. El filtro por grupo
+   (mis fondos / familia) es CSS sobre data-seg / data-fam; el buscador, JS. #}
+<div class="card">
+  <div class="card-title">
+    <span>{{ icon("table") }} Fondos <span class="muted">· {{ filas | length }} con cuotaparte · {{ n_seg }} seguidos</span></span>
+    <span class="card-title-aux">
+      {% if estado.hasta_fmt %}cuotaparte al <b>{{ estado.hasta_fmt }}</b>{% if estado.atraso_dias is not none and estado.atraso_dias > 6 %}
+        · <span class="warn-txt" title="El último dato tiene {{ estado.atraso_dias }} días: revisá que el proceso de la mañana haya corrido y que OneDrive esté sincronizado.">atrasada</span>{% endif %} · {% endif %}
+      <button type="button" class="lnk" data-csv-of="#fondos-tbl" title="Descargar la tabla como se ve (CSV es-AR)">⤓ CSV</button>
+    </span>
+  </div>
+  {% if marcador %}
+  <div class="f-marcador muted u-sm" title="De los fondos que seguís (★), cuántos le ganan a la referencia elegida y el exceso promedio simple.">
+    Mis fondos vs referencia:
+    {% for m in marcador %}<span class="u-nowrap"><b>{{ m.lbl }}</b> {{ m.arriba }} de {{ m.n }} arriba · prom. <span class="{{ m.cls }}">{{ m.prom }}</span></span>{{ " · " if not loop.last else "" }}{% endfor %}
+  </div>
+  {% endif %}
+  {% if estado.avisos %}
+  <div class="alert u-mb8">{{ icon("warning") }} {% for a in estado.avisos %}{{ a }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+  {% endif %}
+  <div class="card-body table-scroll">
+    <table class="cashflows fondos-tbl" id="fondos-tbl" data-sortable>
+      <thead><tr>
+        <th class="f-star" title="Mis fondos">★</th>
+        <th class="u-left" data-sort>Fondo</th>
+        <th class="u-left" data-sort>Grupo</th>
+        <th data-sort title="Moneda del fondo">Mon.</th>
+        <th data-sort title="Patrimonio total del fondo (todas las clases), en su moneda">Patrimonio</th>
+        {% for k, lbl, largo in periodos %}<th data-sort title="{{ largo }}">{{ lbl }}</th>{% endfor %}
+        <th data-sort title="Volatilidad anualizada de los retornos diarios, últimos 12 meses">Vol 1a</th>
+        <th data-sort title="Tracking error anualizado contra la referencia, últimos 12 meses">TE 1a</th>
+        <th class="u-left" data-sort>Referencia</th>
+      </tr></thead>
+      <tbody>
+        {% for r in filas %}
+        <tr data-cafci="{{ r.cafci }}" data-seg="{{ 1 if r.seg else 0 }}" data-fam="{{ r.familia }}"
+            data-txt="{{ (r.corto ~ ' ' ~ r.nombre ~ ' ' ~ r.grupo ~ ' ' ~ r.bm) | lower }}">
+          <td class="f-star"><button type="button" class="f-star-btn{{ ' on' if r.seg else '' }}"
+                hx-post="/fondos/seguir" hx-vals='{"f": {{ r.cafci }}}' hx-swap="none"
+                title="{{ 'Quitar de mis fondos' if r.seg else 'Agregar a mis fondos' }}" aria-label="Seguir">{{ '★' if r.seg else '☆' }}</button></td>
+          <td class="u-left"><a href="/fondos?f={{ r.cafci }}" data-fondo-abrir="{{ r.cafci }}" class="f-nombre" title="{{ r.nombre }} · CAFCI {{ r.cafci }}{% if r.atrasado %} · última cuotaparte {{ r.fecha }}{% endif %}">{{ r.corto }}</a>
+            <span class="chip f-clase" title="Clase mostrada">{{ r.clase }}</span>{% if r.atrasado %} <span class="warn-txt" title="Última cuotaparte: {{ r.fecha }}">{{ r.fecha }}</span>{% endif %}</td>
+          <td class="u-left muted">{{ r.grupo }}</td>
+          <td>{{ r.moneda }}</td>
+          <td data-sort="{{ '%.0f' | format(r.pn_n) }}">{{ r.pn }}</td>
+          {% for c in r.celdas %}
+          <td class="f-per {{ c.cls }}"{% if c.tip %} title="{{ c.tip }}"{% endif %}>{{ c.txt }}{% if c.marca %}<i class="f-mk f-{{ c.marca }}" aria-hidden="true"></i>{% endif %}</td>
+          {% endfor %}
+          <td>{{ r.vol }}</td>
+          <td>{{ r.te }}</td>
+          <td class="u-left {{ 'muted' if r.sin_bm else '' }} f-bm" title="{{ r.bm }}">{{ r.bm }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted u-note f-vacio">Ningún fondo en este grupo. Marcá con ★ los que quieras seguir o elegí «Todos».</p>
+  </div>
+  <p class="muted u-note" style="padding:0 12px 10px">
+    {% if ver == "f" %}Retorno directo del fondo en cada período; <i class="f-mk f-up"></i> le gana a la referencia, <i class="f-mk f-down"></i> pierde (el detalle está en el tooltip).
+    {% elif ver == "x" %}Exceso = retorno del fondo − retorno de la referencia, en puntos porcentuales.
+    {% else %}Retorno de la referencia en cada período.{% endif %}
+    MTD / YTD = desde la última rueda del mes / año anterior; 30d, 90d… = días corridos.
+  </p>
+</div>

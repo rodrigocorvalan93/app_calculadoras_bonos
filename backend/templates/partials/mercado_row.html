@@ -25,7 +25,7 @@
   <td style="color:var(--cyan)">{{ (r.margen_bid if ym == 'margen' else r.tirea_bid) | ar_pct(2) }}</td>
   <td class="grp {{ r.last_cls }}" style="font-weight:600">{{ r.last | ar_num(2) }}</td>
   <td>{{ r.vwap | ar_num(2) }}</td>
-  <td style="color:var(--accent);font-weight:600">{{ (r.margen_last if ym == 'margen' else r.tirea_last) | ar_pct(2) }}</td>
+  <td{% if r.tir_directa %} class="tir-dir" title="TIR al precio de la pata, sin reconvertir por el canje"{% endif %} style="color:var(--accent);font-weight:600">{{ (r.margen_last if ym == 'margen' else r.tirea_last) | ar_pct(2) }}</td>
   <td class="grp {{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>
   <td style="color:var(--cyan)">{{ (r.margen_offer if ym == 'margen' else r.tirea_offer) | ar_pct(2) }}</td>
   <td class="muted">{{ r.offer_size | ar_int }}</td>
