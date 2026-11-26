@@ -9,6 +9,8 @@ los patrimonios y flujos de los fondos de la casa.
                                del fondo / exceso vs referencia / la referencia
 - GET  /fondos/detalle         panel de un fondo: ventana, riesgo, gráficos,
                                meses, clases, flujos y atribución
+- GET  /fondos/atribucion      qué activos y categorías explican el retorno de
+                               la ventana (se abre a pedido desde el panel)
 - POST /fondos/seguir          ★ agrega / quita un fondo de «mis fondos»
 - POST /fondos/releer          relee los archivos ya (lo normal es solo)
 - GET  /fondos/serie.csv       serie diaria del fondo y su referencia (es-AR)
@@ -31,6 +33,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from backend.locale_ar import fmt_date, fmt_hum, fmt_num
 from backend.services import fondos as fsvc
+from backend.services import fondos_attr as fattr
 from backend.services import fondos_calc as fc
 
 logger = logging.getLogger("backend.fondos.routes")
@@ -157,6 +160,7 @@ def _vs_ok(d: Optional[fsvc.Datos], vs: str) -> str:
 @router.get("", response_class=HTMLResponse)
 async def fondos_page(request: Request, f: Optional[int] = None) -> HTMLResponse:
     d = fsvc.asegurar()
+    fattr.asegurar()          # la historia de carteras de la atribución se arma sola, en un proceso aparte
     return _render(request, "fondos.html", estado=_estado_ctx(), vistas=VISTAS,
                    vs_opts=_vs_validos(d) if d else [("bm", "Benchmark del fondo")],
                    sel=f, periodos=fc.PERIODOS)
@@ -330,6 +334,123 @@ async def fondos_seguir(request: Request, f: int = Form(...)) -> Response:
     except OSError as exc:
         return HTMLResponse(f'<div class="alert alert-error">No pude guardar: {exc}</div>', status_code=500)
     return Response(status_code=204, headers={"HX-Trigger": "fondos-refresh"})
+
+
+# ── atribución ───────────────────────────────────────────────────────────────
+_PALETA = ("p0", "p1", "p2", "p3", "p4", "p5")
+
+
+def _attr_filas(filas: List[Dict[str, Any]], tope: float) -> List[Dict[str, Any]]:
+    out = []
+    for g in filas:
+        out.append({"nombre": g["nombre"], "desc": g.get("desc") or "", "grupo": g.get("grupo") or "",
+                    "w_prom": pct(g["w_prom"], 1), "w_hoy": pct(g["w_hoy"], 1) if abs(g["w_hoy"]) > 1e-9 else "—",
+                    "ret": pct(g["ret"]) if g["ret"] is not None else "—",
+                    "c": pp(g["c"]), "cls": cls(g["c"], 5e-6), "w": min(100, int(abs(g["c"]) / tope * 100)) if tope else 0,
+                    "e": pp(g["e"]) if g["e"] is not None else "—", "e_cls": cls(g["e"], 5e-6)})
+    return out
+
+
+def _attr_ctx(res: Dict[str, Any], fo: fsvc.Fondo) -> Dict[str, Any]:
+    """Atribución pre-formateada es-AR + JSON de los dos gráficos."""
+    tope = max((abs(g["c"]) for g in res["grupos"]), default=0.0)
+    tope_a = max((abs(g["c"]) for g in res["suben"] + res["bajan"]), default=0.0)
+    s = res["serie"]
+    dim_lbl = dict(fattr.DIMS)[res["dim"]]
+    charts = {
+        "expl": _json({"x": s["x"], "dec": 2, "suf": "%", "ref": 0, "nombre": "cuotaparte-vs-cartera", "series": [
+            {"label": f"Cuotaparte {fo.corto} (%)", "y": s["fondo"], "color": "acc"},
+            {"label": "Explicado por la cartera (%)", "y": s["cartera"], "color": "mut", "dash": True}]}),
+        "grupos": _json({"x": s["x"], "dec": 2, "suf": " pp", "ref": 0, "nombre": "contribucion-por-grupo", "series": [
+            {"label": g["nombre"], "y": g["y"], "color": _PALETA[i % len(_PALETA)]}
+            for i, g in enumerate(s["grupos"])]}),
+    }
+    notas = []
+    if res["recortada"]:
+        notas.append(f"La ventana pedida arranca el {fmt_date(res['pedido_desde'])}, pero las carteras de este fondo en el "
+                     f"caché empiezan el {fmt_date(res['cobertura']['desde'])}: la atribución va desde el "
+                     f"{fmt_date(res['desde'])} y todos los números de este cuadro son de ese tramo.")
+    if res["cobros"]:
+        notas.append(f"{res['cobros']} cobro(s) de cupón / amortización sumados al retorno del activo (cronograma de la ficha).")
+    if res["vencidos"]:
+        notas.append(f"{res['vencidos']} vencimiento(s) devengados hasta su fecha (tasa del plazo fijo, descuento a la par o pago final).")
+    if res["sin_precio"]:
+        notas.append(f"{res['sin_precio']} salida(s) de cartera sin precio de venta (peso promedio {pct(res['sin_precio_peso'], 1)}): "
+                     "el resultado del último día de esas tenencias queda en «sin explicar».")
+    saltos = [{"activo": x["activo"], "fecha": fmt_date(x["fecha"]), "r": pct(x["r"], 1, True), "w": pct(x["w"], 1)}
+              for x in res["saltos"]]
+    return {
+        "dim": res["dim"], "dim_lbl": dim_lbl, "dims": fattr.DIMS,
+        "desde": fmt_date(res["desde"]), "hasta": fmt_date(res["hasta"]), "dias": res["dias"], "ruedas": res["ruedas"],
+        "total": pct(res["total"]), "cartera": pct(res["cartera"]), "cartera_pp": pp(res["cartera"]),
+        "residual": pp(res["residual"]), "residual_cls": cls(res["residual"]),
+        "fee": pct(res["fee"], 2) if res["fee"] is not None else None,
+        "fee_est": pp(res["fee_est"]) if res["fee_est"] is not None else None,
+        "otros": pp(res["otros"]) if res["otros"] is not None else None, "otros_cls": cls(res["otros"]),
+        "ref": res["ref"], "bench": pct(res["bench"]) if res["bench"] is not None else None,
+        "exceso": pp(res["exceso"]), "exceso_cls": cls(res["exceso"]),
+        "exceso_cartera": pp(res["exceso_cartera"]), "exceso_cartera_cls": cls(res["exceso_cartera"]),
+        "exceso_resto": pp(res["exceso"] - res["exceso_cartera"]) if res["exceso"] is not None and res["exceso_cartera"] is not None else "—",
+        "peso_abierto": pct(res["peso_abierto"], 1) if res["peso_abierto"] is not None else "—",
+        "grupos": _attr_filas(res["grupos"], tope), "suben": _attr_filas(res["suben"], tope_a),
+        "bajan": _attr_filas(res["bajan"], tope_a), "n_activos": res["n_activos"],
+        "charts": charts, "notas": notas, "saltos": saltos,
+        "cobertura": {"desde": fmt_date(res["cobertura"]["desde"]), "hasta": fmt_date(res["cobertura"]["hasta"]),
+                      "dias": res["cobertura"]["dias"]},
+    }
+
+
+@router.get("/atribucion", response_class=HTMLResponse)
+async def fondos_atribucion(request: Request, f: int, clase: str = "", vs: str = "bm", rango: str = "ytd",
+                            desde: str = "", hasta: str = "", dim: str = "clasif") -> HTMLResponse:
+    """Atribución del rendimiento de la ventana. La historia de carteras se
+    arma sola en un proceso aparte (la primera vez tarda un par de minutos:
+    el partial se vuelve a pedir solo) y la de cada fondo se lee del caché
+    local en el executor la primera vez que se abre."""
+    d = fsvc.asegurar()
+    dim = dim if dim in fattr.DIM_KEYS else "clasif"
+    de, ha = _fecha_ok(desde), _fecha_ok(hasta)
+    rango = rango if rango in _RANGO_KEYS else "ytd"
+    qs = {"f": f, "clase": clase.strip(), "vs": vs, "rango": rango, "desde": de or "", "hasta": ha or ""}
+    if d is None or f not in d.fondos:
+        return _render(request, "partials/fondos_attr.html", a=None, qs=qs, dim=dim, estado={"cargando": d is None},
+                       motivo=None if d is None else "No encontré ese fondo.")
+    vs = _vs_ok(d, vs)
+    qs["vs"] = vs
+    est = fattr.asegurar()
+    key = ("attr", d.version, est["version"], f, qs["clase"], vs, rango, de, ha, dim)
+    hit = _memo.get(key)
+    if hit is not None:
+        return HTMLResponse(hit)
+    fo = d.fondos[f]
+
+    def _armar() -> str:
+        motivo = None
+        ctx = None
+        fa = fattr.fondo(d, f) if fo.cod is not None else None
+        if fo.cod is None:
+            motivo = ("Este fondo no tiene código de ESCO en Delta_Fondos: no lo puedo cruzar con las carteras diarias.")
+        elif fa is not None:
+            col = d.col(f, qs["clase"] or None)
+            i_fin = fc.ultimo_valido(d.vcp[:, col])
+            i0, i1 = fsvc.rango_indices(d, i_fin, rango, de, ha)
+            res = fattr.atribucion(fa, d, f, qs["clase"] or None, vs, i0, i1, dim) if i1 > i0 >= 0 else None
+            if res is None:
+                motivo = (f"No hay dos carteras de este fondo dentro de la ventana (en el caché: {len(fa.dias)} días, del "
+                          f"{fmt_date(str(fa.dias[0]))} al {fmt_date(str(fa.dias[-1]))}).")
+            else:
+                ctx = _attr_ctx(res, fo)
+        elif not est["cargando"] and est["listo"]:
+            motivo = est["error"] or "No hay carteras diarias de este fondo en la ventana que guarda el caché."
+        return request.app.state.templates.get_template("partials/fondos_attr.html").render(
+            request=request, a=ctx, qs=qs, dim=dim, estado=est, motivo=motivo, fo=fo)
+
+    html = await asyncio.get_running_loop().run_in_executor(None, _armar)
+    if not est["cargando"] and est["listo"]:
+        if len(_memo) >= _MEMO_MAX:
+            _memo.clear()
+        _memo[key] = html
+    return HTMLResponse(html)
 
 
 @router.post("/releer", response_class=HTMLResponse)

@@ -199,7 +199,7 @@
     {# ── Atribución (lazy: recién al abrirla se lee la historia de carteras) ── #}
     <details class="fondo-attr u-mt12" id="fondo-attr-box">
       <summary>{{ icon("scale") }} <b>Atribución del rendimiento</b> <span class="muted">· qué activos y categorías explican el resultado de la ventana</span></summary>
-      <div id="fondo-attr" hx-get="/fondos/atribucion?f={{ fo.cafci }}&rango={{ det.rango }}&desde={{ det.desde }}&hasta={{ det.hasta }}"
+      <div id="fondo-attr" hx-get="/fondos/atribucion?f={{ fo.cafci }}&clase={{ det.clase | urlencode }}&vs={{ det.vs | urlencode }}&rango={{ det.rango }}&desde={{ det.desde }}&hasta={{ det.hasta }}"
            hx-trigger="toggle from:#fondo-attr-box once" hx-swap="innerHTML" hx-request='{"timeout":120000}'>
         {{ skeleton(4, "Armando la atribución…") }}
       </div>

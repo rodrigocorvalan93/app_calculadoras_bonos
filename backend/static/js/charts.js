@@ -1324,7 +1324,8 @@
       }
       var dec = j.dec == null ? 2 : j.dec, suf = j.suf || "";
       function fv(v, h) { return v == null ? "" : (h ? hum(v) : (v.toFixed(dec).replace(".", ",") + suf)); }
-      var colores = { acc: ACC, mut: MUT, red: RED };
+      // p0..p5: paleta para varias series (contribución por grupo); se lee bien en los tres temas
+      var colores = { acc: ACC, mut: MUT, red: RED, p0: ACC, p1: "#38bdf8", p2: "#a78bfa", p3: GRN, p4: "#f472b6", p5: "#facc15" };
       var series = [{ label: "Fecha", value: function (uu, v) { return v == null ? "" : utcDia(v); } }], data = [j.x], hayY2 = false;
       j.series.forEach(function (s) {
         var col = colores[s.color] || ACC, o = { label: s.label, stroke: col, width: 1.6, points: { show: false }, spanGaps: true,
@@ -1345,7 +1346,7 @@
         }
         series.push(o); data.push(s.y);
       });
-      var ejeY = { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: j.hum ? 62 : 56,
+      var ejeY = { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: j.hum ? 62 : (suf.length > 1 ? 70 : 56),
                    values: function (uu, vals) { return vals.map(function (v) { return j.hum ? hum(v) : (fmtNum(v).replace(/,00$/, "") + suf); }); } };
       var axes = [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, values: ejeFechas }, ejeY];
       var scales = { x: { time: true } };
