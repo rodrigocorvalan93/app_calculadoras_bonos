@@ -176,6 +176,72 @@ The native leg is a no-op, so the **basic curve is FX-free** (native ficha
 fallbacks. Implemented in
 `backend.services.fx.normalize_price(price, leg, native, fx)`.
 
+**Un TICKER suelto se resuelve en `patas.leg_de` (26/11)**. La vista por pata
+de Mercado / Curvas (nativa + `leg`) siempre convirtió bien; lo que entraba
+por ticker no: la pata cruzada no tiene ficha (`GD30D`, `AL30C` → libro de
+Órdenes sin TIR, "Bono no encontrado" en el add-in) y la de pesos tiene una
+ficha en DÓLARES (`GD30` clean, `AL30`) que el add-in y las alertas valuaban
+con el precio en pesos crudo (TIR −100 %) y que el ticket de Órdenes usaba
+como moneda de la orden (VN 10.000 de AL30 en pesos "superaba" el tope en
+USD; GD30D por USD 17 M pasaba como pesos). `patas.leg_de(ticker)` →
+`Leg(ticker, calc, basis, native, propia)`: ficha que lo valúa (la nativa
+DIRTY) y moneda en que cotiza ESE ticker; memo por universo, µs. Reglas
+únicas: `pricing.es_especie_pesos(code)` (ficha USD / USB cuyo ticker cotiza
+en pesos: sin sufijo de pata, o una RAÍZ que termina en C / D con su propia
+pata cargada — `CO32D` → `CO32DC`) y `pricing.dirty_a_cotizacion(code, px,
+settle)` (el precio de BYMA es DIRTY por VN original; una ficha CLEAN lo
+quiere en % del residual sin corridos: `GD30` a 62 daba −35 % en el autofill
+de YAS en vez del 3,4 % de `GD30C`). Lo usan `book_context` (libro de Mercado
+/ Órdenes / pizarra: título y refresh con el ticker pedido, nota
+`.book-valua` con la ficha, la conversión y el CCL / MEP), `_row_for_code`
+(fila de un ticker sin ficha), `ordenes._moneda` = `patas.moneda_ticker`
+(tope y ticket en la moneda en que se OPERA) y `_theo_ref` (valor técnico
+llevado a esa moneda), `routes/excel._calc_batch` (sin precio = mercado del
+ticker; con precio, la pata sin ficha lo lleva a la nativa; un código con
+ficha conserva el basis de SU ficha, `GD30` = clean como en YAS),
+`alertas.current_value` / `add`, `pizarra._codigo_valido`,
+`pricing.market_last_native` y el writer del histórico (misma regla, mismos
+datos). Si un endpoint nuevo recibe un ticker, pasa por `patas.leg_de`:
+nunca `bond_meta(code)["moneda"]` como moneda de cotización.
+
+**TIR de la pata cruzada: reconvertida o al precio que entra (26/11)**.
+Selector "TIR pata USD / USB" en Curvas y Mercado. Reconvertida (default): el
+precio de la pata se lleva al dólar de la ficha (canje) = la TIR del bono.
+Al precio que entra: el precio tal cual contra el flujo (lo que rinde
+comprar por esa pata; difiere en ≈ canje / duration; es la "TIR directa" que
+el histórico guarda para la pata cruzada). El modo viaja ADENTRO de `leg`
+(`USB.dir` / `USD.dir`; `curves._leg_modo`, `_convierte`): todo lo que ya
+lleva la pata —keys de los memos, delta por filas, link y refresh del libro,
+what-if, `/graficos/data`— lleva el modo, así tabla, delta y libro no pueden
+quedar en modos distintos. El selector no tiene `name`: `app.js` cambia el
+valor de las opciones `data-leg` del select de pata y dispara su `change`.
+La pata en PESOS no tiene lectura directa (siempre ÷ FX) y la pata propia
+tampoco cambia. La fila afectada lleva `tir_directa` (celda `.tir-dir`,
+subrayado punteado) y el título de la tabla lo dice. No se persiste: cada
+carga arranca reconvertida.
+
+**Vistas por pata con memo por fila (26/11)**: `_rows_for` memoiza también
+las filas de `leg` ≠ nativa. Key = (código, plazo, fuente, settle, ts MAE,
+pata, SÍMBOLO de la pata, libro, huella del índice); el FX con el que se
+convirtió (`(fx.ccl, fx.usb)`, None si la fila no convierte) va como VALOR a
+validar —no en la key: una entrada por fila, sin acumular una por cada FX— y
+en `_rk`, la identidad de los memos del HTML por fila. Antes cada tick
+re-armaba y re-renderizaba TODAS las filas (corp_hdmep `leg=ARS`: p50 19,0 ·
+p95 20,8 ms → 5,5 · 6,3; `leg=USD` 18,3 · 20,4 → 4,8 · 5,8). Cuando el FX
+cambia (a lo sumo cada 5 s, TTL de `fx.get_fx`, y sólo si operó el par de
+referencia) las filas convertidas se re-arman: peor caso medido con FX nuevo
+en CADA pedido, corp_hdmep `leg=ARS` p50 26 · p95 35 ms, Mercado "todas"
+30 · 35. `_CROW_MEMO` / `_MROW_MEMO` al tope podan la mitad más vieja
+(`_podar_mitad`) en vez de `clear()`. Medido (80 llamadas, tick por pedido,
+ms avg · p50 · p95 · p99): libro por ticker `GD30` 1,9 · 1,8 · 2,2 · 2,4 y
+`GD30D` 1,8 · 1,7 · 2,7 · 2,8; `/ordenes/quote?code=GD30D` 2,0 · 1,9 · 2,3 ·
+4,3; `/market/snapshot/GD30` 0,9 · 0,8 · 1,0 · 1,1; add-in, 6 tickers sin
+precio 1,7 · 1,6 · 2,1 · 2,6; Curvas globales `leg=USB.dir` 1,6 · 1,6 · 1,9
+· 2,0. La fila sigue en ~15 µs (el resolver no se nota). Regresión:
+`tests/test_patas_tickers.py`. Queda como está y avisado al desk: el
+histórico guarda la pata cruzada de los soberanos con la TIR directa
+(decisión del 13/10), no la reconvertida.
+
 ## Cierre completo (`cierres/`)
 
 Además de la base px/tasas (xlsx + parquet, sólo bonos de las curvas), el

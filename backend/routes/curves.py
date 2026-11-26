@@ -29,8 +29,8 @@ from backend.services import auth as auth_svc, bond_universe, curves, fx as fx_s
 # benefits from fan-out across cores.
 _row_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="curve-rows")
 _bg_tasks: set = set()      # refs vivas de tasks fire-and-forget (create_task guarda débil)
-# (código, plazo, fuente, settle, ts MAE, versión 5D, huella del índice) →
-# (seq del símbolo, fila). Ver _rows_for.
+# (código, plazo, fuente, settle, ts MAE, versión 5D | pata + símbolo, libro,
+# huella del índice) → (seq del símbolo, fila, FX usado o None). Ver _rows_for.
 _ROW_MEMO: Dict[tuple, tuple] = {}
 _ROW_MEMO_MAX = 4096
 
@@ -41,8 +41,16 @@ def _podar_row_memo() -> None:
     pidió hace más). Antes `clear()`: con ~4000 entradas vivas (Curvas +
     Mercado + Inicio × plazos) cada tope re-armaba TODAS las curvas en el
     tick siguiente — un pico de cientos de ms cada tanto (revisión 22/10)."""
-    for k in list(itertools.islice(_ROW_MEMO, len(_ROW_MEMO) // 2)):
-        _ROW_MEMO.pop(k, None)
+    _podar_mitad(_ROW_MEMO)
+
+
+def _podar_mitad(memo: dict) -> None:
+    """Saca la mitad más vieja (orden de inserción). En los memos del HTML por
+    fila la key lleva la seq del símbolo, así que lo viejo es, casi todo, HTML
+    de ticks que ya pasaron; con `clear()` cada tope re-renderizaba TODAS las
+    tablas abiertas en el tick siguiente (26/11)."""
+    for k in list(itertools.islice(memo, len(memo) // 2)):
+        memo.pop(k, None)
 
 router = APIRouter(prefix="/curves", tags=["curves"])
 
@@ -58,8 +66,9 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 # La fila sale idéntica mientras no cambie su dict (`_rk` = key + seq del
 # símbolo en _ROW_MEMO) ni su fracción de volumen (relativa al máximo de la
 # tabla): se cachea el <tr> ya renderizado y compactado, y un tick re-renderiza
-# sólo las filas que cambiaron. Las filas sin `_rk` (leg no nativa, especie
-# pesos de un hard-dollar) se renderizan siempre.
+# sólo las filas que cambiaron. Las filas sin `_rk` (especie pesos de un
+# hard-dollar en la vista nativa, fuente MAE) se renderizan siempre; las de una
+# vista por pata llevan `_rk` con el FX que usaron (26/11).
 _CROW_MEMO: Dict[tuple, str] = {}
 _CROW_MAX = 8192
 _CROW_STATS: Dict[str, int] = {"render": 0, "hit": 0}
@@ -79,7 +88,7 @@ def _curve_rows_html(templates: Any, rows: list[dict], plazo: str) -> list[str]:
             _CROW_STATS["render"] += 1
             if k is not None:
                 if len(_CROW_MEMO) >= _CROW_MAX:
-                    _CROW_MEMO.clear()
+                    _podar_mitad(_CROW_MEMO)
                 _CROW_MEMO[k] = h
         else:
             _CROW_STATS["hit"] += 1
@@ -119,7 +128,7 @@ def _mercado_rows_html(templates: Any, rows: list[dict], plazo: str, leg: str,
             _MROW_STATS["render"] += 1
             if k is not None:
                 if len(_MROW_MEMO) >= _MROW_MAX:
-                    _MROW_MEMO.clear()
+                    _podar_mitad(_MROW_MEMO)
                 _MROW_MEMO[k] = h
         else:
             _MROW_STATS["hit"] += 1
@@ -559,31 +568,55 @@ async def _rows_for(
     # lleva `_rk` = (key, seq del símbolo), la identidad que usa el memo del
     # HTML por fila de la tabla de Curvas (_curve_rows_html).
     memo_ok = leg == "native" and fuente != "mae"
+    # Vistas por PATA (leg ARS / USD / USB, 26/11): la fila depende del
+    # snapshot del ticker de ESA pata y, si convierte, del FX implícito — que
+    # cambia a lo sumo cada 5 s (TTL de `fx.get_fx`) y sólo si operó el par de
+    # referencia. Hasta acá no se memoizaban: cada tick re-armaba y, sobre
+    # todo, re-renderizaba las 135 filas de una curva corporativa (medido:
+    # 20 ms por tick contra 5 de la vista nativa). El FX va como VALOR a
+    # validar (no en la key: una entrada por fila, sin acumular una por cada
+    # FX) y en `_rk`, la identidad que usan los memos del HTML por fila.
+    memo_leg = leg != "native" and fuente != "mae"
+    directo = _leg_modo(leg)[1]
+    fxk = (fx.ccl, fx.usb) if (memo_leg and fx is not None) else None
     # El snapshot MAE sólo entra a la fila con book=True (`row["mae"]`): en la
     # key de Curvas (book=False) invalidaba TODAS las filas memoizadas cada vez
     # que el poller MAE refrescaba (~20 s) sin que ninguna cambiara (revisión 22/10).
-    mae_ts = mae_svc.snapshot_ts() if (memo_ok and book) else None
+    mae_ts = mae_svc.snapshot_ts() if ((memo_ok or memo_leg) and book) else None
     ref5 = historico_byma.ref_5d_version() if memo_ok else None
     store = marketdata_store.get_store()
 
     def _build_all() -> list[dict]:
         out: list[dict] = []
         for c in codes:
-            if memo_ok and not _pesos_de_dolar(c, pricing.bond_meta(c)):
-                snap = store.get(syms.md_symbol(c, plazo))
-                sseq = int(getattr(snap, "seq", 0) or 0) if snap is not None else -1
-                key = (c, plazo, fuente, settle, mae_ts, ref5, book,
+            meta_c = pricing.bond_meta(c)
+            sym = fx_fila = None
+            if memo_ok:
+                if not _pesos_de_dolar(c, meta_c):
+                    sym = syms.md_symbol(c, plazo)
+                    key = (c, plazo, fuente, settle, mae_ts, ref5, book,
+                           pricing._index_fingerprint(pricing._bond_index_kind(c)))
+            elif memo_leg and meta_c:
+                sym, basis = _leg_symbol(c, plazo, leg, store)
+                # sólo la fila que de verdad convierte depende del FX (la pata
+                # propia y la cruzada en modo directo, no)
+                if _convierte(basis, meta_c.get("moneda") or "USD", directo):
+                    fx_fila = fxk
+                key = (c, plazo, fuente, settle, mae_ts, leg, sym, book,
                        pricing._index_fingerprint(pricing._bond_index_kind(c)))
+            if sym is not None:
+                snap = store.get(sym)
+                sseq = int(getattr(snap, "seq", 0) or 0) if snap is not None else -1
                 ent = _ROW_MEMO.get(key)
-                if ent is not None and ent[0] == sseq:
+                if ent is not None and ent[0] == sseq and ent[2] == fx_fila:
                     r = dict(ent[1]) if ent[1] is not None else None
                 else:
                     r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
                     if len(_ROW_MEMO) >= _ROW_MEMO_MAX:
                         _podar_row_memo()
-                    _ROW_MEMO[key] = (sseq, dict(r) if r is not None else None)
+                    _ROW_MEMO[key] = (sseq, dict(r) if r is not None else None, fx_fila)
                 if r is not None:
-                    r["_rk"] = (key, sseq)
+                    r["_rk"] = (key, sseq) if fx_fila is None else (key, sseq, fx_fila)
             else:
                 r = _row_for_code(c, plazo, leg, fx, book, fuente, settle)
             if r is not None:

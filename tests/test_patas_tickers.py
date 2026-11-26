@@ -371,3 +371,89 @@ async def test_http_switch_de_tir_en_curvas_mercado_y_libro(tres_patas):
         i = g_dire["codes"].index("GD30C")
         y_dire = next(v for v in (g_dire["usd"][i], g_dire["ars"][i]) if v is not None)
         assert y_conv == pytest.approx(ref["GD30"] * 100, abs=1e-3) and y_dire == pytest.approx(directa * 100, abs=1e-3)
+
+
+# ── Eficiencia: las vistas por pata usan el memo por fila (FX como valor) ────
+@pytest.mark.asyncio
+async def test_vista_por_pata_memoiza_filas_y_el_fx_las_invalida(tres_patas, monkeypatch):
+    """Hasta el 26/11 una vista por pata (leg ARS / USD / USB) re-armaba y
+    re-renderizaba TODAS las filas en cada tick. Ahora la fila se reusa mientras
+    no cambie el snapshot de SU ticker ni el FX con el que se convirtió."""
+    from backend.main import app
+    store, ref, settle = tres_patas["store"], tres_patas["ref"], tres_patas["settle"]
+    rc._ROW_MEMO.clear(); rc._CROW_MEMO.clear(); rc._MROW_MEMO.clear()
+    armadas: list = []
+    real = rc._row_for_code
+
+    def espia(code, plazo, leg="native", *a, **k):
+        armadas.append((code, leg))
+        return real(code, plazo, leg, *a, **k)
+
+    monkeypatch.setattr(rc, "_row_for_code", espia)
+
+    async def filas(leg):
+        armadas.clear()
+        rows, _ = await rc._rows_for("globales", "24hs", True, leg)
+        return {r["code"]: r for r in rows}, list(armadas)
+
+    n_glob = len(curves.build_curve_codes()["globales"])
+    f1, a1 = await filas("USB")
+    assert len(a1) == n_glob and f1["GD30C"]["tirea"] == pytest.approx(ref["GD30"], abs=1e-9)
+    f2, a2 = await filas("USB")
+    assert a2 == [] and f2["GD30C"]["tirea"] == f1["GD30C"]["tirea"]             # nada se re-arma
+    assert f2["GD30C"]["_rk"] == f1["GD30C"]["_rk"] and len(f1["GD30C"]["_rk"]) == 3   # (key, seq, FX)
+    f2["GD30C"]["tirea"] = -1.0                                                   # el caller muta SU copia
+    assert (await filas("USB"))[0]["GD30C"]["tirea"] == f1["GD30C"]["tirea"]
+    # un tick en OTRO símbolo (la nativa: no es el ticker de esta vista ni mueve el FX) no re-arma nada
+    store.update_from_md(syms.md_symbol("GD35C", "24hs"), {"NV": 5})
+    assert (await filas("USB"))[1] == []
+    # un tick en el ticker de la pata re-arma sólo ESA fila
+    px_d = PG * CCL / MEP
+    store.update_from_md(syms.md_symbol("GD30D", "24hs"), {"LA": {"price": px_d * 1.01, "size": 10, "date": "1"}})
+    f3, a3 = await filas("USB")
+    assert a3 == [("GD30C", "USB")] and f3["GD30C"]["last"] == pytest.approx(px_d * 1.01)
+    assert f3["GD30C"]["tirea"] < f1["GD30C"]["tirea"] and f3["GD30C"]["_rk"] != f1["GD30C"]["_rk"]
+    # el HTML por fila sigue al memo: una sola fila renderizada tras el tick
+    tpls = app.state.templates
+    rows, _ = await rc._rows_for("globales", "24hs", True, "USB")
+    rc._curve_rows_html(tpls, rows, "24hs")
+    r0 = rc._CROW_STATS["render"]
+    store.update_from_md(syms.md_symbol("GD30D", "24hs"), {"LA": {"price": px_d, "size": 10, "date": "1"}})
+    rows, _ = await rc._rows_for("globales", "24hs", True, "USB")
+    html = rc._curve_rows_html(tpls, rows, "24hs")
+    assert rc._CROW_STATS["render"] - r0 <= 2 and len(html) == len(rows)     # la fila que cambió (+ la de máx. volumen)
+    # cambia el FX (opera AL30D, la pata dólar del par de referencia: el MEP pasa de 1450 a 1460 con
+    # el CCL quieto → cambia el canje) → las filas CONVERTIDAS se re-arman
+    f4, _a = await filas("USB")
+    _seed(store, "AL30D", PA * MEP / 1460.0)
+    fx_svc.invalidate()
+    fx = fx_svc.get_fx("24hs")
+    assert fx.usb == pytest.approx(1460.0) and fx.ccl == pytest.approx(CCL)
+    f5, a5 = await filas("USB")
+    con_precio = {c for c, r in f4.items() if r.get("last") is not None}
+    assert {c for c, _l in a5} >= con_precio and len(a5) == n_glob
+    assert f5["GD30C"]["px_calc"] == pytest.approx(px_d * 1460.0 / CCL)          # × MEP nuevo ÷ CCL
+    assert f5["GD30C"]["tirea"] != f4["GD30C"]["tirea"] and f5["GD30C"]["_rk"] != f4["GD30C"]["_rk"]
+    # en modo directo la fila cruzada NO depende del FX: el mismo cambio no re-arma nada
+    await filas("USB.dir")
+    _seed(store, "AL30D", PA * MEP / 1470.0)
+    fx_svc.invalidate()
+    assert fx_svc.get_fx("24hs").usb == pytest.approx(1470.0)
+    f6, a6 = await filas("USB.dir")
+    assert a6 == [] and f6["GD30C"]["tir_directa"] and len(f6["GD30C"]["_rk"]) == 2
+    assert f6["GD30C"]["tirea"] == pytest.approx(pricing.metrics_for_market_price("GD30C", px_d, settle)["tirea"], abs=1e-12)
+    # y las dos vistas no se pisan entre sí (la pata va en la key)
+    assert (await filas("USB"))[0]["GD30C"]["tirea"] != f6["GD30C"]["tirea"]
+    assert (await filas("USB.dir"))[1] == []
+    # la vista nativa sigue con su memo de siempre
+    await filas("native")
+    assert (await filas("native"))[1] == []
+    rc._ROW_MEMO.clear(); rc._CROW_MEMO.clear(); rc._MROW_MEMO.clear()
+
+
+def test_memos_de_html_podan_la_mitad_mas_vieja(monkeypatch):
+    d = {i: str(i) for i in range(10)}
+    rc._podar_mitad(d)
+    assert list(d) == [5, 6, 7, 8, 9]
+    rc._podar_mitad(d)
+    assert list(d) == [7, 8, 9]
