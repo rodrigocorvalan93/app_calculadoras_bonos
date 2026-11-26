@@ -12,6 +12,12 @@
       <button type="button" class="lnk" data-csv-of="#fondos-tbl" title="Descargar la tabla como se ve (CSV es-AR)">⤓ CSV</button>
     </span>
   </div>
+  {% if marcador %}
+  <div class="f-marcador muted u-sm" title="De los fondos que seguís (★), cuántos le ganan a la referencia elegida y el exceso promedio simple.">
+    Mis fondos vs referencia:
+    {% for m in marcador %}<span class="u-nowrap"><b>{{ m.lbl }}</b> {{ m.arriba }} de {{ m.n }} arriba · prom. <span class="{{ m.cls }}">{{ m.prom }}</span></span>{{ " · " if not loop.last else "" }}{% endfor %}
+  </div>
+  {% endif %}
   {% if estado.avisos %}
   <div class="alert u-mb8">{{ icon("warning") }} {% for a in estado.avisos %}{{ a }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
   {% endif %}

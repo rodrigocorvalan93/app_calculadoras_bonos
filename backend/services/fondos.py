@@ -402,8 +402,9 @@ def _leer_bench(path: Optional[str], fechas: np.ndarray) -> Tuple[Dict[int, np.n
 
 
 def _clave_col(s: str) -> str:
-    """Nombre de columna normalizado para comparar (sin acentos ni espacios)."""
-    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+    """Nombre de columna normalizado para comparar (sin acentos, espacios ni
+    signos; un `&amp;` que dejó algún exportador vale como `&`)."""
+    s = unicodedata.normalize("NFKD", str(s).replace("&amp;", "&")).encode("ascii", "ignore").decode()
     return "".join(ch for ch in s.lower() if ch.isalnum())
 
 
@@ -702,7 +703,11 @@ def _tarea() -> None:
         rs = rutas()
         firma = _firma(rs)
         with _lock:
-            if _estado["datos"] is not None and firma == _estado["firma"]:
+            d0 = _estado["datos"]
+            # misma firma y todo leído: nada que hacer. Con un extra que no se
+            # pudo leer (marcador de OneDrive: bajarlo NO cambia mtime ni
+            # tamaño) se vuelve a intentar en cada re-chequeo.
+            if d0 is not None and firma == _estado["firma"] and not d0.avisos:
                 return
         try:
             d = _construir(rs)
@@ -739,6 +744,19 @@ def asegurar() -> Optional[Datos]:
         _estado["chequeo"] = ahora
     threading.Thread(target=_tarea, name="fondos-carga", daemon=True).start()
     return d
+
+
+def precargar() -> None:
+    """Dispara la carga en segundo plano si todavía no se hizo (la llama Inicio
+    cuando entra un superuser: la pestaña abre con los datos ya en memoria).
+    `FONDOS_PRECARGA=0` la apaga. Con los datos cargados no hace nada: el
+    re-chequeo de firmas queda para cuando la pestaña está en uso."""
+    if (os.getenv("FONDOS_PRECARGA") or "1") == "0":
+        return
+    with _lock:
+        if _estado["datos"] is not None or _estado["cargando"] or _estado["error"]:
+            return
+    asegurar()
 
 
 def cargar_ahora() -> Optional[Datos]:

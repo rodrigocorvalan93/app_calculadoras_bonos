@@ -62,82 +62,72 @@
     </div>
   </div>
 
-  <div class="attr-grid u-mt8">
-    <div>
-      <div class="fondo-sub">{{ icon("pie") }} Por {{ a.dim_lbl | lower }}
-        <button type="button" class="lnk" data-csv-of="#fondo-attr-tbl" title="CSV es-AR">⤓</button></div>
-      <div class="table-scroll">
-      <table class="cashflows attr-tbl" id="fondo-attr-tbl" data-sortable>
-        <thead><tr>
-          <th class="u-left">{{ a.dim_lbl }}</th>
-          <th title="Peso promedio al abrir cada día de la ventana">Peso prom.</th>
-          <th title="Peso en la última cartera de la ventana">Peso hoy</th>
-          <th title="Contribución ÷ peso promedio (aproximado)">Retorno ≈</th>
-          <th title="Puntos del retorno de la cuotaparte que explica el grupo">Contribución</th>
-          {% if a.ref %}<th title="Peso × (retorno del activo − retorno de la referencia): lo que el grupo le sacó (o cedió) a {{ a.ref }}">vs referencia</th>{% endif %}
-        </tr></thead>
-        <tbody>
-          {% for g in a.grupos %}
-          <tr><td class="u-left">{{ g.nombre }}</td><td>{{ g.w_prom }}</td><td>{{ g.w_hoy }}</td><td>{{ g.ret }}</td>
-            <td class="a-bar {{ g.cls }}" style="--w:{{ g.w }}%"><b>{{ g.c }}</b></td>
-            {% if a.ref %}<td class="{{ g.e_cls }}">{{ g.e }}</td>{% endif %}</tr>
-          {% endfor %}
-        </tbody>
-        <tfoot>
-          <tr class="a-total"><td class="u-left">Cartera</td><td>{{ a.peso_abierto }}</td><td></td><td></td><td>{{ a.cartera_pp }}</td>
-            {% if a.ref %}<td class="{{ a.exceso_cartera_cls }}">{{ a.exceso_cartera }}</td>{% endif %}</tr>
-          {% if a.fee_est %}
-          <tr class="a-resto"><td class="u-left">Honorarios (estimado, adm. {{ a.fee }})</td><td></td><td></td><td></td><td>{{ a.fee_est }}</td>{% if a.ref %}<td></td>{% endif %}</tr>
-          <tr class="a-resto"><td class="u-left">Otros sin explicar</td><td></td><td></td><td></td><td class="{{ a.otros_cls }}">{{ a.otros }}</td>{% if a.ref %}<td></td>{% endif %}</tr>
-          {% else %}
-          <tr class="a-resto"><td class="u-left">Sin explicar (incluye honorarios)</td><td></td><td></td><td></td><td class="{{ a.residual_cls }}">{{ a.residual }}</td>{% if a.ref %}<td>{{ a.exceso_resto }}</td>{% endif %}</tr>
-          {% endif %}
-          <tr class="a-total"><td class="u-left">Cuotaparte</td><td></td><td></td><td></td><td>{{ a.total }}</td>
-            {% if a.ref %}<td class="{{ a.exceso_cls }}">{{ a.exceso }}</td>{% endif %}</tr>
-        </tfoot>
-      </table>
-      </div>
+  <div class="u-mt8">
+    <div class="fondo-sub">{{ icon("pie") }} Por {{ a.dim_lbl | lower }}
+      <button type="button" class="lnk" data-csv-of="#fondo-attr-tbl" title="CSV es-AR">⤓</button></div>
+    <div class="table-scroll">
+    <table class="cashflows attr-tbl" id="fondo-attr-tbl" data-sortable>
+      <thead><tr>
+        <th class="u-left">{{ a.dim_lbl }}</th>
+        <th title="Peso promedio al abrir cada día de la ventana">Peso prom.</th>
+        <th title="Peso en la última cartera de la ventana">Peso hoy</th>
+        <th title="Contribución ÷ peso promedio (aproximado)">Retorno ≈</th>
+        <th title="Puntos del retorno de la cuotaparte que explica el grupo">Contribución</th>
+        {% if a.ref %}<th title="Peso × (retorno del activo − retorno de la referencia): lo que el grupo le sacó (o cedió) a {{ a.ref }}">vs referencia</th>{% endif %}
+      </tr></thead>
+      <tbody>
+        {% for g in a.grupos %}
+        <tr><td class="u-left" title="{{ g.nombre }}">{{ g.nombre }}</td><td>{{ g.w_prom }}</td><td>{{ g.w_hoy }}</td><td>{{ g.ret }}</td>
+          <td class="a-bar {{ g.cls }}" style="--w:{{ g.w }}%"><b>{{ g.c }}</b></td>
+          {% if a.ref %}<td class="{{ g.e_cls }}">{{ g.e }}</td>{% endif %}</tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="a-total"><td class="u-left">Cartera</td><td>{{ a.peso_abierto }}</td><td></td><td></td><td>{{ a.cartera_pp }}</td>
+          {% if a.ref %}<td class="{{ a.exceso_cartera_cls }}">{{ a.exceso_cartera }}</td>{% endif %}</tr>
+        {% if a.fee_est %}
+        <tr class="a-resto"><td class="u-left">Honorarios (estimado, adm. {{ a.fee }})</td><td></td><td></td><td></td><td>{{ a.fee_est }}</td>{% if a.ref %}<td></td>{% endif %}</tr>
+        <tr class="a-resto"><td class="u-left">Otros sin explicar</td><td></td><td></td><td></td><td class="{{ a.otros_cls }}">{{ a.otros }}</td>{% if a.ref %}<td></td>{% endif %}</tr>
+        {% else %}
+        <tr class="a-resto"><td class="u-left">Sin explicar (incluye honorarios)</td><td></td><td></td><td></td><td class="{{ a.residual_cls }}">{{ a.residual }}</td>{% if a.ref %}<td>{{ a.exceso_resto }}</td>{% endif %}</tr>
+        {% endif %}
+        <tr class="a-total"><td class="u-left">Cuotaparte</td><td></td><td></td><td></td><td>{{ a.total }}</td>
+          {% if a.ref %}<td class="{{ a.exceso_cls }}">{{ a.exceso }}</td>{% endif %}</tr>
+      </tfoot>
+    </table>
     </div>
-    <div>
-      <div class="fondo-chart-box">
-        <div class="fondo-chart-t">Contribución acumulada <span class="muted">· por {{ a.dim_lbl | lower }}, puntos porcentuales</span></div>
-        <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ a.charts.grupos | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
-      </div>
+  </div>
+
+  <div class="fondo-charts u-mt12">
+    <div class="fondo-chart-box">
+      <div class="fondo-chart-t">Contribución acumulada <span class="muted">· por {{ a.dim_lbl | lower }}, puntos porcentuales</span></div>
+      <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ a.charts.grupos | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
+    </div>
+    <div class="fondo-chart-box">
+      <div class="fondo-chart-t">Cuotaparte vs lo que explica la cartera <span class="muted">· la distancia entre las dos es lo «sin explicar»</span></div>
+      <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ a.charts.expl | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
     </div>
   </div>
 
   <div class="attr-grid attr-pares u-mt12">
+    {% for titulo, filas, vacio in (("Lo que más sumó", a.suben, "Ninguna tenencia sumó en la ventana."),
+                                    ("Lo que más restó", a.bajan, "Ninguna tenencia restó en la ventana.")) %}
     <div>
-      <div class="fondo-sub">{{ icon("chart-line") }} Lo que más sumó</div>
-      <table class="cashflows attr-tbl">
+      <div class="fondo-sub">{{ icon("chart-line") }} {{ titulo }}</div>
+      <div class="table-scroll">
+      <table class="cashflows attr-tbl attr-act">
         <thead><tr><th class="u-left">Activo</th><th class="u-left">{{ a.dim_lbl }}</th><th>Peso prom.</th><th>Retorno ≈</th><th>Contribución</th></tr></thead>
         <tbody>
-          {% for g in a.suben %}
-          <tr title="{{ g.desc }}"><td class="u-left"><b>{{ g.nombre }}</b></td><td class="u-left muted u-ellipsis attr-grp">{{ g.grupo }}</td><td>{{ g.w_prom }}</td><td>{{ g.ret }}</td>
+          {% for g in filas %}
+          <tr title="{{ g.desc }}"><td class="u-left"><b>{{ g.nombre }}</b></td><td class="u-left muted attr-grp">{{ g.grupo }}</td><td>{{ g.w_prom }}</td><td>{{ g.ret }}</td>
             <td class="a-bar {{ g.cls }}" style="--w:{{ g.w }}%">{{ g.c }}</td></tr>
-          {% else %}<tr><td colspan="5" class="muted u-left">Ninguna tenencia sumó en la ventana.</td></tr>
+          {% else %}<tr><td colspan="5" class="muted u-left">{{ vacio }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </div>
-    <div>
-      <div class="fondo-sub">{{ icon("chart-line") }} Lo que más restó</div>
-      <table class="cashflows attr-tbl">
-        <thead><tr><th class="u-left">Activo</th><th class="u-left">{{ a.dim_lbl }}</th><th>Peso prom.</th><th>Retorno ≈</th><th>Contribución</th></tr></thead>
-        <tbody>
-          {% for g in a.bajan %}
-          <tr title="{{ g.desc }}"><td class="u-left"><b>{{ g.nombre }}</b></td><td class="u-left muted u-ellipsis attr-grp">{{ g.grupo }}</td><td>{{ g.w_prom }}</td><td>{{ g.ret }}</td>
-            <td class="a-bar {{ g.cls }}" style="--w:{{ g.w }}%">{{ g.c }}</td></tr>
-          {% else %}<tr><td colspan="5" class="muted u-left">Ninguna tenencia restó en la ventana.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="fondo-chart-box u-mt12">
-    <div class="fondo-chart-t">Cuotaparte vs lo que explica la cartera <span class="muted">· acumulado en la ventana; la distancia entre las dos es lo «sin explicar»</span></div>
-    <div class="fondo-chart" data-fondos-chart><script type="application/json">{{ a.charts.expl | safe }}</script>{{ skeleton(3, "Gráfico…") }}</div>
+    {% endfor %}
   </div>
 
   <p class="muted u-note u-mt8">

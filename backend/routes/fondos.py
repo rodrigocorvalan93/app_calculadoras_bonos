@@ -166,15 +166,30 @@ async def fondos_page(request: Request, f: Optional[int] = None) -> HTMLResponse
                    sel=f, periodos=fc.PERIODOS)
 
 
+def _marcador(filas: List[Dict[str, Any]], seg: List[int]) -> List[Dict[str, Any]]:
+    """«Mis fondos» contra la referencia: cuántos le ganan en MTD / YTD / 1 año
+    (sólo los que tienen referencia y dato en el período)."""
+    seguidos = set(seg)
+    mios = [r for r in filas if r["cafci"] in seguidos]
+    out = []
+    for k, lbl in (("mtd", "MTD"), ("ytd", "YTD"), ("d365", "1 año")):
+        xs = [r["per"][k]["x"] for r in mios if r["per"][k]["x"] is not None]
+        if xs:
+            out.append({"lbl": lbl, "arriba": sum(1 for x in xs if x > 5e-5), "n": len(xs),
+                        "prom": pp(sum(xs) / len(xs)), "cls": cls(sum(xs) / len(xs))})
+    return out
+
+
 def _tablero_html(request: Request, d: fsvc.Datos, vs: str, ver: str, seg: List[int]) -> str:
     key = ("tab", d.version, vs, ver, tuple(seg))
     hit = _memo.get(key)
     if hit is not None:
         return hit
-    filas = _filas_fmt(fsvc.tablero(d, vs), ver, seg)
+    crudas = fsvc.tablero(d, vs)
+    filas = _filas_fmt(crudas, ver, seg)
     html = request.app.state.templates.get_template("partials/fondos_tablero.html").render(
         request=request, filas=filas, periodos=fc.PERIODOS, ver=ver, vs=vs, estado=_estado_ctx(),
-        n_seg=sum(1 for r in filas if r["seg"]))
+        n_seg=sum(1 for r in filas if r["seg"]), marcador=_marcador(crudas, seg))
     if len(_memo) >= _MEMO_MAX:
         _memo.clear()
     _memo[key] = html
@@ -440,7 +455,8 @@ async def fondos_atribucion(request: Request, f: int, clase: str = "", vs: str =
                           f"{fmt_date(str(fa.dias[0]))} al {fmt_date(str(fa.dias[-1]))}).")
             else:
                 ctx = _attr_ctx(res, fo)
-        elif not est["cargando"] and est["listo"]:
+        elif not est["cargando"]:
+            # el armado ya terminó (o no pudo empezar): sin carteras de este fondo, se dice por qué
             motivo = est["error"] or "No hay carteras diarias de este fondo en la ventana que guarda el caché."
         return request.app.state.templates.get_template("partials/fondos_attr.html").render(
             request=request, a=ctx, qs=qs, dim=dim, estado=est, motivo=motivo, fo=fo)

@@ -184,7 +184,7 @@
           <tbody>
             {% for c in det.clases %}
             <tr class="{{ 'f-sel' if c.elegida else '' }}{{ '' if c.viva else ' f-cerrada' }}">
-              <td class="u-left"><a href="#" onclick="var f=document.querySelector('.fondo-form');f.clase.value='{{ c.clase | e }}';htmx.trigger(f,'change');return false;">{{ c.clase }}</a>{% if c.principal %} <span class="chip" title="Clase emblema del fondo">emblema</span>{% endif %}{% if not c.viva %} <span class="muted u-xs">hasta {{ c.fecha }}</span>{% endif %}</td>
+              <td class="u-left"><a href="#" data-clase="{{ c.clase }}" onclick="var f=document.querySelector('.fondo-form');f.clase.value=this.getAttribute('data-clase');htmx.trigger(f,'change');return false;">{{ c.clase }}</a>{% if c.principal %} <span class="chip" title="Clase emblema del fondo">emblema</span>{% endif %}{% if not c.viva %} <span class="muted u-xs">hasta {{ c.fecha }}</span>{% endif %}</td>
               <td>{{ c.fee }}</td><td>{{ c.vcp }}</td><td>{{ c.pn }}</td>
               {% for v in c.per %}<td>{{ v }}</td>{% endfor %}
             </tr>

@@ -86,6 +86,9 @@ async def _contexto() -> Dict[str, Any]:
 
 @router.get("/inicio", response_class=HTMLResponse)
 async def inicio_page(request: Request) -> HTMLResponse:
+    if getattr(request.state, "is_superuser", False):
+        from backend.services import fondos
+        fondos.precargar()               # la pestaña Fondos abre con los datos ya en memoria (thread; µs acá)
     ctx = await _contexto()
     prefs = await _prefs(request)
     piz = await _pizarra_ctx(request, prefs)

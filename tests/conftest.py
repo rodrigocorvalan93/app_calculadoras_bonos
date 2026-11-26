@@ -50,6 +50,11 @@ os.environ.setdefault("PROYECCIONES_WATCH", "0")
 # data/fondos_prefs.json real; los tests que cargan datos apuntan
 # FONDOS_BASES_DIR a su tmp_path.
 os.environ.setdefault("FONDOS_PREFS_PATH", os.path.join(tempfile.mkdtemp(prefix="bonos_test_fondos_"), "fondos_prefs.json"))
+# Atribución de Fondos: el caché de carteras en un tmp y el conversor en el
+# mismo proceso (un test ejercita el proceso aparte de verdad).
+os.environ.setdefault("FONDOS_ATTR_CACHE", tempfile.mkdtemp(prefix="bonos_test_fondos_attr_"))
+os.environ.setdefault("FONDOS_ATTR_SUBPROCESO", "0")
+os.environ.setdefault("FONDOS_PRECARGA", "0")       # Inicio no dispara la lectura de los archivos de fondos
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-fixed-for-suite-0123456789")
 os.environ.setdefault("APP_USERS_PATH", os.path.join(tempfile.gettempdir(), "bonos_test_auth_store.json"))
 # Bootstrap del superuser de la suite: valores SINTÉTICOS (nunca una cuenta

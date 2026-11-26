@@ -209,6 +209,28 @@ def test_conversor_como_proceso_aparte(bases, tmp_path, monkeypatch):
     assert "3 día(s)" in r.stdout
 
 
+def test_el_servicio_lanza_el_conversor_en_otro_proceso(bases, monkeypatch):
+    """Producción: `fondos_attr` arma el caché con un proceso hijo y recién después lee."""
+    monkeypatch.setenv("FONDOS_ATTR_SUBPROCESO", "1")
+    lanzados = []
+    real = fattr.subprocess.Popen
+
+    def popen(cmd, **kw):
+        lanzados.append(cmd)
+        return real(cmd, **kw)
+
+    monkeypatch.setattr(fattr.subprocess, "Popen", popen)
+    est = fattr.armar_ahora()
+    assert est["listo"] and not est["cargando"] and est["error"] is None and est["progreso"] is None
+    assert len(lanzados) == 1 and lanzados[0][1:3] == ["-m", "backend.tools.fondos_carteras"]
+    assert len(fattr._archivos()) == 18 and fattr._estado["proc"] is None
+    fa = fattr.fondo(bases, 473)
+    assert fa is not None and len(fa.dias) == 18
+    # ya está todo convertido: el re-chequeo no lanza otro proceso (sólo stats)
+    fattr.armar_ahora()
+    assert len(lanzados) == 1
+
+
 # ── motor ────────────────────────────────────────────────────────────────────
 def test_atribucion_contra_la_cuenta_a_mano(bases):
     d = bases
@@ -311,10 +333,14 @@ def test_cobro_en_dolares_en_un_fondo_en_pesos_usa_el_ccl(bases, monkeypatch):
     assert int((con.ev_flag == fattr.F_COBRO).sum()) == 1 and int((sin_fx.ev_flag == fattr.F_COBRO).sum()) == 0
     e = int(np.flatnonzero(con.ev_flag == fattr.F_COBRO)[0])
     assert con.ev_r[e] == pytest.approx(1.0 / 1.05 * 1.001 - 1 + 0.05 / (1.05 * 1.001 ** (I_CUPON - 1)), rel=1e-9)
-    # en un fondo en dólares el mismo cronograma va sin convertir (no hace falta el CCL)
+    # en un fondo en dólares el cronograma va sin convertir: 0,00005 por VN contra una caída de 4,7 % no
+    # es del orden del corte (unidades que no cierran) → no se suma; con 0,05 por VN sí, sin CCL
+    usd = fattr._armar_fondo(13, arch, "USD", None)
+    assert int((usd.ev_flag == fattr.F_COBRO).sum()) == 0
+    monkeypatch.setattr(fattr, "_pagos", lambda tk, isin, pago: ([(cupon, 0.05)], True) if tk == "CUPON" else None)
     usd = fattr._armar_fondo(13, arch, "USD", None)
     e = int(np.flatnonzero(usd.ev_flag == fattr.F_COBRO)[0])
-    assert usd.ev_r[e] == pytest.approx(1.0 / 1.05 * 1.001 - 1 + 0.00005 / (1.05 * 1.001 ** (I_CUPON - 1)), rel=1e-9)
+    assert usd.ev_r[e] == pytest.approx(1.0 / 1.05 * 1.001 - 1 + 0.05 / (1.05 * 1.001 ** (I_CUPON - 1)), rel=1e-9)
 
 
 def test_estado_sin_carpeta_de_carteras(tmp_path, monkeypatch):
@@ -334,6 +360,24 @@ def test_estado_sin_carpeta_de_carteras(tmp_path, monkeypatch):
 
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_http_atribucion_sin_carpeta_de_carteras_dice_por_que(tmp_path, monkeypatch):
+    base = tmp_path / "Delta Bases"
+    _armar_bases(base)
+    monkeypatch.setenv("FONDOS_BASES_DIR", str(base))
+    monkeypatch.setenv("FONDOS_ATTR_CACHE", str(tmp_path / "cache"))
+    fsvc.reset()
+    fattr.reset()
+    fsvc.cargar_ahora()
+    fattr.armar_ahora()
+    async with _client() as ac:
+        r = await ac.get("/fondos/atribucion", params={"f": 473})
+        assert r.status_code == 200 and "No encuentro la carpeta Carteras" in r.text
+        assert "hx-trigger" not in r.text                      # no queda sondeando para siempre
+    fsvc.reset()
+    fattr.reset()
+
+
 def _client() -> AsyncClient:
     from backend.main import app
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")

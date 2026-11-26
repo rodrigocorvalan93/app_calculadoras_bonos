@@ -20,6 +20,7 @@ from httpx import ASGITransport, AsyncClient
 from backend.config import settings
 from backend.services import auth
 from backend.services import fondos as fsvc
+from backend.services import fondos_attr as fattr
 from backend.services import fondos_calc as fc
 
 D0, D1 = "2025-01-02", "2026-11-25"
@@ -73,10 +74,11 @@ def _armar_bases(base) -> None:
     (base / "Text" / "Fondos" / "Delta_Benchmarks.txt").write_text("\n".join(lineas) + "\n", encoding="utf-8")
 
     # índices: A3500 y CER como nivel, Badlar como tasa (% TNA) — días corridos
-    li = ["year;month;day;A3500;CER;Badlar_Privada;Merval"]
+    li = ["year;month;day;A3500;CER;Badlar_Privada;Merval;ETF S&P 500"]
     for j, f in enumerate(cal):
         y, m, dd = str(f).split("-")
-        li.append(f"{int(y)};{int(m)};{int(dd)};{1000.0 * 1.0005 ** j!r};{500.0 * 1.0009 ** j!r};36.5;{2_000_000.0 * 1.001 ** j!r}")
+        li.append(f"{int(y)};{int(m)};{int(dd)};{1000.0 * 1.0005 ** j!r};{500.0 * 1.0009 ** j!r};36.5;"
+                  f"{2_000_000.0 * 1.001 ** j!r};{90_000.0 * 1.0004 ** j!r}")
     (base / "Text" / "Fondos" / "Delta_Indices.txt").write_text("\n".join(li) + "\n", encoding="utf-8")
 
     # suscripciones y rescates de Ahorro Plus (ESCO 13) desde antes de la serie
@@ -108,7 +110,9 @@ def bases(tmp_path, monkeypatch):
     _armar_bases(base)
     monkeypatch.setenv("FONDOS_BASES_DIR", str(base))
     monkeypatch.setenv("FONDOS_PREFS_PATH", str(tmp_path / "fondos_prefs.json"))
+    monkeypatch.setenv("FONDOS_ATTR_CACHE", str(tmp_path / "cache_attr"))
     fsvc.reset()
+    fattr.reset()
     fsvc._prefs_memo.update({"sig": None, "data": None})
     d = fsvc.cargar_ahora()
     assert d is not None, fsvc.estado()
@@ -116,6 +120,7 @@ def bases(tmp_path, monkeypatch):
     rf._memo.clear()
     yield d
     fsvc.reset()
+    fattr.reset()
     rf._memo.clear()
 
 
@@ -135,7 +140,8 @@ def test_carga_el_modelo_desde_los_archivos(bases):
     # benchmark: el plano ("Sin Benchmark") no entra; el relleno a futuro no corre la última rueda
     assert set(d.bench) == {369, 473} and d.bench_nombre[369] == "Badlar Privada + 200 bps"
     assert str(d.fechas[-1]) == D1 and len(d.fechas) == len(_ruedas())
-    assert set(d.indices) == {"a3500", "cer", "badlar", "merval"}
+    assert set(d.indices) == {"a3500", "cer", "badlar", "merval", "spy"}
+    assert fsvc._clave_col("ETF S&amp;P 500") == fsvc._clave_col("ETF S&P 500") == "etfsp500"
     assert d.pesos_bm[473] == {"a3500": 0.25, "badlar": 0.75} and d.pesos_bm[369]["spread"] == 0.02
     assert d.fees[(369, "B")] == pytest.approx(0.0275) and d.fees[(369, "E")] == pytest.approx(0.0085)
     assert set(d.syr) == {473}
@@ -167,7 +173,7 @@ def test_tablero_retornos_referencia_y_exceso(bases):
 
 def test_referencias_indices_tasa_y_otro_fondo(bases):
     d = bases
-    assert [k for k, _ in fsvc.referencias(d)] == ["a3500", "cer", "badlar", "merval"]
+    assert [k for k, _ in fsvc.referencias(d)] == ["a3500", "cer", "badlar", "merval", "spy"]
     r = fsvc.fila_tablero(d, d.fondos[709], "a3500")
     assert r["bm"] == "Dólar A3500" and r["per"]["d1"]["b"] == pytest.approx(0.0005)
     # una TASA (36,5 % TNA) se compara como índice que devenga TNA / 365 por día corrido
@@ -317,6 +323,8 @@ async def test_http_pagina_tablero_detalle_y_csv(bases):
             assert txt in t.text
         assert t.text.count("<tr data-cafci=") == 4 and 'data-fam="Galileo"' in t.text
         assert 'data-cafci="369" data-seg="1"' in t.text                 # seguido por defecto
+        # marcador de «mis fondos»: de los dos con benchmark, Renta le gana y Ahorro Plus no (Renta Dólares y Galileo no tienen)
+        assert "Mis fondos vs referencia" in t.text and "<b>MTD</b> 1 de 2 arriba" in t.text and "<b>YTD</b> 1 de 2 arriba" in t.text
         x = await ac.get("/fondos/tablero", params={"ver": "x", "vs": "a3500"})
         assert x.status_code == 200 and "Dólar A3500" in x.text and " pp" in x.text
         assert (await ac.get("/fondos/tablero", params={"ver": "zzz", "vs": "<script>"})).status_code == 200
@@ -402,6 +410,63 @@ async def test_fondos_solo_superuser(bases, auth_on):
         assert (await ac.post("/fondos/releer")).status_code == 403
         y = await ac.get("/yas")
         assert y.status_code == 200 and ">Fondos<" not in y.text     # ni el link
+        # /salud: el ítem de Fondos (patrimonios de la casa) no existe para otros roles
+        assert "Fondos (cuotapartes y benchmarks)" not in (await ac.get("/salud")).text
+    async with _client() as su:
+        await _login(su)
+        s = await su.get("/salud")
+        assert "Fondos (cuotapartes y benchmarks)" in s.text and "4 fondos · cuotaparte al 2026-11-25" in s.text
     async with _client() as anon:
         r = await anon.get("/fondos", follow_redirects=False)
         assert r.status_code in (302, 303, 307, 401)
+
+
+def test_salud_fondos_sin_abrir_avisos_y_atraso(bases, monkeypatch):
+    from backend.services import salud
+    it = salud._fondos()
+    assert it["estado"] == "ok" and it["solo"] == "superuser" and it["accion"]["href"] == "/fondos"
+    assert "Delta_VCP.txt al 2026-11-25" in it["detalle"] and it["texto"] == "4 fondos · cuotaparte al 2026-11-25"
+    # la atribución sin carpeta de carteras es un aviso del mismo ítem
+    fattr._estado["error"] = "No encuentro la carpeta Carteras"
+    assert salud._fondos()["estado"] == "warn" and "Carteras" in salud._fondos()["detalle"]
+    fattr._estado["error"] = None
+    # un extra que no se pudo leer → aviso con el archivo
+    bases.avisos.append("Delta_Indices.txt: sólo en la nube")
+    it = salud._fondos()
+    assert it["estado"] == "warn" and "1 aviso(s)" in it["texto"] and "Delta_Indices.txt: sólo en la nube" in it["detalle"]
+    bases.avisos.clear()
+    # cuotaparte vieja
+    monkeypatch.setattr(fsvc, "estado", lambda: {"cargado": True, "fondos": 4, "hasta": "2026-11-25", "atraso_dias": 9,
+                                                 "fuentes": [], "avisos": []})
+    assert salud._fondos()["estado"] == "warn" and "atrasada" in salud._fondos()["texto"]
+    # nadie abrió la pestaña en esta instancia: sin ítem (y sin tocar disco); con error de carga, se ve
+    monkeypatch.setattr(fsvc, "estado", lambda: {"cargado": False, "error": None})
+    assert salud._fondos() is None
+    monkeypatch.setattr(fsvc, "estado", lambda: {"cargado": False, "error": "No encuentro Delta_VCP.txt"})
+    assert salud._fondos()["estado"] == "err"
+
+
+def test_precarga_solo_una_vez_y_apagable(bases, monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(fsvc, "asegurar", lambda: llamadas.append(1))
+    monkeypatch.setenv("FONDOS_PRECARGA", "1")
+    fsvc.precargar()                                  # ya hay datos: nada
+    assert llamadas == []
+    fsvc.reset()
+    fsvc.precargar()                                  # sin datos: dispara la carga
+    assert llamadas == [1]
+    fsvc._estado["error"] = "No encuentro Delta_VCP.txt"
+    fsvc.precargar()                                  # ya falló: no insiste desde Inicio (la pestaña reintenta)
+    monkeypatch.setenv("FONDOS_PRECARGA", "0")
+    fsvc._estado["error"] = None
+    fsvc.precargar()
+    assert llamadas == [1]
+
+
+def test_un_extra_ilegible_se_reintenta_aunque_no_cambie_la_firma(bases, tmp_path):
+    """Bajar un marcador de OneDrive no cambia mtime ni tamaño: con avisos, el re-chequeo vuelve a leer."""
+    v0 = bases.version
+    bases.avisos.append("Delta_Indices.txt: sólo en la nube")
+    fsvc._tarea()
+    d2 = fsvc._estado["datos"]
+    assert d2.version == v0 + 1 and d2.avisos == []

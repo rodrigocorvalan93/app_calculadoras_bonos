@@ -13,7 +13,8 @@ con las carteras diarias de la casa (`Carteras/AAAAMMDD/…_Delta_Composicion.xl
 - **cobros** (cupón / amortización): si la tenencia tiene ficha en la app, el
   pago por VN del cronograma (`pricing.cashflow_table`) se suma al retorno del
   día en que el precio cae por el corte (se busca la caída a ±3 días de la
-  fecha de pago; sin caída visible no se suma nada);
+  fecha de pago; sin caída visible, o con una caída que no es del orden del
+  cobro, no se suma nada);
 - **vencimientos**: lo que sale de la cartera el día que vence devenga hasta
   ahí (tasa del plazo fijo; descuento a la par de un cheque / letra; pago
   final de un bono con ficha). Una venta no tiene precio de salida: no suma;
@@ -97,7 +98,7 @@ class FondoAttr:
 
 _lock = threading.Lock()
 _estado: Dict[str, Any] = {"cargando": False, "chequeo": 0.0, "error": None, "progreso": None,
-                           "version": 0, "listo": False, "proc": None}
+                           "version": 0, "listo": False, "proc": None, "gen": 0}
 _fondos: Dict[int, FondoAttr] = {}
 _fondo_locks: Dict[int, threading.Lock] = {}
 _pagos_memo: Dict[Tuple[str, str], Optional[Tuple[List[Tuple[np.datetime64, float]], bool]]] = {}
@@ -147,7 +148,7 @@ def _matar_hijo() -> None:
 atexit.register(_matar_hijo)
 
 
-def _convertir(carteras: str, out: str) -> None:
+def _convertir(carteras: str, out: str, gen: int) -> None:
     """Corre el conversor y va dejando el avance en memoria. En un proceso
     aparte (`FONDOS_ATTR_SUBPROCESO=0` lo corre acá: tests y herramientas)."""
     if (os.getenv("FONDOS_ATTR_SUBPROCESO") or "1") == "0":
@@ -168,67 +169,78 @@ def _convertir(carteras: str, out: str) -> None:
         p = fcart.leer_json(prog_path)
         if p.get("pid") == proc.pid:
             with _lock:
+                if _estado["gen"] != gen:                # hubo un reset(): este armado ya no es de nadie
+                    break
                 _estado["progreso"] = {"total": p.get("total", 0), "hechos": p.get("hechos", 0)}
                 _estado["version"] += 1 if p.get("hechos") else 0
+    if proc.poll() is None:
+        proc.terminate()
+        proc.wait(timeout=10)
+        _estado["proc"] = None
+        return
     _estado["proc"] = None
     if proc.returncode not in (0, None):
         raise RuntimeError(f"el conversor de carteras terminó con código {proc.returncode}")
 
 
-def _tarea() -> None:
+def _tarea(gen: Optional[int] = None) -> None:
+    """Arma / actualiza el caché. `gen` = generación del estado al lanzarla:
+    si en el medio hubo un `reset()` (otra carpeta, tests) no publica nada."""
+    if gen is None:
+        gen = int(_estado["gen"])
+
+    def pub(**kw: Any) -> bool:
+        with _lock:
+            if _estado["gen"] != gen:
+                return False
+            _estado.update(kw)
+            return True
+
     try:
         carteras = carteras_dir()
         if not carteras:
-            with _lock:
-                _estado["error"] = ("No encuentro la carpeta Carteras dentro de Delta Bases: la atribución necesita "
-                                    "las carteras diarias (Carteras\\AAAAMMDD\\…_Delta_Composicion.xlsx).")
-                _estado["listo"] = bool(_archivos())
+            pub(error=("No encuentro la carpeta Carteras dentro de Delta Bases: la atribución necesita "
+                       "las carteras diarias (Carteras\\AAAAMMDD\\…_Delta_Composicion.xlsx)."),
+                listo=bool(_archivos()))
             return
         out = cache_dir()
         os.makedirs(out, exist_ok=True)
         try:
             falta, _man, viejos = fcart.pendientes(carteras, out, fcart.desde_de(dias_atras()))
             if falta or viejos:
-                with _lock:
-                    _estado["progreso"] = {"total": len(falta), "hechos": 0}
+                if not pub(progreso={"total": len(falta), "hechos": 0}):
+                    return
                 t0 = time.perf_counter()
-                _convertir(carteras, out)
+                _convertir(carteras, out, gen)
                 prog = fcart.leer_json(os.path.join(out, "progreso.json"))
                 errores = prog.get("errores") or []
                 logger.info("[fondos] carteras: %d día(s) al caché en %.1f s%s", len(falta), time.perf_counter() - t0,
                             f" · {len(errores)} sin leer ({errores[0]['dia']}: {errores[0]['error']})" if errores else "")
-                with _lock:
-                    _estado["version"] += 1
-                    _estado["error"] = (f"{len(errores)} día(s) de carteras no se pudieron leer (el primero, "
-                                        f"{errores[0]['dia']}: {errores[0]['error']}). Se reintenta solo."
-                                        if errores else None)
+                pub(version=_estado["version"] + 1,
+                    error=(f"{len(errores)} día(s) de carteras no se pudieron leer (el primero, "
+                           f"{errores[0]['dia']}: {errores[0]['error']}). Se reintenta solo." if errores else None))
             else:
-                with _lock:
-                    _estado["error"] = None
+                pub(error=None)
         except Exception as exc:  # noqa: BLE001 — queda el motivo para la pestaña
             logger.warning("[fondos] no pude armar el caché de carteras: %s", exc, exc_info=True)
-            with _lock:
-                _estado["error"] = f"No pude armar la historia de carteras: {type(exc).__name__}: {exc}"
-        with _lock:
-            _estado["listo"] = True
+            pub(error=f"No pude armar la historia de carteras: {type(exc).__name__}: {exc}")
+        pub(listo=True)
     finally:
-        with _lock:
-            _estado["cargando"] = False
-            _estado["progreso"] = None
+        pub(cargando=False, progreso=None)
 
 
 def asegurar() -> Dict[str, Any]:
     """Estado del caché de carteras; dispara (en un thread) el armado o el
     chequeo de días nuevos. Nunca lee disco acá."""
     ahora = time.monotonic()
-    lanzar = False
+    gen = None
     with _lock:
         if not _estado["cargando"] and ahora - _estado["chequeo"] >= _RECHEQUEO_S:
             _estado["cargando"] = True
             _estado["chequeo"] = ahora
-            lanzar = True
-    if lanzar:
-        threading.Thread(target=_tarea, name="fondos-carteras", daemon=True).start()
+            gen = int(_estado["gen"])
+    if gen is not None:
+        threading.Thread(target=_tarea, args=(gen,), name="fondos-carteras", daemon=True).start()
     return estado()
 
 
@@ -237,7 +249,8 @@ def armar_ahora() -> Dict[str, Any]:
     with _lock:
         _estado["cargando"] = True
         _estado["chequeo"] = time.monotonic()
-    _tarea()
+        gen = int(_estado["gen"])
+    _tarea(gen)
     return estado()
 
 
@@ -252,6 +265,7 @@ def reset() -> None:
     with _lock:
         _estado.update({"cargando": False, "chequeo": 0.0, "error": None, "progreso": None, "listo": False})
         _estado["version"] += 1
+        _estado["gen"] += 1
     _fondos.clear()
     _pagos_memo.clear()
 
@@ -423,8 +437,11 @@ def _armar_fondo(cod: int, archivos: List[str], moneda: str,
                             continue
                         conv = fx if paga_usd[k] else 1.0 / fx
                     ingreso = tot * conv / pprev
-                    if not (0 < ingreso < 1.2) or r[e] > -0.3 * ingreso:
-                        continue                              # sin corte visible en el precio: no se suma nada
+                    # El corte tiene que verse en el precio y ser del orden del
+                    # cobro: sin caída no se suma nada, y una caída mucho mayor
+                    # que el cobro delata unidades que no cierran (VN / moneda).
+                    if not (0 < ingreso < 1.2) or r[e] > -0.3 * ingreso or -r[e] > 2.5 * ingreso + 0.03:
+                        continue
                     r[e] += ingreso
                     ev_flag[0][e] = F_COBRO
 
