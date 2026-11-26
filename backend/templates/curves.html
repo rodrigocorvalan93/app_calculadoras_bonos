@@ -54,12 +54,26 @@
             hx-target="#curve-table"
             hx-swap="innerHTML"
             hx-include="[name=curve], [name=plazo], [name=only_quoting]"
-            title="Nativa: precio del ticker propio (fx-free). USD/USB: precio cable/MEP directo. ARS: precio pesos ÷ FX nativo."
+            title="Con qué ticker se mira cada bono. Nativa: el propio (sin FX). USD / USB: su pata cable / MEP; en la pata cruzada la TIR va reconvertida por el canje (o al precio que entra, con el selector de al lado). ARS: la pata en pesos ÷ FX de la ficha."
           >
-            <option value="native" {% if leg == "native" %}selected{% endif %}>Nativa</option>
-            <option value="USD"    {% if leg == "USD"    %}selected{% endif %}>USD (cable)</option>
-            <option value="USB"    {% if leg == "USB"    %}selected{% endif %}>USB (MEP)</option>
-            <option value="ARS"    {% if leg == "ARS"    %}selected{% endif %}>ARS (pesos)</option>
+            {% set leg_b = (leg or "native") | replace(".dir", "") %}
+            {% set leg_dir = (leg or "").endswith(".dir") %}
+            <option value="native" {% if leg_b == "native" %}selected{% endif %}>Nativa</option>
+            <option value="USD{{ '.dir' if leg_dir }}" data-leg="USD" {% if leg_b == "USD" %}selected{% endif %}>USD (cable)</option>
+            <option value="USB{{ '.dir' if leg_dir }}" data-leg="USB" {% if leg_b == "USB" %}selected{% endif %}>USB (MEP)</option>
+            <option value="ARS"    {% if leg_b == "ARS"    %}selected{% endif %}>ARS (pesos)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>TIR pata USD / USB</span>
+          {# Sin `name`: no viaja solo. app.js cambia el valor de las opciones USD /
+             USB del select de pata ("USB" ↔ "USB.dir") y dispara su change — el
+             modo va ADENTRO de `leg`, así tabla, delta, libro, what-if y gráfico
+             quedan siempre en el mismo modo. Default: reconvertida. #}
+          <select data-leg-dir
+                  title="Sólo cambia la pata dólar CRUZADA (ver un global en MEP o un bonar en cable). Reconvertida (default): el precio de la pata se lleva al dólar de la ficha, sacándole o sumándole el canje: es la TIR del bono. Al precio que entra: el precio de la pata tal cual contra el flujo (lo que rinde comprando por esa pata). La pata en pesos siempre va ÷ FX.">
+            <option value="">Reconvertida (canje)</option>
+            <option value="1" {% if leg_dir %}selected{% endif %}>Al precio que entra</option>
           </select>
         </label>
 

@@ -118,9 +118,10 @@ def add(code: str, metric: str, op: str, valor: float, email: str = "") -> Optio
     code = (code or "").strip().upper()
     if not code:
         return "Falta el código del bono."
-    from backend.services import bond_universe
+    from backend.services import bond_universe, patas
     bond_universe.ensure_loaded()
-    if bond_universe.get(code) is None:
+    # también el ticker de una pata sin ficha propia (GD30D, AL30C): se valúa con la nativa
+    if bond_universe.get(code) is None and patas.leg_de(code) is None:
         return f"Código desconocido: {code}."
     if metric not in METRICS:
         return "Métrica inválida."
@@ -177,7 +178,7 @@ def current_value(code: str, metric: str) -> Optional[float]:
     cierre). TIR vía `metrics_for_market_price` (cacheada — el warmup la
     mantiene caliente para las curvas, acá casi siempre es un hit). None si no
     hay dato usable."""
-    from backend.services import marketdata_store as mds, pricing
+    from backend.services import marketdata_store as mds, patas, pricing
     from backend.services import symbols as syms
 
     snap = mds.get_store().get(syms.md_symbol(code, "24hs"))
@@ -188,7 +189,17 @@ def current_value(code: str, metric: str) -> Optional[float]:
         return None
     if metric == "precio":
         return float(px)
-    m = pricing.metrics_for_market_price(code, px)
+    # La TIR de un ticker sale de la ficha que lo valúa: la especie en pesos de
+    # un hard-dollar (AL30, GD30) y la otra pata dólar van con la nativa y el
+    # precio llevado a su dólar — con el precio en pesos crudo contra la ficha
+    # en dólares la TIR daba −100 % y la alerta no servía.
+    lg = patas.leg_de(code)
+    if lg is None:
+        return None
+    calc, px = lg.calc, patas.precio_ficha(lg, px, "24hs")
+    if px is None:
+        return None
+    m = pricing.metrics_for_market_price(calc, px)
     t = (m or {}).get("tirea")
     try:
         t = float(t)

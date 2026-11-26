@@ -699,16 +699,40 @@ def _calc_tr(code: str, modo: str, valor: float, plazo: str,
 
 
 def _px_mercado(code: str, plazo: str) -> Optional[float]:
-    """Último precio del store para un calc sin precio explícito (last → close).
-    Lectura puntual de memoria — NO streamea: el add-in no puede anidar QUOTE
-    (streaming) dentro de otra función custom (#¡VALOR! del runtime de Office),
-    así que el precio de mercado se resuelve acá, una vez por recálculo."""
+    """Precio de mercado para un calc sin precio explícito (last → close), YA
+    en el basis de la ficha `code`: la especie en pesos de un hard-dollar
+    (AL30, GD30, …O) se divide por el FX de pago y, si su ficha cotiza clean
+    (GD30), se pasa a clean — con el último en pesos crudo `=OMS.TIREA("AL30")`
+    daba −100 %. Lectura puntual de memoria — NO streamea: el add-in no puede
+    anidar QUOTE (streaming) dentro de otra función custom (#¡VALOR! del
+    runtime de Office), así que el precio se resuelve acá, una vez por
+    recálculo."""
+    from backend.services import pricing
+
+    return pricing.market_last_native(code, plazo, usar_cierre=True)
+
+
+def _px_ticker(code: str, plazo: str) -> Optional[float]:
+    """Último (o cierre) crudo del ticker, en la moneda en que cotiza."""
     from backend.services import marketdata_store, symbols as syms
 
     snap = marketdata_store.get_store().get(syms.md_symbol(code, plazo))
     if snap is None:
         return None
     return snap.last if snap.last is not None else snap.close
+
+
+def _pata_sin_ficha(code: str):
+    """`patas.Leg` si `code` es el ticker de una pata de un hard-dollar SIN
+    ficha propia (GD30D de un global, AL30C de un bonar, AEC3O de una ON con
+    sólo la nativa): se calcula con la ficha nativa y el precio llevado a su
+    dólar. None si el código tiene ficha (camino de siempre) o no se resuelve."""
+    from backend.services import patas, pricing
+
+    if not code or pricing.bond_meta(code):
+        return None
+    lg = patas.leg_de(code)
+    return lg if (lg is not None and not lg.propia and lg.basis) else None
 
 
 def _calc_meta(code: str) -> Dict[str, Any]:
@@ -869,6 +893,9 @@ def _calc_batch(items: list) -> list:
     for it in items:
         try:
             code = _codigo_calc(it.get("code"))
+            ticker, lg = code, _pata_sin_ficha(code)
+            if lg is not None:
+                code = lg.calc                          # la ficha nativa valúa la pata
             if it.get("tipo") == "meta":               # ficha estática: no necesita modo ni valor
                 out.append(_calc_meta(code))
                 continue
@@ -882,17 +909,25 @@ def _calc_batch(items: list) -> list:
                 continue
             modo = str(it.get("modo") or "precio").strip().lower()
             valor_raw = it.get("valor")
+            settle = str(it.get("settle") or "").strip() or None
             if valor_raw in (None, "") and modo == "precio":
-                px = _px_mercado(code, plazo) if code else None
+                px = (_px_ticker(ticker, plazo) if lg is not None else _px_mercado(code, plazo)) if code else None
                 if px is None:
-                    out.append({"error": f"Sin precio de mercado para {code} ({plazo}) — "
+                    out.append({"error": f"Sin precio de mercado para {ticker} ({plazo}) — "
                                          "pasá el precio como 2º argumento."})
                     continue
                 valor_raw = px
             valor = float(valor_raw)
+            if lg is not None and modo == "precio":
+                # el precio (de mercado o tipeado) viene en la moneda del ticker
+                from backend.services import patas
+                conv = patas.precio_ficha(lg, valor, plazo, settle)
+                if conv is None:
+                    out.append({"error": f"Sin tipo de cambio (CCL / MEP) para llevar {ticker} a la ficha {code}."})
+                    continue
+                valor = conv
             nom = it.get("nominales")
             nom = float(nom) if nom not in (None, "") else None
-            settle = str(it.get("settle") or "").strip() or None
             fx = it.get("fx")
             fx = float(fx) if fx not in (None, "") else None
             if not code:

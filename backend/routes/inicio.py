@@ -183,7 +183,9 @@ async def _pizarra_ctx(request: Request, prefs: Dict[str, Any]) -> Dict[str, Any
             meta = pricing.bond_meta(c["code"]) or {}
             items.append({"tipo": "cotizacion", "cuadro": c,
                           "ctx": {"row": filas.get(i), "code": c["code"],
-                                  "nombre": meta.get("nombre") or c["code"], "plazo": c["plazo"]}})
+                                  # una pata sin ficha propia (GD30D) toma el nombre de la nativa que la valúa
+                                  "nombre": meta.get("nombre") or (filas.get(i) or {}).get("nombre") or c["code"],
+                                  "plazo": c["plazo"]}})
     return {"cuadros": items, "y": y}
 
 

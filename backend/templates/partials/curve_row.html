@@ -17,7 +17,7 @@
             <td class="{{ r.bid_cls }}">{{ r.bid | ar_num(2) }}</td>
             <td class="{{ r.offer_cls }}">{{ r.offer | ar_num(2) }}</td>
             <td class="c-dur">{{ r.duration | ar_num(2) }}</td>
-            <td class="c-tir">{{ r.tirea | ar_pct(2) }}</td>
+            <td class="c-tir{% if r.tir_directa %} tir-dir{% endif %}"{% if r.tir_directa %} title="TIR al precio de la pata, sin reconvertir por el canje"{% endif %}>{{ r.tirea | ar_pct(2) }}</td>
             <td class="c-tna">
               {{ r.tna | ar_pct(2) }}
               {% if r.tna_convention_label and r.tirea is not none %}

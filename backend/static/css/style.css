@@ -2347,6 +2347,10 @@ button:disabled, .btn:disabled, .btn-primary:disabled, .btn[aria-disabled="true"
 .f-vacio { display: none; padding: 8px 12px; }
 .fondos[data-grupo="seg"] #fondos-tbl:not(:has(tbody tr[data-seg="1"])) + .f-vacio { display: block; }
 
+/* TIR de una pata dólar cruzada SIN reconvertir por el canje (leg = USB.dir / USD.dir) */
+.cashflows td.tir-dir { text-decoration: underline dotted; text-underline-offset: 3px; }
+.leg-dir-nota { color: var(--accent); font-weight: 600; }
+.book-valua { color: var(--accent); font-weight: 500; }
 .f-marcador { padding: 6px 12px 0; }
 .fondos-tbl td, .fondos-tbl th { white-space: nowrap; }
 .fondos-tbl tbody tr.f-sel, .fondo-clases tbody tr.f-sel { background: var(--accent-soft); }

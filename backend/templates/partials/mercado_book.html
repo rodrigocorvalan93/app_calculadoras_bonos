@@ -31,7 +31,7 @@
       </span>
       {% endif %}
     </span>
-    <span class="card-title-aux">{{ nombre }} · {{ symbol }}{% if piz %}{% include "partials/_pizarra_tools.html" %}{% endif %}</span>
+    <span class="card-title-aux">{{ nombre }} · {{ symbol }}{% if valua %} · <span class="book-valua" title="Un bono en dólares se valúa con UNA ficha, la de su dólar natural: el precio de este ticker se lleva a esa moneda antes de calcular.">{{ valua }}</span>{% endif %}{% if piz %}{% include "partials/_pizarra_tools.html" %}{% endif %}</span>
   </div>
   <div class="card-body">
     {# Toda la data de la fila, acá mismo (sin recalcular nada — viene del

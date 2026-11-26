@@ -80,29 +80,76 @@ NAN_METRICS: Dict[str, float] = {
 }
 
 
-def market_last_native(code: str, plazo: str = "24hs"):
-    """Last de pantalla convertido al basis PROPIO de la ficha `code`.
+def market_last_native(code: str, plazo: str = "24hs", usar_cierre: bool = False):
+    """Last de pantalla convertido al basis PROPIO de la ficha `code`: el
+    número que hay que tipear en ESA ficha para valuar al precio de mercado.
 
     Para un bono común es el last tal cual. Para la especie en PESOS (o la
-    referencia clean) de un hard-dollar — Moneda USD/USB con ticker sin C/D:
-    AL30, GD30, BPOC7, los …O corporativos — el ticker cotiza en ARS y el
-    last crudo NO sirve como input de la ficha en dólares: se divide por el
-    FX de la moneda de pago (MEP si USB, cable si USD). Sin FX vivo → None
-    (mejor autofill vacío que un precio 1500× que el usuario no nota).
-    Único punto compartido por los autofills de YAS y Comparador; la vista
-    de Curvas hace la misma conversión por su lado (routes/curves.cp)."""
+    referencia clean) de un hard-dollar — AL30, GD30, BPOC7, los …O
+    corporativos, CO32D — el ticker cotiza en ARS y el last crudo NO sirve
+    como input de la ficha en dólares: se divide por el FX de la moneda de
+    pago (MEP si USB, cable si USD). Y si la ficha cotiza CLEAN (GD30 y los
+    …O con precio de Bloomberg: % del residual, sin intereses corridos) ese
+    precio en dólares —DIRTY por 100 VN original, como todo ticker de BYMA—
+    se pasa a su convención (`dirty_a_cotizacion`): hasta el 26/11 entraba
+    crudo y GD30 a 62 daba TIR −35 % en vez del 3,4 % de GD30C. Sin FX vivo →
+    None (mejor autofill vacío que un precio 1500× que el usuario no nota).
+    `usar_cierre`: sin último, el cierre previo (add-in de Excel, alertas).
+    Único punto compartido por los autofills de YAS y Comparador, el add-in
+    y las alertas; la vista de Curvas hace la misma conversión por su lado
+    (routes/curves.cp) y valúa con la ficha nativa."""
     from backend.services import fx as fx_svc
     from backend.services import marketdata_store
     from backend.services import symbols as syms
 
     snap = marketdata_store.get_store().get(syms.md_symbol(code, plazo))
     last = getattr(snap, "last", None) if snap is not None else None
+    if last is None and usar_cierre and snap is not None:
+        last = getattr(snap, "close", None)
     if last is None:
         return None
+    if not es_especie_pesos(code):
+        return float(last)
     meta = bond_meta(code) or {}
-    if meta.get("moneda") in ("USD", "USB") and code[-1:] not in ("C", "D"):
-        return fx_svc.normalize_price(last, "ARS", meta.get("moneda"), fx_svc.get_fx(plazo))
-    return float(last)
+    px = fx_svc.normalize_price(last, "ARS", meta.get("moneda"), fx_svc.get_fx(plazo))
+    if px is None:
+        return None
+    return dirty_a_cotizacion(code, px, settlement_date_str(plazo))
+
+
+def es_especie_pesos(code: str) -> bool:
+    """¿`code` es la especie en PESOS (o la referencia clean) de un bono
+    hard-dollar? Ficha con Moneda USD/USB cuyo ticker BYMA cotiza en ARS: sin
+    sufijo de pata (AL30, GD30, BPOC7, YM34O) o una RAÍZ que termina en C / D y
+    tiene su pata con sufijo cargada (CO32D ↔ CO32DC: el ticker CO32D es el de
+    pesos). Única definición: Curvas, el libro, el histórico, el autofill de
+    YAS y el resolver de patas la usan."""
+    meta = bond_meta(code)
+    if not meta or meta.get("moneda") not in ("USD", "USB"):
+        return False
+    if code[-1:] not in ("C", "D"):
+        return True
+    return bond_universe.get(code + "C") is not None or bond_universe.get(code + "D") is not None
+
+
+def dirty_a_cotizacion(code: str, px_dirty: Optional[float], settle: Optional[str] = None) -> Optional[float]:
+    """Precio DIRTY por 100 VN ORIGINAL (como cotiza todo ticker de BYMA, ya en
+    el dólar de la ficha) → precio en la convención de cotización de `code`.
+    Una ficha DIRTY lo deja igual; una CLEAN (referencia tipo Bloomberg: % del
+    valor residual, sin intereses corridos) = (dirty − corridos) ÷ residual.
+    Corridos y residual no dependen del precio: salen del cache de métricas."""
+    if px_dirty is None:
+        return None
+    if str((bond_meta(code) or {}).get("quote_price_cnv") or "").upper() != "CLEAN":
+        return float(px_dirty)
+    m = metrics_for_market_price(code, 100.0, settle) or {}
+    ic, vr = m.get("intereses_corridos"), m.get("valor_residual")
+    try:
+        if ic is None or vr is None or not (ic == ic and vr == vr) or vr <= 0:
+            return None
+        return (float(px_dirty) - float(ic) * 100.0) / (float(vr) / 100.0)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
 
 
 def _bond_obj_copy(code: str):
@@ -724,7 +771,7 @@ def native_dollar_code(code: str) -> Optional[str]:
     moneda de pago de la ficha (USB → MEP primero, USD → cable primero).
     None si `code` ya es la nativa, no es hard-dollar, o no hay hermana."""
     meta = bond_meta(code)
-    if meta.get("moneda") not in ("USD", "USB") or code[-1:] in ("C", "D"):
+    if not es_especie_pesos(code):
         return None
     sib = dollar_siblings(code)
     pref = ("D", "C") if meta.get("moneda") == "USB" else ("C", "D")
@@ -740,7 +787,7 @@ def pesos_sibling_code(code: str) -> Optional[str]:
     mismo bono hard-dollar: AL30D → AL30, BPC7D → BPOC7. Para resolver la
     pata ARS cuando la raíz del ticker difiere. None si no hay."""
     cands = [c for c in dollar_siblings(code)
-             if c[-1:] not in ("C", "D") and " " not in c]
+             if es_especie_pesos(c) and " " not in c]
     if not cands:
         return None
     return _mas_parecido(code[:-1] if code[-1:] in ("C", "D") else code, cands)

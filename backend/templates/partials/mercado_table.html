@@ -24,7 +24,7 @@
       {% endif %}
       {% if ym == 'margen' %} · <strong style="color:var(--cyan)">margen TNA s/TAMAR-BADLAR</strong> (— = sin benchmark){% endif %}
       {% if fuente == "mae" %} · <strong style="color:var(--cyan)">fuente MAE (OTC, sin libro)</strong>{% endif %}
-      {% if leg and leg != "native" %} · leg {{ leg }}{% endif %}
+      {% if leg and leg != "native" %}{% set _lb = leg | replace(".dir", "") %} · leg {{ _lb }}{% if leg.endswith(".dir") %} · <strong class="leg-dir-nota" title="La pata dólar cruzada entra a la ficha con su precio tal cual (sin sacarle ni sumarle el canje): es lo que rinde comprar por esa pata. Las filas afectadas llevan la TIR subrayada.">TIR al precio de la pata (sin reconvertir)</strong>{% elif _lb in ("USD", "USB") %} · TIR reconvertida (canje){% endif %}{% endif %}
       {% if row_meta and row_meta.store_empty %}
         · sin data live (broker offline)
       {% elif row_meta and row_meta.filtered %}
