@@ -343,6 +343,28 @@ def test_cobro_en_dolares_en_un_fondo_en_pesos_usa_el_ccl(bases, monkeypatch):
     assert usd.ev_r[e] == pytest.approx(1.0 / 1.05 * 1.001 - 1 + 0.05 / (1.05 * 1.001 ** (I_CUPON - 1)), rel=1e-9)
 
 
+def test_la_misma_tenencia_partida_en_dos_filas_es_una_posicion(bases, tmp_path):
+    """Dos filas del mismo activo el mismo día con otro sector: se suman, no es una salida."""
+    fattr.armar_ahora()
+    cache = fattr.cache_dir()
+    for nombre in fattr._archivos():
+        df = pd.read_parquet(f"{cache}/{nombre}")
+        m = (df["cod"] == 13) & (df["ticker"] == "TZXD7")
+        mitad = df[m].copy()
+        df.loc[m, ["q", "v"]] = df.loc[m, ["q", "v"]] / 2.0
+        mitad[["q", "v"]] = mitad[["q", "v"]] / 2.0
+        mitad["sector"] = "Otro sector"
+        pd.concat([df, mitad], ignore_index=True).to_parquet(f"{cache}/{nombre}", index=False)
+    partido = fattr._armar_fondo(13, fattr._archivos(), "ARS", None)
+    assert int((partido.ev_flag == fattr.F_SIN_PRECIO).sum()) == 0
+    d = bases
+    pos = np.searchsorted(d.fechas, partido.dias)
+    res = fattr.atribucion(partido, d, 473, None, "bm", int(pos[0]), len(d.fechas) - 1, "clasif")
+    esp = _esperado(0, 17, d.vcp[:, d.col(473)][pos])
+    assert res["cartera"] == pytest.approx(sum(esp["c"].values()), rel=1e-9)
+    assert {r["nombre"]: r for r in res["suben"]}["TZXD7"]["c"] == pytest.approx(esp["c"]["TZXD7"], rel=1e-9)
+
+
 def test_estado_sin_carpeta_de_carteras(tmp_path, monkeypatch):
     base = tmp_path / "Delta Bases"
     _armar_bases(base)

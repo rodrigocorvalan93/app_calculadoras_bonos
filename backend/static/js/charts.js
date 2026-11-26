@@ -1349,7 +1349,12 @@
       var ejeY = { stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, size: j.hum ? 62 : (suf.length > 1 ? 70 : 56),
                    values: function (uu, vals) { return vals.map(function (v) { return j.hum ? hum(v) : (fmtNum(v).replace(/,00$/, "") + suf); }); } };
       var axes = [{ stroke: MUT, grid: { stroke: BORD, width: 1 }, ticks: { stroke: BORD }, values: ejeFechas }, ejeY];
-      var scales = { x: { time: true } };
+      // una serie plana (sin caída, sin exceso) no deja que uPlot invente un rango de 0 a 80
+      var scales = { x: { time: true }, y: { range: function (uu, mn, mx) {
+        if (mn == null || mx == null) return [0, 1];
+        if (mn === mx) return [mn - 1, mx + 1];
+        return uPlot.rangeNum(mn, mx, 0.1, true);
+      } } };
       if (hayY2) {
         scales.y2 = { auto: true };
         axes.push({ scale: "y2", side: 1, stroke: MUT, grid: { show: false }, ticks: { stroke: BORD }, size: 62,

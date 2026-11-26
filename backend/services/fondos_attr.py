@@ -364,6 +364,16 @@ def _armar_fondo(cod: int, archivos: List[str], moneda: str,
     orden = np.lexsort((t_loc, key))
     df = df.iloc[orden]
     key, t_loc, v, q = key[orden].astype(np.int32), t_loc[orden], v[orden], q[orden]
+    # La misma tenencia dos veces el mismo día (difiere algún atributo: sector,
+    # moneda de pago…): es UNA posición. Se suman cantidad y valor y quedan los
+    # atributos de la primera; si no, la segunda fila parecería una salida.
+    rep = np.zeros(len(key), dtype=bool)
+    rep[1:] = (key[1:] == key[:-1]) & (t_loc[1:] == t_loc[:-1])
+    if rep.any():
+        ini = np.flatnonzero(~rep)
+        v, q = np.add.reduceat(v, ini), np.add.reduceat(q, ini)
+        key, t_loc = key[ini], t_loc[ini]
+        df = df.iloc[ini]
     tasa = df["tasa"].to_numpy(dtype=float)
     vd = pd.to_datetime(df["vto"].astype(str).replace({"": None}), errors="coerce").to_numpy().astype(fc.D)
     n = len(df)
